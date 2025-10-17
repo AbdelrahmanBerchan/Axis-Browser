@@ -49,7 +49,7 @@ All official updates and branding are maintained exclusively by **Abdelrahman Be
 
 ## License
 
-Licensed under the **Axis Browser License** — see [LICENSE](./LICENSE) for terms.
+Licensed under the **Axis Browser License** — see [LICENSE](./LICENSE.md) for terms.
 
 Unauthorized redistribution or 1:1 rebranding of Axis is prohibited.  
 Forking and contribution are allowed under proper credit and compliance with the license terms.
