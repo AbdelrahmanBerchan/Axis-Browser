@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Axis Browser</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Loading Screen -->
+        <div id="loading-screen" class="loading-screen">
+            <div class="loading-content">
+                <img src="Axis_logo.png" alt="Axis Browser" class="loading-logo">
+            </div>
+        </div>
+        
+        <!-- Title Bar -->
+        <div id="title-bar">
+            <div class="title-bar-center">
+                <span class="app-title">Axis</span>
+            </div>
+            <div class="title-bar-right">
+                <!-- Sidebar toggle moved to nav menu -->
+            </div>
+        </div>
+
+        <!-- Main area: Sidebar + Content -->
+        <div id="main-area">
+            <!-- Left Sidebar -->
+            <aside id="sidebar">
+                <div id="sidebar-resize-handle" class="resize-handle"></div>
+                <div class="sidebar-section sidebar-controls">
+                    <div class="nav-controls">
+                        <button id="back-btn" class="nav-btn" disabled>
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <button id="forward-btn" class="nav-btn" disabled>
+                            <i class="fas fa-arrow-right"></i>
+                        </button>
+                        <button id="add-tab-btn" class="nav-btn" title="Add Tab">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                        <div class="nav-menu-container">
+                            <button id="nav-menu-btn" class="nav-btn nav-menu-btn">
+                                <i class="fas fa-ellipsis-h"></i>
+                            </button>
+                            <div id="nav-menu" class="nav-menu hidden">
+                                <button id="refresh-btn" class="nav-menu-item">
+                                    <i class="fas fa-redo"></i>
+                                    <span>Reload</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="url-bar-container vertical">
+                        <input type="text" id="url-bar" placeholder="Search or enter URL" autocomplete="off">
+                        <div class="url-bar-icons">
+                            <button id="bookmark-btn" class="url-icon" title="Bookmark">
+                                <i class="fas fa-bookmark"></i>
+                            </button>
+                            <button id="security-btn" class="url-icon" title="Security">
+                                <i class="fas fa-lock"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            <div class="sidebar-section tabs-section">
+                    <div class="tabs-container vertical">
+                        <div class="tab active" data-tab-id="1">
+                            <div class="tab-content">
+                                <div class="tab-left">
+                                    <img class="tab-favicon" src="" alt="" onerror="this.style.visibility='hidden'">
+                                    <span class="tab-title">New Tab</span>
+                                </div>
+                                <div class="tab-right">
+                                    <button class="tab-pin" title="Pin">
+                                        <i class="fas fa-thumbtack"></i>
+                                    </button>
+                                    <button class="tab-close" title="Close">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            <div class="sidebar-section sidebar-footer">
+                <div class="quick-actions">
+                    <button id="history-btn-footer" class="nav-btn" title="History">
+                        <i class="fas fa-history"></i>
+                    </button>
+                    <button id="downloads-btn-footer" class="nav-btn" title="Downloads">
+                        <i class="fas fa-download"></i>
+                    </button>
+                    <button id="bookmarks-btn-footer" class="nav-btn" title="Bookmarks">
+                        <i class="fas fa-bookmark"></i>
+                    </button>
+                    <button id="shortcuts-btn-footer" class="nav-btn" title="Shortcuts">
+                        <i class="fas fa-keyboard"></i>
+                    </button>
+                    <button id="settings-btn-footer" class="nav-btn" title="Settings">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
+            </div>
+            </aside>
+
+            <!-- Web Content Area -->
+            <div id="content-area">
+                <div class="webview-container">
+                    <webview id="webview" src="about:blank" allowpopups></webview>
+                </div>
+            </div>
+        </div>
+
+        <!-- Backdrop for modals -->
+        <div id="modal-backdrop" class="modal-backdrop hidden"></div>
+    
+    <!-- Tab Context Menu -->
+    <div id="tab-context-menu" class="context-menu hidden">
+        <div class="context-menu-item" id="rename-tab-option">
+            <i class="fas fa-edit"></i>
+            <span>Rename Tab</span>
+        </div>
+        <div class="context-menu-item" id="close-tab-option">
+            <i class="fas fa-times"></i>
+            <span>Close Tab</span>
+        </div>
+    </div>
+    
+    <!-- Search Modal -->
+    <div id="search-modal" class="search-modal hidden">
+        <div class="search-container">
+            <input type="text" id="search-input" placeholder="Search on this page..." autocomplete="off">
+            <div class="search-controls">
+                <button id="search-prev" class="search-btn" title="Previous">
+                    <i class="fas fa-chevron-up"></i>
+                </button>
+                <button id="search-next" class="search-btn" title="Next">
+                    <i class="fas fa-chevron-down"></i>
+                </button>
+                <button id="search-close" class="search-btn" title="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Webpage Context Menu -->
+    <div id="webpage-context-menu" class="context-menu hidden">
+        <div class="context-menu-item" id="webpage-back">
+            <i class="fas fa-arrow-left"></i>
+            <span>Back</span>
+        </div>
+        <div class="context-menu-item" id="webpage-forward">
+            <i class="fas fa-arrow-right"></i>
+            <span>Forward</span>
+        </div>
+        <div class="context-menu-item" id="webpage-reload">
+            <i class="fas fa-redo"></i>
+            <span>Reload</span>
+        </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="webpage-cut">
+            <i class="fas fa-cut"></i>
+            <span>Cut</span>
+        </div>
+        <div class="context-menu-item" id="webpage-copy">
+            <i class="fas fa-copy"></i>
+            <span>Copy</span>
+        </div>
+        <div class="context-menu-item" id="webpage-paste">
+            <i class="fas fa-paste"></i>
+            <span>Paste</span>
+        </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="webpage-select-all">
+            <i class="fas fa-check-square"></i>
+            <span>Select All</span>
+        </div>
+        <div class="context-menu-item" id="webpage-search">
+            <i class="fas fa-search"></i>
+            <span>Search</span>
+        </div>
+    </div>
+
+        <!-- Settings Panel -->
+        <div id="settings-panel" class="settings-panel hidden">
+            <div class="settings-header">
+                <h3>Settings</h3>
+                <button id="close-settings" class="close-settings">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="settings-content">
+                <div class="setting-group">
+                    <h4>Privacy & Security</h4>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="block-trackers">
+                            Block trackers
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="block-ads">
+                            Block ads
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="private-mode">
+                            Enhanced private mode
+                        </label>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <h4>Appearance</h4>
+                    <div class="setting-item">
+                        <label>Theme</label>
+                        <select id="theme-select">
+                            <option value="dark">Dark</option>
+                            <option value="light">Light</option>
+                            <option value="auto">Auto</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="compact-mode">
+                            Compact mode
+                        </label>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <h4>Performance</h4>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="hardware-acceleration">
+                            Hardware acceleration
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="preload-pages">
+                            Preload pages
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-actions">
+                    <button id="save-settings" class="save-btn">Save Changes</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Panel -->
+        <div id="history-panel" class="history-panel hidden">
+            <div class="history-header">
+                <h3>History</h3>
+                <div class="history-controls">
+                    <input type="text" id="history-search" placeholder="Search history..." class="history-search">
+                    <button id="clear-history" class="clear-btn" title="Clear All History">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+                <button id="close-history" class="close-settings">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="history-content">
+                <div id="history-list" class="history-list">
+                    <!-- History items will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Downloads Panel -->
+        <div id="downloads-panel" class="downloads-panel hidden">
+            <div class="downloads-header">
+                <h3>Downloads</h3>
+                <button id="clear-downloads" class="clear-btn" title="Clear All Downloads">
+                    <i class="fas fa-trash"></i>
+                </button>
+                <button id="close-downloads" class="close-settings">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="downloads-search">
+                <input type="text" id="downloads-search-input" placeholder="Search downloads...">
+            </div>
+            <div class="downloads-content">
+                <div id="downloads-list" class="downloads-list">
+                    <!-- Download items will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Bookmarks Panel -->
+        <div id="bookmarks-panel" class="settings-panel hidden">
+            <div class="settings-header">
+                <h3>Bookmarks</h3>
+                <button id="close-bookmarks" class="close-settings">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="settings-content">
+                <div id="bookmarks-list">
+                    <!-- Bookmarks will be populated here -->
+                </div>
+                <div id="no-bookmarks" class="no-bookmarks hidden">
+                    <i class="fas fa-bookmark" style="font-size: 48px; color: #666; margin-bottom: 16px;"></i>
+                    <p>No bookmarks yet</p>
+                    <p style="color: #999; font-size: 12px;">Click the bookmark button to save pages</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Keyboard Shortcuts Panel -->
+        <div id="shortcuts-panel" class="settings-panel hidden">
+            <div class="settings-header">
+                <h3>Keyboard Shortcuts</h3>
+                <button id="close-shortcuts" class="close-settings">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="settings-content">
+                <div class="shortcut-group">
+                    <h4>Navigation</h4>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + T</span>
+                        <span class="shortcut-desc">New Tab</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + W</span>
+                        <span class="shortcut-desc">Close Tab</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + R</span>
+                        <span class="shortcut-desc">Refresh Page</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + L</span>
+                        <span class="shortcut-desc">Focus URL Bar</span>
+                    </div>
+                </div>
+                
+                <div class="shortcut-group">
+                    <h4>Tab Management</h4>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + 1-9</span>
+                        <span class="shortcut-desc">Switch to tab 1-9</span>
+                    </div>
+                </div>
+                
+                <div class="shortcut-group">
+                    <h4>Panels & Menus</h4>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + Y</span>
+                        <span class="shortcut-desc">Open History</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + J</span>
+                        <span class="shortcut-desc">Open Downloads</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + F</span>
+                        <span class="shortcut-desc">Find in Page</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + ,</span>
+                        <span class="shortcut-desc">Open Settings</span>
+                    </div>
+                </div>
+                
+                
+                <div class="shortcut-group">
+                    <h4>Zoom Controls</h4>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + +</span>
+                        <span class="shortcut-desc">Zoom In</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + -</span>
+                        <span class="shortcut-desc">Zoom Out</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + 0</span>
+                        <span class="shortcut-desc">Reset Zoom</span>
+                    </div>
+                </div>
+                
+                <div class="shortcut-group">
+                    <h4>Data Management</h4>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + Shift + H</span>
+                        <span class="shortcut-desc">Clear History</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">⌘ + Shift + J</span>
+                        <span class="shortcut-desc">Clear Downloads</span>
+                    </div>
+                </div>
+                
+                <div class="shortcut-group">
+                    <h4>Browser Controls</h4>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">←</span>
+                        <span class="shortcut-desc">Go Back</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">→</span>
+                        <span class="shortcut-desc">Go Forward</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">Escape</span>
+                        <span class="shortcut-desc">Close Search/Modals</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
