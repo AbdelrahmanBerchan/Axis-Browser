@@ -22,5 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Event listeners
   onNewTab: (callback) => ipcRenderer.on('new-tab', callback),
-  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
+  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
+  
+  // Incognito window
+  openIncognitoWindow: () => ipcRenderer.invoke('open-incognito-window')
 });
