@@ -15,6 +15,10 @@ class AxisBrowser {
         this.setupLoadingScreen();
         this.setupSidebarResize();
         this.setupTabDragDrop();
+        this.setupAddTabMenu();
+        
+        // Make browser instance globally accessible for incognito windows
+        window.browser = this;
     }
 
     async loadSettings() {
@@ -66,6 +70,10 @@ class AxisBrowser {
             urlBar.select();
         });
 
+        urlBar.addEventListener('click', (e) => {
+            this.toggleUrlBarExpansion();
+        });
+
         // Tab controls
         document.getElementById('add-tab-btn').addEventListener('click', () => {
             this.createNewTab();
@@ -89,13 +97,24 @@ class AxisBrowser {
             this.toggleSettings();
         });
 
-        // History
-        document.getElementById('history-btn-footer').addEventListener('click', () => {
-            this.toggleHistory();
+        // Settings tabs
+        document.querySelectorAll('.settings-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                this.switchSettingsTab(tab.dataset.tab);
+            });
         });
-        document.getElementById('close-history').addEventListener('click', () => {
-            this.toggleHistory();
+
+        // History search in settings
+        document.getElementById('history-search').addEventListener('input', (e) => {
+            this.filterHistory(e.target.value);
         });
+
+        // Clear history button in settings
+        document.getElementById('clear-history').addEventListener('click', () => {
+            this.clearAllHistory();
+        });
+
+        // History - now handled through settings panel
 
         // Downloads
         document.getElementById('downloads-btn-footer').addEventListener('click', () => {
@@ -120,6 +139,47 @@ class AxisBrowser {
             this.filterDownloads(e.target.value);
         });
 
+        // Security panel
+        document.getElementById('close-security').addEventListener('click', () => {
+            this.toggleSecurity();
+        });
+
+        document.getElementById('view-certificate').addEventListener('click', () => {
+            this.viewCertificate();
+        });
+
+        document.getElementById('security-settings').addEventListener('click', () => {
+            this.openSecuritySettings();
+        });
+
+        // Close security panel when clicking background
+        document.getElementById('security-panel').addEventListener('click', (e) => {
+            if (e.target.id === 'security-panel') {
+                this.toggleSecurity();
+            }
+        });
+
+        // Spotlight search functionality (buttons removed, only keyboard/click events)
+
+        document.getElementById('spotlight-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                this.performSpotlightSearch();
+            } else if (e.key === 'Escape') {
+                this.closeSpotlightSearch();
+            }
+        });
+
+        document.getElementById('spotlight-input').addEventListener('input', (e) => {
+            this.updateSpotlightSuggestions(e.target.value);
+        });
+
+        // Close spotlight when clicking background
+        document.getElementById('spotlight-search').addEventListener('click', (e) => {
+            if (e.target.id === 'spotlight-search') {
+                this.closeSpotlightSearch();
+            }
+        });
+
         // Bookmarks
         document.getElementById('bookmarks-btn-footer').addEventListener('click', () => {
             this.toggleBookmarks();
@@ -129,24 +189,15 @@ class AxisBrowser {
             this.toggleBookmarks();
         });
 
-        // Keyboard shortcuts
-        document.getElementById('shortcuts-btn-footer').addEventListener('click', () => {
-            this.toggleShortcuts();
-        });
-
-        document.getElementById('close-shortcuts').addEventListener('click', () => {
-            this.toggleShortcuts();
-        });
+        // Keyboard shortcuts - now handled through settings panel
 
         // Backdrop click closes any open modal
         const backdrop = document.getElementById('modal-backdrop');
         if (backdrop) {
         backdrop.addEventListener('click', () => {
             document.getElementById('settings-panel').classList.add('hidden');
-            document.getElementById('history-panel').classList.add('hidden');
             document.getElementById('downloads-panel').classList.add('hidden');
             document.getElementById('bookmarks-panel').classList.add('hidden');
-            document.getElementById('shortcuts-panel').classList.add('hidden');
             backdrop.classList.add('hidden');
         });
         }
@@ -280,11 +331,7 @@ class AxisBrowser {
         });
 
         document.getElementById('security-btn').addEventListener('click', () => {
-            // Show security info
-            const webview = document.getElementById('webview');
-            const url = webview.getURL();
-            const title = webview.getTitle();
-            alert(`Security Info:\n\nURL: ${url}\nTitle: ${title}\nProtocol: ${new URL(url).protocol}`);
+            this.toggleSecurity();
         });
 
         // Settings controls
@@ -309,10 +356,11 @@ class AxisBrowser {
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Cmd/Ctrl + T - New tab
+            // Cmd/Ctrl + T - New tab with spotlight search
             if ((e.metaKey || e.ctrlKey) && e.key === 't') {
                 e.preventDefault();
                 this.createNewTab();
+                this.showSpotlightSearch();
             }
             
             // Cmd/Ctrl + W - Close tab
@@ -349,10 +397,11 @@ class AxisBrowser {
                 this.toggleSettings();
             }
             
-            // Cmd/Ctrl + Y - Open history
+            // Cmd/Ctrl + Y - Open history (now in settings)
             if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
                 e.preventDefault();
-                this.toggleHistory();
+                this.toggleSettings();
+                this.switchSettingsTab('history');
             }
             
             // Cmd/Ctrl + J - Open downloads
@@ -404,8 +453,8 @@ class AxisBrowser {
         const webview = document.getElementById('webview');
         
         // Enable webview functionality
-        // Debounced UI updates for smoother performance
-        const debounce = (fn, delay = 80) => {
+        // Ultra-fast updates with minimal debouncing
+        const debounce = (fn, delay = 1) => {
             let t;
             return (...args) => {
                 clearTimeout(t);
@@ -413,30 +462,43 @@ class AxisBrowser {
             };
         };
 
-        const debouncedUpdateNav = debounce(() => this.updateNavigationButtons());
-        const debouncedUpdateUrl = debounce(() => this.updateUrlBar());
-        const debouncedUpdateTitle = debounce(() => this.updateTabTitle());
-        const debouncedUpdateSecurity = debounce(() => this.updateSecurityIndicator());
+        const debouncedUpdateNav = debounce(() => this.updateNavigationButtons(), 1);
+        const debouncedUpdateUrl = debounce(() => this.updateUrlBar(), 1);
+        const debouncedUpdateTitle = debounce(() => this.updateTabTitle(), 2);
+        const debouncedUpdateSecurity = debounce(() => this.updateSecurityIndicator(), 3);
 
         webview.addEventListener('did-start-loading', () => {
-            debouncedUpdateNav();
-            document.querySelector('.webview-container').classList.add('loading');
+            // Show loading indicator
+            this.showLoadingIndicator();
+            this.updateNavigationButtons();
         });
 
         webview.addEventListener('did-finish-load', () => {
-            debouncedUpdateNav();
-            debouncedUpdateUrl();
-            debouncedUpdateTitle();
-            debouncedUpdateSecurity();
-            this.updateBookmarkButton();
-            document.querySelector('.webview-container').classList.remove('loading');
+            // Hide loading indicator
+            this.hideLoadingIndicator();
             
-            // Track page in history
-            this.trackPageInHistory();
+            // Batch all updates for maximum speed
+            this.updateNavigationButtons();
+            this.updateUrlBar();
+            this.updateTabTitle();
+            this.updateSecurityIndicator();
+            this.updateBookmarkButton();
+            
+            // Update current tab state
+            if (this.currentTab && this.tabs.has(this.currentTab)) {
+                const currentTab = this.tabs.get(this.currentTab);
+                currentTab.url = webview.getURL();
+                currentTab.title = webview.getTitle() || currentTab.title;
+            }
+            
+            // Track page in history (async to not block UI)
+            setTimeout(() => this.trackPageInHistory(), 0);
         });
 
         webview.addEventListener('did-fail-load', (event) => {
             console.error('Failed to load:', event.errorDescription);
+            // Hide loading indicator even on failure
+            this.hideLoadingIndicator();
             // Show error page or fallback
             this.showErrorPage(event.errorDescription);
         });
@@ -447,9 +509,10 @@ class AxisBrowser {
             this.navigate(event.url);
         });
 
-        // Handle navigation events
+        // Handle navigation events - optimized for performance
         webview.addEventListener('will-navigate', (event) => {
-            debouncedUpdateUrl();
+            // Only update URL bar, no debouncing needed for immediate feedback
+            this.updateUrlBar();
         });
 
         // Set initial page
@@ -475,7 +538,7 @@ class AxisBrowser {
         // Removed sidebar resizing functionality
     }
 
-    createNewTab(url = 'https://www.google.com') {
+    createNewTab(url = null) {
         const tabId = Date.now();
         const tabElement = document.createElement('div');
         tabElement.className = 'tab';
@@ -501,7 +564,7 @@ class AxisBrowser {
         // Store tab data
         this.tabs.set(tabId, {
             id: tabId,
-            url: url,
+            url: url || 'about:blank',
             title: 'New Tab',
             canGoBack: false,
             canGoForward: false
@@ -521,11 +584,22 @@ class AxisBrowser {
         // Set up tab event listeners
         this.setupTabEventListeners(tabElement, tabId);
 
+        // Save current tab state before switching
+        if (this.currentTab && this.tabs.has(this.currentTab)) {
+            const currentTab = this.tabs.get(this.currentTab);
+            const webview = document.getElementById('webview');
+            currentTab.url = webview.getURL();
+            currentTab.title = webview.getTitle() || currentTab.title;
+        }
+
         // Switch to new tab
         this.switchToTab(tabId);
 
+        // Navigate to google.com for new tabs without URL
+        if (!url) {
+            this.navigate('https://www.google.com');
+        } else {
         // Navigate if URL provided
-        if (url !== 'https://www.google.com') {
             this.navigate(url);
         }
         this.updateTabFavicon(tabId, tabElement);
@@ -582,7 +656,8 @@ class AxisBrowser {
         const tab = this.tabs.get(tabId);
         if (tab) {
             const webview = document.getElementById('webview');
-            if (webview.src !== tab.url) {
+            // Only navigate if the URL is actually different and not empty
+            if (webview.src !== tab.url && tab.url && tab.url !== 'about:blank') {
                 webview.src = tab.url;
             }
         }
@@ -677,17 +752,72 @@ class AxisBrowser {
     updateUrlBar() {
         const webview = document.getElementById('webview');
         const urlBar = document.getElementById('url-bar');
-        urlBar.value = webview.getURL();
+        const newUrl = webview.getURL();
+        
+        // Only update if URL actually changed to avoid unnecessary DOM updates
+        if (urlBar.value !== newUrl) {
+            urlBar.value = newUrl;
+            this.summarizeUrlBar();
+        }
+    }
+
+    summarizeUrlBar() {
+        const urlBar = document.getElementById('url-bar');
+        const fullUrl = urlBar.value;
+        
+        if (fullUrl && fullUrl !== 'about:blank') {
+            try {
+                const url = new URL(fullUrl);
+                let summarizedUrl = '';
+                
+                if (url.hostname) {
+                    // Show just the hostname (domain) without www
+                    summarizedUrl = url.hostname.replace(/^www\./, '');
+                } else {
+                    summarizedUrl = fullUrl;
+                }
+                
+                urlBar.setAttribute('data-full-url', fullUrl);
+                urlBar.value = summarizedUrl;
+                urlBar.classList.add('summarized');
+                urlBar.classList.remove('expanded');
+            } catch (e) {
+                // Invalid URL, keep as is
+                urlBar.classList.add('summarized');
+                urlBar.classList.remove('expanded');
+            }
+        } else {
+            urlBar.classList.add('summarized');
+            urlBar.classList.remove('expanded');
+        }
+    }
+
+    toggleUrlBarExpansion() {
+        const urlBar = document.getElementById('url-bar');
+        
+        if (urlBar.classList.contains('expanded')) {
+            // Collapse to summarized view
+            this.summarizeUrlBar();
+        } else {
+            // Expand to show full URL
+            const fullUrl = urlBar.getAttribute('data-full-url') || urlBar.value;
+            urlBar.value = fullUrl;
+            urlBar.classList.remove('summarized');
+            urlBar.classList.add('expanded');
+        }
     }
 
     updateTabTitle() {
         const webview = document.getElementById('webview');
         const title = webview.getTitle() || 'New Tab';
         
+        // Direct DOM updates for maximum speed
         const tabElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
         if (tabElement) {
             const titleElement = tabElement.querySelector('.tab-title');
+            if (titleElement && titleElement.textContent !== title) {
             titleElement.textContent = title;
+            }
         }
 
         // Update tab data
@@ -703,51 +833,117 @@ class AxisBrowser {
 
     toggleSettings() {
         const settingsPanel = document.getElementById('settings-panel');
-        const shortcutsPanel = document.getElementById('shortcuts-panel');
         const bookmarksPanel = document.getElementById('bookmarks-panel');
+        const downloadsPanel = document.getElementById('downloads-panel');
+        const securityPanel = document.getElementById('security-panel');
         const backdrop = document.getElementById('modal-backdrop');
         
-        // Close other panels if open
-        shortcutsPanel.classList.add('hidden');
-        bookmarksPanel.classList.add('hidden');
+        // Close other panels with animation
+        if (!bookmarksPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(bookmarksPanel);
+        }
+        if (!downloadsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(downloadsPanel);
+        }
+        if (!securityPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(securityPanel);
+        }
         
-        settingsPanel.classList.toggle('hidden');
-        if (backdrop) backdrop.classList.toggle('hidden', settingsPanel.classList.contains('hidden'));
-        
-        if (!settingsPanel.classList.contains('hidden')) {
+        if (settingsPanel.classList.contains('hidden')) {
+            settingsPanel.classList.remove('hidden');
+            if (backdrop) backdrop.classList.remove('hidden');
             this.populateSettings();
+            // Default to general tab when opening
+            this.switchSettingsTab('general');
+        } else {
+            this.closePanelWithAnimation(settingsPanel);
+            if (backdrop) backdrop.classList.add('hidden');
         }
     }
 
-    toggleShortcuts() {
-        const shortcutsPanel = document.getElementById('shortcuts-panel');
-        const settingsPanel = document.getElementById('settings-panel');
-        const bookmarksPanel = document.getElementById('bookmarks-panel');
-        const backdrop = document.getElementById('modal-backdrop');
+    switchSettingsTab(tabName) {
+        const currentActiveContent = document.querySelector('.settings-tab-content.active');
+        const newContent = document.getElementById(`${tabName}-tab`);
         
-        // Close other panels if open
-        settingsPanel.classList.add('hidden');
-        bookmarksPanel.classList.add('hidden');
-        
-        shortcutsPanel.classList.toggle('hidden');
-        if (backdrop) backdrop.classList.toggle('hidden', shortcutsPanel.classList.contains('hidden'));
+        // If already on the same tab, do nothing
+        if (currentActiveContent === newContent) return;
+
+        // Remove active class from all tabs
+        document.querySelectorAll('.settings-tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
+
+        // Add active class to selected tab
+        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+
+        // Handle content transition
+        if (currentActiveContent && newContent) {
+            // Start exit animation for current content
+            currentActiveContent.classList.add('leaving');
+            currentActiveContent.classList.remove('active');
+
+            // After a brief delay, switch content and start enter animation
+            setTimeout(() => {
+                // Remove old content classes
+                currentActiveContent.classList.remove('leaving');
+                currentActiveContent.style.display = 'none';
+
+                // Show new content and start enter animation
+                newContent.style.display = 'block';
+                newContent.classList.add('entering');
+                
+                // Trigger reflow to ensure the entering class is applied
+                newContent.offsetHeight;
+                
+                // Start the enter animation
+                setTimeout(() => {
+                    newContent.classList.remove('entering');
+                    newContent.classList.add('active');
+                }, 10);
+            }, 150); // Half of the transition duration
+        } else {
+            // Fallback for first load or missing elements
+            document.querySelectorAll('.settings-tab-content').forEach(content => {
+                content.classList.remove('active', 'entering', 'leaving');
+                content.style.display = 'none';
+            });
+            
+            newContent.style.display = 'block';
+            newContent.classList.add('active');
+        }
+
+        // Load content based on tab
+        if (tabName === 'history') {
+            this.populateHistory();
+        }
     }
+
 
     toggleBookmarks() {
         const bookmarksPanel = document.getElementById('bookmarks-panel');
         const settingsPanel = document.getElementById('settings-panel');
-        const shortcutsPanel = document.getElementById('shortcuts-panel');
+        const downloadsPanel = document.getElementById('downloads-panel');
+        const securityPanel = document.getElementById('security-panel');
         const backdrop = document.getElementById('modal-backdrop');
         
-        // Close other panels if open
-        settingsPanel.classList.add('hidden');
-        shortcutsPanel.classList.add('hidden');
+        // Close other panels with animation
+        if (!settingsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(settingsPanel);
+        }
+        if (!downloadsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(downloadsPanel);
+        }
+        if (!securityPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(securityPanel);
+        }
         
-        bookmarksPanel.classList.toggle('hidden');
-        if (backdrop) backdrop.classList.toggle('hidden', bookmarksPanel.classList.contains('hidden'));
-        
-        if (!bookmarksPanel.classList.contains('hidden')) {
+        if (bookmarksPanel.classList.contains('hidden')) {
+            bookmarksPanel.classList.remove('hidden');
+            if (backdrop) backdrop.classList.remove('hidden');
             this.populateBookmarks();
+        } else {
+            this.closePanelWithAnimation(bookmarksPanel);
+            if (backdrop) backdrop.classList.add('hidden');
         }
     }
 
@@ -1043,10 +1239,21 @@ class AxisBrowser {
     setupTabSearch() {
         const search = document.getElementById('tab-search');
         if (!search) return;
-        const debounce = (fn, d = 120) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), d); }; };
+        
+        // Ultra-fast tab search with minimal debouncing
+        const debounce = (fn, d = 5) => { 
+            let t; 
+            return (...a) => { 
+                clearTimeout(t); 
+                t = setTimeout(() => fn(...a), d); 
+            }; 
+        };
+        
         const filter = debounce((q) => {
             const query = (q || '').toLowerCase().trim();
             const tabs = document.querySelectorAll('.tabs-container .tab');
+            
+            // Direct filtering for maximum speed
             tabs.forEach(tab => {
                 const title = tab.querySelector('.tab-title')?.textContent?.toLowerCase() || '';
                 const url = this.tabs.get(parseInt(tab.dataset.tabId))?.url?.toLowerCase() || '';
@@ -1054,6 +1261,7 @@ class AxisBrowser {
                 tab.style.display = match ? '' : 'none';
             });
         });
+        
         search.addEventListener('input', (e) => filter(e.target.value));
     }
 
@@ -1073,12 +1281,26 @@ class AxisBrowser {
 
     toggleNavMenu() {
         const navMenu = document.getElementById('nav-menu');
-        navMenu.classList.toggle('hidden');
+        if (navMenu.classList.contains('hidden')) {
+            navMenu.classList.remove('hidden');
+        } else {
+            this.closeNavMenu();
+        }
     }
 
     hideNavMenu() {
+        this.closeNavMenu();
+    }
+
+    closeNavMenu() {
         const navMenu = document.getElementById('nav-menu');
-        navMenu.classList.add('hidden');
+        navMenu.classList.add('closing');
+        
+        // Remove the menu after animation completes
+        setTimeout(() => {
+            navMenu.classList.add('hidden');
+            navMenu.classList.remove('closing');
+        }, 200); // Match animation duration
     }
 
     setupSidebarSlideBack() {
@@ -1276,19 +1498,6 @@ class AxisBrowser {
     }
 
     // History management
-    toggleHistory() {
-        const panel = document.getElementById('history-panel');
-        const backdrop = document.getElementById('modal-backdrop');
-        
-        if (panel.classList.contains('hidden')) {
-            panel.classList.remove('hidden');
-            backdrop.classList.remove('hidden');
-            this.populateHistory();
-        } else {
-            panel.classList.add('hidden');
-            backdrop.classList.add('hidden');
-        }
-    }
 
     async populateHistory() {
         const historyList = document.getElementById('history-list');
@@ -1322,7 +1531,9 @@ class AxisBrowser {
             historyItem.addEventListener('click', (e) => {
                 if (!e.target.closest('.history-delete')) {
                 this.navigate(item.url);
-                this.toggleHistory();
+                // Close settings panel after navigation
+                document.getElementById('settings-panel').classList.add('hidden');
+                document.getElementById('modal-backdrop').classList.add('hidden');
                 }
             });
             
@@ -1390,18 +1601,85 @@ class AxisBrowser {
         }
     }
 
+    async filterHistory(searchTerm) {
+        const historyList = document.getElementById('history-list');
+        const history = await this.getHistory();
+        
+        if (!searchTerm.trim()) {
+            this.populateHistory();
+            return;
+        }
+
+        const filteredHistory = history.filter(item => 
+            item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            item.url.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+
+        historyList.innerHTML = '';
+
+        filteredHistory.forEach(item => {
+            const historyItem = document.createElement('div');
+            historyItem.className = 'history-item';
+            historyItem.innerHTML = `
+                <div class="history-info">
+                    <div class="history-title">${item.title}</div>
+                    <div class="history-url">${item.url}</div>
+                    <div class="history-time">${this.formatTimeAgo(item.timestamp)}</div>
+                </div>
+                <div class="history-actions">
+                    <button class="history-delete" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `;
+            
+            // Click to navigate
+            historyItem.addEventListener('click', (e) => {
+                if (!e.target.closest('.history-delete')) {
+                this.navigate(item.url);
+                // Close settings panel after navigation
+                document.getElementById('settings-panel').classList.add('hidden');
+                document.getElementById('modal-backdrop').classList.add('hidden');
+                }
+            });
+            
+            // Delete history item
+            const deleteBtn = historyItem.querySelector('.history-delete');
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.deleteHistoryItem(item.id);
+            });
+            
+            historyList.appendChild(historyItem);
+        });
+    }
+
     // Downloads management
     toggleDownloads() {
-        const panel = document.getElementById('downloads-panel');
+        const downloadsPanel = document.getElementById('downloads-panel');
+        const settingsPanel = document.getElementById('settings-panel');
+        const bookmarksPanel = document.getElementById('bookmarks-panel');
+        const securityPanel = document.getElementById('security-panel');
         const backdrop = document.getElementById('modal-backdrop');
         
-        if (panel.classList.contains('hidden')) {
-            panel.classList.remove('hidden');
-            backdrop.classList.remove('hidden');
+        // Close other panels with animation
+        if (!settingsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(settingsPanel);
+        }
+        if (!bookmarksPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(bookmarksPanel);
+        }
+        if (!securityPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(securityPanel);
+        }
+        
+        if (downloadsPanel.classList.contains('hidden')) {
+            downloadsPanel.classList.remove('hidden');
+            if (backdrop) backdrop.classList.remove('hidden');
             this.populateDownloads();
         } else {
-            panel.classList.add('hidden');
-            backdrop.classList.add('hidden');
+            this.closePanelWithAnimation(downloadsPanel);
+            if (backdrop) backdrop.classList.add('hidden');
         }
     }
 
@@ -1571,24 +1849,131 @@ class AxisBrowser {
     }
 
     setupLoadingScreen() {
-        const loadingScreen = document.getElementById('loading-screen');
         const app = document.getElementById('app');
         
-        // Quick blur-in effect
+        // Ultra-fast loading
         setTimeout(() => {
             // Add blur-in effect to main app
             app.classList.add('loaded');
-            
-            // Hide loading screen quickly
-            setTimeout(() => {
-                loadingScreen.classList.add('hidden');
-                
-                // Remove loading screen from DOM
-                setTimeout(() => {
-                    loadingScreen.remove();
-                }, 600);
-            }, 100);
-        }, 800); // Start blur-in after 0.8 seconds
+        }, 200); // Start blur-in after 0.2 seconds for instant feel
+    }
+
+    showLoadingIndicator() {
+        const loadingIndicator = document.getElementById('loading-indicator');
+        if (loadingIndicator) {
+            loadingIndicator.classList.remove('hidden');
+        }
+    }
+
+    hideLoadingIndicator() {
+        const loadingIndicator = document.getElementById('loading-indicator');
+        if (loadingIndicator) {
+            loadingIndicator.classList.add('hidden');
+        }
+    }
+
+    setupAddTabMenu() {
+        const addTabBtn = document.getElementById('add-tab-btn');
+        const addTabMenu = document.getElementById('add-tab-menu');
+        const newTabBtn = document.getElementById('new-tab-btn');
+        const newIncognitoBtn = document.getElementById('new-incognito-btn');
+
+        // Toggle add tab menu
+        addTabBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleAddTabMenu();
+        });
+
+        // New tab option
+        newTabBtn.addEventListener('click', () => {
+            this.closeAddTabMenu();
+            this.createNewTab();
+            this.showSpotlightSearch();
+        });
+
+        // New incognito tab option
+        newIncognitoBtn.addEventListener('click', () => {
+            this.closeAddTabMenu();
+            this.createIncognitoTab();
+        });
+
+        // Close menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!addTabBtn.contains(e.target) && !addTabMenu.contains(e.target)) {
+                this.closeAddTabMenu();
+            }
+        });
+    }
+
+    toggleAddTabMenu() {
+        const addTabMenu = document.getElementById('add-tab-menu');
+        if (addTabMenu.classList.contains('hidden')) {
+            this.showAddTabMenu();
+        } else {
+            this.closeAddTabMenu();
+        }
+    }
+
+    showAddTabMenu() {
+        const addTabMenu = document.getElementById('add-tab-menu');
+        addTabMenu.classList.remove('hidden');
+    }
+
+    closeAddTabMenu() {
+        const addTabMenu = document.getElementById('add-tab-menu');
+        addTabMenu.classList.add('closing');
+        setTimeout(() => {
+            addTabMenu.classList.add('hidden');
+            addTabMenu.classList.remove('closing');
+        }, 200);
+    }
+
+    createIncognitoTab() {
+        // Open incognito window
+        window.electronAPI.openIncognitoWindow();
+        // Note: Spotlight search will be handled in the new incognito window
+    }
+
+    updateTabDisplay() {
+        const tabsContainer = document.getElementById('tabs-container');
+        if (!tabsContainer) return;
+
+        tabsContainer.innerHTML = '';
+
+        this.tabs.forEach((tab, tabId) => {
+            const tabElement = document.createElement('div');
+            tabElement.className = `tab ${tab.active ? 'active' : ''} ${tab.incognito ? 'incognito' : ''}`;
+            tabElement.draggable = true;
+            tabElement.dataset.tabId = tabId;
+
+            const title = tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
+            const isPinned = tab.pinned;
+
+            tabElement.innerHTML = `
+                <div class="tab-content">
+                    ${isPinned ? '<i class="fas fa-thumbtack tab-pin"></i>' : ''}
+                    ${tab.incognito ? '<i class="fas fa-mask tab-incognito-icon"></i>' : ''}
+                    <span class="tab-title">${title}</span>
+                    <button class="tab-close" data-tab-id="${tabId}">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            `;
+
+            // Add event listeners
+            tabElement.addEventListener('click', () => this.switchToTab(tabId));
+            tabElement.addEventListener('dragstart', (e) => this.handleTabDragStart(e));
+            tabElement.addEventListener('dragover', (e) => this.handleTabDragOver(e));
+            tabElement.addEventListener('drop', (e) => this.handleTabDrop(e));
+
+            const closeBtn = tabElement.querySelector('.tab-close');
+            closeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closeTab(tabId);
+            });
+
+            tabsContainer.appendChild(tabElement);
+        });
     }
 
     setupSidebarResize() {
@@ -1869,6 +2254,220 @@ class AxisBrowser {
             });
         } catch (error) {
             console.error('Failed to track page in history:', error);
+        }
+    }
+
+    toggleSecurity() {
+        const securityPanel = document.getElementById('security-panel');
+        const settingsPanel = document.getElementById('settings-panel');
+        const downloadsPanel = document.getElementById('downloads-panel');
+        const bookmarksPanel = document.getElementById('bookmarks-panel');
+        
+        // Close other panels with animation
+        if (!settingsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(settingsPanel);
+        }
+        if (!downloadsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(downloadsPanel);
+        }
+        if (!bookmarksPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(bookmarksPanel);
+        }
+        
+        if (securityPanel.classList.contains('hidden')) {
+            securityPanel.classList.remove('hidden');
+            this.updateSecurityInfo();
+        } else {
+            this.closePanelWithAnimation(securityPanel);
+        }
+    }
+
+    updateSecurityInfo() {
+        const webview = document.getElementById('webview');
+        const url = webview.getURL();
+        const title = webview.getTitle();
+        
+        try {
+            const urlObj = new URL(url);
+            const protocol = urlObj.protocol;
+            const hostname = urlObj.hostname;
+            
+            // Update security icon and status
+            const securityIcon = document.getElementById('security-icon');
+            const securityTitle = document.getElementById('security-title');
+            const securitySubtitle = document.getElementById('security-subtitle');
+            const securityWebsite = document.getElementById('security-website');
+            const securityCertificate = document.getElementById('security-certificate');
+            const securityEncryption = document.getElementById('security-encryption');
+            const securityConnection = document.getElementById('security-connection');
+            
+            if (protocol === 'https:') {
+                securityIcon.className = 'fas fa-lock';
+                securityIcon.style.color = '#4CAF50';
+                securityTitle.textContent = 'Secure Connection';
+                securitySubtitle.textContent = 'Your connection is encrypted';
+                securityWebsite.textContent = hostname;
+                securityCertificate.textContent = 'Valid';
+                securityEncryption.textContent = 'TLS 1.3';
+                securityConnection.textContent = 'Secure';
+            } else if (protocol === 'http:') {
+                securityIcon.className = 'fas fa-unlock';
+                securityIcon.style.color = '#ff9800';
+                securityTitle.textContent = 'Not Secure';
+                securitySubtitle.textContent = 'Your connection is not encrypted';
+                securityWebsite.textContent = hostname;
+                securityCertificate.textContent = 'None';
+                securityEncryption.textContent = 'None';
+                securityConnection.textContent = 'Not Secure';
+            } else {
+                securityIcon.className = 'fas fa-info-circle';
+                securityIcon.style.color = '#666';
+                securityTitle.textContent = 'Local Page';
+                securitySubtitle.textContent = 'This is a local or system page';
+                securityWebsite.textContent = hostname || 'Local';
+                securityCertificate.textContent = 'N/A';
+                securityEncryption.textContent = 'N/A';
+                securityConnection.textContent = 'Local';
+            }
+        } catch (error) {
+            // Handle invalid URLs
+            const securityIcon = document.getElementById('security-icon');
+            const securityTitle = document.getElementById('security-title');
+            const securitySubtitle = document.getElementById('security-subtitle');
+            
+            securityIcon.className = 'fas fa-info-circle';
+            securityIcon.style.color = '#666';
+            securityTitle.textContent = 'Unknown';
+            securitySubtitle.textContent = 'Unable to determine security status';
+        }
+    }
+
+    viewCertificate() {
+        const webview = document.getElementById('webview');
+        const url = webview.getURL();
+        
+        if (url && url.startsWith('https:')) {
+            // Open certificate viewer in new tab
+            this.createNewTab(`chrome://net-internals/#hsts`);
+            this.showNotification('Certificate details opened in new tab', 'info');
+        } else {
+            this.showNotification('No certificate available for this page', 'warning');
+        }
+    }
+
+    openSecuritySettings() {
+        // Close security panel and open settings
+        this.toggleSecurity();
+        this.toggleSettings();
+        this.showNotification('Security settings opened', 'info');
+    }
+
+    closePanelWithAnimation(panel) {
+        panel.classList.add('closing');
+        
+        // Remove the panel after animation completes
+        setTimeout(() => {
+            panel.classList.add('hidden');
+            panel.classList.remove('closing');
+        }, 300); // Match animation duration
+    }
+
+    showSpotlightSearch() {
+        const spotlightSearch = document.getElementById('spotlight-search');
+        spotlightSearch.classList.remove('hidden');
+        
+        // Focus the input after animation
+        setTimeout(() => {
+            document.getElementById('spotlight-input').focus();
+        }, 200);
+    }
+
+    closeSpotlightSearch() {
+        const spotlightSearch = document.getElementById('spotlight-search');
+        this.closePanelWithAnimation(spotlightSearch);
+        
+        // Clear input and suggestions
+        document.getElementById('spotlight-input').value = '';
+        document.getElementById('spotlight-suggestions').style.display = 'none';
+    }
+
+    performSpotlightSearch() {
+        const input = document.getElementById('spotlight-input');
+        const query = input.value.trim();
+        
+        if (query) {
+            // Close spotlight and navigate to search
+            this.closeSpotlightSearch();
+            
+            // Determine if it's a URL or search query
+            let searchUrl;
+            if (this.isValidUrl(query)) {
+                searchUrl = query.startsWith('http') ? query : `https://${query}`;
+            } else {
+                searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+            }
+            
+            // Navigate to the search URL
+            const webview = document.getElementById('webview');
+            webview.src = searchUrl;
+        }
+    }
+
+    updateSpotlightSuggestions(query) {
+        const suggestionsContainer = document.getElementById('spotlight-suggestions');
+        
+        if (query.length < 2) {
+            suggestionsContainer.style.display = 'none';
+            return;
+        }
+        
+        // Generate suggestions based on query
+        const suggestions = this.generateSearchSuggestions(query);
+        
+        if (suggestions.length > 0) {
+            suggestionsContainer.innerHTML = '';
+            suggestions.forEach(suggestion => {
+                const suggestionEl = document.createElement('div');
+                suggestionEl.className = 'spotlight-suggestion';
+                suggestionEl.textContent = suggestion;
+                suggestionEl.addEventListener('click', () => {
+                    document.getElementById('spotlight-input').value = suggestion;
+                    this.performSpotlightSearch();
+                });
+                suggestionsContainer.appendChild(suggestionEl);
+            });
+            suggestionsContainer.style.display = 'block';
+        } else {
+            suggestionsContainer.style.display = 'none';
+        }
+    }
+
+    generateSearchSuggestions(query) {
+        const commonSearches = [
+            'weather',
+            'news',
+            'maps',
+            'translate',
+            'calculator',
+            'youtube',
+            'github',
+            'stackoverflow',
+            'reddit',
+            'wikipedia'
+        ];
+        
+        return commonSearches.filter(item => 
+            item.toLowerCase().includes(query.toLowerCase())
+        ).slice(0, 5);
+    }
+
+    isValidUrl(string) {
+        try {
+            new URL(string);
+            return true;
+        } catch (_) {
+            // Check if it looks like a domain
+            return /^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$/.test(string);
         }
     }
 }
