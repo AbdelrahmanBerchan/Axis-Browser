@@ -15,7 +15,7 @@ const downloadsStore = new Store({ name: 'downloads' });
 let mainWindow;
 
 function createWindow() {
-  // Create the browser window
+  // Create the browser window with optimized settings
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -28,7 +28,12 @@ function createWindow() {
       contextIsolation: true,
       enableRemoteModule: false,
       webviewTag: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      // Performance optimizations
+      backgroundThrottling: false,
+      offscreen: false,
+      experimentalFeatures: true,
+      enableBlinkFeatures: 'CSSColorSchemeUARendering'
     },
     titleBarStyle: 'hiddenInset',
     frame: false,
@@ -235,6 +240,65 @@ ipcMain.handle('delete-download', (event, id) => {
   const downloads = downloadsStore.get('items', []);
   const filtered = downloads.filter(item => item.id !== id);
   downloadsStore.set('items', filtered);
+  return true;
+});
+
+// Incognito window
+ipcMain.handle('open-incognito-window', () => {
+  // Create a new session for incognito mode
+  const incognitoSession = session.fromPartition('incognito');
+  
+  const incognitoWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    title: 'Axis - Incognito',
+    icon: path.join(__dirname, 'Axis_logo.png'),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      enableRemoteModule: false,
+      webviewTag: true,
+      preload: path.join(__dirname, 'preload.js'),
+      backgroundThrottling: false,
+      offscreen: false,
+      experimentalFeatures: true,
+      enableBlinkFeatures: 'CSSColorSchemeUARendering',
+      session: incognitoSession,
+      partition: 'incognito'
+    },
+    titleBarStyle: 'hiddenInset',
+    frame: false,
+    show: false,
+    backgroundColor: '#1a1a1a'
+  });
+
+  // Load the app
+  incognitoWindow.loadFile('src/index.html');
+
+  // Show window when ready
+  incognitoWindow.once('ready-to-show', () => {
+    incognitoWindow.show();
+    // Show spotlight search in the incognito window
+    incognitoWindow.webContents.executeJavaScript(`
+      setTimeout(() => {
+        if (window.browser && window.browser.showSpotlightSearch) {
+          window.browser.showSpotlightSearch();
+        }
+      }, 1000);
+    `);
+  });
+
+  // Handle window closed - clear all incognito data
+  incognitoWindow.on('closed', () => {
+    // Clear all incognito session data when window closes
+    incognitoSession.clearStorageData();
+    incognitoSession.clearCache();
+    incognitoSession.clearAuthCache();
+    incognitoSession.clearHostResolverCache();
+  });
+
   return true;
 });
 
