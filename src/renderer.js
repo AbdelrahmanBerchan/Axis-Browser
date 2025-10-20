@@ -74,10 +74,7 @@ class AxisBrowser {
             this.toggleUrlBarExpansion();
         });
 
-        // Tab controls
-        document.getElementById('add-tab-btn').addEventListener('click', () => {
-            this.createNewTab();
-        });
+        // Tab controls handled in setupAddTabMenu to avoid double toggle
 
         // Nav menu toggle
         document.getElementById('nav-menu-btn').addEventListener('click', (e) => {
@@ -170,12 +167,16 @@ class AxisBrowser {
         });
 
         document.getElementById('spotlight-input').addEventListener('input', (e) => {
-            this.updateSpotlightSuggestions(e.target.value);
+            // Debounce the suggestions update to wait for user to finish typing
+            clearTimeout(this.spotlightDebounceTimer);
+            this.spotlightDebounceTimer = setTimeout(() => {
+                this.updateSpotlightSuggestions(e.target.value);
+            }, 800); // Wait 800ms after user stops typing for better UX
         });
 
-        // Close spotlight when clicking background
+        // Close spotlight when clicking background or backdrop
         document.getElementById('spotlight-search').addEventListener('click', (e) => {
-            if (e.target.id === 'spotlight-search') {
+            if (e.target.id === 'spotlight-search' || e.target.classList.contains('spotlight-backdrop')) {
                 this.closeSpotlightSearch();
             }
         });
@@ -356,10 +357,9 @@ class AxisBrowser {
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Cmd/Ctrl + T - New tab with spotlight search
+            // Cmd/Ctrl + T - Show spotlight search
             if ((e.metaKey || e.ctrlKey) && e.key === 't') {
                 e.preventDefault();
-                this.createNewTab();
                 this.showSpotlightSearch();
             }
             
@@ -1834,18 +1834,51 @@ class AxisBrowser {
     zoomIn() {
         const webview = document.getElementById('webview');
         const currentZoom = webview.getZoomFactor();
-        webview.setZoomFactor(Math.min(currentZoom + 0.1, 3.0));
+        const newZoom = Math.min(currentZoom + 0.1, 3.0);
+        webview.setZoomFactor(newZoom);
+        this.showZoomIndicator('zoom-in', Math.round(newZoom * 100));
     }
 
     zoomOut() {
         const webview = document.getElementById('webview');
         const currentZoom = webview.getZoomFactor();
-        webview.setZoomFactor(Math.max(currentZoom - 0.1, 0.25));
+        const newZoom = Math.max(currentZoom - 0.1, 0.25);
+        webview.setZoomFactor(newZoom);
+        this.showZoomIndicator('zoom-out', Math.round(newZoom * 100));
     }
 
     resetZoom() {
         const webview = document.getElementById('webview');
         webview.setZoomFactor(1.0);
+        this.showZoomIndicator('zoom-in', 100);
+    }
+
+    showZoomIndicator(type, percentage) {
+        const indicator = document.getElementById('zoom-indicator');
+        const percentageSpan = indicator.querySelector('.zoom-percentage');
+        const icon = indicator.querySelector('i');
+        
+        // Update content
+        percentageSpan.textContent = `${percentage}%`;
+        
+        // Update icon based on zoom type
+        if (type === 'zoom-in') {
+            icon.className = 'fas fa-search-plus';
+        } else if (type === 'zoom-out') {
+            icon.className = 'fas fa-search-minus';
+        }
+        
+        // Show indicator
+        indicator.classList.remove('hidden');
+        indicator.classList.add('show', type);
+        
+        // Hide after 4 seconds
+        setTimeout(() => {
+            indicator.classList.remove('show', type);
+            setTimeout(() => {
+                indicator.classList.add('hidden');
+            }, 300);
+        }, 4000);
     }
 
     setupLoadingScreen() {
@@ -1859,16 +1892,16 @@ class AxisBrowser {
     }
 
     showLoadingIndicator() {
-        const loadingIndicator = document.getElementById('loading-indicator');
-        if (loadingIndicator) {
-            loadingIndicator.classList.remove('hidden');
+        const loadingBar = document.getElementById('loading-bar');
+        if (loadingBar) {
+            loadingBar.classList.add('loading');
         }
     }
 
     hideLoadingIndicator() {
-        const loadingIndicator = document.getElementById('loading-indicator');
-        if (loadingIndicator) {
-            loadingIndicator.classList.add('hidden');
+        const loadingBar = document.getElementById('loading-bar');
+        if (loadingBar) {
+            loadingBar.classList.remove('loading');
         }
     }
 
@@ -1877,6 +1910,20 @@ class AxisBrowser {
         const addTabMenu = document.getElementById('add-tab-menu');
         const newTabBtn = document.getElementById('new-tab-btn');
         const newIncognitoBtn = document.getElementById('new-incognito-btn');
+
+        // Prevent clicks inside the menu from closing it
+        if (addTabMenu) {
+            addTabMenu.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+        }
+
+        // Prevent clicks inside the menu from closing it
+        if (addTabMenu) {
+            addTabMenu.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+        }
 
         // Toggle add tab menu
         addTabBtn.addEventListener('click', (e) => {
@@ -1887,8 +1934,10 @@ class AxisBrowser {
         // New tab option
         newTabBtn.addEventListener('click', () => {
             this.closeAddTabMenu();
-            this.createNewTab();
+            // Open spotlight instead of creating a tab
             this.showSpotlightSearch();
+            const inputEl = document.getElementById('spotlight-input');
+            if (inputEl) inputEl.focus();
         });
 
         // New incognito tab option
@@ -1900,6 +1949,18 @@ class AxisBrowser {
         // Close menu when clicking outside
         document.addEventListener('click', (e) => {
             if (!addTabBtn.contains(e.target) && !addTabMenu.contains(e.target)) {
+                this.closeAddTabMenu();
+            }
+        });
+        // Also close on mousedown for immediate response
+        document.addEventListener('mousedown', (e) => {
+            if (!addTabBtn.contains(e.target) && !addTabMenu.contains(e.target)) {
+                this.closeAddTabMenu();
+            }
+        });
+        // Close on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
                 this.closeAddTabMenu();
             }
         });
@@ -1917,6 +1978,7 @@ class AxisBrowser {
     showAddTabMenu() {
         const addTabMenu = document.getElementById('add-tab-menu');
         addTabMenu.classList.remove('hidden');
+        addTabMenu.classList.remove('closing');
     }
 
     closeAddTabMenu() {
@@ -2396,8 +2458,24 @@ class AxisBrowser {
         const query = input.value.trim();
         
         if (query) {
-            // Close spotlight and navigate to search
+            // Close spotlight first
             this.closeSpotlightSearch();
+            
+            // Track recent search
+            if (!this.settings.recentSearches) {
+                this.settings.recentSearches = [];
+            }
+            
+            // Add to recent searches (avoid duplicates)
+            if (!this.settings.recentSearches.includes(query)) {
+                this.settings.recentSearches.unshift(query);
+                // Keep only last 10 searches
+                this.settings.recentSearches = this.settings.recentSearches.slice(0, 10);
+                this.saveSetting('recentSearches', this.settings.recentSearches);
+            }
+            
+            // Create a new tab for the search
+            this.createNewTab();
             
             // Determine if it's a URL or search query
             let searchUrl;
@@ -2407,7 +2485,7 @@ class AxisBrowser {
                 searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
             }
             
-            // Navigate to the search URL
+            // Navigate to the search URL in the new tab
             const webview = document.getElementById('webview');
             webview.src = searchUrl;
         }
@@ -2416,49 +2494,1047 @@ class AxisBrowser {
     updateSpotlightSuggestions(query) {
         const suggestionsContainer = document.getElementById('spotlight-suggestions');
         
-        if (query.length < 2) {
-            suggestionsContainer.style.display = 'none';
-            return;
-        }
-        
-        // Generate suggestions based on query
-        const suggestions = this.generateSearchSuggestions(query);
+        // Always show suggestions (5 default when empty, 5 when typing)
+        const suggestions = query.length < 1 ? this.getDefaultSuggestions() : this.generateAdvancedSuggestions(query);
         
         if (suggestions.length > 0) {
-            suggestionsContainer.innerHTML = '';
-            suggestions.forEach(suggestion => {
-                const suggestionEl = document.createElement('div');
-                suggestionEl.className = 'spotlight-suggestion';
-                suggestionEl.textContent = suggestion;
-                suggestionEl.addEventListener('click', () => {
-                    document.getElementById('spotlight-input').value = suggestion;
-                    this.performSpotlightSearch();
-                });
-                suggestionsContainer.appendChild(suggestionEl);
-            });
-            suggestionsContainer.style.display = 'block';
+            // Show loading state only for typed queries
+            if (query.length > 0) {
+                suggestionsContainer.classList.add('loading');
+                suggestionsContainer.style.display = 'block';
+                
+                setTimeout(() => {
+                    this.updateSuggestionsContent(suggestionsContainer, suggestions);
+                }, 200);
+            } else {
+                // For empty query, show immediately without loading
+                this.updateSuggestionsContent(suggestionsContainer, suggestions);
+            }
         } else {
-            suggestionsContainer.style.display = 'none';
+            // Hide when no suggestions
+            suggestionsContainer.classList.remove('show');
+            suggestionsContainer.classList.add('hiding');
+            setTimeout(() => {
+                suggestionsContainer.style.display = 'none';
+                suggestionsContainer.classList.remove('hiding');
+            }, 300);
         }
     }
 
-    generateSearchSuggestions(query) {
-        const commonSearches = [
-            'weather',
-            'news',
-            'maps',
-            'translate',
-            'calculator',
-            'youtube',
-            'github',
-            'stackoverflow',
-            'reddit',
-            'wikipedia'
+    updateSuggestionsContent(suggestionsContainer, suggestions) {
+        // Remove loading state
+        suggestionsContainer.classList.remove('loading');
+        
+        // Clear existing content
+        suggestionsContainer.innerHTML = '';
+        
+        // Limit to 5 visible suggestions
+        const visibleSuggestions = suggestions.slice(0, 5);
+        
+        // Add new suggestions without resetting animations
+        visibleSuggestions.forEach((suggestion, index) => {
+            const suggestionEl = document.createElement('div');
+            suggestionEl.className = 'spotlight-suggestion-item';
+            
+            suggestionEl.innerHTML = `
+                <div class="spotlight-suggestion-icon">
+                    <i class="${suggestion.icon}"></i>
+                </div>
+                <div class="spotlight-suggestion-text">${suggestion.text}</div>
+                ${suggestion.tabId ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
+            `;
+            
+            suggestionEl.addEventListener('click', () => {
+                // Do not close spotlight preemptively; only close when navigating
+                if (suggestion.isTab && suggestion.tabId) {
+                    this.closeSpotlightSearch();
+                    this.switchToTab(suggestion.tabId);
+                } else if (suggestion.isAction) {
+                    if (suggestion.text === 'New Tab') {
+                        // Open spotlight, do not create a tab
+                        this.showSpotlightSearch();
+                        const inputEl = document.getElementById('spotlight-input');
+                        if (inputEl) inputEl.focus();
+                        return;
+                    } else if (suggestion.text === 'New Incognito Tab') {
+                        this.closeSpotlightSearch();
+                        this.createIncognitoTab();
+                    } else if (suggestion.text === 'Open Settings') {
+                        this.closeSpotlightSearch();
+                        this.toggleSettings();
+                    }
+                } else if (suggestion.isSearch) {
+                    this.closeSpotlightSearch();
+                    this.createNewTab();
+                    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(suggestion.searchQuery)}`;
+                    const webview = document.getElementById('webview');
+                    webview.src = searchUrl;
+                } else if (suggestion.isHistory) {
+                    this.closeSpotlightSearch();
+                    this.createNewTab();
+                    const webview = document.getElementById('webview');
+                    webview.src = suggestion.url;
+                } else if (suggestion.isCompletion) {
+                    this.closeSpotlightSearch();
+                    this.createNewTab();
+                    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(suggestion.searchQuery)}`;
+                    const webview = document.getElementById('webview');
+                    webview.src = searchUrl;
+                } else if (suggestion.isUrl) {
+                    this.closeSpotlightSearch();
+                    this.createNewTab();
+                    const webview = document.getElementById('webview');
+                    webview.src = suggestion.url;
+                } else {
+                    // Default search behavior requires Enter; keep spotlight open
+                    const input = document.getElementById('spotlight-input');
+                    if (input) input.value = suggestion.text;
+                }
+            });
+            
+            suggestionsContainer.appendChild(suggestionEl);
+        });
+        
+        // Show with animation
+        suggestionsContainer.style.display = 'block';
+        setTimeout(() => {
+            suggestionsContainer.classList.add('show');
+        }, 50);
+    }
+
+    generateAdvancedSuggestions(query) {
+        const suggestions = [];
+        const lowerQuery = query.toLowerCase();
+        
+        // Show existing tabs first
+        this.tabs.forEach((tab, tabId) => {
+            const title = tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
+            const url = tab.url || 'about:blank';
+            
+            if (title.toLowerCase().includes(lowerQuery) || 
+                url.toLowerCase().includes(lowerQuery) || 
+                lowerQuery.length === 0) {
+                
+                let icon = 'fas fa-globe';
+                if (tab.incognito) {
+                    icon = 'fas fa-mask';
+                } else if (url.includes('gmail.com')) {
+                    icon = 'fas fa-envelope';
+                } else if (url.includes('youtube.com')) {
+                    icon = 'fab fa-youtube';
+                } else if (url.includes('github.com')) {
+                    icon = 'fab fa-github';
+                } else if (url.includes('facebook.com')) {
+                    icon = 'fab fa-facebook';
+                } else if (url.includes('twitter.com')) {
+                    icon = 'fab fa-twitter';
+                } else if (url.includes('instagram.com')) {
+                    icon = 'fab fa-instagram';
+                } else if (url.includes('reddit.com')) {
+                    icon = 'fab fa-reddit';
+                } else if (url.includes('stackoverflow.com')) {
+                    icon = 'fab fa-stack-overflow';
+                } else if (url.includes('wikipedia.org')) {
+                    icon = 'fab fa-wikipedia-w';
+                } else if (url.includes('amazon.com')) {
+                    icon = 'fab fa-amazon';
+                }
+                
+                suggestions.push({
+                    text: title,
+                    icon: icon,
+                    tabId: tabId,
+                    url: url,
+                    isTab: true
+                });
+            }
+        });
+        
+        // Add recent history items
+        if (this.settings.history && this.settings.history.length > 0) {
+            const recentHistory = this.settings.history
+                .filter(item => 
+                    item.title.toLowerCase().includes(lowerQuery) || 
+                    item.url.toLowerCase().includes(lowerQuery) ||
+                    lowerQuery.length === 0
+                )
+                .slice(0, 3)
+                .map(item => {
+                    let icon = 'fas fa-globe';
+                    if (item.url.includes('gmail.com')) {
+                        icon = 'fas fa-envelope';
+                    } else if (item.url.includes('youtube.com')) {
+                        icon = 'fab fa-youtube';
+                    } else if (item.url.includes('github.com')) {
+                        icon = 'fab fa-github';
+                    } else if (item.url.includes('facebook.com')) {
+                        icon = 'fab fa-facebook';
+                    } else if (item.url.includes('twitter.com')) {
+                        icon = 'fab fa-twitter';
+                    } else if (item.url.includes('instagram.com')) {
+                        icon = 'fab fa-instagram';
+                    } else if (item.url.includes('reddit.com')) {
+                        icon = 'fab fa-reddit';
+                    } else if (item.url.includes('stackoverflow.com')) {
+                        icon = 'fab fa-stack-overflow';
+                    } else if (item.url.includes('wikipedia.org')) {
+                        icon = 'fab fa-wikipedia-w';
+                    } else if (item.url.includes('amazon.com')) {
+                        icon = 'fab fa-amazon';
+                    }
+                    
+                    return {
+                        text: item.title,
+                        icon: icon,
+                        url: item.url,
+                        isHistory: true,
+                        timestamp: item.timestamp
+                    };
+                });
+            
+            suggestions.push(...recentHistory);
+        }
+        
+        // Add recent searches with sentence completion
+        if (this.settings.recentSearches && this.settings.recentSearches.length > 0) {
+            const recentSearches = this.settings.recentSearches
+                .filter(search => 
+                    search.toLowerCase().includes(lowerQuery) || 
+                    lowerQuery.length === 0
+                )
+                .slice(0, 2)
+                .map(search => ({
+                    text: `Search "${search}"`,
+                    icon: 'fas fa-search',
+                    searchQuery: search,
+                    isSearch: true
+                }));
+            
+            suggestions.push(...recentSearches);
+        }
+        
+        // Add intelligent sentence completions
+        if (lowerQuery.length > 0) {
+            const completions = this.generateSentenceCompletions(lowerQuery);
+            suggestions.push(...completions);
+        }
+        
+        // Add quick actions if no matches or query is empty
+        if (suggestions.length === 0 || lowerQuery.length === 0) {
+            suggestions.push({
+                text: 'New Tab',
+                icon: 'fas fa-plus',
+                isAction: true
+            });
+            
+            suggestions.push({
+                text: 'New Incognito Tab',
+                icon: 'fas fa-mask',
+                isAction: true
+            });
+            
+            suggestions.push({
+                text: 'Open Settings',
+                icon: 'fas fa-cog',
+                isAction: true
+            });
+        }
+        
+        // Quick actions
+        if (lowerQuery.includes('new') || lowerQuery.includes('tab')) {
+            suggestions.push({
+                text: 'New Tab',
+                icon: 'fas fa-plus',
+                shortcut: '⌘T'
+            });
+        }
+        
+        if (lowerQuery.includes('incognito') || lowerQuery.includes('private')) {
+            suggestions.push({
+                text: 'New Incognito Tab',
+                icon: 'fas fa-mask',
+                shortcut: '⌘⇧N'
+            });
+        }
+        
+        // Navigation
+        if (lowerQuery.includes('back') || lowerQuery.includes('previous')) {
+            suggestions.push({
+                text: 'Go Back',
+                icon: 'fas fa-arrow-left',
+                shortcut: '←'
+            });
+        }
+        
+        if (lowerQuery.includes('forward') || lowerQuery.includes('next')) {
+            suggestions.push({
+                text: 'Go Forward',
+                icon: 'fas fa-arrow-right',
+                shortcut: '→'
+            });
+        }
+        
+        if (lowerQuery.includes('reload') || lowerQuery.includes('refresh')) {
+            suggestions.push({
+                text: 'Reload Page',
+                icon: 'fas fa-redo',
+                shortcut: '⌘R'
+            });
+        }
+        
+        // Settings and panels
+        if (lowerQuery.includes('settings') || lowerQuery.includes('preferences')) {
+            suggestions.push({
+                text: 'Open Settings',
+                icon: 'fas fa-cog',
+                shortcut: '⌘,'
+            });
+        }
+        
+        if (lowerQuery.includes('bookmark') || lowerQuery.includes('save')) {
+            suggestions.push({
+                text: 'Bookmark This Page',
+                icon: 'fas fa-bookmark',
+                shortcut: '⌘D'
+            });
+        }
+        
+        if (lowerQuery.includes('download') || lowerQuery.includes('downloads')) {
+            suggestions.push({
+                text: 'Open Downloads',
+                icon: 'fas fa-download',
+                shortcut: '⌘J'
+            });
+        }
+        
+        if (lowerQuery.includes('history')) {
+            suggestions.push({
+                text: 'Open History',
+                icon: 'fas fa-history',
+                shortcut: '⌘Y'
+            });
+        }
+        
+        // Search engines
+        if (lowerQuery.includes('google') || lowerQuery.includes('search')) {
+            suggestions.push({
+                text: 'Search on Google',
+                icon: 'fab fa-google',
+                shortcut: 'google.com'
+            });
+        }
+        
+        if (lowerQuery.includes('youtube') || lowerQuery.includes('video')) {
+            suggestions.push({
+                text: 'Search on YouTube',
+                icon: 'fab fa-youtube',
+                shortcut: 'youtube.com'
+            });
+        }
+        
+        if (lowerQuery.includes('github') || lowerQuery.includes('code')) {
+            suggestions.push({
+                text: 'Search on GitHub',
+                icon: 'fab fa-github',
+                shortcut: 'github.com'
+            });
+        }
+        
+        // Word suggestions for search queries
+        const wordSuggestions = [
+            'weather', 'news', 'maps', 'translate', 'calculator', 'time', 'date',
+            'stock market', 'crypto', 'sports', 'music', 'movies', 'games',
+            'programming', 'design', 'photography', 'travel', 'food', 'health',
+            'education', 'technology', 'science', 'history', 'art', 'books'
         ];
         
-        return commonSearches.filter(item => 
-            item.toLowerCase().includes(query.toLowerCase())
-        ).slice(0, 5);
+        wordSuggestions.forEach(word => {
+            if (word.toLowerCase().includes(lowerQuery) || lowerQuery.includes(word.toLowerCase())) {
+                suggestions.push({
+                    text: `Search for "${word}"`,
+                    icon: 'fas fa-search',
+                    shortcut: `Search ${word}`
+                });
+            }
+        });
+        
+        // Popular websites
+        const popularSites = [
+            { name: 'Gmail', icon: 'fab fa-google', url: 'gmail.com' },
+            { name: 'YouTube', icon: 'fab fa-youtube', url: 'youtube.com' },
+            { name: 'GitHub', icon: 'fab fa-github', url: 'github.com' },
+            { name: 'Twitter', icon: 'fab fa-twitter', url: 'twitter.com' },
+            { name: 'Reddit', icon: 'fab fa-reddit', url: 'reddit.com' },
+            { name: 'Stack Overflow', icon: 'fab fa-stack-overflow', url: 'stackoverflow.com' },
+            { name: 'Wikipedia', icon: 'fab fa-wikipedia-w', url: 'wikipedia.org' },
+            { name: 'Netflix', icon: 'fab fa-netflix', url: 'netflix.com' }
+        ];
+        
+        popularSites.forEach(site => {
+            if (site.name.toLowerCase().includes(lowerQuery) || 
+                site.url.toLowerCase().includes(lowerQuery)) {
+                suggestions.push({
+                    text: `Go to ${site.name}`,
+                    icon: site.icon,
+                    shortcut: site.url
+                });
+            }
+        });
+        
+        // If it looks like a URL, suggest direct navigation
+        if (this.isValidUrl(query) || lowerQuery.includes('.com') || lowerQuery.includes('.org')) {
+            const url = query.startsWith('http') ? query : `https://${query}`;
+            suggestions.unshift({
+                text: `Navigate to ${query}`,
+                icon: 'fas fa-external-link-alt',
+                shortcut: url
+            });
+        }
+        
+        return suggestions.slice(0, 8); // Limit to 8 suggestions
+    }
+
+    generateSentenceCompletions(query) {
+        const completions = [];
+        const lowerQuery = query.toLowerCase();
+        
+        // Comprehensive search patterns and completions
+        const searchPatterns = [
+            // Programming & Development
+            { pattern: 'how to', completions: [
+                'how to code', 'how to learn programming', 'how to make a website', 'how to use git', 'how to fix bugs',
+                'how to deploy', 'how to debug', 'how to optimize', 'how to test', 'how to refactor',
+                'how to design', 'how to architect', 'how to scale', 'how to secure', 'how to monitor'
+            ]},
+            { pattern: 'what is', completions: [
+                'what is javascript', 'what is react', 'what is python', 'what is ai', 'what is machine learning',
+                'what is docker', 'what is kubernetes', 'what is microservices', 'what is api', 'what is database',
+                'what is cloud computing', 'what is devops', 'what is agile', 'what is scrum', 'what is blockchain'
+            ]},
+            { pattern: 'best', completions: [
+                'best programming languages', 'best code editors', 'best frameworks', 'best practices', 'best tutorials',
+                'best libraries', 'best tools', 'best courses', 'best books', 'best resources',
+                'best algorithms', 'best design patterns', 'best architectures', 'best methodologies', 'best technologies'
+            ]},
+            { pattern: 'learn', completions: [
+                'learn javascript', 'learn python', 'learn react', 'learn coding', 'learn programming',
+                'learn data structures', 'learn algorithms', 'learn system design', 'learn databases', 'learn networking',
+                'learn security', 'learn testing', 'learn deployment', 'learn cloud', 'learn mobile development'
+            ]},
+            { pattern: 'tutorial', completions: [
+                'javascript tutorial', 'python tutorial', 'react tutorial', 'css tutorial', 'html tutorial',
+                'node.js tutorial', 'mongodb tutorial', 'docker tutorial', 'git tutorial', 'aws tutorial',
+                'machine learning tutorial', 'data science tutorial', 'web development tutorial', 'mobile app tutorial', 'game development tutorial'
+            ]},
+            
+            // Technology & Software
+            { pattern: 'javascript', completions: [
+                'javascript tutorial', 'javascript frameworks', 'javascript libraries', 'javascript best practices',
+                'javascript es6', 'javascript async', 'javascript promises', 'javascript modules', 'javascript testing'
+            ]},
+            { pattern: 'python', completions: [
+                'python tutorial', 'python for beginners', 'python data science', 'python machine learning',
+                'python web development', 'python automation', 'python libraries', 'python frameworks'
+            ]},
+            { pattern: 'react', completions: [
+                'react tutorial', 'react hooks', 'react components', 'react state management', 'react routing',
+                'react testing', 'react performance', 'react best practices', 'react native'
+            ]},
+            { pattern: 'node', completions: [
+                'node.js tutorial', 'node.js express', 'node.js api', 'node.js database', 'node.js deployment',
+                'node.js performance', 'node.js security', 'node.js testing'
+            ]},
+            { pattern: 'database', completions: [
+                'database design', 'database optimization', 'database security', 'database backup',
+                'sql tutorial', 'mongodb tutorial', 'mysql tutorial', 'postgresql tutorial'
+            ]},
+            
+            // Web Development
+            { pattern: 'web', completions: [
+                'web development', 'web design', 'web performance', 'web security', 'web accessibility',
+                'web standards', 'web optimization', 'web testing', 'web deployment'
+            ]},
+            { pattern: 'css', completions: [
+                'css tutorial', 'css grid', 'css flexbox', 'css animations', 'css responsive design',
+                'css frameworks', 'css preprocessors', 'css best practices'
+            ]},
+            { pattern: 'html', completions: [
+                'html tutorial', 'html5 features', 'html semantics', 'html accessibility', 'html forms',
+                'html validation', 'html best practices', 'html structure'
+            ]},
+            { pattern: 'api', completions: [
+                'api design', 'api documentation', 'api testing', 'api security', 'rest api',
+                'graphql api', 'api integration', 'api versioning'
+            ]},
+            
+            // Data Science & AI
+            { pattern: 'data', completions: [
+                'data science', 'data analysis', 'data visualization', 'data mining', 'data engineering',
+                'data structures', 'data modeling', 'data cleaning', 'data processing'
+            ]},
+            { pattern: 'machine', completions: [
+                'machine learning', 'machine learning algorithms', 'machine learning models', 'machine learning tutorial',
+                'machine learning python', 'machine learning projects', 'machine learning career'
+            ]},
+            { pattern: 'ai', completions: [
+                'artificial intelligence', 'ai applications', 'ai ethics', 'ai research', 'ai tools',
+                'ai frameworks', 'ai algorithms', 'ai career', 'ai future'
+            ]},
+            { pattern: 'deep', completions: [
+                'deep learning', 'deep learning tutorial', 'deep learning frameworks', 'deep learning models',
+                'deep learning applications', 'deep learning career', 'deep learning research'
+            ]},
+            
+            // Cloud & DevOps
+            { pattern: 'cloud', completions: [
+                'cloud computing', 'cloud services', 'cloud architecture', 'cloud security', 'cloud migration',
+                'aws cloud', 'azure cloud', 'google cloud', 'cloud deployment'
+            ]},
+            { pattern: 'docker', completions: [
+                'docker tutorial', 'docker containers', 'docker compose', 'docker deployment', 'docker best practices',
+                'docker security', 'docker networking', 'docker volumes'
+            ]},
+            { pattern: 'kubernetes', completions: [
+                'kubernetes tutorial', 'kubernetes deployment', 'kubernetes services', 'kubernetes networking',
+                'kubernetes security', 'kubernetes monitoring', 'kubernetes best practices'
+            ]},
+            { pattern: 'devops', completions: [
+                'devops practices', 'devops tools', 'devops culture', 'devops automation', 'devops monitoring',
+                'devops security', 'devops career', 'devops certification'
+            ]},
+            
+            // General Technology
+            { pattern: 'programming', completions: [
+                'programming languages', 'programming concepts', 'programming patterns', 'programming career',
+                'programming fundamentals', 'programming best practices', 'programming tools'
+            ]},
+            { pattern: 'software', completions: [
+                'software development', 'software engineering', 'software architecture', 'software testing',
+                'software design', 'software quality', 'software maintenance', 'software lifecycle'
+            ]},
+            { pattern: 'algorithm', completions: [
+                'algorithm design', 'algorithm analysis', 'algorithm complexity', 'algorithm optimization',
+                'sorting algorithms', 'searching algorithms', 'graph algorithms', 'dynamic programming'
+            ]},
+            { pattern: 'security', completions: [
+                'cybersecurity', 'web security', 'application security', 'network security', 'data security',
+                'security best practices', 'security tools', 'security testing', 'security audit'
+            ]},
+            
+            // Lifestyle & General
+            { pattern: 'weather', completions: [
+                'weather today', 'weather forecast', 'weather app', 'weather widget', 'weather radar',
+                'weather alerts', 'weather conditions', 'weather temperature'
+            ]},
+            { pattern: 'news', completions: [
+                'tech news', 'world news', 'sports news', 'breaking news', 'latest news',
+                'business news', 'science news', 'health news', 'entertainment news'
+            ]},
+            { pattern: 'music', completions: [
+                'music streaming', 'music player', 'music download', 'music videos', 'music concerts',
+                'music festivals', 'music genres', 'music artists', 'music production'
+            ]},
+            { pattern: 'video', completions: [
+                'video editing', 'video converter', 'video player', 'video download', 'video streaming',
+                'video conferencing', 'video tutorials', 'video production', 'video marketing'
+            ]},
+            { pattern: 'game', completions: [
+                'online games', 'mobile games', 'pc games', 'game development', 'game design',
+                'game programming', 'game engines', 'game art', 'game music'
+            ]},
+            { pattern: 'shop', completions: [
+                'online shopping', 'shopping deals', 'shopping mall', 'shopping app', 'shopping comparison',
+                'shopping reviews', 'shopping security', 'shopping delivery'
+            ]},
+            { pattern: 'travel', completions: [
+                'travel booking', 'travel deals', 'travel guide', 'travel tips', 'travel insurance',
+                'travel planning', 'travel destinations', 'travel reviews', 'travel photography'
+            ]},
+            { pattern: 'food', completions: [
+                'food delivery', 'food recipes', 'food near me', 'food ordering', 'food reviews',
+                'food nutrition', 'food safety', 'food preparation', 'food photography'
+            ]},
+            { pattern: 'health', completions: [
+                'health tips', 'health tracker', 'health app', 'health news', 'health insurance',
+                'health monitoring', 'health research', 'health technology', 'health services'
+            ]},
+            { pattern: 'work', completions: [
+                'work from home', 'work tools', 'work productivity', 'work management', 'work life balance',
+                'work communication', 'work collaboration', 'work efficiency', 'work culture'
+            ]},
+            { pattern: 'study', completions: [
+                'study tips', 'study materials', 'study app', 'study schedule', 'study techniques',
+                'study groups', 'study resources', 'study motivation', 'study planning'
+            ]},
+            { pattern: 'design', completions: [
+                'design tools', 'design inspiration', 'design software', 'design portfolio', 'design principles',
+                'design thinking', 'design systems', 'design trends', 'design career'
+            ]},
+            { pattern: 'photo', completions: [
+                'photo editing', 'photo storage', 'photo sharing', 'photo gallery', 'photo printing',
+                'photo organization', 'photo backup', 'photo restoration', 'photo techniques'
+            ]},
+            { pattern: 'social', completions: [
+                'social media', 'social network', 'social sharing', 'social platform', 'social marketing',
+                'social analytics', 'social engagement', 'social strategy', 'social trends'
+            ]},
+            { pattern: 'business', completions: [
+                'business tools', 'business plan', 'business ideas', 'business management', 'business strategy',
+                'business development', 'business analytics', 'business automation', 'business growth'
+            ]},
+            { pattern: 'finance', completions: [
+                'finance management', 'finance planning', 'finance tools', 'finance news', 'finance education',
+                'finance investment', 'finance budgeting', 'finance tracking', 'finance analysis'
+            ]},
+            { pattern: 'education', completions: [
+                'education technology', 'education resources', 'education platforms', 'education trends',
+                'education career', 'education research', 'education innovation', 'education accessibility'
+            ]},
+            { pattern: 'science', completions: [
+                'science news', 'science research', 'science education', 'science technology', 'science discovery',
+                'science experiments', 'science careers', 'science communication', 'science innovation'
+            ]},
+            { pattern: 'environment', completions: [
+                'environmental protection', 'environmental science', 'environmental technology', 'environmental policy',
+                'environmental sustainability', 'environmental conservation', 'environmental research', 'environmental education'
+            ]}
+        ];
+        
+        // Find matching patterns
+        searchPatterns.forEach(({ pattern, completions: patternCompletions }) => {
+            if (lowerQuery.includes(pattern) || pattern.includes(lowerQuery)) {
+                patternCompletions.forEach(completion => {
+                    if (completion.toLowerCase().includes(lowerQuery) && !completion.toLowerCase().startsWith(lowerQuery)) {
+                        completions.push({
+                            text: completion,
+                            icon: 'fas fa-lightbulb',
+                            isCompletion: true,
+                            searchQuery: completion
+                        });
+                    }
+                });
+            }
+        });
+        
+        // Comprehensive smart completions
+        const smartCompletions = [
+            // Programming Languages
+            'javascript tutorial for beginners', 'python programming course', 'java programming tutorial',
+            'c++ programming guide', 'c# programming tutorial', 'php web development', 'ruby programming',
+            'go programming language', 'rust programming tutorial', 'swift ios development',
+            'kotlin android development', 'typescript tutorial', 'dart flutter development',
+            
+            // Web Development
+            'react native development', 'vue.js tutorial', 'angular framework guide', 'svelte tutorial',
+            'css grid layout guide', 'html5 semantic elements', 'bootstrap framework tutorial',
+            'tailwind css tutorial', 'sass preprocessor guide', 'less css tutorial',
+            'webpack bundler tutorial', 'babel javascript compiler', 'eslint code quality',
+            'prettier code formatter', 'jest testing framework', 'cypress e2e testing',
+            
+            // Backend Development
+            'node.js backend development', 'express.js tutorial', 'nestjs framework guide',
+            'django python web framework', 'flask python tutorial', 'spring boot java',
+            'laravel php framework', 'ruby on rails tutorial', 'asp.net core tutorial',
+            'fastapi python tutorial', 'gin go framework', 'actix rust framework',
+            
+            // Databases
+            'mongodb database tutorial', 'mysql database guide', 'postgresql tutorial',
+            'redis caching tutorial', 'elasticsearch tutorial', 'cassandra database',
+            'dynamodb aws tutorial', 'firebase database', 'supabase tutorial',
+            'prisma orm tutorial', 'sequelize orm guide', 'mongoose mongodb tutorial',
+            
+            // DevOps & Cloud
+            'docker containerization', 'kubernetes orchestration', 'aws cloud services',
+            'azure cloud platform', 'google cloud platform', 'terraform infrastructure',
+            'ansible automation', 'jenkins ci/cd pipeline', 'gitlab ci/cd tutorial',
+            'github actions tutorial', 'circleci continuous integration', 'travis ci tutorial',
+            
+            // Data Science & AI
+            'machine learning algorithms', 'data science with python', 'pandas data analysis',
+            'numpy numerical computing', 'scikit-learn machine learning', 'tensorflow deep learning',
+            'pytorch neural networks', 'keras deep learning', 'opencv computer vision',
+            'nltk natural language processing', 'spacy nlp tutorial', 'transformers ai models',
+            
+            // Mobile Development
+            'react native mobile app', 'flutter cross platform', 'ionic hybrid app',
+            'xamarin microsoft mobile', 'cordova phonegap tutorial', 'progressive web apps',
+            'mobile app design', 'ios app development', 'android app development',
+            
+            // Design & UI/UX
+            'responsive design principles', 'accessibility guidelines', 'user experience design',
+            'user interface design', 'figma design tool', 'sketch design software',
+            'adobe xd tutorial', 'invision prototyping', 'material design principles',
+            'design systems guide', 'wireframing techniques', 'prototyping methods',
+            
+            // Performance & Optimization
+            'performance optimization tips', 'web performance metrics', 'lighthouse optimization',
+            'core web vitals', 'bundle size optimization', 'image optimization techniques',
+            'caching strategies', 'cdn implementation', 'database optimization',
+            'api performance tuning', 'memory management', 'cpu optimization',
+            
+            // Security
+            'security best practices', 'web application security', 'owasp security guidelines',
+            'authentication systems', 'authorization patterns', 'jwt token tutorial',
+            'oauth implementation', 'ssl certificate setup', 'https configuration',
+            'sql injection prevention', 'xss attack prevention', 'csrf protection',
+            
+            // Testing
+            'testing strategies', 'unit testing tutorial', 'integration testing guide',
+            'end-to-end testing', 'test driven development', 'behavior driven development',
+            'mocking techniques', 'test automation', 'continuous testing',
+            'performance testing', 'load testing tutorial', 'security testing',
+            
+            // Deployment & Operations
+            'deployment automation', 'ci/cd pipeline setup', 'blue green deployment',
+            'canary deployment', 'rolling deployment', 'infrastructure as code',
+            'monitoring and logging', 'error tracking', 'application performance monitoring',
+            'serverless architecture', 'microservices deployment', 'container orchestration',
+            
+            // Career & Learning
+            'programming career path', 'software engineering career', 'web developer roadmap',
+            'data scientist career', 'devops engineer path', 'tech interview preparation',
+            'coding bootcamp guide', 'online learning platforms', 'programming certifications',
+            'open source contribution', 'github portfolio building', 'technical writing',
+            
+            // Tools & Technologies
+            'git version control basics', 'github collaboration', 'gitlab tutorial',
+            'bitbucket repository', 'vscode editor setup', 'vim editor tutorial',
+            'emacs editor guide', 'terminal command line', 'bash scripting tutorial',
+            'powershell tutorial', 'linux administration', 'windows development',
+            
+            // Frameworks & Libraries
+            'express.js tutorial', 'fastify framework', 'koa.js tutorial',
+            'hapi.js framework', 'sails.js tutorial', 'meteor.js full stack',
+            'next.js react framework', 'nuxt.js vue framework', 'gatsby static site',
+            'sveltekit tutorial', 'remix framework', 'solid.js tutorial',
+            
+            // General Technology
+            'blockchain technology', 'cryptocurrency tutorial', 'smart contracts',
+            'web3 development', 'nft development', 'defi protocols',
+            'quantum computing', 'edge computing', 'iot development',
+            'augmented reality', 'virtual reality', 'mixed reality',
+            
+            // Business & Productivity
+            'project management tools', 'agile methodology', 'scrum framework',
+            'kanban methodology', 'lean development', 'devops culture',
+            'team collaboration', 'remote work tools', 'productivity techniques',
+            'time management', 'task automation', 'workflow optimization'
+        ];
+        
+        smartCompletions.forEach(completion => {
+            if (completion.toLowerCase().includes(lowerQuery) && lowerQuery.length > 2) {
+                completions.push({
+                    text: completion,
+                    icon: 'fas fa-magic',
+                    isCompletion: true,
+                    searchQuery: completion
+                });
+            }
+        });
+        
+        // Comprehensive URL completions
+        const commonDomains = [
+            // Developer & Programming
+            'github.com', 'stackoverflow.com', 'dev.to', 'medium.com', 'codepen.io',
+            'jsfiddle.net', 'repl.it', 'codesandbox.io', 'glitch.com', 'heroku.com',
+            'netlify.com', 'vercel.com', 'surge.sh', 'firebase.google.com', 'supabase.com',
+            'mongodb.com', 'redis.com', 'elastic.co', 'datadog.com', 'newrelic.com',
+            
+            // Learning & Education
+            'wikipedia.org', 'youtube.com', 'coursera.org', 'udemy.com', 'edx.org',
+            'khanacademy.org', 'freecodecamp.org', 'codecademy.com', 'pluralsight.com',
+            'linkedin.com/learning', 'skillshare.com', 'masterclass.com', 'brilliant.org',
+            
+            // Social & Community
+            'reddit.com', 'twitter.com', 'facebook.com', 'instagram.com', 'linkedin.com',
+            'discord.com', 'slack.com', 'telegram.org', 'whatsapp.com', 'signal.org',
+            'mastodon.social', 'minds.com', 'gab.com', 'parler.com', 'truthsocial.com',
+            
+            // News & Information
+            'cnn.com', 'bbc.com', 'reuters.com', 'ap.org', 'npr.org', 'wsj.com',
+            'nytimes.com', 'washingtonpost.com', 'theguardian.com', 'bloomberg.com',
+            'techcrunch.com', 'arstechnica.com', 'wired.com', 'theverge.com', 'engadget.com',
+            
+            // E-commerce & Shopping
+            'amazon.com', 'ebay.com', 'etsy.com', 'shopify.com', 'woocommerce.com',
+            'magento.com', 'prestashop.com', 'opencart.com', 'bigcommerce.com', 'squarespace.com',
+            'wix.com', 'weebly.com', 'wordpress.com', 'blogger.com', 'tumblr.com',
+            
+            // Entertainment & Media
+            'netflix.com', 'hulu.com', 'disney.com', 'hbo.com', 'paramount.com',
+            'spotify.com', 'apple.com/music', 'pandora.com', 'soundcloud.com', 'bandcamp.com',
+            'twitch.tv', 'youtube.com/gaming', 'mixer.com', 'dlive.tv', 'caffeine.tv',
+            
+            // Productivity & Business
+            'google.com', 'microsoft.com', 'apple.com', 'adobe.com', 'salesforce.com',
+            'hubspot.com', 'mailchimp.com', 'zendesk.com', 'freshworks.com', 'intercom.com',
+            'asana.com', 'trello.com', 'monday.com', 'notion.so', 'airtable.com',
+            
+            // Cloud & Infrastructure
+            'aws.amazon.com', 'azure.microsoft.com', 'cloud.google.com', 'digitalocean.com',
+            'linode.com', 'vultr.com', 'cloudflare.com', 'fastly.com', 'keycdn.com',
+            'bunny.net', 'maxcdn.com', 'jsdelivr.com', 'unpkg.com', 'cdnjs.com',
+            
+            // Design & Creative
+            'figma.com', 'sketch.com', 'adobe.com', 'canva.com', 'dribbble.com',
+            'behance.net', 'pinterest.com', 'unsplash.com', 'pexels.com', 'pixabay.com',
+            'freepik.com', 'shutterstock.com', 'gettyimages.com', 'istockphoto.com',
+            
+            // Finance & Investment
+            'paypal.com', 'stripe.com', 'square.com', 'venmo.com', 'cashapp.com',
+            'robinhood.com', 'etrade.com', 'fidelity.com', 'schwab.com', 'vanguard.com',
+            'coinbase.com', 'binance.com', 'kraken.com', 'gemini.com', 'blockchain.com',
+            
+            // Travel & Lifestyle
+            'booking.com', 'airbnb.com', 'expedia.com', 'kayak.com', 'skyscanner.com',
+            'tripadvisor.com', 'yelp.com', 'foursquare.com', 'swarmapp.com', 'untappd.com',
+            'strava.com', 'myfitnesspal.com', 'fitbit.com', 'garmin.com', 'polar.com',
+            
+            // Communication & Collaboration
+            'zoom.us', 'teams.microsoft.com', 'meet.google.com', 'webex.com', 'gotomeeting.com',
+            'jitsi.org', 'whereby.com', 'appear.in', 'join.me', 'bluejeans.com',
+            'calendly.com', 'doodle.com', 'when2meet.com', 'scheduling.com', 'acuityscheduling.com',
+            
+            // Development Tools
+            'npmjs.com', 'yarnpkg.com', 'bower.io', 'webpack.js.org', 'rollupjs.org',
+            'parceljs.org', 'vitejs.dev', 'esbuild.github.io', 'swc.rs', 'babeljs.io',
+            'typescriptlang.org', 'svelte.dev', 'vuejs.org', 'angular.io', 'reactjs.org',
+            
+            // Documentation & Reference
+            'mdn.mozilla.org', 'developer.mozilla.org', 'docs.microsoft.com', 'developers.google.com',
+            'docs.aws.amazon.com', 'kubernetes.io', 'docker.com', 'nginx.com', 'apache.org',
+            'nodejs.org', 'python.org', 'php.net', 'ruby-lang.org', 'golang.org',
+            
+            // Testing & Quality
+            'jestjs.io', 'mochajs.org', 'jasmine.github.io', 'karma-runner.github.io',
+            'cypress.io', 'playwright.dev', 'puppeteer.dev', 'selenium.dev', 'webdriver.io',
+            'testing-library.com', 'enzymejs.github.io', 'chai.js', 'sinonjs.org', 'nockjs.github.io'
+        ];
+        
+        commonDomains.forEach(domain => {
+            if (domain.includes(lowerQuery) || lowerQuery.includes(domain.split('.')[0])) {
+                completions.push({
+                    text: `Visit ${domain}`,
+                    icon: 'fas fa-external-link-alt',
+                    url: `https://${domain}`,
+                    isUrl: true
+                });
+            }
+        });
+        
+        // Add comprehensive programming dictionary
+        const programmingTerms = [
+            // Programming Languages
+            'javascript', 'python', 'java', 'c++', 'c#', 'php', 'ruby', 'go', 'rust', 'swift',
+            'kotlin', 'typescript', 'dart', 'scala', 'clojure', 'haskell', 'erlang', 'elixir',
+            'lua', 'perl', 'r', 'matlab', 'octave', 'fortran', 'cobol', 'pascal', 'ada',
+            'assembly', 'bash', 'powershell', 'sql', 'html', 'css', 'xml', 'json', 'yaml',
+            
+            // Frameworks & Libraries
+            'react', 'vue', 'angular', 'svelte', 'ember', 'backbone', 'jquery', 'lodash',
+            'express', 'koa', 'hapi', 'fastify', 'nest', 'django', 'flask', 'fastapi',
+            'spring', 'laravel', 'rails', 'sinatra', 'asp.net', 'gin', 'echo', 'fiber',
+            'bootstrap', 'tailwind', 'bulma', 'foundation', 'materialize', 'semantic-ui',
+            'antd', 'chakra-ui', 'mantine', 'headless-ui', 'radix-ui', 'ariakit',
+            
+            // Databases
+            'mysql', 'postgresql', 'mongodb', 'redis', 'elasticsearch', 'cassandra',
+            'dynamodb', 'couchdb', 'neo4j', 'influxdb', 'timescaledb', 'cockroachdb',
+            'sqlite', 'oracle', 'sql-server', 'mariadb', 'percona', 'clickhouse',
+            
+            // Cloud & DevOps
+            'aws', 'azure', 'gcp', 'digitalocean', 'linode', 'vultr', 'heroku', 'netlify',
+            'vercel', 'firebase', 'supabase', 'planetscale', 'railway', 'render',
+            'docker', 'kubernetes', 'terraform', 'ansible', 'jenkins', 'gitlab-ci',
+            'github-actions', 'circleci', 'travis-ci', 'azure-devops', 'bamboo',
+            
+            // Tools & Technologies
+            'git', 'github', 'gitlab', 'bitbucket', 'vscode', 'vim', 'emacs', 'sublime',
+            'atom', 'webstorm', 'intellij', 'eclipse', 'netbeans', 'xcode', 'android-studio',
+            'webpack', 'rollup', 'parcel', 'vite', 'esbuild', 'swc', 'babel', 'typescript',
+            'eslint', 'prettier', 'husky', 'lint-staged', 'commitizen', 'conventional-commits',
+            
+            // Testing
+            'jest', 'mocha', 'jasmine', 'karma', 'cypress', 'playwright', 'puppeteer',
+            'selenium', 'webdriver', 'testing-library', 'enzyme', 'chai', 'sinon',
+            'nock', 'supertest', 'nightwatch', 'testcafe', 'capybara', 'rspec',
+            
+            // Design & UI/UX
+            'figma', 'sketch', 'adobe-xd', 'invision', 'framer', 'principle', 'origami',
+            'zeplin', 'abstract', 'avocode', 'handoff', 'design-systems', 'storybook',
+            'chromatic', 'percy', 'visual-regression', 'accessibility', 'wcag', 'aria',
+            
+            // Mobile Development
+            'react-native', 'flutter', 'ionic', 'xamarin', 'cordova', 'phonegap',
+            'expo', 'native-script', 'quasar', 'framework7', 'onsen-ui', 'tabris',
+            'progressive-web-apps', 'pwa', 'service-workers', 'web-app-manifest',
+            
+            // Data Science & AI
+            'pandas', 'numpy', 'scipy', 'scikit-learn', 'tensorflow', 'pytorch', 'keras',
+            'opencv', 'pillow', 'matplotlib', 'seaborn', 'plotly', 'bokeh', 'dash',
+            'streamlit', 'gradio', 'hugging-face', 'transformers', 'spacy', 'nltk',
+            'gensim', 'word2vec', 'bert', 'gpt', 'transformer', 'attention-mechanism',
+            
+            // Security
+            'owasp', 'jwt', 'oauth', 'openid-connect', 'saml', 'ldap', 'kerberos',
+            'ssl', 'tls', 'https', 'certificates', 'pki', 'encryption', 'hashing',
+            'bcrypt', 'argon2', 'scrypt', 'pbkdf2', 'aes', 'rsa', 'elliptic-curve',
+            'sql-injection', 'xss', 'csrf', 'clickjacking', 'session-hijacking',
+            
+            // Performance
+            'lighthouse', 'core-web-vitals', 'lcp', 'fid', 'cls', 'tti', 'tbt',
+            'bundle-size', 'tree-shaking', 'code-splitting', 'lazy-loading', 'preloading',
+            'caching', 'cdn', 'compression', 'minification', 'optimization', 'profiling',
+            
+            // Architecture
+            'microservices', 'monolith', 'serverless', 'lambda', 'functions', 'edge-computing',
+            'api-gateway', 'load-balancer', 'reverse-proxy', 'circuit-breaker', 'bulkhead',
+            'saga-pattern', 'event-sourcing', 'cqrs', 'domain-driven-design', 'clean-architecture',
+            'hexagonal-architecture', 'onion-architecture', 'layered-architecture', 'mvc', 'mvp', 'mvvm',
+            
+            // Methodologies
+            'agile', 'scrum', 'kanban', 'lean', 'devops', 'sre', 'gitops', 'infrastructure-as-code',
+            'continuous-integration', 'continuous-deployment', 'continuous-delivery', 'blue-green',
+            'canary-deployment', 'feature-flags', 'a-b-testing', 'chaos-engineering',
+            
+            // Career & Learning
+            'programming-career', 'software-engineering', 'web-development', 'mobile-development',
+            'data-science', 'machine-learning', 'ai-engineer', 'devops-engineer', 'sre',
+            'tech-interview', 'coding-interview', 'system-design', 'algorithms', 'data-structures',
+            'leetcode', 'hackerrank', 'leetcode', 'codewars', 'hackerearth', 'topcoder',
+            'open-source', 'github-portfolio', 'technical-writing', 'blogging', 'speaking',
+            'mentoring', 'code-review', 'pair-programming', 'mob-programming', 'tdd', 'bdd'
+        ];
+        
+        // Add programming terms to completions
+        programmingTerms.forEach(term => {
+            if (term.toLowerCase().includes(lowerQuery) && lowerQuery.length > 1) {
+                completions.push({
+                    text: `Learn ${term}`,
+                    icon: 'fas fa-code',
+                    isCompletion: true,
+                    searchQuery: term
+                });
+            }
+        });
+        
+        return completions.slice(0, 4); // Limit completions to 4
+    }
+
+    getDefaultSuggestions() {
+        const suggestions = [];
+        
+        // Add quick actions
+        suggestions.push({
+            text: 'New Tab',
+            icon: 'fas fa-plus',
+            isAction: true
+        });
+        
+        suggestions.push({
+            text: 'New Incognito Tab',
+            icon: 'fas fa-mask',
+            isAction: true
+        });
+        
+        suggestions.push({
+            text: 'Open Settings',
+            icon: 'fas fa-cog',
+            isAction: true
+        });
+        
+        // Add recent searches if available
+        if (this.settings.recentSearches && this.settings.recentSearches.length > 0) {
+            const recentSearches = this.settings.recentSearches.slice(0, 2);
+            recentSearches.forEach(search => {
+                suggestions.push({
+                    text: `Search "${search}"`,
+                    icon: 'fas fa-search',
+                    searchQuery: search,
+                    isSearch: true
+                });
+            });
+        }
+        
+        // Add recent history if available
+        if (this.settings.history && this.settings.history.length > 0) {
+            const recentHistory = this.settings.history.slice(0, 2);
+            recentHistory.forEach(item => {
+                let icon = 'fas fa-globe';
+                if (item.url.includes('gmail.com')) {
+                    icon = 'fas fa-envelope';
+                } else if (item.url.includes('youtube.com')) {
+                    icon = 'fab fa-youtube';
+                } else if (item.url.includes('github.com')) {
+                    icon = 'fab fa-github';
+                } else if (item.url.includes('facebook.com')) {
+                    icon = 'fab fa-facebook';
+                } else if (item.url.includes('twitter.com')) {
+                    icon = 'fab fa-twitter';
+                } else if (item.url.includes('instagram.com')) {
+                    icon = 'fab fa-instagram';
+                } else if (item.url.includes('reddit.com')) {
+                    icon = 'fab fa-reddit';
+                } else if (item.url.includes('stackoverflow.com')) {
+                    icon = 'fab fa-stack-overflow';
+                } else if (item.url.includes('wikipedia.org')) {
+                    icon = 'fab fa-wikipedia-w';
+                } else if (item.url.includes('amazon.com')) {
+                    icon = 'fab fa-amazon';
+                }
+                
+                suggestions.push({
+                    text: item.title,
+                    icon: icon,
+                    url: item.url,
+                    isHistory: true,
+                    timestamp: item.timestamp
+                });
+            });
+        }
+        
+        // Add existing tabs
+        this.tabs.forEach((tab, tabId) => {
+            if (suggestions.length >= 5) return; // Limit to 5 total
+            
+            const title = tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
+            const url = tab.url || 'about:blank';
+            
+            let icon = 'fas fa-globe';
+            if (tab.incognito) {
+                icon = 'fas fa-mask';
+            } else if (url.includes('gmail.com')) {
+                icon = 'fas fa-envelope';
+            } else if (url.includes('youtube.com')) {
+                icon = 'fab fa-youtube';
+            } else if (url.includes('github.com')) {
+                icon = 'fab fa-github';
+            } else if (url.includes('facebook.com')) {
+                icon = 'fab fa-facebook';
+            } else if (url.includes('twitter.com')) {
+                icon = 'fab fa-twitter';
+            } else if (url.includes('instagram.com')) {
+                icon = 'fab fa-instagram';
+            } else if (url.includes('reddit.com')) {
+                icon = 'fab fa-reddit';
+            } else if (url.includes('stackoverflow.com')) {
+                icon = 'fab fa-stack-overflow';
+            } else if (url.includes('wikipedia.org')) {
+                icon = 'fab fa-wikipedia-w';
+            } else if (url.includes('amazon.com')) {
+                icon = 'fab fa-amazon';
+            }
+            
+            suggestions.push({
+                text: title,
+                icon: icon,
+                tabId: tabId,
+                url: url,
+                isTab: true
+            });
+        });
+        
+        return suggestions.slice(0, 5); // Ensure exactly 5 suggestions
     }
 
     isValidUrl(string) {
