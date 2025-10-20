@@ -113,7 +113,13 @@
             <!-- Web Content Area -->
             <div id="content-area">
                 <div class="webview-container">
-                    <div id="loading-indicator" class="loading-indicator hidden"></div>
+                    <div id="loading-bar" class="loading-bar"></div>
+                    <div id="zoom-indicator" class="zoom-indicator hidden">
+                        <div class="zoom-content">
+                            <i class="fas fa-search-plus"></i>
+                            <span class="zoom-percentage">100%</span>
+                        </div>
+                    </div>
                     <webview id="webview" src="about:blank" allowpopups></webview>
                 </div>
             </div>
@@ -225,15 +231,6 @@
                             <label>
                                 <input type="checkbox" id="private-mode">
                                 Enhanced private mode
-                            </label>
-                        </div>
-                    </div>
-                    <div class="setting-group">
-                        <h4>Appearance</h4>
-                        <div class="setting-item">
-                            <label>
-                                <input type="checkbox" id="compact-mode">
-                                Compact mode
                             </label>
                         </div>
                     </div>
@@ -466,10 +463,11 @@
             <div class="spotlight-backdrop"></div>
             <div class="spotlight-content">
                 <div class="spotlight-input-container">
-                    <input type="text" id="spotlight-input" placeholder="" autocomplete="off">
-                    <div class="spotlight-suggestions" id="spotlight-suggestions">
-                        <!-- Suggestions will be populated here -->
-                    </div>
+                    <i class="fas fa-search spotlight-search-icon"></i>
+                    <input type="text" id="spotlight-input" placeholder="Search or Enter URL..." autocomplete="off">
+                </div>
+                <div class="spotlight-suggestions" id="spotlight-suggestions">
+                    <!-- Suggestions will be populated here -->
                 </div>
             </div>
         </div>
