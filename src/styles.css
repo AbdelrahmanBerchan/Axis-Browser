@@ -1,16 +1,48 @@
-/* CSS Variables for custom colors */
+/* CSS Variables for custom colors - Enhanced */
 :root {
     --background-color: #1a1a1a;
     --accent-color: #555;
     --text-color: #ffffff;
+    --popup-background: #111;
+    --popup-header: #2a2a2a;
+    --button-background: #2a2a2a;
+    --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    --warning-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+    --error-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    --glass-bg: rgba(255, 255, 255, 0.1);
+    --glass-border: rgba(255, 255, 255, 0.2);
+    --shadow-light: 0 4px 20px rgba(0, 0, 0, 0.1);
+    --shadow-medium: 0 8px 30px rgba(0, 0, 0, 0.2);
+    --shadow-heavy: 0 15px 50px rgba(0, 0, 0, 0.3);
 }
 
-/* Reset and base styles */
+/* Reset and base styles - Optimized */
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
     font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+/* Performance optimizations */
+* {
+    will-change: auto;
+}
+
+/* Optimize for animations */
+.animated {
+    will-change: transform, opacity;
+}
+
+.animated:hover {
+    will-change: transform, opacity;
 }
 
 /* Remove button highlights after click */
@@ -41,6 +73,12 @@ body {
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
     font-weight: 600;
+    /* Performance optimizations */
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    perspective: 1000px;
+    /* GPU acceleration */
+    will-change: auto;
 }
 
 /* Main app container - no rounded corners to avoid conflict with macOS */
@@ -112,48 +150,61 @@ body {
     display: none;
 }
 
-/* Loading Bar */
+/* Loading Bar - Completely Revamped */
 .loading-bar {
-    height: 2px;
-    width: 200px;
-    background: #111;
-    position: absolute;
-    top: 8px;
-    left: 50%;
-    transform: translateX(-50%);
-    overflow: hidden;
-    z-index: 1000;
-    border-radius: 1px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: transparent;
+    z-index: 999999;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    /* Enhanced visual effects */
+    backdrop-filter: blur(2px);
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
 }
 
 .loading-bar::before {
     content: '';
     position: absolute;
     top: 0;
-    left: -100%;
+    left: 0;
     width: 100%;
     height: 100%;
     background: linear-gradient(90deg, 
         transparent 0%, 
-        rgba(255, 255, 255, 0.3) 25%, 
-        rgba(255, 255, 255, 0.6) 50%, 
-        rgba(255, 255, 255, 0.3) 75%, 
+        rgba(255, 255, 255, 0.9) 50%, 
         transparent 100%);
-    animation: loading-shimmer 1.5s ease-in-out infinite;
+    transform: translateX(-100%);
+    animation: loading-sweep 1.5s ease-in-out infinite;
+    /* Enhanced visual effects */
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    border-radius: 2px;
+}
+
+.loading-bar.loading {
+    opacity: 1;
 }
 
 .loading-bar.loading::before {
-    animation: loading-progress 2s ease-out forwards;
+    animation: loading-sweep 1.5s ease-in-out infinite;
 }
 
-@keyframes loading-shimmer {
-    0% { left: -100%; }
-    100% { left: 100%; }
+.loading-bar:not(.loading)::before {
+    animation: none;
+    transform: translateX(-100%);
 }
 
-@keyframes loading-progress {
-    0% { left: -100%; }
-    100% { left: 100%; }
+@keyframes loading-sweep {
+    0% {
+        transform: translate3d(-100%, 0, 0);
+    }
+    100% {
+        transform: translate3d(100%, 0, 0);
+    }
 }
 
 /* Enhanced drag areas for easier window dragging */
@@ -288,6 +339,25 @@ body {
     max-width: 500px;
     border-radius: 0 0 0 24px;
     -webkit-app-region: drag;
+    z-index: 1000;
+}
+
+/* Left-edge hover area for sidebar slide-out */
+#sidebar-hover-area {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 20px;
+    height: 100vh;
+    z-index: 999;
+    background: transparent;
+    pointer-events: auto;
+    transition: all 0.2s ease;
+}
+
+#sidebar-hover-area:hover {
+    width: 30px;
+    background: rgba(255, 255, 255, 0.05);
 }
 
 /* Enhanced drag area for sidebar */
@@ -307,6 +377,28 @@ body {
     opacity: 0;
     transform: translateX(-20px);
     overflow: hidden;
+}
+
+/* Sidebar slide-out state */
+#sidebar.slide-out {
+    width: 300px !important;
+    opacity: 1 !important;
+    transform: translateX(0) !important;
+    overflow: visible !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    height: 100vh !important;
+    z-index: 1001 !important;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3) !important;
+    pointer-events: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    background: #111 !important;
+    border-radius: 0 0 0 24px !important;
+    min-width: 200px !important;
+    max-width: 500px !important;
 }
 
 /* Sidebar Resize Handle */
@@ -371,6 +463,7 @@ body.resizing .resize-handle {
 
 .nav-menu-container {
     position: relative;
+    z-index: 999999 !important;
 }
 
 .nav-menu-btn {
@@ -378,8 +471,8 @@ body.resizing .resize-handle {
 }
 
 .nav-menu {
-    position: absolute;
-    top: 100%;
+    position: fixed;
+    top: 0;
     left: 0;
     background: #111;
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -389,11 +482,12 @@ body.resizing .resize-handle {
     max-width: 200px;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(10px);
-    z-index: 1000;
+    z-index: 999999 !important;
     opacity: 0;
     transform: translateY(-10px) scale(0.95);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     pointer-events: none;
+    visibility: hidden;
 }
 
 .nav-menu:not(.hidden) {
@@ -853,24 +947,25 @@ body.resizing .resize-handle {
 }
 
 /* Add Tab Menu */
-.add-tab-menu {
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%) translateY(-10px) scale(0.95);
-    background: rgba(42, 42, 42, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-    padding: 8px;
-    min-width: 160px;
-    z-index: 1000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    animation: addTabMenuSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
+  .add-tab-menu {
+     position: absolute;
+     bottom: 100%;
+     left: 50%;
+     transform: translateX(-50%) translateY(-10px) scale(0.95);
+     background: #111;
+     border: 1px solid rgba(255, 255, 255, 0.1);
+     border-radius: 12px;
+     backdrop-filter: blur(10px);
+     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+     padding: 8px 0;
+     min-width: 180px;
+     max-width: 200px;
+     z-index: 1000;
+     opacity: 0;
+     visibility: hidden;
+     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+     animation: addTabMenuSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
 
 .add-tab-menu:not(.hidden) {
     opacity: 1;
@@ -882,25 +977,29 @@ body.resizing .resize-handle {
     animation: addTabMenuSlideOut 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.add-tab-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    padding: 12px 16px;
-    background: transparent;
-    border: none;
-    color: #fff;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 14px;
-    font-weight: 500;
-    text-align: left;
-    transform: translateX(-5px);
-    opacity: 0;
-    animation: addTabMenuItemSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
+  .add-tab-menu-item {
+     display: flex;
+     align-items: center;
+     gap: 8px;
+     padding: 8px 12px;
+     color: #ddd;
+     cursor: pointer;
+     font-size: 13px;
+     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+     position: relative;
+     border-radius: 8px;
+     margin: 2px 6px;
+     background: transparent;
+     border: none;
+     width: calc(100% - 12px);
+     text-align: left;
+     white-space: nowrap;
+     overflow: hidden;
+     text-overflow: ellipsis;
+     transform: translateX(-5px);
+     opacity: 0;
+     animation: addTabMenuItemSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
 
 .add-tab-menu-item:nth-child(1) {
     animation-delay: 0.1s;
@@ -911,20 +1010,28 @@ body.resizing .resize-handle {
 }
 
 .add-tab-menu-item:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(58, 58, 58, 0.8);
+    color: #fff;
     transform: translateX(0) scale(1.02);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
-.add-tab-menu-item i {
-    font-size: 16px;
-    width: 20px;
-    text-align: center;
-}
-
-.add-tab-menu-item span {
-    flex: 1;
-}
+  .add-tab-menu-item i {
+     width: 14px;
+     font-size: 11px;
+     flex-shrink: 0;
+     display: flex;
+     align-items: center;
+     justify-content: center;
+  }
+  
+  .add-tab-menu-item span {
+     flex: 1;
+     min-width: 0;
+     overflow: hidden;
+     text-overflow: ellipsis;
+     white-space: nowrap;
+  }
 
 /* Add Tab Menu Animations */
 @keyframes addTabMenuSlideIn {
@@ -1002,6 +1109,15 @@ body.resizing .resize-handle {
     backdrop-filter: blur(8px);
     min-width: 0;
     flex-shrink: 1;
+    isolation: isolate;
+    z-index: 1;
+    /* Performance optimizations */
+    transform: translateZ(0);
+    will-change: transform;
+    backface-visibility: hidden;
+    /* GPU acceleration */
+    -webkit-transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
 }
 
 .webview-container::after {
@@ -1031,25 +1147,49 @@ body.resizing .resize-handle {
     outline: none;
     -webkit-app-region: no-drag;
     box-shadow: none;
+    /* Performance optimizations */
+    transform: translateZ(0);
+    will-change: transform;
+    backface-visibility: hidden;
+    /* GPU acceleration */
+    -webkit-transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
+    /* Hardware acceleration */
+    -webkit-perspective: 1000px;
+    perspective: 1000px;
 }
 
-/* Professional Modal Backdrop */
+/* Professional Modal Backdrop - Enhanced */
 .modal-backdrop {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(10px);
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.5) 100%);
+    backdrop-filter: blur(15px);
     z-index: 1000;
     opacity: 0;
-    transition: opacity 0.3s ease, backdrop-filter 0.3s ease;
+    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    pointer-events: none;
 }
 
 .modal-backdrop:not(.hidden) {
     opacity: 1;
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(20px);
+    pointer-events: auto;
+    animation: backdropFadeIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@keyframes backdropFadeIn {
+    0% {
+        opacity: 0;
+        backdrop-filter: blur(0px);
+    }
+    100% {
+        opacity: 1;
+        backdrop-filter: blur(20px);
+    }
 }
 
 /* Settings Panel */
@@ -1057,11 +1197,11 @@ body.resizing .resize-handle {
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%) scale(0.9) rotateY(10deg) translateY(30px);
-    width: 700px;
+    transform: translate(-50%, -50%) scale(0.85) rotateY(-10deg) translateX(15px);
+    width: 600px;
     max-width: 90vw;
-    max-height: 80vh;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.95) 0%, rgba(20, 20, 20, 0.98) 100%);
+    max-height: 85vh;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 24px;
     z-index: 1001;
@@ -1074,9 +1214,217 @@ body.resizing .resize-handle {
         0 32px 64px rgba(0, 0, 0, 0.6),
         0 0 0 1px rgba(255, 255, 255, 0.05),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(20px);
-    overflow: visible;
+    backdrop-filter: blur(25px);
+    overflow: hidden;
 }
+
+/* Clean Color Picker */
+.color-picker-container {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#main-color-picker {
+    width: 80px;
+    height: 80px;
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    cursor: pointer;
+    background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+    padding: 0;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    box-shadow: 
+        0 8px 24px rgba(74, 144, 226, 0.3),
+        0 4px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    position: relative;
+}
+
+#main-color-picker::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.3) 0%, transparent 50%);
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+#main-color-picker:hover {
+    transform: scale(1.05) translateY(-2px);
+    box-shadow: 
+        0 12px 32px rgba(74, 144, 226, 0.4),
+        0 8px 16px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+#main-color-picker:active {
+    transform: scale(0.98) translateY(0px);
+    box-shadow: 
+        0 4px 16px rgba(74, 144, 226, 0.3),
+        0 2px 8px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+#main-color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    overflow: hidden;
+}
+
+#main-color-picker::-webkit-color-swatch {
+    border: none;
+    border-radius: 50%;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+}
+
+/* Firefox support */
+#main-color-picker::-moz-color-swatch {
+    border: none;
+    border-radius: 50%;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+}
+
+.color-picker-panel::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image: 
+        radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.02) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.02) 0%, transparent 50%);
+    pointer-events: none;
+}
+
+.color-wheel-container {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
+}
+
+.color-wheel {
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    background: conic-gradient(
+        from 0deg,
+        #ff0000 0deg,
+        #ffff00 60deg,
+        #00ff00 120deg,
+        #00ffff 180deg,
+        #0000ff 240deg,
+        #ff00ff 300deg,
+        #ff0000 360deg
+    );
+    position: relative;
+    cursor: pointer;
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    margin: 0 auto;
+}
+
+.color-wheel-handle {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    background: #ffffff;
+    border: 3px solid #333;
+    border-radius: 50%;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    cursor: grab;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+}
+
+.color-wheel-handle:hover {
+    transform: translateX(-50%) scale(1.1);
+}
+
+.color-wheel-handle:active {
+    cursor: grabbing;
+    transform: translateX(-50%) scale(1.2);
+}
+
+.brightness-slider-container {
+    margin-bottom: 20px;
+}
+
+.brightness-slider {
+    width: 100%;
+    height: 20px;
+    background: linear-gradient(90deg, #000 0%, #fff 100%);
+    border-radius: 10px;
+    position: relative;
+    cursor: pointer;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.brightness-handle {
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    background: #ffffff;
+    border: 3px solid #333;
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    cursor: grab;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+}
+
+.brightness-handle:hover {
+    transform: translate(-50%, -50%) scale(1.1);
+}
+
+.brightness-handle:active {
+    cursor: grabbing;
+    transform: translate(-50%, -50%) scale(1.2);
+}
+
+.color-preview-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.current-color {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #4a90e2;
+    box-shadow: 0 0 20px rgba(74, 144, 226, 0.4);
+    border: 3px solid rgba(255, 255, 255, 0.2);
+}
+
+.color-hex {
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
 
 .settings-panel:not(.hidden) {
     transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateY(0px);
@@ -1089,44 +1437,76 @@ body.resizing .resize-handle {
         inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
+/* Enhanced entrance animation */
+.settings-panel.settings-entering {
+    animation: settingsPanelSlideIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Enhanced exit animation */
+.settings-panel.settings-closing {
+    animation: settingsPanelSlideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes settingsPanelSlideIn {
+    0% {
+        transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateY(20px);
+        opacity: 0;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.02) rotateY(-2deg) translateY(2px);
+        opacity: 0.8;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateY(0px);
+        opacity: 1;
+    }
+}
+
+@keyframes settingsPanelSlideOut {
+    0% {
+        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateY(0px);
+        opacity: 1;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(0.8) rotateY(15deg) translateY(-20px);
+        opacity: 0;
+    }
+}
+
 .settings-panel.hidden {
-    transform: translate(-50%, -50%) scale(0.9) rotateY(10deg) translateY(30px);
+    transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
     opacity: 0;
     visibility: hidden;
     backdrop-filter: blur(0px);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
 }
 
 .settings-header {
-    height: 60px;
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 0 24px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+    align-items: center;
+    padding: 20px 24px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
+    background: rgba(42, 42, 42, 0.3);
+    flex-shrink: 0;
 }
 
-/* Settings Tabs */
+.settings-header h3 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #fff;
+    margin: 0;
+    flex: 1;
+}
+
+/* Settings Tabs - Enhanced to match Downloads */
 .settings-tabs {
     display: flex;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    background: linear-gradient(135deg, rgba(40, 40, 40, 0.8) 0%, rgba(30, 30, 30, 0.9) 100%);
-    border-radius: 24px 24px 0 0;
-    backdrop-filter: blur(10px);
-    position: relative;
-    overflow: hidden;
-}
-
-.settings-tabs::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    background: rgba(20, 20, 20, 0.8);
+    flex-shrink: 0;
+    padding: 0;
+    margin: 0;
 }
 
 .settings-tab {
@@ -1136,105 +1516,59 @@ body.resizing .resize-handle {
     border: none;
     color: rgba(255, 255, 255, 0.6);
     cursor: pointer;
-    transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
-    font-size: 15px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 14px;
     font-weight: 500;
-    border-radius: 0;
     position: relative;
-    overflow: hidden;
-    z-index: 1;
+    border-bottom: 2px solid transparent;
 }
 
-.settings-tab::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
-    opacity: 0;
-    transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
-    z-index: -1;
-}
-
-.settings-tab::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 50%;
-    width: 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
-    transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
-    transform: translateX(-50%);
-}
-
-.settings-tab:first-child {
-    border-radius: 24px 0 0 0;
-}
-
-.settings-tab:last-child {
-    border-radius: 0 24px 0 0;
+.settings-tab:hover {
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .settings-tab.active {
     color: #fff;
-    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.08);
+    border-bottom-color: rgba(255, 255, 255, 0.3);
 }
 
-.settings-tab.active::before {
-    opacity: 1;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.05) 100%);
-}
-
-.settings-tab.active::after {
-    width: 60%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.9), transparent);
-}
-
-.settings-tab:hover:not(.active) {
-    color: rgba(255, 255, 255, 0.8);
-    transform: translateY(-1px);
-}
-
-.settings-tab:hover:not(.active)::before {
-    opacity: 0.5;
-}
-
-/* Settings Tab Content */
+/* Settings Tab Content - Enhanced to match Downloads */
 .settings-tab-content {
     display: none;
     flex: 1;
     overflow-y: auto;
-    padding: 32px;
+    padding: 16px 20px;
     opacity: 0;
-    transform: translateY(20px) scale(0.98);
-    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(135deg, rgba(25, 25, 25, 0.3) 0%, rgba(20, 20, 20, 0.5) 100%);
-    max-height: calc(80vh - 120px);
+    transform: translateY(10px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    background: transparent;
 }
 
 .settings-tab-content.active {
     display: block;
     opacity: 1;
-    transform: translateY(0) scale(1);
-    position: relative;
+    transform: translateY(0);
 }
 
-.settings-tab-content.entering {
-    opacity: 0;
-    transform: translateY(20px) scale(0.98);
+.settings-tab-content::-webkit-scrollbar {
+    width: 6px;
 }
 
-.settings-tab-content.leaving {
-    opacity: 0;
-    transform: translateY(-20px) scale(1.02);
+.settings-tab-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.settings-tab-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+
+.settings-tab-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.4);
 }
 
 /* Sidebar footer */
@@ -1243,10 +1577,31 @@ body.resizing .resize-handle {
 
 .quick-actions {
     display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 8px;
+    position: relative;
+}
+
+.corner-button {
+    position: absolute;
+    top: 6px;
+}
+
+.corner-button.top-left {
+    left: 8px;
+}
+
+.corner-button.top-right {
+    right: 8px;
+}
+
+.center-buttons {
+    display: flex;
     justify-content: center;
     align-items: center;
     gap: 8px;
-    padding: 6px 8px;
+    flex: 1;
 }
 
 .settings-header h3 {
@@ -1283,59 +1638,82 @@ body.resizing .resize-handle {
 }
 
 .settings-content {
-    padding: 0;
-    overflow-y: auto;
     flex: 1;
-    position: relative;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.settings-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.settings-content::-webkit-scrollbar-track {
     background: transparent;
 }
 
+.settings-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+
+.settings-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.4);
+}
+
 .setting-group {
-    margin-bottom: 32px;
-    padding: 24px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%);
+    margin-bottom: 16px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.8) 0%, rgba(20, 20, 20, 0.9) 100%);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 16px;
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(15px);
     position: relative;
     overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .setting-group::before {
     content: '';
     position: absolute;
     top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transition: left 0.5s ease;
+}
+
+.setting-group:hover {
+    background: linear-gradient(135deg, rgba(35, 35, 35, 0.9) 0%, rgba(25, 25, 25, 0.95) 100%);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px) scale(1.01);
+    box-shadow: 
+        0 8px 25px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.setting-group:hover::before {
+    left: 100%;
 }
 
 .setting-group h4 {
     font-size: 16px;
     font-weight: 600;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
     color: #fff;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    position: relative;
-    padding-left: 12px;
-}
-
-.setting-group h4::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 3px;
-    height: 16px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.2) 100%);
-    border-radius: 2px;
+    margin: 0 0 16px 0;
 }
 
 .setting-item {
-    margin-bottom: 20px;
+    margin-bottom: 12px;
     position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .setting-item:last-child {
@@ -1343,35 +1721,34 @@ body.resizing .resize-handle {
 }
 
 .setting-item label {
-    display: block;
     font-size: 14px;
     color: rgba(255, 255, 255, 0.8);
-    margin-bottom: 8px;
     font-weight: 500;
+    flex: 1;
+    margin: 0;
 }
 
 .setting-item input[type="text"],
 .setting-item input[type="color"],
 .setting-item select {
-    width: 100%;
-    height: 44px;
-    background: rgba(20, 20, 20, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
-    padding: 0 16px;
+    height: 36px;
+    background: rgba(10, 10, 10, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 0 12px;
     color: #fff;
     font-size: 14px;
     outline: none;
-    transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+    transition: all 0.2s ease;
     backdrop-filter: blur(10px);
+    min-width: 120px;
 }
 
 .setting-item input:focus,
 .setting-item select:focus {
     border-color: rgba(255, 255, 255, 0.3);
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
-    background: rgba(25, 25, 25, 0.9);
-    transform: translateY(-1px);
+    background: rgba(15, 15, 15, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
 }
 
 .setting-item input[type="checkbox"] {
@@ -1551,14 +1928,45 @@ body.light-theme .shortcut-desc {
 .bookmark-item {
     display: flex;
     align-items: center;
-    padding: 12px;
-    border-bottom: 1px solid #333;
+    gap: 16px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, rgba(42, 42, 42, 0.7) 0%, rgba(35, 35, 35, 0.8) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(15px);
+    position: relative;
+    margin-bottom: 12px;
     cursor: pointer;
-    transition: background-color 0.2s ease;
+    overflow: hidden;
+}
+
+.bookmark-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transition: left 0.5s ease;
 }
 
 .bookmark-item:hover {
-    background: #333;
+    background: linear-gradient(135deg, rgba(50, 50, 50, 0.8) 0%, rgba(45, 45, 45, 0.9) 100%);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px) scale(1.01);
+    box-shadow: 
+        0 8px 25px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.bookmark-item:hover::before {
+    left: 100%;
+}
+
+.bookmark-item:active {
+    transform: translateY(-1px) scale(0.99);
 }
 
 .bookmark-item:last-child {
@@ -1660,41 +2068,170 @@ body.light-theme .shortcut-desc {
     transform: translateY(0);
 }
 
-/* Bookmarks Panel */
+/* Bookmarks Panel - Enhanced to match Downloads */
 .bookmarks-panel {
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%) scale(0.8) rotateY(15deg) translateX(-20px);
-    width: 400px;
+    transform: translate(-50%, -50%) scale(0.85) rotateY(-10deg) translateX(15px);
+    width: 600px;
     max-width: 90vw;
-    max-height: 80vh;
-    background: rgba(42, 42, 42, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 28px;
+    max-height: 85vh;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 24px;
     z-index: 1001;
     opacity: 0;
     visibility: hidden;
-    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
     display: flex;
     flex-direction: column;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+    box-shadow: 
+        0 32px 64px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(255, 255, 255, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(25px);
+    overflow: hidden;
 }
 
 .bookmarks-panel:not(.hidden) {
     transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
     opacity: 1;
     visibility: visible;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(25px);
+    box-shadow: 
+        0 40px 80px rgba(0, 0, 0, 0.7),
+        0 0 0 1px rgba(255, 255, 255, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Enhanced entrance animation */
+.bookmarks-panel.bookmarks-entering {
+    animation: bookmarksPanelSlideIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Enhanced exit animation */
+.bookmarks-panel.bookmarks-closing {
+    animation: bookmarksPanelSlideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes bookmarksPanelSlideIn {
+    0% {
+        transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
+        opacity: 0;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.02) rotateY(-2deg) translateX(2px);
+        opacity: 0.8;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
+        opacity: 1;
+    }
+}
+
+@keyframes bookmarksPanelSlideOut {
+    0% {
+        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
+        opacity: 1;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(0.8) rotateY(15deg) translateX(-20px);
+        opacity: 0;
+    }
 }
 
 .bookmarks-panel.hidden {
-    transform: translate(-50%, -50%) scale(0.8) rotateY(15deg) translateX(-20px);
+    transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
     opacity: 0;
     visibility: hidden;
     backdrop-filter: blur(0px);
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+}
+
+/* Bookmarks Search Bar - Matching Downloads */
+.bookmarks-search {
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(42, 42, 42, 0.5);
+    flex-shrink: 0;
+}
+
+.bookmarks-search input {
+    width: 100%;
+    height: 36px;
+    background: rgba(17, 17, 17, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 18px;
+    padding: 0 16px;
+    color: #fff;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(10px);
+}
+
+.bookmarks-search input:focus {
+    border-color: rgba(255, 255, 255, 0.3);
+    background: rgba(17, 17, 17, 0.9);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+}
+
+.bookmarks-search input::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Bookmarks Header - Matching Downloads */
+.bookmarks-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(42, 42, 42, 0.3);
+    flex-shrink: 0;
+}
+
+.bookmarks-header h3 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #fff;
+    margin: 0;
+    flex: 1;
+}
+
+.bookmarks-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Bookmarks Content - Matching Downloads */
+.bookmarks-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.bookmarks-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.bookmarks-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.bookmarks-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+
+.bookmarks-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.4);
 }
 
 /* Shortcuts Panel */
@@ -1767,33 +2304,77 @@ body.light-theme .shortcut-desc {
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
 }
 
-/* Downloads Panel */
+/* Downloads Panel - Enhanced */
 .downloads-panel {
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
-    width: 500px;
+    transform: translate(-50%, -50%) scale(0.85) rotateY(-10deg) translateX(15px);
+    width: 600px;
     max-width: 90vw;
-    max-height: 80vh;
-    background: rgba(42, 42, 42, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 28px;
+    max-height: 85vh;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 24px;
     z-index: 1001;
     opacity: 0;
     visibility: hidden;
-    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
     display: flex;
     flex-direction: column;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+    box-shadow: 
+        0 32px 64px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(255, 255, 255, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(25px);
+    overflow: hidden;
 }
 
 .downloads-panel:not(.hidden) {
     transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
     opacity: 1;
     visibility: visible;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(25px);
+    box-shadow: 
+        0 40px 80px rgba(0, 0, 0, 0.7),
+        0 0 0 1px rgba(255, 255, 255, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Enhanced entrance animation */
+.downloads-panel.downloads-entering {
+    animation: downloadsPanelSlideIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Enhanced exit animation */
+.downloads-panel.downloads-closing {
+    animation: downloadsPanelSlideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes downloadsPanelSlideIn {
+    0% {
+        transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
+        opacity: 0;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.02) rotateY(-2deg) translateX(2px);
+        opacity: 0.8;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
+        opacity: 1;
+    }
+}
+
+@keyframes downloadsPanelSlideOut {
+    0% {
+        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
+        opacity: 1;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(0.8) rotateY(15deg) translateX(-20px);
+        opacity: 0;
+    }
 }
 
 .downloads-panel.hidden {
@@ -2089,17 +2670,30 @@ body.light-theme .shortcut-desc {
     color: #ff4444;
 }
 
-/* Downloads Styles */
+/* Downloads Styles - Enhanced */
 .downloads-header {
-    height: 60px;
+    height: 70px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
+    padding: 0 24px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(42, 42, 42, 0.8);
-    border-radius: 28px 28px 0 0;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%);
+    border-radius: 24px 24px 0 0;
     flex-shrink: 0;
+    backdrop-filter: blur(15px);
+    position: relative;
+    overflow: hidden;
+}
+
+.downloads-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
 }
 
 .downloads-header h3 {
@@ -2114,6 +2708,37 @@ body.light-theme .shortcut-desc {
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.refresh-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.8);
+    padding: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+}
+
+.refresh-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 1);
+    transform: scale(1.05);
+}
+
+.refresh-btn:active {
+    transform: scale(0.95);
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .downloads-header .clear-btn {
@@ -2157,37 +2782,79 @@ body.light-theme .shortcut-desc {
 }
 
 .downloads-content {
-    padding: 0;
+    padding: 20px 24px;
     overflow-y: auto;
     flex: 1;
-    background: rgba(26, 26, 26, 0.3);
+    background: linear-gradient(135deg, rgba(20, 20, 20, 0.4) 0%, rgba(15, 15, 15, 0.6) 100%);
+    position: relative;
+}
+
+.downloads-content::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
 }
 
 .downloads-list {
-    padding: 16px 20px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
+    animation: downloadsListSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Download items styling */
+@keyframes downloadsListSlideIn {
+    0% {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Download items styling - Enhanced */
 .download-item {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background: rgba(42, 42, 42, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    transition: all 0.2s ease;
-    backdrop-filter: blur(10px);
+    gap: 16px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, rgba(42, 42, 42, 0.7) 0%, rgba(35, 35, 35, 0.8) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(15px);
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.download-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transition: left 0.5s ease;
 }
 
 .download-item:hover {
-    background: rgba(42, 42, 42, 0.8);
-    border-color: rgba(255, 255, 255, 0.1);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    background: linear-gradient(135deg, rgba(50, 50, 50, 0.8) 0%, rgba(45, 45, 45, 0.9) 100%);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px) scale(1.01);
+    box-shadow: 
+        0 8px 25px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.download-item:hover::before {
+    left: 100%;
 }
 
 .download-icon {
@@ -2201,26 +2868,29 @@ body.light-theme .shortcut-desc {
 }
 
 .download-name {
-    font-weight: 500;
+    font-weight: 600;
     color: #fff;
-    font-size: 14px;
-    margin-bottom: 2px;
+    font-size: 15px;
+    margin-bottom: 4px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .download-progress {
-    font-size: 12px;
-    color: #888;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 500;
 }
 
 .download-url {
-    font-size: 11px;
-    color: #666;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    margin-top: 2px;
 }
 
 .download-actions {
@@ -2229,22 +2899,28 @@ body.light-theme .shortcut-desc {
 }
 
 .download-btn {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     border: none;
-    background: rgba(255, 255, 255, 0.1);
-    color: #ccc;
-    border-radius: 6px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+    color: rgba(255, 255, 255, 0.7);
+    border-radius: 8px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    font-size: 14px;
 }
 
 .download-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.15) 100%);
     color: #fff;
+    transform: translateY(-1px) scale(1.05);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    border-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Security Panel */
@@ -2710,15 +3386,15 @@ body.light-theme .shortcut-desc {
 
 @keyframes slideInFromLeft {
     0% {
-        transform: translateX(-20px) scale(0.95);
+        transform: translate3d(-20px, 0, 0) scale(0.95);
         opacity: 0;
     }
     60% {
-        transform: translateX(-5px) scale(0.98);
+        transform: translate3d(-5px, 0, 0) scale(0.98);
         opacity: 0.8;
     }
     100% {
-        transform: translateX(0) scale(1);
+        transform: translate3d(0, 0, 0) scale(1);
         opacity: 1;
     }
 }
@@ -3328,6 +4004,361 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.4);
+}
+
+/* ===== REFINED MICRO-INTERACTIONS ===== */
+
+/* Refined Button Press Animations */
+.nav-btn, .tab-close, .url-icon, .add-tab-btn, .settings-btn, .bookmark-btn, .security-btn, .nav-menu-btn, .download-btn, .bookmark-delete, .close-settings, .refresh-btn, .clear-btn {
+    transition: all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    position: relative;
+    overflow: hidden;
+}
+
+.nav-btn:active, .tab-close:active, .url-icon:active, .add-tab-btn:active, .settings-btn:active, .bookmark-btn:active, .security-btn:active, .nav-menu-btn:active, .download-btn:active, .bookmark-delete:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
+    transform: scale(0.98) translateY(1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+/* Premium Ripple Effect for Buttons */
+.nav-btn::before, .tab-close::before, .url-icon::before, .add-tab-btn::before, .settings-btn::before, .bookmark-btn::before, .security-btn::before, .nav-menu-btn::before, .download-btn::before, .bookmark-delete::before, .close-settings::before, .refresh-btn::before, .clear-btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.1) 50%, transparent 70%);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    pointer-events: none;
+    opacity: 0;
+    z-index: 1;
+}
+
+.nav-btn:active::before, .tab-close:active::before, .url-icon:active::before, .add-tab-btn:active::before, .settings-btn:active::before, .bookmark-btn:active::before, .security-btn:active::before, .nav-menu-btn:active::before, .download-btn:active::before, .bookmark-delete:active::before, .close-settings:active::before, .refresh-btn:active::before, .clear-btn:active::before {
+    width: 80px;
+    height: 80px;
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1);
+}
+
+/* Premium Popup Menu Item Animations */
+.nav-menu-item::before, .add-tab-menu-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, transparent 100%);
+    border-radius: 8px;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    pointer-events: none;
+    opacity: 0;
+    z-index: 1;
+}
+
+.nav-menu-item:active::before, .add-tab-menu-item:active::before {
+    transform: scaleX(1);
+    opacity: 1;
+}
+
+/* Premium Click Animation */
+.nav-btn:active, .tab-close:active, .url-icon:active, .add-tab-btn:active, .settings-btn:active, .bookmark-btn:active, .security-btn:active, .nav-menu-btn:active, .download-btn:active, .bookmark-delete:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
+    transform: scale(0.96) translateY(1px);
+    box-shadow: 
+        0 2px 8px rgba(0, 0, 0, 0.3),
+        inset 0 1px 2px rgba(255, 255, 255, 0.1);
+    transition: all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Premium Popup Menu Click Animation */
+.nav-menu-item:active, .add-tab-menu-item:active {
+    transform: scale(0.98) translateY(0.5px);
+    box-shadow: 
+        0 1px 4px rgba(0, 0, 0, 0.2),
+        inset 0 1px 1px rgba(255, 255, 255, 0.1);
+    transition: all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Refined Hover Effects */
+.nav-btn:hover, .tab-close:hover, .url-icon:hover, .add-tab-btn:hover, .settings-btn:hover, .bookmark-btn:hover, .security-btn:hover, .nav-menu-btn:hover, .download-btn:hover, .bookmark-delete:hover, .close-settings:hover, .refresh-btn:hover, .clear-btn:hover {
+    transform: translateY(-1px) scale(1.02);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Premium Popup Menu Hover Effects */
+.nav-menu-item:hover, .add-tab-menu-item:hover {
+    transform: translateY(-0.5px) scale(1.01);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Subtle Icon Rotation on Hover */
+.nav-btn:hover i, .url-icon:hover i, .add-tab-btn:hover i, .settings-btn:hover i, .bookmark-btn:hover i, .security-btn:hover i, .nav-menu-btn:hover i, .download-btn:hover i, .bookmark-delete:hover i, .close-settings:hover i, .refresh-btn:hover i, .clear-btn:hover i, .nav-menu-item:hover i, .add-tab-menu-item:hover i {
+    transform: rotate(2deg);
+    transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Special rotation for + button */
+.add-tab-btn:hover i {
+    transform: rotate(45deg);
+    transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Refined Tab Interactions */
+.tab {
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    position: relative;
+    overflow: hidden;
+}
+
+.tab:hover {
+    transform: translateY(-1px) scale(1.01);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+}
+
+.tab.active {
+    transform: translateY(-1px) scale(1.02);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.tab-close {
+    transition: all 0.15s ease;
+}
+
+.tab-close:hover {
+    background: rgba(255, 59, 48, 0.15);
+    transform: scale(1.05);
+}
+
+/* Refined URL Bar Enhancements */
+.url-bar {
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.url-bar:focus-within {
+    transform: scale(1.01);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+}
+
+.url-icon {
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.url-icon:hover {
+    transform: scale(1.05) rotate(5deg);
+    color: #4CAF50;
+}
+
+/* Loading States */
+.loading-spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Pulse Animation for Loading */
+.pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Shimmer Effect */
+.shimmer {
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+/* Toast Notifications */
+.toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.95) 0%, rgba(20, 20, 20, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 16px 20px;
+    color: #fff;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(20px);
+    transform: translateX(100%);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 10000;
+}
+
+.toast.show {
+    transform: translateX(0);
+}
+
+.toast.success {
+    border-left: 4px solid #4CAF50;
+}
+
+.toast.error {
+    border-left: 4px solid #f44336;
+}
+
+.toast.info {
+    border-left: 4px solid #2196F3;
+}
+
+/* Success Checkmark Animation */
+.success-checkmark {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #4CAF50;
+    position: relative;
+    animation: checkmark 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.success-checkmark::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+@keyframes checkmark {
+    0% { transform: scale(0); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
+/* Error Shake Animation */
+.shake {
+    animation: shake 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-2px); }
+    20%, 40%, 60%, 80% { transform: translateX(2px); }
+}
+
+/* Smooth Focus Rings */
+input:focus, select:focus, button:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+    transition: box-shadow 0.2s ease;
+}
+
+/* Refined Card Hover Effects */
+.download-item:hover, .bookmark-item:hover, .setting-group:hover {
+    transform: translateY(-1px) scale(1.005);
+    box-shadow: 
+        0 4px 12px rgba(0, 0, 0, 0.15),
+        0 0 0 1px rgba(255, 255, 255, 0.05);
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Refined Transitions for Interactive Elements */
+button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .settings-btn, .bookmark-btn, .security-btn, .nav-menu-btn, .download-btn, .bookmark-delete, .close-settings, .refresh-btn, .clear-btn, .nav-menu-item, .add-tab-menu-item {
+    transition: all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Smooth Popup Closing Animations */
+.downloads-panel.closing, .bookmarks-panel.closing, .settings-panel.closing {
+    animation: popupClose 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+    pointer-events: none;
+}
+
+.downloads-panel.closing .downloads-content, 
+.bookmarks-panel.closing .bookmarks-content, 
+.settings-panel.closing .settings-content {
+    animation: contentFadeOut 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.downloads-panel.closing .downloads-header, 
+.bookmarks-panel.closing .bookmarks-header, 
+.settings-panel.closing .settings-header {
+    animation: headerSlideUp 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.downloads-panel.closing .downloads-list,
+.bookmarks-panel.closing .bookmarks-list,
+.settings-panel.closing .settings-tabs {
+    animation: listFadeOut 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+@keyframes popupClose {
+    0% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+        filter: blur(0px);
+    }
+    50% {
+        opacity: 0.8;
+        transform: scale(0.98) translateY(10px);
+        filter: blur(0.5px);
+    }
+    100% {
+        opacity: 0;
+        transform: scale(0.95) translateY(20px);
+        filter: blur(1px);
+    }
+}
+
+@keyframes contentFadeOut {
+    0% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(15px) scale(0.98);
+    }
+}
+
+@keyframes headerSlideUp {
+    0% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-15px) scale(0.98);
+    }
+}
+
+@keyframes listFadeOut {
+    0% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+}
+
+/* Disable transitions for performance on large elements */
+.webview-container, .sidebar, .content-area {
+    transition: none;
 }
 
 /* Enhanced focus states */
