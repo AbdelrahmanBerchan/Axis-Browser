@@ -38,12 +38,6 @@
                             <button id="nav-menu-btn" class="nav-btn nav-menu-btn">
                                 <i class="fas fa-ellipsis-h"></i>
                             </button>
-                            <div id="nav-menu" class="nav-menu hidden">
-                                <button id="refresh-btn" class="nav-menu-item">
-                                    <i class="fas fa-redo"></i>
-                                    <span>Reload</span>
-                                </button>
-                            </div>
                         </div>
                     </div>
                     <div class="url-bar-container vertical">
@@ -82,30 +76,41 @@
 
             <div class="sidebar-section sidebar-footer">
                 <div class="quick-actions">
-                    <div class="add-tab-container">
-                        <button id="add-tab-btn" class="nav-btn" title="Add Tab">
-                            <i class="fas fa-plus"></i>
+                    <!-- Top-left corner: Settings button -->
+                    <div class="corner-button top-left">
+                        <button id="settings-btn-footer" class="nav-btn" title="Settings">
+                            <i class="fas fa-cog"></i>
                         </button>
-                        <div id="add-tab-menu" class="add-tab-menu hidden">
-                            <button id="new-tab-btn" class="add-tab-menu-item">
+                    </div>
+                    
+                    <!-- Center: Downloads and Bookmarks buttons -->
+                    <div class="center-buttons">
+                        <button id="downloads-btn-footer" class="nav-btn" title="Downloads">
+                            <i class="fas fa-download"></i>
+                        </button>
+                        <button id="bookmarks-btn-footer" class="nav-btn" title="Bookmarks">
+                            <i class="fas fa-bookmark"></i>
+                        </button>
+                    </div>
+                    
+                    <!-- Top-right corner: + button -->
+                    <div class="corner-button top-right">
+                        <div class="add-tab-container">
+                            <button id="add-tab-btn" class="nav-btn" title="Add Tab">
                                 <i class="fas fa-plus"></i>
-                                <span>New Tab</span>
                             </button>
-                            <button id="new-incognito-btn" class="add-tab-menu-item">
-                                <i class="fas fa-mask"></i>
-                                <span>New Incognito Tab</span>
-                            </button>
+                            <div id="add-tab-menu" class="add-tab-menu hidden">
+                                <button id="new-tab-btn" class="add-tab-menu-item">
+                                    <i class="fas fa-plus"></i>
+                                    <span>New Tab</span>
+                                </button>
+                                <button id="new-incognito-btn" class="add-tab-menu-item">
+                                    <i class="fas fa-mask"></i>
+                                    <span>New Incognito Tab</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <button id="downloads-btn-footer" class="nav-btn" title="Downloads">
-                        <i class="fas fa-download"></i>
-                    </button>
-                    <button id="bookmarks-btn-footer" class="nav-btn" title="Bookmarks">
-                        <i class="fas fa-bookmark"></i>
-                    </button>
-                    <button id="settings-btn-footer" class="nav-btn" title="Settings">
-                        <i class="fas fa-cog"></i>
-                    </button>
                 </div>
             </div>
             </aside>
@@ -120,9 +125,34 @@
                             <span class="zoom-percentage">100%</span>
                         </div>
                     </div>
-                    <webview id="webview" src="about:blank" allowpopups></webview>
+                    <webview id="webview" 
+                             src="about:blank" 
+                             allowpopups 
+                             webpreferences="allowRunningInsecureContent,experimentalFeatures,contextIsolation=false,nodeIntegration=false,webSecurity=false,allowDisplayingInsecureContent,allowRunningInsecureContent,accelerated2dCanvas=true,acceleratedJpegDecoding=true,acceleratedVideoDecode=true,acceleratedVideoEncode=true,enableWebGL=true,enableWebGL2=true,enableAcceleratedVideoDecode=true,enableAcceleratedVideoEncode=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,enableAggressiveDomStorageFlushing=true,enableExperimentalWebPlatformFeatures=true,enableTcpFastOpen=true,enableQuic=true,aggressiveCacheDiscard=true,enableNetworkService=true,enableNetworkServiceLogging=true,enableBlinkFeatures=CSSContainerQueries,enableThrottleForegroundTimers=true,enableWebGPU=true,enableWebGPUDawn=true"
+                             partition="persist:main"
+                             useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                             preload=""
+                             autosize="true"
+                             disablewebsecurity="true"
+                             style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; perspective: 1000px;">
+                    </webview>
                 </div>
             </div>
+        </div>
+
+        <!-- Left-edge hover area to reveal sidebar when hidden -->
+        <div id="sidebar-hover-area"></div>
+
+        <!-- Navigation Menu (moved outside sidebar for proper z-index) -->
+        <div id="nav-menu" class="nav-menu hidden">
+            <button id="toggle-sidebar-btn" class="nav-menu-item">
+                <i class="fas fa-bars"></i>
+                <span>Toggle Sidebar</span>
+            </button>
+            <button id="refresh-btn" class="nav-menu-item">
+                <i class="fas fa-redo"></i>
+                <span>Reload</span>
+            </button>
         </div>
 
         <!-- Backdrop for modals -->
@@ -213,42 +243,36 @@
                 
                 <!-- General Settings Tab -->
                 <div class="settings-tab-content active" id="general-tab">
-                    <div class="setting-group">
-                        <h4>Privacy & Security</h4>
-                        <div class="setting-item">
-                            <label>
-                                <input type="checkbox" id="block-trackers">
-                                Block trackers
-                            </label>
-                        </div>
-                        <div class="setting-item">
-                            <label>
-                                <input type="checkbox" id="block-ads">
-                                Block ads
-                            </label>
-                        </div>
-                        <div class="setting-item">
-                            <label>
-                                <input type="checkbox" id="private-mode">
-                                Enhanced private mode
-                            </label>
-                        </div>
-                    </div>
-                    <div class="setting-group">
-                        <h4>Performance</h4>
-                        <div class="setting-item">
-                            <label>
-                                <input type="checkbox" id="hardware-acceleration">
-                                Hardware acceleration
-                            </label>
-                        </div>
-                        <div class="setting-item">
-                            <label>
-                                <input type="checkbox" id="preload-pages">
-                                Preload pages
-                            </label>
-                        </div>
-                    </div>
+                     <div class="setting-group">
+                         <h4>Custom Theme</h4>
+                         <div class="setting-item">
+                             <label>Choose Your Color</label>
+                             <div class="color-picker-container">
+                                 <input type="color" id="main-color-picker" value="#4a90e2">
+                             </div>
+                         </div>
+                     </div>
+                     <div class="setting-group">
+                         <h4>Privacy & Security</h4>
+                         <div class="setting-item">
+                             <label>
+                                 <input type="checkbox" id="block-trackers">
+                                 Block trackers
+                             </label>
+                         </div>
+                         <div class="setting-item">
+                             <label>
+                                 <input type="checkbox" id="block-ads">
+                                 Block ads
+                             </label>
+                         </div>
+                         <div class="setting-item">
+                             <label>
+                                 <input type="checkbox" id="private-mode">
+                                 Enhanced private mode
+                             </label>
+                         </div>
+                     </div>
                     <div class="settings-actions">
                         <button id="save-settings" class="save-btn">Save Changes</button>
                     </div>
@@ -282,6 +306,10 @@
                             <span class="shortcut-desc">Close Tab</span>
                         </div>
                         <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + Z</span>
+                            <span class="shortcut-desc">Recover Closed Tab</span>
+                        </div>
+                        <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + R</span>
                             <span class="shortcut-desc">Refresh Page</span>
                         </div>
@@ -301,6 +329,10 @@
                     
                     <div class="shortcut-group">
                         <h4>Panels & Menus</h4>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + B</span>
+                            <span class="shortcut-desc">Toggle Sidebar</span>
+                        </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + Y</span>
                             <span class="shortcut-desc">Open History</span>
@@ -372,6 +404,9 @@
             <div class="downloads-header">
                 <h3>Downloads</h3>
                 <div class="downloads-header-actions">
+                    <button id="refresh-downloads" class="refresh-btn" title="Refresh Downloads">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
                     <button id="clear-downloads" class="clear-btn" title="Clear All Downloads">
                         <i class="fas fa-trash"></i>
                     </button>
@@ -391,14 +426,19 @@
         </div>
 
         <!-- Bookmarks Panel -->
-        <div id="bookmarks-panel" class="settings-panel hidden">
-            <div class="settings-header">
+        <div id="bookmarks-panel" class="bookmarks-panel hidden">
+            <div class="bookmarks-header">
                 <h3>Bookmarks</h3>
-                <button id="close-bookmarks" class="close-settings">
-                    <i class="fas fa-times"></i>
-                </button>
+                <div class="bookmarks-header-actions">
+                    <button id="close-bookmarks" class="close-settings">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
             </div>
-            <div class="settings-content">
+            <div class="bookmarks-search">
+                <input type="text" id="bookmarks-search-input" placeholder="Search bookmarks...">
+            </div>
+            <div class="bookmarks-content">
                 <div id="bookmarks-list">
                     <!-- Bookmarks will be populated here -->
                 </div>
