@@ -4,7 +4,12 @@ class AxisBrowser {
         this.currentTab = 1;
         this.tabs = new Map();
         this.settings = {};
+        this.closedTabs = []; // Store recently closed tabs for recovery
+        
         this.init();
+        
+        // Add enhanced button interactions
+        setTimeout(() => this.addButtonInteractions(), 100);
     }
 
     async init() {
@@ -16,6 +21,7 @@ class AxisBrowser {
         this.setupSidebarResize();
         this.setupTabDragDrop();
         this.setupAddTabMenu();
+        this.setupPerformanceOptimizations();
         
         // Make browser instance globally accessible for incognito windows
         window.browser = this;
@@ -58,6 +64,10 @@ class AxisBrowser {
             this.refresh();
         });
 
+        document.getElementById('toggle-sidebar-btn').addEventListener('click', () => {
+            this.toggleSidebar();
+        });
+
         // URL bar
         const urlBar = document.getElementById('url-bar');
         urlBar.addEventListener('keypress', (e) => {
@@ -82,8 +92,8 @@ class AxisBrowser {
             this.toggleNavMenu();
         });
 
-        // Sidebar slide-back functionality (temporarily disabled)
-        // this.setupSidebarSlideBack();
+        // Sidebar slide-back functionality
+        this.setupSidebarSlideBack();
 
         // Settings
         document.getElementById('settings-btn-footer').addEventListener('click', () => {
@@ -93,6 +103,9 @@ class AxisBrowser {
         document.getElementById('close-settings').addEventListener('click', () => {
             this.toggleSettings();
         });
+
+        // Custom color picker
+        this.setupCustomColorPicker();
 
         // Settings tabs
         document.querySelectorAll('.settings-tab').forEach(tab => {
@@ -119,6 +132,9 @@ class AxisBrowser {
         });
         document.getElementById('close-downloads').addEventListener('click', () => {
             this.toggleDownloads();
+        });
+        document.getElementById('refresh-downloads').addEventListener('click', () => {
+            this.refreshDownloads();
         });
 
         // Clear history button
@@ -231,6 +247,21 @@ class AxisBrowser {
             if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
                 e.preventDefault();
                 this.selectAll();
+            }
+            
+            // Escape key to close panels
+            if (e.key === 'Escape') {
+                const downloadsPanel = document.getElementById('downloads-panel');
+                const bookmarksPanel = document.getElementById('bookmarks-panel');
+                const settingsPanel = document.getElementById('settings-panel');
+                
+                if (!downloadsPanel.classList.contains('hidden')) {
+                    this.toggleDownloads();
+                } else if (!bookmarksPanel.classList.contains('hidden')) {
+                    this.toggleBookmarks();
+                } else if (!settingsPanel.classList.contains('hidden')) {
+                    this.toggleSettings();
+                }
             }
         });
 
@@ -363,6 +394,12 @@ class AxisBrowser {
                 this.showSpotlightSearch();
             }
             
+            // Cmd/Ctrl + B - Toggle sidebar
+            if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+                e.preventDefault();
+                this.toggleSidebar();
+            }
+            
             // Cmd/Ctrl + W - Close tab
             if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
                 e.preventDefault();
@@ -395,6 +432,12 @@ class AxisBrowser {
             if ((e.metaKey || e.ctrlKey) && e.key === ',') {
                 e.preventDefault();
                 this.toggleSettings();
+            }
+            
+            // Cmd/Ctrl + Z - Recover closed tab
+            if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                e.preventDefault();
+                this.recoverClosedTab();
             }
             
             // Cmd/Ctrl + Y - Open history (now in settings)
@@ -451,6 +494,12 @@ class AxisBrowser {
 
     setupWebview() {
         const webview = document.getElementById('webview');
+        if (!webview) return;
+        
+        // Optimize webview for performance
+        webview.style.willChange = 'transform';
+        webview.style.transform = 'translateZ(0)';
+        webview.style.backfaceVisibility = 'hidden';
         
         // Enable webview functionality
         // Ultra-fast updates with minimal debouncing
@@ -471,11 +520,20 @@ class AxisBrowser {
             // Show loading indicator
             this.showLoadingIndicator();
             this.updateNavigationButtons();
+            
+            // Fallback timeout to ensure loading indicator is cleared
+            setTimeout(() => {
+                this.hideLoadingIndicator();
+            }, 10000); // 10 second timeout
         });
 
         webview.addEventListener('did-finish-load', () => {
             // Hide loading indicator
             this.hideLoadingIndicator();
+            
+            // Reset retry counters on successful load
+            this.errorRetryCount = 0;
+            this.dnsRetryCount = 0;
             
             // Batch all updates for maximum speed
             this.updateNavigationButtons();
@@ -495,12 +553,45 @@ class AxisBrowser {
             setTimeout(() => this.trackPageInHistory(), 0);
         });
 
+        // Add did-stop-loading event as backup
+        webview.addEventListener('did-stop-loading', () => {
+            // Hide loading indicator as backup
+            this.hideLoadingIndicator();
+        });
+
         webview.addEventListener('did-fail-load', (event) => {
-            console.error('Failed to load:', event.errorDescription);
+            console.error('Failed to load:', event.errorDescription, 'Error code:', event.errorCode);
             // Hide loading indicator even on failure
             this.hideLoadingIndicator();
-            // Show error page or fallback
-            this.showErrorPage(event.errorDescription);
+            
+            // Prevent infinite retry loops
+            if (this.errorRetryCount >= 5) {
+                console.log('Max error retries reached, showing error page');
+                this.showErrorPage('Unable to load page. Please check your internet connection.');
+                return;
+            }
+            
+            this.errorRetryCount = (this.errorRetryCount || 0) + 1;
+            
+            // Handle different types of errors
+            if (event.errorCode === -2) {
+                // Network error - try to reload once
+                console.log('Network error, attempting to reload...');
+                setTimeout(() => {
+                    webview.reload();
+                }, 2000);
+            } else if (event.errorCode === -3) {
+                // Aborted - usually means navigation was cancelled
+                console.log('Navigation aborted');
+            } else if (event.errorCode === -105) {
+                // ERR_NAME_NOT_RESOLVED - DNS issue
+                console.log('DNS resolution failed, trying alternative approach...');
+                const currentUrl = event.url || webview.getURL() || 'https://www.google.com';
+                this.handleDNSFailure(currentUrl);
+            } else {
+                // Other errors - show error page
+                this.showErrorPage(event.errorDescription);
+            }
         });
 
         webview.addEventListener('new-window', (event) => {
@@ -515,8 +606,8 @@ class AxisBrowser {
             this.updateUrlBar();
         });
 
-        // Set initial page
-        webview.src = 'https://www.google.com';
+        // Set initial page with error handling and network check
+        this.checkNetworkAndLoad();
         
         // Set up event listeners for the initial tab
         const initialTab = document.querySelector('.tab[data-tab-id="1"]');
@@ -536,6 +627,525 @@ class AxisBrowser {
         });
         
         // Removed sidebar resizing functionality
+    }
+
+    handleDNSFailure(url) {
+        console.log('Handling DNS failure for:', url);
+        
+        // Prevent infinite retry loops
+        if (this.dnsRetryCount >= 3) {
+            console.log('Max DNS retries reached, falling back to Google');
+            const webview = document.getElementById('webview');
+            webview.src = 'https://www.google.com';
+            return;
+        }
+        
+        this.dnsRetryCount = (this.dnsRetryCount || 0) + 1;
+        
+        // Try simple fallback to Google search
+        const searchQuery = url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+        const fallbackUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
+        
+        console.log(`DNS retry ${this.dnsRetryCount}/3, trying:`, fallbackUrl);
+        
+        const webview = document.getElementById('webview');
+        webview.src = fallbackUrl;
+    }
+
+    checkNetworkAndLoad() {
+        const webview = document.getElementById('webview');
+        
+        // Simple approach - just load Google directly
+        try {
+            console.log('Loading initial page...');
+            webview.src = 'https://www.google.com';
+        } catch (error) {
+            console.error('Failed to load initial page:', error);
+            // Fallback to a simple HTML page
+            webview.src = 'data:text/html,<html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;"><h1>Axis Browser</h1><p>Loading...</p></body></html>';
+        }
+    }
+
+    showErrorPage(message) {
+        const webview = document.getElementById('webview');
+        const errorHtml = `
+            <html>
+                <head>
+                    <title>Error - Axis Browser</title>
+                    <style>
+                        body { 
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                            background: #1a1a1a;
+                            color: #ffffff;
+                            margin: 0;
+                            padding: 50px;
+                            text-align: center;
+                        }
+                        .error-container {
+                            max-width: 600px;
+                            margin: 0 auto;
+                            padding: 40px;
+                            background: #2a2a2a;
+                            border-radius: 12px;
+                            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                        }
+                        .error-icon {
+                            font-size: 48px;
+                            color: #ff6b6b;
+                            margin-bottom: 20px;
+                        }
+                        .error-title {
+                            font-size: 24px;
+                            margin-bottom: 16px;
+                            color: #ffffff;
+                        }
+                        .error-message {
+                            font-size: 16px;
+                            color: #cccccc;
+                            margin-bottom: 30px;
+                            line-height: 1.5;
+                        }
+                        .retry-button {
+                            background: #007AFF;
+                            color: white;
+                            border: none;
+                            padding: 12px 24px;
+                            border-radius: 8px;
+                            font-size: 16px;
+                            cursor: pointer;
+                            transition: background 0.2s;
+                        }
+                        .retry-button:hover {
+                            background: #0056CC;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="error-container">
+                        <div class="error-icon">⚠️</div>
+                        <h1 class="error-title">Unable to Load Page</h1>
+                        <p class="error-message">${message}</p>
+                        <button class="retry-button" onclick="window.location.href='https://www.google.com'">Go to Google</button>
+                    </div>
+                </body>
+            </html>
+        `;
+        webview.src = `data:text/html,${encodeURIComponent(errorHtml)}`;
+    }
+
+    setupPerformanceOptimizations() {
+        // Simple, effective optimizations
+        const webview = document.getElementById('webview');
+        if (webview) {
+            // Basic hardware acceleration
+            webview.style.willChange = 'transform';
+            webview.style.transform = 'translateZ(0)';
+        }
+        
+        // Simple DNS prefetch for common sites
+        this.preloadDNS();
+    }
+
+    // Removed broken preloading methods that were slowing things down
+
+    preloadDNS() {
+        // Simple DNS prefetch for common sites
+        const commonDomains = [
+            'google.com',
+            'youtube.com',
+            'github.com',
+            'stackoverflow.com',
+            'reddit.com'
+        ];
+        
+        commonDomains.forEach(domain => {
+            const dnsLink = document.createElement('link');
+            dnsLink.rel = 'dns-prefetch';
+            dnsLink.href = `//${domain}`;
+            document.head.appendChild(dnsLink);
+        });
+    }
+
+    // Removed broken preloading methods that were slowing things down
+
+    // Removed broken tab webview methods - using single webview approach
+
+    // Removed broken performance monitoring that was slowing things down
+
+    setupCustomColorPicker() {
+        const colorPicker = document.getElementById('main-color-picker');
+
+        // Load saved color or use default
+        this.currentColor = this.settings.mainColor || '#4a90e2';
+        
+        // Set the color picker value
+        if (colorPicker) {
+            colorPicker.value = this.currentColor;
+        }
+
+        // Initialize color scheme
+        this.generateColorScheme(this.currentColor);
+
+        // Color picker change event
+        if (colorPicker) {
+            colorPicker.addEventListener('change', (e) => {
+                const color = e.target.value;
+                this.selectColor(color);
+            });
+        }
+    }
+
+    selectColor(color) {
+        this.currentColor = color;
+        this.generateColorScheme(color);
+        this.saveSetting('mainColor', color);
+    }
+
+
+    setupColorWheel(wheel, handle) {
+        let isDragging = false;
+
+        const updateColorFromWheel = (e) => {
+            const rect = wheel.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+            const degrees = ((angle * 180 / Math.PI) + 360) % 360;
+            
+            const radius = rect.width / 2 - 20;
+            const x = Math.cos(angle) * radius + rect.width / 2;
+            const y = Math.sin(angle) * radius + rect.height / 2;
+            
+            // Smooth positioning
+            handle.style.left = x + 'px';
+            handle.style.top = y + 'px';
+            handle.style.transition = isDragging ? 'none' : 'all 0.2s ease';
+            
+            this.currentHue = degrees;
+            this.updateColorFromHSL();
+        };
+
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            isDragging = true;
+            handle.style.cursor = 'grabbing';
+            handle.style.transition = 'none';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                e.preventDefault();
+                updateColorFromWheel(e);
+            }
+        });
+
+        document.addEventListener('mouseup', (e) => {
+            if (isDragging) {
+                isDragging = false;
+                handle.style.cursor = 'grab';
+                handle.style.transition = 'all 0.2s ease';
+            }
+        });
+
+        wheel.addEventListener('click', (e) => {
+            if (!isDragging) {
+                updateColorFromWheel(e);
+            }
+        });
+    }
+
+    setupBrightnessSlider(slider, handle) {
+        let isDragging = false;
+
+        const updateBrightness = (e) => {
+            const rect = slider.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+            
+            // Smooth positioning
+            handle.style.left = percentage + '%';
+            handle.style.transition = isDragging ? 'none' : 'all 0.2s ease';
+            
+            this.currentBrightness = percentage;
+            this.updateColorFromHSL();
+        };
+
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            isDragging = true;
+            handle.style.cursor = 'grabbing';
+            handle.style.transition = 'none';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                e.preventDefault();
+                updateBrightness(e);
+            }
+        });
+
+        document.addEventListener('mouseup', (e) => {
+            if (isDragging) {
+                isDragging = false;
+                handle.style.cursor = 'grab';
+                handle.style.transition = 'all 0.2s ease';
+            }
+        });
+
+        slider.addEventListener('click', (e) => {
+            if (!isDragging) {
+                updateBrightness(e);
+            }
+        });
+    }
+
+    updateColorFromHex(hex) {
+        const hsl = this.hexToHsl(hex);
+        this.currentHue = hsl.h;
+        this.currentSaturation = hsl.s;
+        this.currentBrightness = hsl.l;
+        this.updateColorFromHSL();
+    }
+
+    updateColorFromHSL() {
+        const hex = this.hslToHex(this.currentHue, this.currentSaturation, this.currentBrightness);
+        this.currentColor = hex;
+        this.updateColorDisplay();
+        const generatedColors = this.generateHarmoniousColors(hex);
+        this.applyCustomTheme(generatedColors);
+        this.saveSetting('mainColor', hex);
+    }
+
+    updateColorDisplay() {
+        const currentColorDisplay = document.getElementById('current-color');
+        const colorHexDisplay = document.getElementById('color-hex');
+        const colorRgbDisplay = document.getElementById('color-rgb');
+        const brightnessValue = document.getElementById('brightness-value');
+        
+        if (currentColorDisplay) {
+            currentColorDisplay.style.background = this.currentColor;
+            currentColorDisplay.style.boxShadow = `0 4px 12px ${this.currentColor}40`;
+        }
+        
+        if (colorHexDisplay) {
+            colorHexDisplay.textContent = this.currentColor.toUpperCase();
+        }
+        
+        if (colorRgbDisplay) {
+            const rgb = this.hexToRgb(this.currentColor);
+            colorRgbDisplay.textContent = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+        }
+        
+        if (brightnessValue) {
+            brightnessValue.textContent = `${this.currentBrightness}%`;
+        }
+    }
+
+    hexToRgb(hex) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return { r, g, b };
+    }
+
+    updateColorOrb(color) {
+        const orb = document.getElementById('color-orb');
+        if (orb) {
+            orb.style.background = color;
+            orb.style.boxShadow = `0 0 20px ${color}40`;
+        }
+    }
+
+    generateHarmoniousColors(baseColor) {
+        const hsl = this.hexToHsl(baseColor);
+        const isDark = this.isDarkColor(baseColor);
+        
+        let primary = baseColor;
+        let secondary, accent, text;
+
+        if (isDark) {
+            // Dark mode - create lighter variations
+            secondary = this.hslToHex(hsl.h, Math.max(0, hsl.s - 20), Math.min(100, hsl.l + 15));
+            accent = this.hslToHex(hsl.h, Math.min(100, hsl.s + 10), Math.min(100, hsl.l + 25));
+            text = '#ffffff';
+        } else {
+            // Light mode - create darker variations
+            secondary = this.hslToHex(hsl.h, Math.max(0, hsl.s - 30), Math.max(0, hsl.l - 20));
+            accent = this.hslToHex(hsl.h, Math.min(100, hsl.s + 15), Math.max(0, hsl.l - 10));
+            text = '#000000';
+        }
+
+        return { primary, secondary, accent, text };
+    }
+
+    generateColorScheme(baseColor) {
+        const colors = this.generateHarmoniousColors(baseColor);
+        this.applyCustomTheme(colors);
+    }
+
+
+    // Color utility functions
+    hexToHsl(hex) {
+        const r = parseInt(hex.slice(1, 3), 16) / 255;
+        const g = parseInt(hex.slice(3, 5), 16) / 255;
+        const b = parseInt(hex.slice(5, 7), 16) / 255;
+        
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        let h, s, l = (max + min) / 2;
+        
+        if (max === min) {
+            h = s = 0;
+        } else {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch (max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
+            }
+            h /= 6;
+        }
+        
+        return {
+            h: Math.round(h * 360),
+            s: Math.round(s * 100),
+            l: Math.round(l * 100)
+        };
+    }
+
+    hslToHex(h, s, l) {
+        h = h / 360;
+        s = s / 100;
+        l = l / 100;
+        
+        const hue2rgb = (p, q, t) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1/6) return p + (q - p) * 6 * t;
+            if (t < 1/2) return q;
+            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+        };
+        
+        let r, g, b;
+        if (s === 0) {
+            r = g = b = l;
+        } else {
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+            r = hue2rgb(p, q, h + 1/3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1/3);
+        }
+        
+        const toHex = (c) => {
+            const hex = Math.round(c * 255).toString(16);
+            return hex.length === 1 ? '0' + hex : hex;
+        };
+        
+        return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    }
+
+    isDarkColor(hex) {
+        const hsl = this.hexToHsl(hex);
+        return hsl.l < 50;
+    }
+
+    applyCustomTheme(colors) {
+        // Create gradient from primary and secondary colors
+        const gradient = `linear-gradient(135deg, ${colors.secondary} 0%, ${colors.primary} 50%, ${this.darkenColor(colors.primary, 0.3)} 100%)`;
+        
+        // Apply theme to body
+        document.body.style.background = gradient;
+        document.body.style.color = colors.text;
+        
+        // Apply theme to sidebar
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+            sidebar.style.background = colors.primary;
+        }
+        
+        // Apply theme to nav bar
+        const navBar = document.getElementById('nav-bar');
+        if (navBar) {
+            navBar.style.background = colors.primary;
+        }
+        
+        // Apply theme to tabs
+        const tabs = document.querySelectorAll('.tab');
+        tabs.forEach(tab => {
+            tab.style.background = colors.secondary;
+        });
+        
+        // Apply theme to webview container
+        const webviewContainer = document.querySelector('.webview-container');
+        if (webviewContainer) {
+            webviewContainer.style.background = colors.primary;
+        }
+        
+        // Apply theme to popups
+        const popups = document.querySelectorAll('.downloads-panel, .bookmarks-panel, .settings-panel, .nav-menu, .add-tab-menu');
+        popups.forEach(popup => {
+            popup.style.background = colors.primary;
+        });
+        
+        // Apply theme to popup headers
+        const popupHeaders = document.querySelectorAll('.downloads-header, .bookmarks-header, .settings-header');
+        popupHeaders.forEach(header => {
+            header.style.background = colors.secondary;
+        });
+        
+        // Apply theme to popup content areas
+        const popupContents = document.querySelectorAll('.downloads-content, .bookmarks-content, .settings-content');
+        popupContents.forEach(content => {
+            content.style.background = colors.primary;
+        });
+        
+        // Apply theme to popup items
+        const popupItems = document.querySelectorAll('.download-item, .bookmark-item, .setting-item, .nav-menu-item, .add-tab-menu-item');
+        popupItems.forEach(item => {
+            item.style.color = colors.text;
+        });
+        
+        // Apply theme to buttons
+        const buttons = document.querySelectorAll('.nav-btn, .tab-close, .url-icon, .add-tab-btn, .settings-btn, .bookmark-btn, .security-btn, .nav-menu-btn, .download-btn, .bookmark-delete, .close-settings, .refresh-btn, .clear-btn, .save-btn');
+        buttons.forEach(button => {
+            button.style.background = colors.secondary;
+            button.style.color = colors.text;
+        });
+        
+        // Apply theme to settings tabs
+        const settingsTabs = document.querySelectorAll('.settings-tab');
+        settingsTabs.forEach(tab => {
+            tab.style.background = colors.secondary;
+            tab.style.color = colors.text;
+        });
+        
+        // Apply theme to setting groups
+        const settingGroups = document.querySelectorAll('.setting-group');
+        settingGroups.forEach(group => {
+            group.style.background = colors.primary;
+        });
+        
+        // Update CSS variables
+        document.documentElement.style.setProperty('--background-color', colors.primary);
+        document.documentElement.style.setProperty('--accent-color', colors.accent);
+        document.documentElement.style.setProperty('--text-color', colors.text);
+        document.documentElement.style.setProperty('--popup-background', colors.primary);
+        document.documentElement.style.setProperty('--popup-header', colors.secondary);
+        document.documentElement.style.setProperty('--button-background', colors.secondary);
+        document.documentElement.style.setProperty('--primary-color', colors.primary);
+        document.documentElement.style.setProperty('--secondary-color', colors.secondary);
+    }
+
+    // Helper function to darken colors
+    darkenColor(color, amount) {
+        const hex = color.replace('#', '');
+        const r = Math.max(0, parseInt(hex.substr(0, 2), 16) - Math.round(255 * amount));
+        const g = Math.max(0, parseInt(hex.substr(2, 2), 16) - Math.round(255 * amount));
+        const b = Math.max(0, parseInt(hex.substr(4, 2), 16) - Math.round(255 * amount));
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
     }
 
     createNewTab(url = null) {
@@ -564,10 +1174,12 @@ class AxisBrowser {
         // Store tab data
         this.tabs.set(tabId, {
             id: tabId,
-            url: url || 'about:blank',
+            url: url || 'https://www.google.com',
             title: 'New Tab',
             canGoBack: false,
-            canGoForward: false
+            canGoForward: false,
+            history: url ? [url] : ['https://www.google.com'], // Navigation history for this tab
+            historyIndex: url ? 0 : 0 // Current position in history
         });
 
         // Initialize the first tab if it doesn't exist
@@ -577,7 +1189,9 @@ class AxisBrowser {
                 url: 'https://www.google.com',
                 title: 'New Tab',
                 canGoBack: false,
-                canGoForward: false
+                canGoForward: false,
+                history: ['https://www.google.com'],
+                historyIndex: 0
             });
         }
 
@@ -656,9 +1270,18 @@ class AxisBrowser {
         const tab = this.tabs.get(tabId);
         if (tab) {
             const webview = document.getElementById('webview');
-            // Only navigate if the URL is actually different and not empty
-            if (webview.src !== tab.url && tab.url && tab.url !== 'about:blank') {
+            // Navigate to tab's URL if it exists and is valid
+            if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
                 webview.src = tab.url;
+            } else {
+                // If tab has no valid URL, set to Google and update tab data
+                webview.src = 'https://www.google.com';
+                tab.url = 'https://www.google.com';
+                // Update history if it's empty
+                if (!tab.history || tab.history.length === 0) {
+                    tab.history = ['https://www.google.com'];
+                    tab.historyIndex = 0;
+                }
             }
         }
         
@@ -677,6 +1300,25 @@ class AxisBrowser {
 
     closeTab(tabId) {
         const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+        const tab = this.tabs.get(tabId);
+        
+        // Store closed tab for recovery (only if it's not a new tab)
+        if (tab && tab.url && tab.url !== 'about:blank') {
+            this.closedTabs.unshift({
+                id: tabId,
+                title: tab.title || 'Untitled',
+                url: tab.url,
+                timestamp: Date.now()
+            });
+            
+            // Keep only the last 10 closed tabs
+            if (this.closedTabs.length > 10) {
+                this.closedTabs = this.closedTabs.slice(0, 10);
+            }
+        }
+        
+        // Tab cleanup (no individual webviews to remove)
+        
         if (tabElement) {
             tabElement.remove();
         }
@@ -691,6 +1333,43 @@ class AxisBrowser {
             } else {
                 this.createNewTab();
             }
+        }
+    }
+
+    recoverClosedTab() {
+        if (this.closedTabs.length === 0) {
+            this.showNotification('No closed tabs to recover', 'info');
+            return;
+        }
+        
+        // Get the most recently closed tab
+        const closedTab = this.closedTabs.shift();
+        
+        // Create new tab with the closed tab's URL
+        const newTabId = this.createNewTab();
+        const tab = this.tabs.get(newTabId);
+        
+        if (tab) {
+            // Navigate to the closed tab's URL
+            tab.url = closedTab.url;
+            tab.title = closedTab.title;
+            
+            // Update the tab element
+            const tabElement = document.querySelector(`[data-tab-id="${newTabId}"]`);
+            if (tabElement) {
+                const titleElement = tabElement.querySelector('.tab-title');
+                if (titleElement) {
+                    titleElement.textContent = closedTab.title;
+                }
+            }
+            
+            // Navigate the webview
+            const webview = document.getElementById('webview');
+            if (webview) {
+                webview.src = closedTab.url;
+            }
+            
+            this.showNotification(`Recovered: ${closedTab.title}`, 'success');
         }
     }
 
@@ -709,29 +1388,114 @@ class AxisBrowser {
         }
 
         const webview = document.getElementById('webview');
-        webview.src = url;
+        
+        // Ultra-fast navigation with instant loading
+        try {
+            // Clear any existing timeouts
+            if (this.navigationTimeout) {
+                clearTimeout(this.navigationTimeout);
+            }
+            
+            // Ultra-aggressive speed optimizations
+            webview.style.willChange = 'transform';
+            webview.style.transform = 'translateZ(0)';
+            webview.style.backfaceVisibility = 'hidden';
+            webview.style.perspective = '1000px';
+            
+            // Navigate immediately
+            webview.src = url;
+            
+        } catch (error) {
+            console.error('Navigation error:', error);
+            // Ultra-fast fallback
+            webview.src = 'https://www.google.com';
+        }
 
-        // Update tab data
+        // Update tab data and add to history
         const tab = this.tabs.get(this.currentTab);
         if (tab) {
+            // Initialize history if empty
+            if (!tab.history || tab.history.length === 0) {
+                tab.history = [url];
+                tab.historyIndex = 0;
+            } else if (tab.url && tab.url !== url) {
+                // Remove any forward history if we're navigating to a new URL
+                if (tab.historyIndex < tab.history.length - 1) {
+                    tab.history = tab.history.slice(0, tab.historyIndex + 1);
+                }
+                
+                // Add new URL to history
+                tab.history.push(url);
+                tab.historyIndex = tab.history.length - 1;
+            }
+            
             tab.url = url;
         }
 
         // Update URL bar
         document.getElementById('url-bar').value = url;
+        
+        // Update navigation buttons
+        this.updateNavigationButtons();
     }
 
     goBack() {
-        const webview = document.getElementById('webview');
-        if (webview.canGoBack()) {
-            webview.goBack();
+        const currentTab = this.tabs.get(this.currentTab);
+        if (currentTab && currentTab.history && currentTab.history.length > 1 && currentTab.historyIndex > 0) {
+            // Move back in tab's history
+            currentTab.historyIndex--;
+            const previousUrl = currentTab.history[currentTab.historyIndex];
+            
+            // Navigate to previous URL in this tab's history
+            this.navigateToUrlInCurrentTab(previousUrl);
+            
+            // Update navigation buttons
+            this.updateNavigationButtons();
+        } else {
+            // Fallback to webview navigation
+            const webview = document.getElementById('webview');
+            if (webview && webview.canGoBack()) {
+                webview.goBack();
+                this.updateNavigationButtons();
+            }
         }
     }
 
     goForward() {
+        const currentTab = this.tabs.get(this.currentTab);
+        if (currentTab && currentTab.history && currentTab.history.length > 1 && currentTab.historyIndex < currentTab.history.length - 1) {
+            // Move forward in tab's history
+            currentTab.historyIndex++;
+            const nextUrl = currentTab.history[currentTab.historyIndex];
+            
+            // Navigate to next URL in this tab's history
+            this.navigateToUrlInCurrentTab(nextUrl);
+            
+            // Update navigation buttons
+            this.updateNavigationButtons();
+        } else {
+            // Fallback to webview navigation
+            const webview = document.getElementById('webview');
+            if (webview && webview.canGoForward()) {
+                webview.goForward();
+                this.updateNavigationButtons();
+            }
+        }
+    }
+
+    navigateToUrlInCurrentTab(url) {
         const webview = document.getElementById('webview');
-        if (webview.canGoForward()) {
-            webview.goForward();
+        if (webview) {
+            webview.src = url;
+            
+            // Update tab data
+            const currentTab = this.tabs.get(this.currentTab);
+            if (currentTab) {
+                currentTab.url = url;
+            }
+            
+            // Update URL bar
+            document.getElementById('url-bar').value = url;
         }
     }
 
@@ -741,12 +1505,20 @@ class AxisBrowser {
     }
 
     updateNavigationButtons() {
-        const webview = document.getElementById('webview');
+        const currentTab = this.tabs.get(this.currentTab);
         const backBtn = document.getElementById('back-btn');
         const forwardBtn = document.getElementById('forward-btn');
+        const webview = document.getElementById('webview');
 
-        backBtn.disabled = !webview.canGoBack();
-        forwardBtn.disabled = !webview.canGoForward();
+        if (currentTab && currentTab.history && currentTab.history.length > 1) {
+            // Use tab-specific history for navigation buttons
+            backBtn.disabled = currentTab.historyIndex <= 0;
+            forwardBtn.disabled = currentTab.historyIndex >= currentTab.history.length - 1;
+        } else {
+            // Fallback to webview navigation
+            backBtn.disabled = !webview.canGoBack();
+            forwardBtn.disabled = !webview.canGoForward();
+        }
     }
 
     updateUrlBar() {
@@ -850,14 +1622,33 @@ class AxisBrowser {
         }
         
         if (settingsPanel.classList.contains('hidden')) {
+            // Enhanced opening animation
             settingsPanel.classList.remove('hidden');
-            if (backdrop) backdrop.classList.remove('hidden');
-            this.populateSettings();
-            // Default to general tab when opening
-            this.switchSettingsTab('general');
+            if (backdrop) {
+                backdrop.classList.remove('hidden');
+                backdrop.style.transition = 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)';
+            }
+            
+            // Add entrance animation class
+            settingsPanel.classList.add('settings-entering');
+            
+            // Populate settings with delay for smooth animation
+            setTimeout(() => {
+                this.populateSettings();
+                // Default to general tab when opening
+                this.switchSettingsTab('general');
+                settingsPanel.classList.remove('settings-entering');
+            }, 100);
+            
         } else {
-            this.closePanelWithAnimation(settingsPanel);
-            if (backdrop) backdrop.classList.add('hidden');
+            // Enhanced closing animation
+            settingsPanel.classList.add('settings-closing');
+            
+            setTimeout(() => {
+                this.closePanelWithAnimation(settingsPanel);
+                settingsPanel.classList.remove('settings-closing');
+                if (backdrop) backdrop.classList.add('hidden');
+            }, 300);
         }
     }
 
@@ -938,12 +1729,31 @@ class AxisBrowser {
         }
         
         if (bookmarksPanel.classList.contains('hidden')) {
+            // Enhanced opening animation
             bookmarksPanel.classList.remove('hidden');
-            if (backdrop) backdrop.classList.remove('hidden');
-            this.populateBookmarks();
+            if (backdrop) {
+                backdrop.classList.remove('hidden');
+                backdrop.style.transition = 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)';
+            }
+            
+            // Add entrance animation class
+            bookmarksPanel.classList.add('bookmarks-entering');
+            
+            // Populate bookmarks with delay for smooth animation
+            setTimeout(() => {
+                this.populateBookmarks();
+                bookmarksPanel.classList.remove('bookmarks-entering');
+            }, 100);
+            
         } else {
-            this.closePanelWithAnimation(bookmarksPanel);
-            if (backdrop) backdrop.classList.add('hidden');
+            // Enhanced closing animation
+            bookmarksPanel.classList.add('bookmarks-closing');
+            
+            setTimeout(() => {
+                this.closePanelWithAnimation(bookmarksPanel);
+                bookmarksPanel.classList.remove('bookmarks-closing');
+                if (backdrop) backdrop.classList.add('hidden');
+            }, 300);
         }
     }
 
@@ -957,56 +1767,97 @@ class AxisBrowser {
         const noBookmarks = document.getElementById('no-bookmarks');
         const bookmarks = this.settings.bookmarks || [];
         
-        bookmarksList.innerHTML = '';
+        // Clear with fade out animation
+        bookmarksList.style.opacity = '0';
+        bookmarksList.style.transform = 'translateY(10px)';
         
-        if (bookmarks.length === 0) {
-            noBookmarks.classList.remove('hidden');
-            return;
-        }
-        
-        noBookmarks.classList.add('hidden');
-        
-        bookmarks.forEach((bookmark, index) => {
-            const bookmarkElement = document.createElement('div');
-            bookmarkElement.className = 'bookmark-item';
-            bookmarkElement.innerHTML = `
-                <i class="fas fa-globe bookmark-icon"></i>
-                <div class="bookmark-content">
-                    <div class="bookmark-title">${bookmark.title}</div>
-                    <div class="bookmark-url">${bookmark.url}</div>
-                </div>
-                <div class="bookmark-actions">
-                    <button class="bookmark-delete" data-index="${index}">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            `;
+        setTimeout(() => {
+            bookmarksList.innerHTML = '';
             
-            // Click to navigate
-            bookmarkElement.addEventListener('click', (e) => {
-                if (!e.target.closest('.bookmark-delete')) {
-                    this.navigate(bookmark.url);
-                    this.toggleBookmarks();
-                }
+            if (bookmarks.length === 0) {
+                noBookmarks.classList.remove('hidden');
+                noBookmarks.style.opacity = '0';
+                noBookmarks.style.transform = 'translateY(20px)';
+                
+                setTimeout(() => {
+                    noBookmarks.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+                    noBookmarks.style.opacity = '1';
+                    noBookmarks.style.transform = 'translateY(0)';
+                }, 100);
+                return;
+            }
+            
+            noBookmarks.classList.add('hidden');
+            
+            // Add items with staggered animation
+            bookmarks.forEach((bookmark, index) => {
+                const bookmarkElement = document.createElement('div');
+                bookmarkElement.className = 'bookmark-item';
+                bookmarkElement.style.opacity = '0';
+                bookmarkElement.style.transform = 'translateY(20px)';
+                bookmarkElement.innerHTML = `
+                    <i class="fas fa-globe bookmark-icon"></i>
+                    <div class="bookmark-content">
+                        <div class="bookmark-title">${bookmark.title}</div>
+                        <div class="bookmark-url">${bookmark.url}</div>
+                    </div>
+                    <div class="bookmark-actions">
+                        <button class="bookmark-delete" data-index="${index}">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                `;
+                
+                // Click to navigate
+                bookmarkElement.addEventListener('click', (e) => {
+                    if (!e.target.closest('.bookmark-delete')) {
+                        this.navigate(bookmark.url);
+                        this.toggleBookmarks();
+                    }
+                });
+                
+                // Delete bookmark
+                const deleteBtn = bookmarkElement.querySelector('.bookmark-delete');
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.deleteBookmark(index);
+                });
+                
+                bookmarksList.appendChild(bookmarkElement);
+                
+                // Staggered entrance animation
+                setTimeout(() => {
+                    bookmarkElement.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+                    bookmarkElement.style.opacity = '1';
+                    bookmarkElement.style.transform = 'translateY(0)';
+                }, index * 50); // 50ms delay between items
             });
             
-            // Delete bookmark
-            const deleteBtn = bookmarkElement.querySelector('.bookmark-delete');
-            deleteBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.deleteBookmark(index);
-            });
-            
-            bookmarksList.appendChild(bookmarkElement);
-        });
+            // Fade in the list
+            bookmarksList.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+            bookmarksList.style.opacity = '1';
+            bookmarksList.style.transform = 'translateY(0)';
+        }, 150);
     }
 
     deleteBookmark(index) {
         const bookmarks = this.settings.bookmarks || [];
-        bookmarks.splice(index, 1);
-        this.saveSetting('bookmarks', bookmarks);
-        this.populateBookmarks();
-        this.showNotification('Bookmark deleted', 'success');
+        const bookmark = bookmarks[index];
+        
+        // Add delete animation
+        const bookmarkElement = document.querySelector(`[data-index="${index}"]`).closest('.bookmark-item');
+        if (bookmarkElement) {
+            bookmarkElement.style.transform = 'scale(0.95)';
+            bookmarkElement.style.opacity = '0.5';
+            bookmarkElement.classList.add('shake');
+        }
+        
+        setTimeout(() => {
+            bookmarks.splice(index, 1);
+            this.saveSetting('bookmarks', bookmarks);
+            this.populateBookmarks();
+            this.showNotification(`Bookmark "${bookmark.title}" deleted`, 'success');
+        }, 300);
     }
 
     // preview color helpers removed
@@ -1189,22 +2040,163 @@ class AxisBrowser {
     }
 
     showNotification(message, type = 'info') {
-        // Create notification element
-        const notification = document.createElement('div');
-        notification.className = `notification notification-${type}`;
-        notification.textContent = message;
+        // Create toast notification element
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="toast-icon">
+                    ${type === 'success' ? '<i class="fas fa-check-circle" style="color: #4CAF50;"></i>' : 
+                      type === 'error' ? '<i class="fas fa-exclamation-circle" style="color: #f44336;"></i>' : 
+                      type === 'warning' ? '<i class="fas fa-exclamation-triangle" style="color: #ff9800;"></i>' :
+                      '<i class="fas fa-info-circle" style="color: #2196F3;"></i>'}
+                </div>
+                <span>${message}</span>
+            </div>
+        `;
         
-        // Add to page
-        document.body.appendChild(notification);
+        // Add to DOM
+        document.body.appendChild(toast);
         
-        // Animate in
-        setTimeout(() => notification.classList.add('show'), 10);
-        
-        // Remove after 3 seconds
+        // Trigger animation
         setTimeout(() => {
-            notification.classList.remove('show');
-            setTimeout(() => notification.remove(), 300);
-        }, 3000);
+            toast.classList.add('show');
+        }, 100);
+        
+        // Remove after 4 seconds with animation
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 400);
+        }, 4000);
+    }
+
+    // Premium button interactions
+    addButtonInteractions() {
+        // Add premium interactions to main buttons
+        const mainButtons = document.querySelectorAll('.nav-btn, .tab-close, .url-icon, .add-tab-btn, .settings-btn, .bookmark-btn, .security-btn, .nav-menu-btn, .download-btn, .bookmark-delete, .close-settings, .refresh-btn, .clear-btn');
+        
+        mainButtons.forEach(button => {
+            // Add premium click animation
+            button.addEventListener('mousedown', (e) => {
+                button.style.transform = 'scale(0.96) translateY(1px)';
+                button.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.1)';
+                button.style.transition = 'all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            });
+            
+            button.addEventListener('mouseup', (e) => {
+                button.style.transform = '';
+                button.style.boxShadow = '';
+                button.style.transition = 'all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            });
+            
+            button.addEventListener('mouseleave', (e) => {
+                button.style.transform = '';
+                button.style.boxShadow = '';
+                button.style.transition = 'all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            });
+            
+            // Add premium haptic feedback
+            button.addEventListener('click', (e) => {
+                // Enhanced haptic feedback (if supported)
+                if (navigator.vibrate) {
+                    navigator.vibrate([50, 25, 50]);
+                }
+                
+                // Add subtle glow effect
+                button.style.boxShadow = '0 0 20px rgba(255, 255, 255, 0.2)';
+                setTimeout(() => {
+                    button.style.boxShadow = '';
+                }, 200);
+            });
+        });
+
+        // Add premium popup menu interactions
+        const popupItems = document.querySelectorAll('.nav-menu-item, .add-tab-menu-item');
+        
+        popupItems.forEach(item => {
+            // Add premium popup click animation
+            item.addEventListener('mousedown', (e) => {
+                item.style.transform = 'scale(0.98) translateY(0.5px)';
+                item.style.boxShadow = '0 1px 4px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.1)';
+                item.style.transition = 'all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            });
+            
+            item.addEventListener('mouseup', (e) => {
+                item.style.transform = '';
+                item.style.boxShadow = '';
+                item.style.transition = 'all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            });
+            
+            item.addEventListener('mouseleave', (e) => {
+                item.style.transform = '';
+                item.style.boxShadow = '';
+                item.style.transition = 'all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            });
+            
+            // Add premium popup haptic feedback
+            item.addEventListener('click', (e) => {
+                // Gentle haptic feedback for popup items
+                if (navigator.vibrate) {
+                    navigator.vibrate(30);
+                }
+                
+                // Add subtle glow effect
+                item.style.boxShadow = '0 0 15px rgba(255, 255, 255, 0.15)';
+                setTimeout(() => {
+                    item.style.boxShadow = '';
+                }, 150);
+            });
+        });
+    }
+
+    // Enhanced loading states
+    showLoadingState(element, message = 'Loading...') {
+        if (!element) return;
+        
+        const originalContent = element.innerHTML;
+        element.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px; padding: 20px;">
+                <div class="loading-spinner" style="width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid #fff; border-radius: 50%;"></div>
+                <span>${message}</span>
+            </div>
+        `;
+        
+        return () => {
+            element.innerHTML = originalContent;
+        };
+    }
+
+    // Enhanced success feedback
+    showSuccessFeedback(element, message = 'Success!') {
+        if (!element) return;
+        
+        const originalContent = element.innerHTML;
+        element.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px; padding: 20px;">
+                <div class="success-checkmark"></div>
+                <span>${message}</span>
+            </div>
+        `;
+        
+        setTimeout(() => {
+            element.innerHTML = originalContent;
+        }, 2000);
+    }
+
+    // Enhanced error feedback
+    showErrorFeedback(element, message = 'Error occurred') {
+        if (!element) return;
+        
+        element.classList.add('shake');
+        this.showNotification(message, 'error');
+        
+        setTimeout(() => {
+            element.classList.remove('shake');
+        }, 500);
     }
 
     updateTabFavicon(tabId, tabElement) {
@@ -1267,21 +2259,25 @@ class AxisBrowser {
 
     toggleSidebar() {
         const sidebar = document.getElementById('sidebar');
-        const toggleBtn = document.getElementById('sidebar-toggle');
+        const toggleBtn = document.getElementById('toggle-sidebar-btn');
         const icon = toggleBtn.querySelector('i');
         
         sidebar.classList.toggle('hidden');
         
-        if (sidebar.classList.contains('hidden')) {
-            icon.className = 'fas fa-bars';
-        } else {
-            icon.className = 'fas fa-times';
-        }
+        // Keep the icon as sidebar bars, don't change it
+        icon.className = 'fas fa-bars';
     }
 
     toggleNavMenu() {
         const navMenu = document.getElementById('nav-menu');
+        const navMenuBtn = document.getElementById('nav-menu-btn');
+        
         if (navMenu.classList.contains('hidden')) {
+            // Calculate position relative to the button
+            const btnRect = navMenuBtn.getBoundingClientRect();
+            navMenu.style.top = (btnRect.bottom + 5) + 'px';
+            navMenu.style.left = btnRect.left + 'px';
+            navMenu.style.visibility = 'visible';
             navMenu.classList.remove('hidden');
         } else {
             this.closeNavMenu();
@@ -1300,6 +2296,7 @@ class AxisBrowser {
         setTimeout(() => {
             navMenu.classList.add('hidden');
             navMenu.classList.remove('closing');
+            navMenu.style.visibility = 'hidden';
         }, 200); // Match animation duration
     }
 
@@ -1311,29 +2308,55 @@ class AxisBrowser {
         
         console.log('Setting up sidebar slide-back, hover area:', hoverArea);
         
+        if (!hoverArea) {
+            console.error('Hover area not found!');
+            return;
+        }
+        
         hoverArea.addEventListener('mouseenter', () => {
             console.log('Mouse entered hover area, sidebar hidden:', sidebar.classList.contains('hidden'));
             if (sidebar.classList.contains('hidden')) {
                 clearTimeout(slideBackTimeout);
-                sidebar.style.width = '300px';
-                sidebar.style.opacity = '1';
-                sidebar.style.transform = 'translateX(0)';
-                sidebar.style.transition = 'all 0.3s ease';
-                sidebar.style.pointerEvents = 'auto';
-                console.log('Sidebar slide-back triggered');
+                sidebar.classList.add('slide-out');
+                console.log('Sidebar slide-out triggered, classes:', sidebar.className);
             }
         });
         
+        // When mouse enters the sidebar, clear any pending slide-back
+        sidebar.addEventListener('mouseenter', () => {
+            if (sidebar.classList.contains('slide-out')) {
+                clearTimeout(slideBackTimeout);
+                console.log('Mouse entered sidebar, cleared slide-back timeout');
+            }
+        });
+        
+        // When mouse leaves the hover area, start slide-back timer
         hoverArea.addEventListener('mouseleave', () => {
             console.log('Mouse left hover area');
-            if (sidebar.classList.contains('hidden')) {
+            if (sidebar.classList.contains('hidden') && sidebar.classList.contains('slide-out')) {
                 slideBackTimeout = setTimeout(() => {
-                    sidebar.style.width = '0';
-                    sidebar.style.opacity = '0';
-                    sidebar.style.transform = 'translateX(-20px)';
-                    sidebar.style.pointerEvents = 'none';
-                    console.log('Sidebar slide-back hidden');
-                }, 200);
+                    sidebar.classList.remove('slide-out');
+                    console.log('Sidebar slide-out reverted');
+                }, 300);
+            }
+        });
+        
+        // When mouse leaves the sidebar, start slide-back timer
+        sidebar.addEventListener('mouseleave', () => {
+            if (sidebar.classList.contains('hidden') && sidebar.classList.contains('slide-out')) {
+                slideBackTimeout = setTimeout(() => {
+                    sidebar.classList.remove('slide-out');
+                    console.log('Sidebar slide-out reverted from sidebar mouse leave');
+                }, 300);
+            }
+        });
+        
+        // Also hide slide-out when clicking outside
+        document.addEventListener('click', (e) => {
+            if (sidebar.classList.contains('slide-out') && 
+                !sidebar.contains(e.target) && 
+                !hoverArea.contains(e.target)) {
+                sidebar.classList.remove('slide-out');
             }
         });
     }
@@ -1674,12 +2697,31 @@ class AxisBrowser {
         }
         
         if (downloadsPanel.classList.contains('hidden')) {
+            // Enhanced opening animation
             downloadsPanel.classList.remove('hidden');
-            if (backdrop) backdrop.classList.remove('hidden');
-            this.populateDownloads();
+            if (backdrop) {
+                backdrop.classList.remove('hidden');
+                backdrop.style.transition = 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)';
+            }
+            
+            // Add entrance animation class
+            downloadsPanel.classList.add('downloads-entering');
+            
+            // Populate downloads with delay for smooth animation
+            setTimeout(() => {
+                this.populateDownloads();
+                downloadsPanel.classList.remove('downloads-entering');
+            }, 100);
+            
         } else {
-            this.closePanelWithAnimation(downloadsPanel);
-            if (backdrop) backdrop.classList.add('hidden');
+            // Enhanced closing animation
+            downloadsPanel.classList.add('downloads-closing');
+            
+            setTimeout(() => {
+                this.closePanelWithAnimation(downloadsPanel);
+                downloadsPanel.classList.remove('downloads-closing');
+                if (backdrop) backdrop.classList.add('hidden');
+            }, 300);
         }
     }
 
@@ -1687,49 +2729,105 @@ class AxisBrowser {
         const downloadsList = document.getElementById('downloads-list');
         const downloads = await this.getDownloads();
         
-        downloadsList.innerHTML = '';
+        // Clear with fade out animation
+        downloadsList.style.opacity = '0';
+        downloadsList.style.transform = 'translateY(10px)';
         
-        if (downloads.length === 0) {
-            downloadsList.innerHTML = '<div class="empty-state">No downloads</div>';
-            return;
+        setTimeout(() => {
+            downloadsList.innerHTML = '';
+            
+            if (downloads.length === 0) {
+                downloadsList.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 40px; color: rgba(255, 255, 255, 0.6);">
+                        <i class="fas fa-download" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
+                        <p style="margin: 0; font-size: 16px; font-weight: 500;">No downloads yet</p>
+                        <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.7;">Downloads will appear here</p>
+                    </div>
+                `;
+                downloadsList.style.opacity = '1';
+                downloadsList.style.transform = 'translateY(0)';
+                return;
+            }
+            
+            // Add items with staggered animation
+            downloads.forEach((download, index) => {
+                const downloadItem = document.createElement('div');
+                downloadItem.className = 'download-item';
+                downloadItem.style.opacity = '0';
+                downloadItem.style.transform = 'translateY(20px)';
+                downloadItem.innerHTML = `
+                    <i class="fas fa-file-download download-icon"></i>
+                    <div class="download-info">
+                        <div class="download-name">${download.filename}</div>
+                        <div class="download-progress">${this.formatDownloadProgress(download)}</div>
+                        <div class="download-url">${download.url}</div>
+                    </div>
+                    <div class="download-actions">
+                        <button class="download-btn" title="Open" data-id="${download.id}">
+                            <i class="fas fa-external-link-alt"></i>
+                        </button>
+                        <button class="download-btn" title="Delete" data-id="${download.id}">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                `;
+                
+                // Open download
+                const openBtn = downloadItem.querySelector('.download-btn[title="Open"]');
+                openBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.openDownload(download);
+                });
+                
+                // Delete download
+                const deleteBtn = downloadItem.querySelector('.download-btn[title="Delete"]');
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.deleteDownload(download.id);
+                });
+                
+                downloadsList.appendChild(downloadItem);
+                
+                // Staggered entrance animation
+                setTimeout(() => {
+                    downloadItem.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+                    downloadItem.style.opacity = '1';
+                    downloadItem.style.transform = 'translateY(0)';
+                }, index * 50); // 50ms delay between items
+            });
+            
+            // Fade in the list
+            downloadsList.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+            downloadsList.style.opacity = '1';
+            downloadsList.style.transform = 'translateY(0)';
+        }, 150);
+    }
+
+    async refreshDownloads() {
+        const refreshBtn = document.getElementById('refresh-downloads');
+        const icon = refreshBtn.querySelector('i');
+        
+        // Add spinning animation
+        icon.style.animation = 'spin 1s linear infinite';
+        refreshBtn.style.pointerEvents = 'none';
+        
+        // Add loading state to downloads list
+        const downloadsList = document.getElementById('downloads-list');
+        const restoreContent = this.showLoadingState(downloadsList, 'Refreshing downloads...');
+        
+        try {
+            await this.populateDownloads();
+            this.showNotification('Downloads refreshed', 'success');
+        } catch (error) {
+            this.showErrorFeedback(downloadsList, 'Failed to refresh downloads');
+        } finally {
+            // Remove spinning animation after a delay
+            setTimeout(() => {
+                icon.style.animation = '';
+                refreshBtn.style.pointerEvents = 'auto';
+                if (restoreContent) restoreContent();
+            }, 1000);
         }
-        
-        downloads.forEach(download => {
-            const downloadItem = document.createElement('div');
-            downloadItem.className = 'download-item';
-            downloadItem.innerHTML = `
-                <i class="fas fa-file-download download-icon"></i>
-                <div class="download-info">
-                    <div class="download-name">${download.filename}</div>
-                    <div class="download-progress">${this.formatDownloadProgress(download)}</div>
-                    <div class="download-url">${download.url}</div>
-                </div>
-                <div class="download-actions">
-                    <button class="download-btn" title="Open" data-id="${download.id}">
-                        <i class="fas fa-external-link-alt"></i>
-                    </button>
-                    <button class="download-btn" title="Delete" data-id="${download.id}">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            `;
-            
-            // Open download
-            const openBtn = downloadItem.querySelector('.download-btn[title="Open"]');
-            openBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.openDownload(download);
-            });
-            
-            // Delete download
-            const deleteBtn = downloadItem.querySelector('.download-btn[title="Delete"]');
-            deleteBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.deleteDownload(download.id);
-            });
-            
-            downloadsList.appendChild(downloadItem);
-        });
     }
 
     async getDownloads() {
@@ -1777,9 +2875,19 @@ class AxisBrowser {
 
     async deleteDownload(id) {
         try {
-            await window.electronAPI.deleteDownload(id);
-            this.populateDownloads();
-            this.showNotification('Download deleted', 'success');
+            // Add delete animation
+            const downloadElement = document.querySelector(`[data-id="${id}"]`).closest('.download-item');
+            if (downloadElement) {
+                downloadElement.style.transform = 'scale(0.95)';
+                downloadElement.style.opacity = '0.5';
+                downloadElement.classList.add('shake');
+            }
+            
+            setTimeout(async () => {
+                await window.electronAPI.deleteDownload(id);
+                this.populateDownloads();
+                this.showNotification('Download deleted', 'success');
+            }, 300);
         } catch (error) {
             console.error('Failed to delete download:', error);
             this.showNotification('Failed to delete download', 'error');
@@ -1894,6 +3002,7 @@ class AxisBrowser {
     showLoadingIndicator() {
         const loadingBar = document.getElementById('loading-bar');
         if (loadingBar) {
+            console.log('Showing loading indicator');
             loadingBar.classList.add('loading');
         }
     }
@@ -1901,7 +3010,13 @@ class AxisBrowser {
     hideLoadingIndicator() {
         const loadingBar = document.getElementById('loading-bar');
         if (loadingBar) {
+            console.log('Hiding loading indicator, current classes:', loadingBar.className);
             loadingBar.classList.remove('loading');
+            // Force clear any stuck animations
+            loadingBar.style.animation = 'none';
+            loadingBar.offsetHeight; // Trigger reflow
+            loadingBar.style.animation = null;
+            console.log('Loading indicator hidden, classes after:', loadingBar.className);
         }
     }
 
@@ -2425,12 +3540,25 @@ class AxisBrowser {
     }
 
     closePanelWithAnimation(panel) {
+        // Add closing animation class
         panel.classList.add('closing');
+        
+        // Add backdrop fade out
+        const backdrop = document.getElementById('modal-backdrop');
+        if (backdrop && !backdrop.classList.contains('hidden')) {
+            backdrop.style.transition = 'opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            backdrop.style.opacity = '0';
+        }
         
         // Remove the panel after animation completes
         setTimeout(() => {
             panel.classList.add('hidden');
             panel.classList.remove('closing');
+            if (backdrop) {
+                backdrop.classList.add('hidden');
+                backdrop.style.opacity = '';
+                backdrop.style.transition = '';
+            }
         }, 300); // Match animation duration
     }
 
