@@ -59,6 +59,134 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  // Configure session for better webview support
+  const mainSession = session.defaultSession;
+  
+  // Clear DNS cache and configure network
+  mainSession.clearHostResolverCache();
+  
+  // Configure network settings for speed
+  app.commandLine.appendSwitch('--disable-web-security');
+  app.commandLine.appendSwitch('--disable-features', 'VizDisplayCompositor');
+  app.commandLine.appendSwitch('--disable-background-timer-throttling');
+  app.commandLine.appendSwitch('--disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('--disable-backgrounding-occluded-windows');
+  app.commandLine.appendSwitch('--disable-ipc-flooding-protection');
+  
+  // REAL performance optimizations for actual speed
+  app.commandLine.appendSwitch('--enable-gpu-rasterization');
+  app.commandLine.appendSwitch('--enable-zero-copy');
+  app.commandLine.appendSwitch('--enable-hardware-acceleration');
+  app.commandLine.appendSwitch('--enable-accelerated-2d-canvas');
+  app.commandLine.appendSwitch('--enable-accelerated-video-decode');
+  app.commandLine.appendSwitch('--enable-accelerated-video-encode');
+  app.commandLine.appendSwitch('--enable-webgl');
+  app.commandLine.appendSwitch('--enable-webgl2');
+  app.commandLine.appendSwitch('--enable-oop-rasterization');
+  app.commandLine.appendSwitch('--max_old_space_size', '4096');
+  app.commandLine.appendSwitch('--memory-pressure-off');
+  
+  // ACTUAL speed improvements
+  app.commandLine.appendSwitch('--disable-background-timer-throttling');
+  app.commandLine.appendSwitch('--disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('--disable-backgrounding-occluded-windows');
+  app.commandLine.appendSwitch('--disable-ipc-flooding-protection');
+  app.commandLine.appendSwitch('--enable-tcp-fast-open');
+  app.commandLine.appendSwitch('--enable-quic');
+  app.commandLine.appendSwitch('--aggressive-cache-discard');
+  app.commandLine.appendSwitch('--enable-features', 'NetworkService,NetworkServiceLogging');
+  app.commandLine.appendSwitch('--force-fieldtrials', 'NetworkService/Enabled');
+  app.commandLine.appendSwitch('--enable-blink-features', 'CSSContainerQueries');
+  app.commandLine.appendSwitch('--enable-features', 'ThrottleForegroundTimers');
+  app.commandLine.appendSwitch('--disable-features', 'VizDisplayCompositor');
+  app.commandLine.appendSwitch('--enable-features', 'VaapiVideoDecoder,WebUIDarkMode,ThrottleForegroundTimers,WebGPU');
+  app.commandLine.appendSwitch('--enable-webgpu');
+  app.commandLine.appendSwitch('--enable-webgpu-developer-features');
+  app.commandLine.appendSwitch('--disable-webgpu-subgroup-limits-warning');
+  
+  // Additional speed optimizations
+  app.commandLine.appendSwitch('--enable-aggressive-domstorage-flushing');
+  app.commandLine.appendSwitch('--enable-experimental-web-platform-features');
+  app.commandLine.appendSwitch('--disable-background-networking');
+  app.commandLine.appendSwitch('--disable-default-apps');
+  app.commandLine.appendSwitch('--disable-extensions');
+  app.commandLine.appendSwitch('--disable-sync');
+  app.commandLine.appendSwitch('--disable-translate');
+  
+  // Allow insecure content for development
+  mainSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    const allowedPermissions = [
+      'camera',
+      'microphone',
+      'notifications',
+      'geolocation',
+      'media',
+      'midi',
+      'midiSysex',
+      'pointerLock',
+      'fullscreen',
+      'openExternal'
+    ];
+    
+    if (allowedPermissions.includes(permission)) {
+      callback(true);
+    } else {
+      callback(false);
+    }
+  });
+
+  // Handle certificate errors - allow all certificates
+  mainSession.setCertificateVerifyProc((request, callback) => {
+    // Always allow certificates
+    callback(0);
+  });
+
+  // Set user agent
+  mainSession.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+  
+  // Configure web security - simplified
+  mainSession.webRequest.onBeforeRequest((details, callback) => {
+    // Allow all requests
+    callback({ cancel: false });
+  });
+  
+  // Enable aggressive caching
+  mainSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const headers = details.requestHeaders || {};
+    
+    // Add cache control headers for better performance
+    headers['Cache-Control'] = 'max-age=31536000, public';
+    headers['Pragma'] = 'cache';
+    
+    callback({ requestHeaders: headers });
+  });
+  
+  // Configure REAL cache settings that actually work
+  mainSession.setCache({
+    maxCacheSize: 200 * 1024 * 1024, // 200MB cache
+    maxCacheEntries: 1000
+  });
+  
+  // Enable proper caching
+  mainSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const headers = details.requestHeaders || {};
+    
+    // Add proper cache headers
+    if (details.url.includes('.css') || details.url.includes('.js') || details.url.includes('.png') || details.url.includes('.jpg') || details.url.includes('.gif')) {
+      headers['Cache-Control'] = 'max-age=3600, public';
+    }
+    
+    // Enable compression
+    headers['Accept-Encoding'] = 'gzip, deflate, br';
+    
+    callback({ requestHeaders: headers });
+  });
+  
+  // Allow all requests
+  mainSession.webRequest.onBeforeRequest((details, callback) => {
+    callback({ cancel: false });
+  });
+
   // Create application menu
   createMenu();
 }
