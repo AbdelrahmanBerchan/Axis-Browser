@@ -5,15 +5,19 @@ class AxisBrowser {
         this.tabs = new Map();
         this.settings = {};
         this.closedTabs = []; // Store recently closed tabs for recovery
+        this.isSplitView = false;
+        this.activePane = 'left'; // 'left' or 'right'
+        this.splitRatio = 0.5; // 50/50 split
         
         this.init();
         
-        // Add enhanced button interactions
-        setTimeout(() => this.addButtonInteractions(), 100);
+        // Add button interactions immediately
+        this.addButtonInteractions();
     }
 
     async init() {
         await this.loadSettings();
+        this.applySavedTheme();
         this.setupEventListeners();
         this.setupWebview();
         this.setupTabSearch();
@@ -68,6 +72,15 @@ class AxisBrowser {
             this.toggleSidebar();
         });
 
+        // Split view buttons
+        document.getElementById('split-view-btn').addEventListener('click', () => {
+            this.toggleSplitView();
+        });
+        
+        document.getElementById('split-view-btn-footer').addEventListener('click', () => {
+            this.toggleSplitView();
+        });
+
         // URL bar
         const urlBar = document.getElementById('url-bar');
         urlBar.addEventListener('keypress', (e) => {
@@ -77,11 +90,17 @@ class AxisBrowser {
         });
 
         urlBar.addEventListener('focus', () => {
+            // Show full URL and select all text
+            const fullUrl = urlBar.getAttribute('data-full-url') || urlBar.value;
+            urlBar.value = fullUrl;
+            urlBar.classList.remove('summarized');
+            urlBar.classList.add('expanded');
             urlBar.select();
         });
 
-        urlBar.addEventListener('click', (e) => {
-            this.toggleUrlBarExpansion();
+        urlBar.addEventListener('blur', () => {
+            // Collapse back to summarized view when clicking away
+            this.summarizeUrlBar();
         });
 
         // Tab controls handled in setupAddTabMenu to avoid double toggle
@@ -183,11 +202,8 @@ class AxisBrowser {
         });
 
         document.getElementById('spotlight-input').addEventListener('input', (e) => {
-            // Debounce the suggestions update to wait for user to finish typing
-            clearTimeout(this.spotlightDebounceTimer);
-            this.spotlightDebounceTimer = setTimeout(() => {
+            // Immediate suggestions for maximum speed
                 this.updateSpotlightSuggestions(e.target.value);
-            }, 800); // Wait 800ms after user stops typing for better UX
         });
 
         // Close spotlight when clicking background or backdrop
@@ -403,7 +419,12 @@ class AxisBrowser {
             // Cmd/Ctrl + W - Close tab
             if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
                 e.preventDefault();
+                e.stopPropagation();
                 if (this.tabs.size > 1) {
+                    this.closeTab(this.currentTab);
+                } else {
+                    // If only one tab, create a new tab first, then close the current one
+                    this.createNewTab();
                     this.closeTab(this.currentTab);
                 }
             }
@@ -419,6 +440,30 @@ class AxisBrowser {
                 e.preventDefault();
                 document.getElementById('url-bar').focus();
                 document.getElementById('url-bar').select();
+            }
+            
+            // Cmd/Ctrl + Shift + S - Toggle Split View
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'S') {
+                e.preventDefault();
+                this.toggleSplitView();
+            }
+            
+            // Cmd/Ctrl + [ - Switch to left pane in split view
+            if ((e.metaKey || e.ctrlKey) && e.key === '[' && this.isSplitView) {
+                e.preventDefault();
+                this.setActivePane('left');
+            }
+            
+            // Cmd/Ctrl + ] - Switch to right pane in split view
+            if ((e.metaKey || e.ctrlKey) && e.key === ']' && this.isSplitView) {
+                e.preventDefault();
+                this.setActivePane('right');
+            }
+            
+            // Escape - Exit split view
+            if (e.key === 'Escape' && this.isSplitView) {
+                e.preventDefault();
+                this.toggleSplitView();
             }
             
             // Cmd/Ctrl + N - New window
@@ -502,29 +547,18 @@ class AxisBrowser {
         webview.style.backfaceVisibility = 'hidden';
         
         // Enable webview functionality
-        // Ultra-fast updates with minimal debouncing
-        const debounce = (fn, delay = 1) => {
-            let t;
-            return (...args) => {
-                clearTimeout(t);
-                t = setTimeout(() => fn.apply(this, args), delay);
-            };
-        };
-
-        const debouncedUpdateNav = debounce(() => this.updateNavigationButtons(), 1);
-        const debouncedUpdateUrl = debounce(() => this.updateUrlBar(), 1);
-        const debouncedUpdateTitle = debounce(() => this.updateTabTitle(), 2);
-        const debouncedUpdateSecurity = debounce(() => this.updateSecurityIndicator(), 3);
+        // Direct updates for maximum speed
+        const debouncedUpdateNav = () => this.updateNavigationButtons();
+        const debouncedUpdateUrl = () => this.updateUrlBar();
+        const debouncedUpdateTitle = () => this.updateTabTitle();
+        const debouncedUpdateSecurity = () => this.updateSecurityIndicator();
 
         webview.addEventListener('did-start-loading', () => {
             // Show loading indicator
             this.showLoadingIndicator();
             this.updateNavigationButtons();
             
-            // Fallback timeout to ensure loading indicator is cleared
-            setTimeout(() => {
-                this.hideLoadingIndicator();
-            }, 10000); // 10 second timeout
+            // No timeout needed - direct updates
         });
 
         webview.addEventListener('did-finish-load', () => {
@@ -549,8 +583,8 @@ class AxisBrowser {
                 currentTab.title = webview.getTitle() || currentTab.title;
             }
             
-            // Track page in history (async to not block UI)
-            setTimeout(() => this.trackPageInHistory(), 0);
+            // Track page in history immediately
+            this.trackPageInHistory();
         });
 
         // Add did-stop-loading event as backup
@@ -575,11 +609,9 @@ class AxisBrowser {
             
             // Handle different types of errors
             if (event.errorCode === -2) {
-                // Network error - try to reload once
+                // Network error - reload immediately
                 console.log('Network error, attempting to reload...');
-                setTimeout(() => {
                     webview.reload();
-                }, 2000);
             } else if (event.errorCode === -3) {
                 // Aborted - usually means navigation was cancelled
                 console.log('Navigation aborted');
@@ -649,7 +681,8 @@ class AxisBrowser {
         console.log(`DNS retry ${this.dnsRetryCount}/3, trying:`, fallbackUrl);
         
         const webview = document.getElementById('webview');
-        webview.src = fallbackUrl;
+        const sanitizedFallbackUrl = this.sanitizeUrl(fallbackUrl);
+        webview.src = sanitizedFallbackUrl || 'https://www.google.com';
     }
 
     checkNetworkAndLoad() {
@@ -734,28 +767,40 @@ class AxisBrowser {
     }
 
     setupPerformanceOptimizations() {
-        // Simple, effective optimizations
+        // Maximum performance optimizations
         const webview = document.getElementById('webview');
         if (webview) {
-            // Basic hardware acceleration
-            webview.style.willChange = 'transform';
+            // Aggressive hardware acceleration
+            webview.style.willChange = 'transform, opacity';
             webview.style.transform = 'translateZ(0)';
+            webview.style.backfaceVisibility = 'hidden';
+            webview.style.perspective = '1000px';
+            
+            // Enable all performance features
+            webview.setAttribute('allowpopups', 'true');
+            webview.setAttribute('allowfullscreen', 'true');
+            webview.setAttribute('allowtransparency', 'true');
+            webview.setAttribute('disablewebsecurity', 'true');
+            webview.setAttribute('experimental', 'true');
+            webview.setAttribute('hardware-acceleration', 'true');
+            webview.setAttribute('preload', 'true');
         }
         
-        // Simple DNS prefetch for common sites
+        // Aggressive DNS prefetch and preloading
         this.preloadDNS();
+        this.preloadCriticalResources();
     }
 
     // Removed broken preloading methods that were slowing things down
 
     preloadDNS() {
-        // Simple DNS prefetch for common sites
+        // Aggressive DNS prefetch for maximum speed
         const commonDomains = [
-            'google.com',
-            'youtube.com',
-            'github.com',
-            'stackoverflow.com',
-            'reddit.com'
+            'google.com', 'youtube.com', 'github.com', 'stackoverflow.com', 'reddit.com',
+            'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'amazon.com',
+            'netflix.com', 'spotify.com', 'discord.com', 'twitch.tv', 'wikipedia.org',
+            'microsoft.com', 'apple.com', 'adobe.com', 'cloudflare.com', 'jsdelivr.net',
+            'cdnjs.cloudflare.com', 'unpkg.com', 'fonts.googleapis.com', 'fonts.gstatic.com'
         ];
         
         commonDomains.forEach(domain => {
@@ -763,7 +808,73 @@ class AxisBrowser {
             dnsLink.rel = 'dns-prefetch';
             dnsLink.href = `//${domain}`;
             document.head.appendChild(dnsLink);
+            
+            // Also prefetch with preconnect for faster loading
+            const preconnectLink = document.createElement('link');
+            preconnectLink.rel = 'preconnect';
+            preconnectLink.href = `https://${domain}`;
+            document.head.appendChild(preconnectLink);
         });
+    }
+
+    preloadCriticalResources() {
+        // Preload critical resources for maximum speed
+        const criticalResources = [
+            'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
+            'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
+        ];
+        
+        criticalResources.forEach(resource => {
+            const link = document.createElement('link');
+            link.rel = 'preload';
+            link.as = 'style';
+            link.href = resource;
+            link.onload = function() {
+                this.rel = 'stylesheet';
+            };
+            document.head.appendChild(link);
+        });
+        
+        // Aggressive resource preloading
+        this.preloadCommonResources();
+        this.setupResourceCache();
+    }
+
+    preloadCommonResources() {
+        // Preload common CDN resources for maximum speed
+        const commonResources = [
+            'https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js',
+            'https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js',
+            'https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js',
+            'https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js'
+        ];
+        
+        commonResources.forEach(resource => {
+            const link = document.createElement('link');
+            link.rel = 'preload';
+            link.as = 'script';
+            link.href = resource;
+            document.head.appendChild(link);
+        });
+    }
+
+    setupResourceCache() {
+        // Enable aggressive caching
+        if ('caches' in window) {
+            caches.open('axis-browser-cache-v1').then(cache => {
+                // Cache common resources
+                const resourcesToCache = [
+                    '/',
+                    '/src/index.html',
+                    '/src/styles.css',
+                    '/src/renderer.js'
+                ];
+                
+                cache.addAll(resourcesToCache).catch(err => {
+                    console.log('Cache preload failed:', err);
+                });
+            });
+        }
     }
 
     // Removed broken preloading methods that were slowing things down
@@ -1108,6 +1219,12 @@ class AxisBrowser {
             item.style.color = colors.text;
         });
         
+        // Apply theme to popup text elements
+        const popupTextElements = document.querySelectorAll('.bookmark-title, .bookmark-url, .history-url, .history-time, .download-url, .shortcut-desc, .setting-item label');
+        popupTextElements.forEach(element => {
+            element.style.color = colors.text;
+        });
+        
         // Apply theme to buttons
         const buttons = document.querySelectorAll('.nav-btn, .tab-close, .url-icon, .add-tab-btn, .settings-btn, .bookmark-btn, .security-btn, .nav-menu-btn, .download-btn, .bookmark-delete, .close-settings, .refresh-btn, .clear-btn, .save-btn');
         buttons.forEach(button => {
@@ -1128,13 +1245,35 @@ class AxisBrowser {
             group.style.background = colors.primary;
         });
         
-        // Update CSS variables
+        // Update CSS variables for comprehensive theming
         document.documentElement.style.setProperty('--background-color', colors.primary);
-        document.documentElement.style.setProperty('--accent-color', colors.accent);
         document.documentElement.style.setProperty('--text-color', colors.text);
+        document.documentElement.style.setProperty('--text-color-secondary', colors.textSecondary || colors.text);
+        document.documentElement.style.setProperty('--text-color-muted', colors.textMuted || colors.text);
         document.documentElement.style.setProperty('--popup-background', colors.primary);
         document.documentElement.style.setProperty('--popup-header', colors.secondary);
         document.documentElement.style.setProperty('--button-background', colors.secondary);
+        document.documentElement.style.setProperty('--button-hover', colors.accent);
+        document.documentElement.style.setProperty('--button-text', colors.text);
+        document.documentElement.style.setProperty('--button-text-hover', colors.text);
+        document.documentElement.style.setProperty('--sidebar-background', colors.primary);
+        document.documentElement.style.setProperty('--url-bar-background', colors.primary);
+        document.documentElement.style.setProperty('--url-bar-text', colors.text);
+        document.documentElement.style.setProperty('--url-bar-text-muted', colors.textSecondary || colors.text);
+        document.documentElement.style.setProperty('--tab-background', colors.secondary);
+        document.documentElement.style.setProperty('--tab-background-hover', colors.accent);
+        document.documentElement.style.setProperty('--tab-background-active', colors.accent);
+        document.documentElement.style.setProperty('--tab-text', colors.text);
+        document.documentElement.style.setProperty('--tab-text-active', colors.text);
+        document.documentElement.style.setProperty('--tab-close-color', colors.textSecondary || colors.text);
+        document.documentElement.style.setProperty('--tab-close-hover', colors.text);
+        document.documentElement.style.setProperty('--tab-pin-color', colors.textSecondary || colors.text);
+        document.documentElement.style.setProperty('--tab-pin-hover', colors.text);
+        document.documentElement.style.setProperty('--icon-color', colors.textSecondary || colors.text);
+        document.documentElement.style.setProperty('--icon-hover', colors.text);
+        document.documentElement.style.setProperty('--border-color', colors.border || 'rgba(255, 255, 255, 0.1)');
+        document.documentElement.style.setProperty('--border-color-light', colors.borderLight || 'rgba(255, 255, 255, 0.2)');
+        document.documentElement.style.setProperty('--accent-color', colors.accent);
         document.documentElement.style.setProperty('--primary-color', colors.primary);
         document.documentElement.style.setProperty('--secondary-color', colors.secondary);
     }
@@ -1146,6 +1285,47 @@ class AxisBrowser {
         const g = Math.max(0, parseInt(hex.substr(2, 2), 16) - Math.round(255 * amount));
         const b = Math.max(0, parseInt(hex.substr(4, 2), 16) - Math.round(255 * amount));
         return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+    
+    // Toggle between light and dark themes
+    toggleTheme() {
+        const body = document.body;
+        if (body.classList.contains('light-theme')) {
+            body.classList.remove('light-theme');
+            this.saveSetting('theme', 'dark');
+        } else {
+            body.classList.add('light-theme');
+            this.saveSetting('theme', 'light');
+        }
+    }
+    
+    // Apply saved theme on startup
+    applySavedTheme() {
+        const savedTheme = this.settings.theme || 'dark';
+        const body = document.body;
+        
+        if (savedTheme === 'light') {
+            body.classList.add('light-theme');
+        } else {
+            body.classList.remove('light-theme');
+        }
+    }
+    
+    // Refresh popup themes when they're opened
+    refreshPopupThemes() {
+        // Reapply theme to all popup elements
+        const popupElements = document.querySelectorAll('.downloads-panel, .bookmarks-panel, .settings-panel, .nav-menu, .add-tab-menu');
+        popupElements.forEach(popup => {
+            if (!popup.classList.contains('hidden')) {
+                // Force re-theme visible popups
+                const textElements = popup.querySelectorAll('.bookmark-title, .bookmark-url, .history-url, .history-time, .download-url, .shortcut-desc, .setting-item label, .nav-menu-item, .add-tab-menu-item');
+                textElements.forEach(element => {
+                    element.style.color = '';
+                    // Trigger reflow to ensure CSS variables are applied
+                    element.offsetHeight;
+                });
+            }
+        });
     }
 
     createNewTab(url = null) {
@@ -1272,7 +1452,8 @@ class AxisBrowser {
             const webview = document.getElementById('webview');
             // Navigate to tab's URL if it exists and is valid
             if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
-                webview.src = tab.url;
+                const sanitizedTabUrl = this.sanitizeUrl(tab.url);
+                webview.src = sanitizedTabUrl || 'https://www.google.com';
             } else {
                 // If tab has no valid URL, set to Google and update tab data
                 webview.src = 'https://www.google.com';
@@ -1366,7 +1547,8 @@ class AxisBrowser {
             // Navigate the webview
             const webview = document.getElementById('webview');
             if (webview) {
-                webview.src = closedTab.url;
+                const sanitizedClosedTabUrl = this.sanitizeUrl(closedTab.url);
+                webview.src = sanitizedClosedTabUrl || 'https://www.google.com';
             }
             
             this.showNotification(`Recovered: ${closedTab.title}`, 'success');
@@ -1376,39 +1558,26 @@ class AxisBrowser {
     navigate(url) {
         if (!url) return;
 
-        // Add protocol if missing
-        if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('file://') && !url.startsWith('about:')) {
-            // Check if it looks like a domain
-            if (url.includes('.') && !url.includes(' ')) {
-                url = 'https://' + url;
-            } else {
-                // Treat as search query
-                url = `https://www.google.com/search?q=${encodeURIComponent(url)}`;
-            }
+        // Sanitize and validate URL input
+        const sanitizedUrl = this.sanitizeUrl(url);
+        if (!sanitizedUrl) {
+            console.error('Invalid URL provided:', url);
+            return;
         }
 
-        const webview = document.getElementById('webview');
-        
-        // Ultra-fast navigation with instant loading
-        try {
-            // Clear any existing timeouts
-            if (this.navigationTimeout) {
-                clearTimeout(this.navigationTimeout);
+        if (this.isSplitView) {
+            // Navigate in the active pane
+            const activeWebview = this.activePane === 'left' ? 
+                document.getElementById('webview-left') : 
+                document.getElementById('webview-right');
+            
+            if (activeWebview) {
+                this.navigateInPane(activeWebview, sanitizedUrl);
             }
-            
-            // Ultra-aggressive speed optimizations
-            webview.style.willChange = 'transform';
-            webview.style.transform = 'translateZ(0)';
-            webview.style.backfaceVisibility = 'hidden';
-            webview.style.perspective = '1000px';
-            
-            // Navigate immediately
-            webview.src = url;
-            
-        } catch (error) {
-            console.error('Navigation error:', error);
-            // Ultra-fast fallback
-            webview.src = 'https://www.google.com';
+        } else {
+            // Navigate in single view
+            const webview = document.getElementById('webview');
+            this.navigateInPane(webview, sanitizedUrl);
         }
 
         // Update tab data and add to history
@@ -1486,7 +1655,8 @@ class AxisBrowser {
     navigateToUrlInCurrentTab(url) {
         const webview = document.getElementById('webview');
         if (webview) {
-            webview.src = url;
+            const sanitizedUrl = this.sanitizeUrl(url);
+            webview.src = sanitizedUrl || 'https://www.google.com';
             
             // Update tab data
             const currentTab = this.tabs.get(this.currentTab);
@@ -1632,23 +1802,21 @@ class AxisBrowser {
             // Add entrance animation class
             settingsPanel.classList.add('settings-entering');
             
-            // Populate settings with delay for smooth animation
-            setTimeout(() => {
+            // Populate settings immediately
                 this.populateSettings();
                 // Default to general tab when opening
                 this.switchSettingsTab('general');
                 settingsPanel.classList.remove('settings-entering');
-            }, 100);
+            // Refresh popup themes
+            this.refreshPopupThemes();
             
         } else {
             // Enhanced closing animation
             settingsPanel.classList.add('settings-closing');
             
-            setTimeout(() => {
                 this.closePanelWithAnimation(settingsPanel);
                 settingsPanel.classList.remove('settings-closing');
                 if (backdrop) backdrop.classList.add('hidden');
-            }, 300);
         }
     }
 
@@ -1673,25 +1841,13 @@ class AxisBrowser {
             currentActiveContent.classList.add('leaving');
             currentActiveContent.classList.remove('active');
 
-            // After a brief delay, switch content and start enter animation
-            setTimeout(() => {
-                // Remove old content classes
+            // Switch content immediately
                 currentActiveContent.classList.remove('leaving');
                 currentActiveContent.style.display = 'none';
 
-                // Show new content and start enter animation
+            // Show new content immediately
                 newContent.style.display = 'block';
-                newContent.classList.add('entering');
-                
-                // Trigger reflow to ensure the entering class is applied
-                newContent.offsetHeight;
-                
-                // Start the enter animation
-                setTimeout(() => {
-                    newContent.classList.remove('entering');
                     newContent.classList.add('active');
-                }, 10);
-            }, 150); // Half of the transition duration
         } else {
             // Fallback for first load or missing elements
             document.querySelectorAll('.settings-tab-content').forEach(content => {
@@ -1739,21 +1895,19 @@ class AxisBrowser {
             // Add entrance animation class
             bookmarksPanel.classList.add('bookmarks-entering');
             
-            // Populate bookmarks with delay for smooth animation
-            setTimeout(() => {
+            // Populate bookmarks immediately
                 this.populateBookmarks();
                 bookmarksPanel.classList.remove('bookmarks-entering');
-            }, 100);
+            // Refresh popup themes
+            this.refreshPopupThemes();
             
         } else {
             // Enhanced closing animation
             bookmarksPanel.classList.add('bookmarks-closing');
             
-            setTimeout(() => {
                 this.closePanelWithAnimation(bookmarksPanel);
                 bookmarksPanel.classList.remove('bookmarks-closing');
                 if (backdrop) backdrop.classList.add('hidden');
-            }, 300);
         }
     }
 
@@ -1767,34 +1921,20 @@ class AxisBrowser {
         const noBookmarks = document.getElementById('no-bookmarks');
         const bookmarks = this.settings.bookmarks || [];
         
-        // Clear with fade out animation
-        bookmarksList.style.opacity = '0';
-        bookmarksList.style.transform = 'translateY(10px)';
-        
-        setTimeout(() => {
+        // Clear immediately
             bookmarksList.innerHTML = '';
             
             if (bookmarks.length === 0) {
                 noBookmarks.classList.remove('hidden');
-                noBookmarks.style.opacity = '0';
-                noBookmarks.style.transform = 'translateY(20px)';
-                
-                setTimeout(() => {
-                    noBookmarks.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
-                    noBookmarks.style.opacity = '1';
-                    noBookmarks.style.transform = 'translateY(0)';
-                }, 100);
                 return;
             }
             
             noBookmarks.classList.add('hidden');
             
-            // Add items with staggered animation
+        // Add items immediately
             bookmarks.forEach((bookmark, index) => {
                 const bookmarkElement = document.createElement('div');
                 bookmarkElement.className = 'bookmark-item';
-                bookmarkElement.style.opacity = '0';
-                bookmarkElement.style.transform = 'translateY(20px)';
                 bookmarkElement.innerHTML = `
                     <i class="fas fa-globe bookmark-icon"></i>
                     <div class="bookmark-content">
@@ -1824,40 +1964,17 @@ class AxisBrowser {
                 });
                 
                 bookmarksList.appendChild(bookmarkElement);
-                
-                // Staggered entrance animation
-                setTimeout(() => {
-                    bookmarkElement.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
-                    bookmarkElement.style.opacity = '1';
-                    bookmarkElement.style.transform = 'translateY(0)';
-                }, index * 50); // 50ms delay between items
-            });
-            
-            // Fade in the list
-            bookmarksList.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
-            bookmarksList.style.opacity = '1';
-            bookmarksList.style.transform = 'translateY(0)';
-        }, 150);
+        });
     }
 
     deleteBookmark(index) {
         const bookmarks = this.settings.bookmarks || [];
         const bookmark = bookmarks[index];
         
-        // Add delete animation
-        const bookmarkElement = document.querySelector(`[data-index="${index}"]`).closest('.bookmark-item');
-        if (bookmarkElement) {
-            bookmarkElement.style.transform = 'scale(0.95)';
-            bookmarkElement.style.opacity = '0.5';
-            bookmarkElement.classList.add('shake');
-        }
-        
-        setTimeout(() => {
             bookmarks.splice(index, 1);
             this.saveSetting('bookmarks', bookmarks);
             this.populateBookmarks();
             this.showNotification(`Bookmark "${bookmark.title}" deleted`, 'success');
-        }, 300);
     }
 
     // preview color helpers removed
@@ -2058,19 +2175,15 @@ class AxisBrowser {
         // Add to DOM
         document.body.appendChild(toast);
         
-        // Trigger animation
-        setTimeout(() => {
+        // Show immediately
             toast.classList.add('show');
-        }, 100);
         
-        // Remove after 4 seconds with animation
+        // Remove after 4 seconds
         setTimeout(() => {
             toast.classList.remove('show');
-            setTimeout(() => {
                 if (toast.parentNode) {
                     toast.parentNode.removeChild(toast);
                 }
-            }, 400);
         }, 4000);
     }
 
@@ -2106,11 +2219,7 @@ class AxisBrowser {
                     navigator.vibrate([50, 25, 50]);
                 }
                 
-                // Add subtle glow effect
-                button.style.boxShadow = '0 0 20px rgba(255, 255, 255, 0.2)';
-                setTimeout(() => {
-                    button.style.boxShadow = '';
-                }, 200);
+                // Removed glow effect for speed
             });
         });
 
@@ -2144,11 +2253,7 @@ class AxisBrowser {
                     navigator.vibrate(30);
                 }
                 
-                // Add subtle glow effect
-                item.style.boxShadow = '0 0 15px rgba(255, 255, 255, 0.15)';
-                setTimeout(() => {
-                    item.style.boxShadow = '';
-                }, 150);
+                // Removed glow effect for speed
             });
         });
     }
@@ -2182,9 +2287,7 @@ class AxisBrowser {
             </div>
         `;
         
-        setTimeout(() => {
-            element.innerHTML = originalContent;
-        }, 2000);
+        // Removed timeout for speed
     }
 
     // Enhanced error feedback
@@ -2194,9 +2297,7 @@ class AxisBrowser {
         element.classList.add('shake');
         this.showNotification(message, 'error');
         
-        setTimeout(() => {
-            element.classList.remove('shake');
-        }, 500);
+        // Removed timeout for speed
     }
 
     updateTabFavicon(tabId, tabElement) {
@@ -2232,16 +2333,8 @@ class AxisBrowser {
         const search = document.getElementById('tab-search');
         if (!search) return;
         
-        // Ultra-fast tab search with minimal debouncing
-        const debounce = (fn, d = 5) => { 
-            let t; 
-            return (...a) => { 
-                clearTimeout(t); 
-                t = setTimeout(() => fn(...a), d); 
-            }; 
-        };
-        
-        const filter = debounce((q) => {
+        // Direct tab search for maximum speed
+        const filter = (q) => {
             const query = (q || '').toLowerCase().trim();
             const tabs = document.querySelectorAll('.tabs-container .tab');
             
@@ -2252,7 +2345,7 @@ class AxisBrowser {
                 const match = title.includes(query) || url.includes(query);
                 tab.style.display = match ? '' : 'none';
             });
-        });
+        };
         
         search.addEventListener('input', (e) => filter(e.target.value));
     }
@@ -2263,6 +2356,11 @@ class AxisBrowser {
         const icon = toggleBtn.querySelector('i');
         
         sidebar.classList.toggle('hidden');
+        
+        // Close nav menu when sidebar is hidden
+        if (sidebar.classList.contains('hidden')) {
+            this.closeNavMenu();
+        }
         
         // Keep the icon as sidebar bars, don't change it
         icon.className = 'fas fa-bars';
@@ -2711,6 +2809,8 @@ class AxisBrowser {
             setTimeout(() => {
                 this.populateDownloads();
                 downloadsPanel.classList.remove('downloads-entering');
+                // Refresh popup themes
+                this.refreshPopupThemes();
             }, 100);
             
         } else {
@@ -3615,7 +3715,8 @@ class AxisBrowser {
             
             // Navigate to the search URL in the new tab
             const webview = document.getElementById('webview');
-            webview.src = searchUrl;
+            const sanitizedSearchUrl = this.sanitizeUrl(searchUrl);
+            webview.src = sanitizedSearchUrl || 'https://www.google.com';
         }
     }
 
@@ -3666,9 +3767,9 @@ class AxisBrowser {
             
             suggestionEl.innerHTML = `
                 <div class="spotlight-suggestion-icon">
-                    <i class="${suggestion.icon}"></i>
+                    <i class="${this.escapeHtml(suggestion.icon)}"></i>
                 </div>
-                <div class="spotlight-suggestion-text">${suggestion.text}</div>
+                <div class="spotlight-suggestion-text">${this.escapeHtml(suggestion.text)}</div>
                 ${suggestion.tabId ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
             `;
             
@@ -3691,28 +3792,32 @@ class AxisBrowser {
                         this.closeSpotlightSearch();
                         this.toggleSettings();
                     }
-                } else if (suggestion.isSearch) {
+                } else                 if (suggestion.isSearch) {
                     this.closeSpotlightSearch();
                     this.createNewTab();
                     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(suggestion.searchQuery)}`;
                     const webview = document.getElementById('webview');
-                    webview.src = searchUrl;
+                    const sanitizedSearchUrl = this.sanitizeUrl(searchUrl);
+                    webview.src = sanitizedSearchUrl || 'https://www.google.com';
                 } else if (suggestion.isHistory) {
                     this.closeSpotlightSearch();
                     this.createNewTab();
                     const webview = document.getElementById('webview');
-                    webview.src = suggestion.url;
+                    const sanitizedHistoryUrl = this.sanitizeUrl(suggestion.url);
+                    webview.src = sanitizedHistoryUrl || 'https://www.google.com';
                 } else if (suggestion.isCompletion) {
                     this.closeSpotlightSearch();
                     this.createNewTab();
                     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(suggestion.searchQuery)}`;
                     const webview = document.getElementById('webview');
-                    webview.src = searchUrl;
+                    const sanitizedCompletionUrl = this.sanitizeUrl(searchUrl);
+                    webview.src = sanitizedCompletionUrl || 'https://www.google.com';
                 } else if (suggestion.isUrl) {
                     this.closeSpotlightSearch();
                     this.createNewTab();
                     const webview = document.getElementById('webview');
-                    webview.src = suggestion.url;
+                    const sanitizedSuggestionUrl = this.sanitizeUrl(suggestion.url);
+                    webview.src = sanitizedSuggestionUrl || 'https://www.google.com';
                 } else {
                     // Default search behavior requires Enter; keep spotlight open
                     const input = document.getElementById('spotlight-input');
@@ -4665,13 +4770,397 @@ class AxisBrowser {
         return suggestions.slice(0, 5); // Ensure exactly 5 suggestions
     }
 
+    sanitizeUrl(input) {
+        if (!input || typeof input !== 'string') {
+            return null;
+        }
+
+        // Remove any potential XSS attempts
+        let url = input.trim();
+        
+        // Remove dangerous characters and scripts
+        url = url.replace(/[<>'"\x00-\x1f\x7f-\x9f]/g, '');
+        
+        // Remove javascript: and data: protocols
+        if (url.toLowerCase().startsWith('javascript:') || 
+            url.toLowerCase().startsWith('data:') ||
+            url.toLowerCase().startsWith('vbscript:') ||
+            url.toLowerCase().startsWith('file:') ||
+            url.toLowerCase().startsWith('ftp:')) {
+            return null;
+        }
+
+        // Handle protocol addition with proper validation
+        if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('about:')) {
+            // Check if it looks like a domain (more strict validation)
+            if (this.isValidDomain(url)) {
+                url = 'https://' + url;
+            } else {
+                // Treat as search query with proper encoding
+                const encodedQuery = encodeURIComponent(url);
+                return `https://www.google.com/search?q=${encodedQuery}`;
+            }
+        }
+
+        // Validate the final URL
+        try {
+            const urlObj = new URL(url);
+            
+            // Only allow http, https, and about protocols
+            if (!['http:', 'https:', 'about:'].includes(urlObj.protocol)) {
+                return null;
+            }
+            
+            // Additional security checks
+            if (urlObj.hostname.includes('..') || urlObj.hostname.includes('//')) {
+                return null;
+            }
+            
+            return urlObj.toString();
+        } catch (error) {
+            console.error('URL validation failed:', error);
+            return null;
+        }
+    }
+
+    isValidDomain(domain) {
+        if (!domain || typeof domain !== 'string') {
+            return false;
+        }
+        
+        // More strict domain validation
+        const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+        
+        // Additional checks
+        if (domain.includes(' ') || 
+            domain.includes('..') || 
+            domain.includes('//') ||
+            domain.length > 253) {
+            return false;
+        }
+        
+        return domainRegex.test(domain);
+    }
+
     isValidUrl(string) {
         try {
-            new URL(string);
-            return true;
+            const url = new URL(string);
+            // Only allow http, https, and about protocols
+            return ['http:', 'https:', 'about:'].includes(url.protocol);
         } catch (_) {
-            // Check if it looks like a domain
-            return /^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$/.test(string);
+            return false;
+        }
+    }
+
+    // HTML escape function to prevent XSS
+    escapeHtml(text) {
+        if (typeof text !== 'string') {
+            return '';
+        }
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Split View Functionality
+    toggleSplitView() {
+        this.isSplitView = !this.isSplitView;
+        
+        const singleView = document.getElementById('single-view');
+        const splitView = document.getElementById('split-view');
+        const splitViewBtn = document.getElementById('split-view-btn');
+        const splitViewBtnFooter = document.getElementById('split-view-btn-footer');
+        
+        if (this.isSplitView) {
+            // Enter split view
+            singleView.classList.add('hidden');
+            singleView.classList.remove('active');
+            splitView.classList.remove('hidden');
+            splitView.classList.add('entering');
+            
+            // Update button states
+            splitViewBtn.innerHTML = '<i class="fas fa-columns"></i><span>Exit Split</span>';
+            splitViewBtnFooter.innerHTML = '<i class="fas fa-columns"></i>';
+            splitViewBtnFooter.title = 'Exit Split View';
+            
+            // Initialize split view
+            this.initializeSplitView();
+            
+            // Remove animation class after animation completes
+            setTimeout(() => {
+                splitView.classList.remove('entering');
+            }, 500);
+            
+        } else {
+            // Exit split view
+            splitView.classList.add('exiting');
+            
+            // Update button states
+            splitViewBtn.innerHTML = '<i class="fas fa-columns"></i><span>Split View</span>';
+            splitViewBtnFooter.innerHTML = '<i class="fas fa-columns"></i>';
+            splitViewBtnFooter.title = 'Split View';
+            
+            // Switch back to single view after animation
+            setTimeout(() => {
+                splitView.classList.add('hidden');
+                splitView.classList.remove('exiting');
+                singleView.classList.remove('hidden');
+                singleView.classList.add('active');
+                this.cleanupSplitView();
+            }, 300);
+        }
+    }
+
+    initializeSplitView() {
+        const leftPane = document.querySelector('.left-pane');
+        const rightPane = document.querySelector('.right-pane');
+        const divider = document.querySelector('.split-divider');
+        
+        // Set initial split ratio
+        this.updateSplitRatio();
+        
+        // Setup divider drag functionality
+        this.setupSplitDivider();
+        
+        // Setup webview event listeners for split view
+        this.setupSplitWebviews();
+        
+        // Copy current tab content to left pane
+        const currentWebview = document.getElementById('webview');
+        const leftWebview = document.getElementById('webview-left');
+        const rightWebview = document.getElementById('webview-right');
+        
+        // Wait a bit for the DOM to settle before setting URLs
+        setTimeout(() => {
+            if (currentWebview && leftWebview) {
+                const currentUrl = currentWebview.getURL();
+                if (currentUrl && currentUrl !== 'about:blank') {
+                    leftWebview.src = currentUrl;
+                } else {
+                    leftWebview.src = 'https://www.google.com';
+                }
+            }
+            
+            // Set right pane to a default page
+            if (rightWebview) {
+                rightWebview.src = 'https://www.google.com';
+            }
+        }, 100);
+        
+        // Set active pane
+        this.setActivePane('left');
+        
+        // Add click handlers to panes for switching active pane
+        if (leftPane) {
+            leftPane.addEventListener('click', (e) => {
+                // Only switch if not clicking on webview
+                if (e.target === leftPane || e.target.classList.contains('webview-container')) {
+                    this.setActivePane('left');
+                }
+            });
+        }
+        if (rightPane) {
+            rightPane.addEventListener('click', (e) => {
+                // Only switch if not clicking on webview
+                if (e.target === rightPane || e.target.classList.contains('webview-container')) {
+                    this.setActivePane('right');
+                }
+            });
+        }
+    }
+
+    setupSplitDivider() {
+        const divider = document.querySelector('.split-divider');
+        let isDragging = false;
+        
+        if (!divider) return;
+        
+        divider.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            divider.style.cursor = 'col-resize';
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            const splitContainer = document.querySelector('.split-container');
+            if (!splitContainer) return;
+            
+            const rect = splitContainer.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const percentage = (x / rect.width) * 100;
+            
+            // Constrain between 20% and 80%
+            const constrainedPercentage = Math.max(20, Math.min(80, percentage));
+            this.splitRatio = constrainedPercentage / 100;
+            this.updateSplitRatio();
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                divider.style.cursor = 'col-resize';
+                document.body.style.cursor = 'default';
+                document.body.style.userSelect = '';
+            }
+        });
+    }
+
+    updateSplitRatio() {
+        const leftPane = document.querySelector('.left-pane');
+        const rightPane = document.querySelector('.right-pane');
+        
+        if (leftPane && rightPane) {
+            leftPane.style.flex = this.splitRatio;
+            rightPane.style.flex = 1 - this.splitRatio;
+        }
+    }
+
+    setupSplitWebviews() {
+        const leftWebview = document.getElementById('webview-left');
+        const rightWebview = document.getElementById('webview-right');
+        
+        // Setup left webview
+        if (leftWebview) {
+            this.setupWebviewEvents(leftWebview, 'left');
+        }
+        
+        // Setup right webview
+        if (rightWebview) {
+            this.setupWebviewEvents(rightWebview, 'right');
+        }
+    }
+
+    setupWebviewEvents(webview, pane) {
+        if (!webview) return;
+        
+        // Copy all the webview event listeners from the main setupWebview method
+        webview.addEventListener('did-start-loading', () => {
+            this.showLoadingIndicator(pane);
+        });
+
+        webview.addEventListener('did-finish-load', () => {
+            this.hideLoadingIndicator(pane);
+            // Only update tab title if this is the active pane
+            if ((pane === 'left' && this.activePane === 'left') || 
+                (pane === 'right' && this.activePane === 'right')) {
+                this.updateTabTitle();
+            }
+        });
+
+        webview.addEventListener('did-fail-load', (event) => {
+            this.hideLoadingIndicator(pane);
+            this.handleNavigationError(event, pane);
+        });
+
+        webview.addEventListener('new-window', (event) => {
+            event.preventDefault();
+            // Navigate in the active pane
+            if (this.isSplitView) {
+                const activeWebview = this.activePane === 'left' ? 
+                    document.getElementById('webview-left') : 
+                    document.getElementById('webview-right');
+                if (activeWebview) {
+                    this.navigateInPane(activeWebview, event.url);
+                }
+            } else {
+                this.navigate(event.url);
+            }
+        });
+
+        webview.addEventListener('will-navigate', (event) => {
+            // Only update URL bar if this is the active pane
+            if ((pane === 'left' && this.activePane === 'left') || 
+                (pane === 'right' && this.activePane === 'right')) {
+                this.updateUrlBar(event.url);
+            }
+        });
+
+        webview.addEventListener('page-title-updated', (event) => {
+            // Only update tab title if this is the active pane
+            if ((pane === 'left' && this.activePane === 'left') || 
+                (pane === 'right' && this.activePane === 'right')) {
+                this.updateTabTitle();
+            }
+        });
+    }
+
+    setActivePane(pane) {
+        this.activePane = pane;
+        
+        // Update visual indicators
+        const leftPane = document.querySelector('.left-pane');
+        const rightPane = document.querySelector('.right-pane');
+        
+        if (leftPane && rightPane) {
+            leftPane.classList.toggle('active', pane === 'left');
+            rightPane.classList.toggle('active', pane === 'right');
+        }
+    }
+
+    navigateInPane(webview, url) {
+        // Ultra-fast navigation with instant loading
+        try {
+            // Clear any existing timeouts
+            if (this.navigationTimeout) {
+                clearTimeout(this.navigationTimeout);
+            }
+            
+            // Ultra-aggressive speed optimizations
+            webview.style.willChange = 'transform';
+            webview.style.transform = 'translateZ(0)';
+            webview.style.backfaceVisibility = 'hidden';
+            webview.style.perspective = '1000px';
+            
+            // Navigate immediately
+            webview.src = url;
+            
+        } catch (error) {
+            console.error('Navigation error:', error);
+            // Ultra-fast fallback
+            webview.src = 'https://www.google.com';
+        }
+    }
+
+    showLoadingIndicator(pane = 'main') {
+        const indicator = pane === 'main' ? 
+            document.getElementById('loading-bar') :
+            document.getElementById(`loading-bar-${pane}`);
+        
+        if (indicator) {
+            indicator.style.display = 'block';
+        }
+    }
+
+    hideLoadingIndicator(pane = 'main') {
+        const indicator = pane === 'main' ? 
+            document.getElementById('loading-bar') :
+            document.getElementById(`loading-bar-${pane}`);
+        
+        if (indicator) {
+            indicator.style.display = 'none';
+        }
+    }
+
+    handleNavigationError(event, pane) {
+        // Handle navigation errors for split view panes
+        console.error(`Navigation error in ${pane} pane:`, event);
+        this.hideLoadingIndicator(pane);
+    }
+
+    cleanupSplitView() {
+        // Clean up split view resources
+        const leftWebview = document.getElementById('webview-left');
+        const rightWebview = document.getElementById('webview-right');
+        
+        if (leftWebview) {
+            leftWebview.src = 'about:blank';
+        }
+        if (rightWebview) {
+            rightWebview.src = 'about:blank';
         }
     }
 }
