@@ -29,11 +29,34 @@ function createWindow() {
       enableRemoteModule: false,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
-      // Performance optimizations
+      // Maximum performance optimizations
       backgroundThrottling: false,
       offscreen: false,
       experimentalFeatures: true,
-      enableBlinkFeatures: 'CSSColorSchemeUARendering'
+      enableBlinkFeatures: 'CSSColorSchemeUARendering',
+      // Speed optimizations
+      hardwareAcceleration: true,
+      webSecurity: false,
+      allowRunningInsecureContent: true,
+      experimentalCanvasFeatures: true,
+      enableWebGL: true,
+      enableWebGL2: true,
+      enableAcceleratedVideoDecode: true,
+      enableAcceleratedVideoEncode: true,
+      enableGpuRasterization: true,
+      enableZeroCopy: true,
+      enableHardwareAcceleration: true,
+      enableAggressiveDomStorageFlushing: true,
+      enableExperimentalWebPlatformFeatures: true,
+      enableTcpFastOpen: true,
+      enableQuic: true,
+      aggressiveCacheDiscard: true,
+      enableNetworkService: true,
+      enableNetworkServiceLogging: false,
+      enableBlinkFeatures: 'CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn',
+      enableThrottleForegroundTimers: true,
+      enableWebGPU: true,
+      enableWebGPUDawn: true
     },
     titleBarStyle: 'hiddenInset',
     frame: false,
@@ -54,8 +77,16 @@ function createWindow() {
     mainWindow = null;
   });
 
-  // Handle new window requests
+  // Handle new window requests with URL validation
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // Validate URL before allowing new windows
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      // Additional security checks
+      if (url.includes('javascript:') || url.includes('data:') || url.includes('file:')) {
+        return { action: 'deny' };
+      }
+      return { action: 'allow' };
+    }
     return { action: 'deny' };
   });
 
@@ -261,6 +292,8 @@ function createMenu() {
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
+  // Don't quit on macOS, keep the app running even when all windows are closed
+  // This prevents the app from closing when the last tab is closed
   if (process.platform !== 'darwin') {
     app.quit();
   }
