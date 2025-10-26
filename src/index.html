@@ -83,13 +83,16 @@
                         </button>
                     </div>
                     
-                    <!-- Center: Downloads and Bookmarks buttons -->
+                    <!-- Center: Downloads, Bookmarks, and Split View buttons -->
                     <div class="center-buttons">
                         <button id="downloads-btn-footer" class="nav-btn" title="Downloads">
                             <i class="fas fa-download"></i>
                         </button>
                         <button id="bookmarks-btn-footer" class="nav-btn" title="Bookmarks">
                             <i class="fas fa-bookmark"></i>
+                        </button>
+                        <button id="split-view-btn-footer" class="nav-btn" title="Split View">
+                            <i class="fas fa-columns"></i>
                         </button>
                     </div>
                     
@@ -117,25 +120,83 @@
 
             <!-- Web Content Area -->
             <div id="content-area">
-                <div class="webview-container">
-                    <div id="loading-bar" class="loading-bar"></div>
-                    <div id="zoom-indicator" class="zoom-indicator hidden">
-                        <div class="zoom-content">
-                            <i class="fas fa-search-plus"></i>
-                            <span class="zoom-percentage">100%</span>
+                <!-- Single View -->
+                <div id="single-view" class="view-container active">
+                    <div class="webview-container">
+                        <div id="loading-bar" class="loading-bar"></div>
+                        <div id="zoom-indicator" class="zoom-indicator hidden">
+                            <div class="zoom-content">
+                                <i class="fas fa-search-plus"></i>
+                                <span class="zoom-percentage">100%</span>
+                            </div>
+                        </div>
+                        <webview id="webview" 
+                                 src="about:blank" 
+                                 allowpopups 
+                                 webpreferences="allowRunningInsecureContent,experimentalFeatures,contextIsolation=false,nodeIntegration=false,webSecurity=false,allowDisplayingInsecureContent,allowRunningInsecureContent,accelerated2dCanvas=true,acceleratedJpegDecoding=true,acceleratedVideoDecode=true,acceleratedVideoEncode=true,enableWebGL=true,enableWebGL2=true,enableAcceleratedVideoDecode=true,enableAcceleratedVideoEncode=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,enableAggressiveDomStorageFlushing=true,enableExperimentalWebPlatformFeatures=true,enableTcpFastOpen=true,enableQuic=true,aggressiveCacheDiscard=true,enableNetworkService=true,enableNetworkServiceLogging=true,enableBlinkFeatures=CSSContainerQueries,enableThrottleForegroundTimers=true,enableWebGPU=true,enableWebGPUDawn=true"
+                                 partition="persist:main"
+                                 useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                                 preload=""
+                                 autosize="true"
+                                 disablewebsecurity="true"
+                                 style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; perspective: 1000px;">
+                        </webview>
+                    </div>
+                </div>
+
+                <!-- Split View -->
+                <div id="split-view" class="view-container hidden">
+                    <div class="split-container">
+                        <div class="left-pane active">
+                            <div class="webview-container">
+                                <div id="loading-bar-left" class="loading-bar"></div>
+                                <div id="zoom-indicator-left" class="zoom-indicator hidden">
+                                    <div class="zoom-content">
+                                        <i class="fas fa-search-plus"></i>
+                                        <span class="zoom-percentage">100%</span>
+                                    </div>
+                                </div>
+                                <webview id="webview-left" 
+                                         src="about:blank" 
+                                         allowpopups 
+                                         webpreferences="allowRunningInsecureContent,experimentalFeatures,contextIsolation=false,nodeIntegration=false,webSecurity=false,allowDisplayingInsecureContent,allowRunningInsecureContent,accelerated2dCanvas=true,acceleratedJpegDecoding=true,acceleratedVideoDecode=true,acceleratedVideoEncode=true,enableWebGL=true,enableWebGL2=true,enableAcceleratedVideoDecode=true,enableAcceleratedVideoEncode=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,enableAggressiveDomStorageFlushing=true,enableExperimentalWebPlatformFeatures=true,enableTcpFastOpen=true,enableQuic=true,aggressiveCacheDiscard=true,enableNetworkService=true,enableNetworkServiceLogging=true,enableBlinkFeatures=CSSContainerQueries,enableThrottleForegroundTimers=true,enableWebGPU=true,enableWebGPUDawn=true"
+                                         partition="persist:main"
+                                         useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                                         preload=""
+                                         autosize="true"
+                                         disablewebsecurity="true"
+                                         style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; perspective: 1000px;">
+                                </webview>
+                            </div>
+                        </div>
+                        
+                        <div class="split-divider">
+                            <div class="split-handle"></div>
+                        </div>
+                        
+                        <div class="right-pane">
+                            <div class="webview-container">
+                                <div id="loading-bar-right" class="loading-bar"></div>
+                                <div id="zoom-indicator-right" class="zoom-indicator hidden">
+                                    <div class="zoom-content">
+                                        <i class="fas fa-search-plus"></i>
+                                        <span class="zoom-percentage">100%</span>
+                                    </div>
+                                </div>
+                                <webview id="webview-right" 
+                                         src="about:blank" 
+                                         allowpopups 
+                                         webpreferences="allowRunningInsecureContent,experimentalFeatures,contextIsolation=false,nodeIntegration=false,webSecurity=false,allowDisplayingInsecureContent,allowRunningInsecureContent,accelerated2dCanvas=true,acceleratedJpegDecoding=true,acceleratedVideoDecode=true,acceleratedVideoEncode=true,enableWebGL=true,enableWebGL2=true,enableAcceleratedVideoDecode=true,enableAcceleratedVideoEncode=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,enableAggressiveDomStorageFlushing=true,enableExperimentalWebPlatformFeatures=true,enableTcpFastOpen=true,enableQuic=true,aggressiveCacheDiscard=true,enableNetworkService=true,enableNetworkServiceLogging=true,enableBlinkFeatures=CSSContainerQueries,enableThrottleForegroundTimers=true,enableWebGPU=true,enableWebGPUDawn=true"
+                                         partition="persist:main"
+                                         useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                                         preload=""
+                                         autosize="true"
+                                         disablewebsecurity="true"
+                                         style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; perspective: 1000px;">
+                                </webview>
+                            </div>
                         </div>
                     </div>
-                    <webview id="webview" 
-                             src="about:blank" 
-                             allowpopups 
-                             webpreferences="allowRunningInsecureContent,experimentalFeatures,contextIsolation=false,nodeIntegration=false,webSecurity=false,allowDisplayingInsecureContent,allowRunningInsecureContent,accelerated2dCanvas=true,acceleratedJpegDecoding=true,acceleratedVideoDecode=true,acceleratedVideoEncode=true,enableWebGL=true,enableWebGL2=true,enableAcceleratedVideoDecode=true,enableAcceleratedVideoEncode=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,enableAggressiveDomStorageFlushing=true,enableExperimentalWebPlatformFeatures=true,enableTcpFastOpen=true,enableQuic=true,aggressiveCacheDiscard=true,enableNetworkService=true,enableNetworkServiceLogging=true,enableBlinkFeatures=CSSContainerQueries,enableThrottleForegroundTimers=true,enableWebGPU=true,enableWebGPUDawn=true"
-                             partition="persist:main"
-                             useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                             preload=""
-                             autosize="true"
-                             disablewebsecurity="true"
-                             style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; perspective: 1000px;">
-                    </webview>
                 </div>
             </div>
         </div>
@@ -148,6 +209,10 @@
             <button id="toggle-sidebar-btn" class="nav-menu-item">
                 <i class="fas fa-bars"></i>
                 <span>Toggle Sidebar</span>
+            </button>
+            <button id="split-view-btn" class="nav-menu-item">
+                <i class="fas fa-columns"></i>
+                <span>Split View</span>
             </button>
             <button id="refresh-btn" class="nav-menu-item">
                 <i class="fas fa-redo"></i>
