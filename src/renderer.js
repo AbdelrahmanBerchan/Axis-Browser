@@ -1,8 +1,8 @@
 // Axis Browser Renderer Process
 class AxisBrowser {
     constructor() {
-        this.currentTab = 1;
-        this.tabs = new Map();
+        this.currentTab = null; // Start with no tabs
+        this.tabs = new Map(); // Start with empty tabs
         this.settings = {};
         this.closedTabs = []; // Store recently closed tabs for recovery
         this.isSplitView = false;
@@ -26,6 +26,9 @@ class AxisBrowser {
         this.setupTabDragDrop();
         this.setupAddTabMenu();
         this.setupPerformanceOptimizations();
+        
+        // Show empty state initially (no tabs on startup)
+        this.updateEmptyState();
         
         // Make browser instance globally accessible for incognito windows
         window.browser = this;
@@ -72,12 +75,8 @@ class AxisBrowser {
             this.toggleSidebar();
         });
 
-        // Split view buttons
+        // Split view button
         document.getElementById('split-view-btn').addEventListener('click', () => {
-            this.toggleSplitView();
-        });
-        
-        document.getElementById('split-view-btn-footer').addEventListener('click', () => {
             this.toggleSplitView();
         });
 
@@ -171,6 +170,20 @@ class AxisBrowser {
             this.filterDownloads(e.target.value);
         });
 
+        // Empty state new tab buttons - open spotlight search
+        const emptyStateBtn = document.getElementById('empty-state-new-tab');
+        if (emptyStateBtn) {
+            emptyStateBtn.addEventListener('click', () => {
+                this.showSpotlightSearch();
+            });
+        }
+        const emptyStateBtnEmpty = document.getElementById('empty-state-new-tab-empty');
+        if (emptyStateBtnEmpty) {
+            emptyStateBtnEmpty.addEventListener('click', () => {
+                this.showSpotlightSearch();
+            });
+        }
+
         // Security panel
         document.getElementById('close-security').addEventListener('click', () => {
             this.toggleSecurity();
@@ -228,9 +241,37 @@ class AxisBrowser {
         const backdrop = document.getElementById('modal-backdrop');
         if (backdrop) {
         backdrop.addEventListener('click', () => {
-            document.getElementById('settings-panel').classList.add('hidden');
-            document.getElementById('downloads-panel').classList.add('hidden');
-            document.getElementById('bookmarks-panel').classList.add('hidden');
+            const settingsPanel = document.getElementById('settings-panel');
+            const downloadsPanel = document.getElementById('downloads-panel');
+            const bookmarksPanel = document.getElementById('bookmarks-panel');
+            
+            // Close settings with animation
+            if (settingsPanel && !settingsPanel.classList.contains('hidden')) {
+                settingsPanel.classList.add('settings-closing');
+                setTimeout(() => {
+                    settingsPanel.classList.add('hidden');
+                    settingsPanel.classList.remove('settings-closing');
+                }, 500);
+            }
+            
+            // Close downloads with animation
+            if (downloadsPanel && !downloadsPanel.classList.contains('hidden')) {
+                downloadsPanel.classList.add('downloads-closing');
+                setTimeout(() => {
+                    downloadsPanel.classList.add('hidden');
+                    downloadsPanel.classList.remove('downloads-closing');
+                }, 500);
+            }
+            
+            // Close bookmarks with animation
+            if (bookmarksPanel && !bookmarksPanel.classList.contains('hidden')) {
+                bookmarksPanel.classList.add('bookmarks-closing');
+                setTimeout(() => {
+                    bookmarksPanel.classList.add('hidden');
+                    bookmarksPanel.classList.remove('bookmarks-closing');
+                }, 500);
+            }
+            
             backdrop.classList.add('hidden');
         });
         }
@@ -238,6 +279,19 @@ class AxisBrowser {
         // Context menu event listeners
         document.getElementById('rename-tab-option').addEventListener('click', () => {
             this.renameCurrentTab();
+            this.hideTabContextMenu();
+        });
+
+        document.getElementById('duplicate-tab-option').addEventListener('click', () => {
+            console.log('Duplicate tab option clicked!');
+            // Close the context menu immediately
+            this.hideTabContextMenu();
+            // Then duplicate the tab
+            this.duplicateCurrentTab();
+        });
+
+        document.getElementById('split-view-option').addEventListener('click', () => {
+            this.toggleSplitView();
             this.hideTabContextMenu();
         });
 
@@ -402,6 +456,18 @@ class AxisBrowser {
             this.createNewTab();
         });
 
+        // Listen for close tab accelerator from main process
+        window.electronAPI.onCloseTab(() => {
+            if (this.currentTab) {
+                this.closeTab(this.currentTab);
+            }
+        });
+
+        // Listen for quit request from main process
+        window.electronAPI.onRequestQuit(() => {
+            this.showQuitConfirmation();
+        });
+
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
             // Cmd/Ctrl + T - Show spotlight search
@@ -420,11 +486,7 @@ class AxisBrowser {
             if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
                 e.preventDefault();
                 e.stopPropagation();
-                if (this.tabs.size > 1) {
-                    this.closeTab(this.currentTab);
-                } else {
-                    // If only one tab, create a new tab first, then close the current one
-                    this.createNewTab();
+                if (this.currentTab) {
                     this.closeTab(this.currentTab);
                 }
             }
@@ -1196,7 +1258,7 @@ class AxisBrowser {
         }
         
         // Apply theme to popups
-        const popups = document.querySelectorAll('.downloads-panel, .bookmarks-panel, .settings-panel, .nav-menu, .add-tab-menu');
+        const popups = document.querySelectorAll('.downloads-panel, .bookmarks-panel, .settings-panel, .nav-menu, .add-tab-menu, .context-menu');
         popups.forEach(popup => {
             popup.style.background = colors.primary;
         });
@@ -1214,7 +1276,7 @@ class AxisBrowser {
         });
         
         // Apply theme to popup items
-        const popupItems = document.querySelectorAll('.download-item, .bookmark-item, .setting-item, .nav-menu-item, .add-tab-menu-item');
+        const popupItems = document.querySelectorAll('.download-item, .bookmark-item, .setting-item, .nav-menu-item, .add-tab-menu-item, .context-menu-item');
         popupItems.forEach(item => {
             item.style.color = colors.text;
         });
@@ -1314,11 +1376,11 @@ class AxisBrowser {
     // Refresh popup themes when they're opened
     refreshPopupThemes() {
         // Reapply theme to all popup elements
-        const popupElements = document.querySelectorAll('.downloads-panel, .bookmarks-panel, .settings-panel, .nav-menu, .add-tab-menu');
+        const popupElements = document.querySelectorAll('.downloads-panel, .bookmarks-panel, .settings-panel, .nav-menu, .add-tab-menu, .context-menu');
         popupElements.forEach(popup => {
             if (!popup.classList.contains('hidden')) {
                 // Force re-theme visible popups
-                const textElements = popup.querySelectorAll('.bookmark-title, .bookmark-url, .history-url, .history-time, .download-url, .shortcut-desc, .setting-item label, .nav-menu-item, .add-tab-menu-item');
+                const textElements = popup.querySelectorAll('.bookmark-title, .bookmark-url, .history-url, .history-time, .download-url, .shortcut-desc, .setting-item label, .nav-menu-item, .add-tab-menu-item, .context-menu-item');
                 textElements.forEach(element => {
                     element.style.color = '';
                     // Trigger reflow to ensure CSS variables are applied
@@ -1354,40 +1416,35 @@ class AxisBrowser {
         // Store tab data
         this.tabs.set(tabId, {
             id: tabId,
-            url: url || 'https://www.google.com',
+            url: url || null,
             title: 'New Tab',
             canGoBack: false,
             canGoForward: false,
-            history: url ? [url] : ['https://www.google.com'], // Navigation history for this tab
-            historyIndex: url ? 0 : 0 // Current position in history
+            history: url ? [url] : [], // Navigation history for this tab
+            historyIndex: url ? 0 : -1 // Current position in history
         });
-
-        // Initialize the first tab if it doesn't exist
-        if (!this.tabs.has(1)) {
-            this.tabs.set(1, {
-                id: 1,
-                url: 'https://www.google.com',
-                title: 'New Tab',
-                canGoBack: false,
-                canGoForward: false,
-                history: ['https://www.google.com'],
-                historyIndex: 0
-            });
-        }
 
         // Set up tab event listeners
         this.setupTabEventListeners(tabElement, tabId);
 
-        // Save current tab state before switching
+        // Save current tab state before switching (if there is a current tab)
         if (this.currentTab && this.tabs.has(this.currentTab)) {
             const currentTab = this.tabs.get(this.currentTab);
             const webview = document.getElementById('webview');
-            currentTab.url = webview.getURL();
-            currentTab.title = webview.getTitle() || currentTab.title;
+            if (webview) {
+                const currentUrl = webview.getURL();
+                if (currentUrl && currentUrl !== 'about:blank') {
+                    currentTab.url = currentUrl;
+                    currentTab.title = webview.getTitle() || currentTab.title;
+                }
+            }
         }
 
         // Switch to new tab
         this.switchToTab(tabId);
+
+        // Hide empty state now that we have a tab
+        this.updateEmptyState();
 
         // Navigate to google.com for new tabs without URL
         if (!url) {
@@ -1434,6 +1491,10 @@ class AxisBrowser {
     }
 
     switchToTab(tabId) {
+        if (!tabId || !this.tabs.has(tabId)) {
+            return;
+        }
+
         // Update active tab
         document.querySelectorAll('.tab').forEach(tab => {
             tab.classList.remove('active');
@@ -1450,24 +1511,45 @@ class AxisBrowser {
         const tab = this.tabs.get(tabId);
         if (tab) {
             const webview = document.getElementById('webview');
-            // Navigate to tab's URL if it exists and is valid
-            if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
-                const sanitizedTabUrl = this.sanitizeUrl(tab.url);
-                webview.src = sanitizedTabUrl || 'https://www.google.com';
-            } else {
-                // If tab has no valid URL, set to Google and update tab data
-                webview.src = 'https://www.google.com';
-                tab.url = 'https://www.google.com';
-                // Update history if it's empty
-                if (!tab.history || tab.history.length === 0) {
-                    tab.history = ['https://www.google.com'];
-                    tab.historyIndex = 0;
+            if (webview) {
+                // Navigate to tab's URL if it exists and is valid
+                if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
+                    const sanitizedTabUrl = this.sanitizeUrl(tab.url);
+                    webview.src = sanitizedTabUrl || 'https://www.google.com';
+                } else {
+                    // If tab has no valid URL, set to Google and update tab data
+                    webview.src = 'https://www.google.com';
+                    tab.url = 'https://www.google.com';
+                    // Update history if it's empty
+                    if (!tab.history || tab.history.length === 0) {
+                        tab.history = ['https://www.google.com'];
+                        tab.historyIndex = 0;
+                    }
                 }
             }
         }
         
+        // Hide empty state when switching to a tab
+        this.updateEmptyState();
         this.updateNavigationButtons();
         this.updateUrlBar();
+    }
+
+    updateEmptyState() {
+        const emptyState = document.getElementById('empty-state');
+        if (!emptyState) return;
+
+        const emptyContent = document.getElementById('empty-state-empty');
+        
+        if (this.tabs.size === 0 || this.currentTab === null) {
+            // Show empty state
+            emptyState.classList.remove('hidden');
+            if (emptyContent) emptyContent.classList.remove('hidden');
+        } else {
+            // Hide empty state
+            emptyState.classList.add('hidden');
+            if (emptyContent) emptyContent.classList.add('hidden');
+        }
     }
 
     switchToTabByIndex(index) {
@@ -1506,13 +1588,21 @@ class AxisBrowser {
 
         this.tabs.delete(tabId);
 
-        // If we closed the active tab, switch to another tab
+        // If we closed the active tab, switch to another tab or show empty state
         if (this.currentTab === tabId) {
             const remainingTabs = Array.from(this.tabs.keys());
             if (remainingTabs.length > 0) {
                 this.switchToTab(remainingTabs[remainingTabs.length - 1]);
             } else {
-                this.createNewTab();
+                // No more tabs - show empty state
+                this.currentTab = null;
+                const webview = document.getElementById('webview');
+                if (webview) {
+                    webview.src = 'about:blank';
+                }
+                this.updateEmptyState();
+                this.updateUrlBar();
+                this.updateNavigationButtons();
             }
         }
     }
@@ -1557,6 +1647,12 @@ class AxisBrowser {
 
     navigate(url) {
         if (!url) return;
+
+        // Create a tab if there are no tabs
+        if (this.tabs.size === 0 || this.currentTab === null) {
+            this.createNewTab(url);
+            return;
+        }
 
         // Sanitize and validate URL input
         const sanitizedUrl = this.sanitizeUrl(url);
@@ -1609,6 +1705,7 @@ class AxisBrowser {
     }
 
     goBack() {
+        if (!this.currentTab || !this.tabs.has(this.currentTab)) return;
         const currentTab = this.tabs.get(this.currentTab);
         if (currentTab && currentTab.history && currentTab.history.length > 1 && currentTab.historyIndex > 0) {
             // Move back in tab's history
@@ -1631,6 +1728,7 @@ class AxisBrowser {
     }
 
     goForward() {
+        if (!this.currentTab || !this.tabs.has(this.currentTab)) return;
         const currentTab = this.tabs.get(this.currentTab);
         if (currentTab && currentTab.history && currentTab.history.length > 1 && currentTab.historyIndex < currentTab.history.length - 1) {
             // Move forward in tab's history
@@ -1670,16 +1768,24 @@ class AxisBrowser {
     }
 
     refresh() {
+        if (!this.currentTab || !this.tabs.has(this.currentTab)) return;
         const webview = document.getElementById('webview');
-        webview.reload();
+        if (webview) {
+            webview.reload();
+        }
     }
 
     updateNavigationButtons() {
-        const currentTab = this.tabs.get(this.currentTab);
         const backBtn = document.getElementById('back-btn');
         const forwardBtn = document.getElementById('forward-btn');
-        const webview = document.getElementById('webview');
+        
+        if (!this.currentTab || !this.tabs.has(this.currentTab)) {
+            if (backBtn) backBtn.disabled = true;
+            if (forwardBtn) forwardBtn.disabled = true;
+            return;
+        }
 
+        const currentTab = this.tabs.get(this.currentTab);
         if (currentTab && currentTab.history && currentTab.history.length > 1) {
             // Use tab-specific history for navigation buttons
             backBtn.disabled = currentTab.historyIndex <= 0;
@@ -1692,8 +1798,18 @@ class AxisBrowser {
     }
 
     updateUrlBar() {
-        const webview = document.getElementById('webview');
         const urlBar = document.getElementById('url-bar');
+        if (!urlBar) return;
+
+        if (!this.currentTab || !this.tabs.has(this.currentTab)) {
+            urlBar.value = '';
+            urlBar.classList.remove('summarized');
+            return;
+        }
+
+        const webview = document.getElementById('webview');
+        if (!webview) return;
+        
         const newUrl = webview.getURL();
         
         // Only update if URL actually changed to avoid unnecessary DOM updates
@@ -1814,9 +1930,11 @@ class AxisBrowser {
             // Enhanced closing animation
             settingsPanel.classList.add('settings-closing');
             
-                this.closePanelWithAnimation(settingsPanel);
+            setTimeout(() => {
+                settingsPanel.classList.add('hidden');
                 settingsPanel.classList.remove('settings-closing');
                 if (backdrop) backdrop.classList.add('hidden');
+            }, 500);
         }
     }
 
@@ -1905,9 +2023,11 @@ class AxisBrowser {
             // Enhanced closing animation
             bookmarksPanel.classList.add('bookmarks-closing');
             
-                this.closePanelWithAnimation(bookmarksPanel);
+            setTimeout(() => {
+                bookmarksPanel.classList.add('hidden');
                 bookmarksPanel.classList.remove('bookmarks-closing');
                 if (backdrop) backdrop.classList.add('hidden');
+            }, 500);
         }
     }
 
@@ -2224,7 +2344,7 @@ class AxisBrowser {
         });
 
         // Add premium popup menu interactions
-        const popupItems = document.querySelectorAll('.nav-menu-item, .add-tab-menu-item');
+        const popupItems = document.querySelectorAll('.nav-menu-item, .add-tab-menu-item, .context-menu-item');
         
         popupItems.forEach(item => {
             // Add premium popup click animation
@@ -2469,14 +2589,27 @@ class AxisBrowser {
             contextMenu.style.display = 'block';
             contextMenu.classList.remove('hidden');
             this.contextMenuTabId = tabId;
+            
+            // Add slide-in animation like nav menu
+            contextMenu.style.animation = 'contextMenuSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
         }
     }
 
     hideTabContextMenu() {
+        console.log('hideTabContextMenu called');
         const contextMenu = document.getElementById('tab-context-menu');
         if (contextMenu) {
-            contextMenu.classList.add('hidden');
-            contextMenu.style.display = 'none';
+            contextMenu.classList.add('closing');
+            
+            // Remove the menu after animation completes
+            setTimeout(() => {
+                contextMenu.classList.add('hidden');
+                contextMenu.classList.remove('closing');
+                contextMenu.style.display = 'none';
+                console.log('Context menu hidden');
+            }, 200); // Match animation duration
+        } else {
+            console.log('Context menu element not found');
         }
         this.contextMenuTabId = null;
     }
@@ -2488,6 +2621,44 @@ class AxisBrowser {
                 const titleElement = tabElement.querySelector('.tab-title');
                 this.renameTab(this.contextMenuTabId, titleElement);
             }
+        }
+    }
+
+    duplicateCurrentTab() {
+        try {
+            // Get the current URL from the webview directly
+            const webview = document.getElementById('webview');
+            if (!webview) {
+                console.error('Webview not found');
+                this.showToast('Error: Webview not found');
+                return;
+            }
+            
+            const currentUrl = webview.getURL();
+            console.log('Current URL from webview:', currentUrl);
+            
+            // Use a fallback URL if current URL is invalid
+            const urlToDuplicate = currentUrl && currentUrl !== 'about:blank' && currentUrl.startsWith('http') 
+                ? currentUrl 
+                : 'https://www.google.com';
+            
+            console.log('URL to duplicate:', urlToDuplicate);
+            
+            // Create a new tab
+            const newTabId = this.createNewTab(urlToDuplicate);
+            console.log('createNewTab returned:', newTabId);
+            
+            // Update URL bar to reflect the new tab's URL
+            setTimeout(() => {
+                this.updateUrlBar();
+            }, 100); // Small delay to ensure the new tab is fully loaded
+            
+            // Show success message
+            this.showToast('Tab duplicated successfully');
+            
+        } catch (error) {
+            console.error('Error in duplicateCurrentTab:', error);
+            this.showToast('Error duplicating tab: ' + error.message);
         }
     }
 
@@ -2818,10 +2989,10 @@ class AxisBrowser {
             downloadsPanel.classList.add('downloads-closing');
             
             setTimeout(() => {
-                this.closePanelWithAnimation(downloadsPanel);
+                downloadsPanel.classList.add('hidden');
                 downloadsPanel.classList.remove('downloads-closing');
                 if (backdrop) backdrop.classList.add('hidden');
-            }, 300);
+            }, 500);
         }
     }
 
@@ -2838,10 +3009,10 @@ class AxisBrowser {
             
             if (downloads.length === 0) {
                 downloadsList.innerHTML = `
-                    <div class="empty-state" style="text-align: center; padding: 40px; color: rgba(255, 255, 255, 0.6);">
-                        <i class="fas fa-download" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
-                        <p style="margin: 0; font-size: 16px; font-weight: 500;">No downloads yet</p>
-                        <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.7;">Downloads will appear here</p>
+                    <div class="no-downloads">
+                        <i class="fas fa-download"></i>
+                        <p>No downloads yet</p>
+                        <p class="no-downloads-subtitle">Downloads will appear here</p>
                     </div>
                 `;
                 downloadsList.style.opacity = '1';
@@ -4869,7 +5040,6 @@ class AxisBrowser {
         const singleView = document.getElementById('single-view');
         const splitView = document.getElementById('split-view');
         const splitViewBtn = document.getElementById('split-view-btn');
-        const splitViewBtnFooter = document.getElementById('split-view-btn-footer');
         
         if (this.isSplitView) {
             // Enter split view
@@ -4880,8 +5050,12 @@ class AxisBrowser {
             
             // Update button states
             splitViewBtn.innerHTML = '<i class="fas fa-columns"></i><span>Exit Split</span>';
-            splitViewBtnFooter.innerHTML = '<i class="fas fa-columns"></i>';
-            splitViewBtnFooter.title = 'Exit Split View';
+            
+            // Update context menu text
+            const splitViewContextOption = document.getElementById('split-view-option');
+            if (splitViewContextOption) {
+                splitViewContextOption.innerHTML = '<i class="fas fa-columns"></i><span>Exit Split</span>';
+            }
             
             // Initialize split view
             this.initializeSplitView();
@@ -4897,8 +5071,12 @@ class AxisBrowser {
             
             // Update button states
             splitViewBtn.innerHTML = '<i class="fas fa-columns"></i><span>Split View</span>';
-            splitViewBtnFooter.innerHTML = '<i class="fas fa-columns"></i>';
-            splitViewBtnFooter.title = 'Split View';
+            
+            // Update context menu text
+            const splitViewContextOption = document.getElementById('split-view-option');
+            if (splitViewContextOption) {
+                splitViewContextOption.innerHTML = '<i class="fas fa-columns"></i><span>Split View</span>';
+            }
             
             // Switch back to single view after animation
             setTimeout(() => {
@@ -4950,62 +5128,66 @@ class AxisBrowser {
         // Set active pane
         this.setActivePane('left');
         
-        // Add click handlers to panes for switching active pane
-        if (leftPane) {
-            leftPane.addEventListener('click', (e) => {
-                // Only switch if not clicking on webview
-                if (e.target === leftPane || e.target.classList.contains('webview-container')) {
-                    this.setActivePane('left');
-                }
-            });
-        }
-        if (rightPane) {
-            rightPane.addEventListener('click', (e) => {
-                // Only switch if not clicking on webview
-                if (e.target === rightPane || e.target.classList.contains('webview-container')) {
-                    this.setActivePane('right');
-                }
-            });
-        }
+        // No click handlers needed for pane switching
     }
 
     setupSplitDivider() {
         const divider = document.querySelector('.split-divider');
         let isDragging = false;
+        let frameRequested = false;
+        let pendingRatio = null;
         
-        if (!divider) return;
+        if (!divider) {
+            console.error('Split divider not found');
+            return;
+        }
+        
+        const applyPendingRatio = () => {
+            if (pendingRatio !== null) {
+                this.splitRatio = pendingRatio;
+                this.updateSplitRatio();
+                pendingRatio = null;
+            }
+            frameRequested = false;
+        };
+        
+        const onMouseMove = (e) => {
+            if (!isDragging) return;
+            const splitContainer = document.querySelector('.split-container');
+            if (!splitContainer) return;
+            const rect = splitContainer.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const ratio = x / rect.width;
+            // Constrain between 0.2 and 0.8
+            const constrained = Math.max(0.2, Math.min(0.8, ratio));
+            pendingRatio = constrained;
+            if (!frameRequested) {
+                frameRequested = true;
+                requestAnimationFrame(applyPendingRatio);
+            }
+        };
+        
+        const onMouseUp = () => {
+            if (!isDragging) return;
+            isDragging = false;
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            divider.style.cursor = 'col-resize';
+            document.body.style.cursor = 'default';
+            document.body.style.userSelect = '';
+            document.body.classList.remove('resizing');
+        };
         
         divider.addEventListener('mousedown', (e) => {
             isDragging = true;
             divider.style.cursor = 'col-resize';
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
+            document.body.classList.add('resizing');
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
             e.preventDefault();
-        });
-        
-        document.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            
-            const splitContainer = document.querySelector('.split-container');
-            if (!splitContainer) return;
-            
-            const rect = splitContainer.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const percentage = (x / rect.width) * 100;
-            
-            // Constrain between 20% and 80%
-            const constrainedPercentage = Math.max(20, Math.min(80, percentage));
-            this.splitRatio = constrainedPercentage / 100;
-            this.updateSplitRatio();
-        });
-        
-        document.addEventListener('mouseup', () => {
-            if (isDragging) {
-                isDragging = false;
-                divider.style.cursor = 'col-resize';
-                document.body.style.cursor = 'default';
-                document.body.style.userSelect = '';
-            }
+            e.stopPropagation();
         });
     }
 
@@ -5090,15 +5272,7 @@ class AxisBrowser {
 
     setActivePane(pane) {
         this.activePane = pane;
-        
-        // Update visual indicators
-        const leftPane = document.querySelector('.left-pane');
-        const rightPane = document.querySelector('.right-pane');
-        
-        if (leftPane && rightPane) {
-            leftPane.classList.toggle('active', pane === 'left');
-            rightPane.classList.toggle('active', pane === 'right');
-        }
+        // No visual indicators needed
     }
 
     navigateInPane(webview, url) {
@@ -5162,6 +5336,49 @@ class AxisBrowser {
         if (rightWebview) {
             rightWebview.src = 'about:blank';
         }
+    }
+
+    showQuitConfirmation() {
+        let backdrop = document.getElementById('quit-modal-backdrop');
+        if (!backdrop) {
+            backdrop = document.createElement('div');
+            backdrop.id = 'quit-modal-backdrop';
+            backdrop.className = 'modal-backdrop hidden';
+            document.body.appendChild(backdrop);
+
+            const modal = document.createElement('div');
+            modal.className = 'quit-modal-card';
+            modal.innerHTML = `
+                <div class="quit-modal-content">
+                    <div class="quit-modal-icon">⎋</div>
+                    <div class="quit-modal-title">Quit Axis?</div>
+                    <div class="quit-modal-subtitle">Are you sure you want to exit the application?</div>
+                    <div class="quit-modal-actions">
+                        <button class="btn-secondary" id="quit-cancel-btn">Cancel</button>
+                        <button class="btn-primary" id="quit-confirm-btn">Quit</button>
+                    </div>
+                </div>`;
+            backdrop.appendChild(modal);
+
+            modal.querySelector('#quit-cancel-btn').addEventListener('click', () => this.hideQuitConfirmation());
+            modal.querySelector('#quit-confirm-btn').addEventListener('click', () => {
+                window.electronAPI.confirmQuit();
+            });
+            backdrop.addEventListener('click', (e) => {
+                if (e.target === backdrop) this.hideQuitConfirmation();
+            });
+        }
+        requestAnimationFrame(() => {
+            backdrop.classList.remove('hidden');
+            document.body.classList.add('modal-open');
+        });
+    }
+
+    hideQuitConfirmation() {
+        const backdrop = document.getElementById('quit-modal-backdrop');
+        if (!backdrop) return;
+        backdrop.classList.add('hidden');
+        document.body.classList.remove('modal-open');
     }
 }
 
