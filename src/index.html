@@ -55,22 +55,7 @@
 
             <div class="sidebar-section tabs-section">
                     <div class="tabs-container vertical">
-                        <div class="tab active" data-tab-id="1">
-                            <div class="tab-content">
-                                <div class="tab-left">
-                                    <img class="tab-favicon" src="" alt="" onerror="this.style.visibility='hidden'">
-                                    <span class="tab-title">New Tab</span>
-                                </div>
-                                <div class="tab-right">
-                                    <button class="tab-pin" title="Pin">
-                                        <i class="fas fa-thumbtack"></i>
-                                    </button>
-                                    <button class="tab-close" title="Close">
-                                        <i class="fas fa-times"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+                        <!-- Tabs will be dynamically added here -->
                     </div>
                 </div>
 
@@ -90,9 +75,6 @@
                         </button>
                         <button id="bookmarks-btn-footer" class="nav-btn" title="Bookmarks">
                             <i class="fas fa-bookmark"></i>
-                        </button>
-                        <button id="split-view-btn-footer" class="nav-btn" title="Split View">
-                            <i class="fas fa-columns"></i>
                         </button>
                     </div>
                     
@@ -141,8 +123,23 @@
                                  disablewebsecurity="true"
                                  style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; perspective: 1000px;">
                         </webview>
+                        <!-- Empty State Welcome Message -->
+                        <div id="empty-state" class="empty-state">
+                            <div id="empty-state-empty" class="empty-state-content">
+                                <div class="empty-state-icon">
+                                    <i class="fas fa-window-maximize"></i>
+                                </div>
+                                <h2 class="empty-state-title">No tabs open</h2>
+                                <p class="empty-state-subtitle">Create a new tab to start browsing</p>
+                                <div class="empty-state-actions">
+                                    <button class="empty-state-btn" id="empty-state-new-tab-empty">
+                                        <i class="fas fa-plus"></i>
+                                        <span>New Tab</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </div>
 
                 <!-- Split View -->
                 <div id="split-view" class="view-container hidden">
@@ -228,6 +225,14 @@
         <div class="context-menu-item" id="rename-tab-option">
             <i class="fas fa-edit"></i>
             <span>Rename Tab</span>
+        </div>
+        <div class="context-menu-item" id="duplicate-tab-option">
+            <i class="fas fa-copy"></i>
+            <span>Duplicate Tab</span>
+        </div>
+        <div class="context-menu-item" id="split-view-option">
+            <i class="fas fa-columns"></i>
+            <span>Split View</span>
         </div>
         <div class="context-menu-item" id="close-tab-option">
             <i class="fas fa-times"></i>
