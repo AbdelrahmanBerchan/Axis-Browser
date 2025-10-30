@@ -13,6 +13,7 @@ const downloadsStore = new Store({ name: 'downloads' });
 
 // Keep a global reference of the window object
 let mainWindow;
+let isQuitConfirmed = false;
 
 function createWindow() {
   // Create the browser window with optimized settings
@@ -75,6 +76,16 @@ function createWindow() {
   // Handle window closed
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  // Intercept close to show quit confirmation
+  mainWindow.on('close', (e) => {
+    if (!isQuitConfirmed) {
+      e.preventDefault();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('request-quit');
+      }
+    }
   });
 
   // Handle new window requests with URL validation
@@ -234,6 +245,15 @@ function createMenu() {
           }
         },
         {
+          label: 'Close Tab',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('close-tab');
+            }
+          }
+        },
+        {
           label: 'New Window',
           accelerator: 'CmdOrCtrl+N',
           click: () => {
@@ -245,7 +265,11 @@ function createMenu() {
           label: 'Quit',
           accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Ctrl+Q',
           click: () => {
-            app.quit();
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('request-quit');
+            } else {
+              app.quit();
+            }
           }
         }
       ]
@@ -461,5 +485,10 @@ ipcMain.handle('open-incognito-window', () => {
   });
 
   return true;
+});
+
+ipcMain.on('confirm-quit', () => {
+  isQuitConfirmed = true;
+  app.quit();
 });
 
