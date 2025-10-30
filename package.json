@@ -1,6 +1,6 @@
 {
   "name": "axis",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "A minimalistic, customizable, and beautiful browser built on Electron",
   "main": "src/main.js",
   "scripts": {
