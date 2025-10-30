@@ -90,7 +90,7 @@ body {
     color: var(--text-color);
     overflow: hidden;
     user-select: none;
-    border-radius: 28px;
+    border-radius: 10px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -498,7 +498,7 @@ body.resizing .resize-handle {
     left: 0;
     background: var(--sidebar-background);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 8px 0;
     min-width: 180px;
     max-width: 200px;
@@ -632,7 +632,7 @@ body.resizing .resize-handle {
     height: 32px;
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 28px;
+    border-radius: 10px;
     padding: 0 16px 0 16px;
     padding-right: 60px;
     color: var(--text-color);
@@ -739,7 +739,7 @@ body.resizing .resize-handle {
     background: transparent;
     color: var(--text-color-secondary);
     cursor: pointer;
-    border-radius: 12px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -846,7 +846,8 @@ body.resizing .resize-handle {
     border-bottom: 3px solid rgba(255, 255, 255, 0.6);
 }
 
-.tab:hover {
+/* Hover state - only applies to inactive tabs when actually hovering */
+.tab:hover:not(.active) {
     background: var(--tab-background-hover);
     transform: translateY(-1px);
     border-color: rgba(255, 255, 255, 0.1);
@@ -858,6 +859,13 @@ body.resizing .resize-handle {
     border: 1px solid rgba(255, 255, 255, 0.2);
     transform: translateY(-1px);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Ensure inactive tabs without hover are transparent */
+.tab:not(.active):not(:hover) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
 }
 
 .tab-content {
@@ -934,13 +942,13 @@ body.resizing .resize-handle {
     justify-content: center;
     font-size: 10px;
     margin-left: 8px;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .tab-close:hover {
     background: var(--button-hover);
     color: var(--tab-close-hover);
-    transform: scale(1.1);
+    transform: scale(1.05) rotate(5deg);
 }
 
 .tab-pin {
@@ -955,12 +963,13 @@ body.resizing .resize-handle {
     align-items: center;
     justify-content: center;
     font-size: 10px;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .tab-pin:hover {
     background: var(--button-hover);
     color: var(--tab-pin-hover);
+    transform: scale(1.05) rotate(5deg);
 }
 
 /* Incognito Tab Styling */
@@ -994,7 +1003,7 @@ body.resizing .resize-handle {
      transform: translateX(-50%) translateY(-10px) scale(0.95);
      background: var(--sidebar-background);
      border: 1px solid rgba(255, 255, 255, 0.1);
-     border-radius: 12px;
+     border-radius: 10px;
      backdrop-filter: blur(10px);
      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
      padding: 8px 0;
@@ -1140,7 +1149,7 @@ body.resizing .resize-handle {
     overflow: hidden;
     position: relative;
     background: transparent;
-    border-radius: 12px;
+    border-radius: 10px;
     margin: 2px;
     /* Shadow removed */
     backdrop-filter: blur(8px);
@@ -1165,7 +1174,7 @@ body.resizing .resize-handle {
     right: 0;
     bottom: 0;
     pointer-events: none;
-    border-radius: 12px;
+    border-radius: 10px;
     overflow: hidden;
 }
 
@@ -1178,7 +1187,7 @@ body.resizing .resize-handle {
     min-width: 0;
     flex-shrink: 1;
     position: relative;
-    border-radius: 12px;
+    border-radius: 10px;
     max-width: 100%;
     max-height: 100%;
     outline: none;
@@ -1194,6 +1203,145 @@ body.resizing .resize-handle {
     /* Hardware acceleration */
     -webkit-perspective: 1000px;
     perspective: 1000px;
+}
+
+/* Empty State Welcome Message */
+.empty-state {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+    border-radius: 10px;
+    animation: emptyStateFadeIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    pointer-events: auto;
+    overflow: hidden;
+    isolation: isolate;
+}
+
+.empty-state.hidden {
+    display: none !important;
+    z-index: -1;
+    pointer-events: none;
+    visibility: hidden;
+}
+
+.empty-state-content {
+    text-align: center;
+    padding: 48px;
+    max-width: 500px;
+    animation: emptyStateSlideUp 0.6s cubic-bezier(0.23, 1, 0.32, 1) 0.1s both;
+}
+
+.empty-state-icon {
+    font-size: 72px;
+    color: rgba(255, 255, 255, 0.15);
+    margin-bottom: 24px;
+    animation: emptyStateIconFloat 3s ease-in-out infinite;
+}
+
+.empty-state-icon i {
+    display: inline-block;
+    filter: drop-shadow(0 4px 12px rgba(255, 255, 255, 0.1));
+}
+
+.empty-state-title {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text-color);
+    margin: 0 0 12px 0;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.75) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.empty-state-subtitle {
+    font-size: 16px;
+    color: var(--text-color-secondary);
+    margin: 0 0 32px 0;
+    line-height: 1.5;
+    opacity: 0.8;
+}
+
+.empty-state-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+}
+
+.empty-state-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    color: var(--text-color);
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.empty-state-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.empty-state-btn:active {
+    transform: translateY(0) scale(0.98);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    transition: all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.empty-state-btn i {
+    font-size: 14px;
+    transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.empty-state-btn:hover i {
+    transform: rotate(90deg) scale(1.1);
+}
+
+@keyframes emptyStateFadeIn {
+    0% {
+        opacity: 0;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+@keyframes emptyStateSlideUp {
+    0% {
+        opacity: 0;
+        transform: translateY(20px) scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes emptyStateIconFloat {
+    0%, 100% {
+        transform: translateY(0) rotate(0deg);
+    }
+    50% {
+        transform: translateY(-8px) rotate(5deg);
+    }
 }
 
 /* Professional Modal Backdrop - Enhanced */
@@ -1441,7 +1589,7 @@ body.resizing .resize-handle {
     justify-content: space-between;
     padding: 16px;
     background: rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
+    border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -1463,8 +1611,8 @@ body.resizing .resize-handle {
 }
 
 
-.settings-panel:not(.hidden) {
-    transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateY(0px);
+.settings-panel:not(.hidden):not(.settings-closing) {
+    transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
     opacity: 1;
     visibility: visible;
     backdrop-filter: blur(25px);
@@ -1481,31 +1629,41 @@ body.resizing .resize-handle {
 
 /* Enhanced exit animation */
 .settings-panel.settings-closing {
-    animation: settingsPanelSlideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: settingsPanelSlideOut 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards !important;
+    transition: none !important;
+    visibility: visible !important;
+    will-change: transform, opacity;
+    transform-origin: center center;
+    backface-visibility: hidden;
+    contain: layout style paint;
 }
 
 @keyframes settingsPanelSlideIn {
     0% {
-        transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateY(20px);
+        transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
         opacity: 0;
     }
     50% {
-        transform: translate(-50%, -50%) scale(1.02) rotateY(-2deg) translateY(2px);
+        transform: translate(-50%, -50%) scale(1.02) rotateY(-2deg) translateX(2px);
         opacity: 0.8;
     }
     100% {
-        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateY(0px);
+        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
         opacity: 1;
     }
 }
 
 @keyframes settingsPanelSlideOut {
     0% {
-        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateY(0px);
+        transform: translate(-50%, -50%) translateZ(0) scale(1) rotateY(0deg);
         opacity: 1;
     }
+    50% {
+        transform: translate(-50%, -50%) translateZ(0) scale(0.95) rotateY(8deg) translateX(-8px);
+        opacity: 0.6;
+    }
     100% {
-        transform: translate(-50%, -50%) scale(0.8) rotateY(15deg) translateY(-20px);
+        transform: translate(-50%, -50%) translateZ(0) scale(0.8) rotateY(15deg) translateX(-20px);
         opacity: 0;
     }
 }
@@ -2137,6 +2295,39 @@ body.light-theme .shortcut-desc {
     margin: 8px 0;
 }
 
+/* No Downloads Empty State */
+.no-downloads {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-color-muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+}
+
+.no-downloads i {
+    font-size: 48px;
+    color: rgba(255, 255, 255, 0.2);
+    margin-bottom: 20px;
+    opacity: 0.6;
+}
+
+.no-downloads p {
+    margin: 8px 0;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-color-secondary);
+}
+
+.no-downloads-subtitle {
+    font-size: 13px !important;
+    color: rgba(255, 255, 255, 0.5) !important;
+    font-weight: 400 !important;
+    margin-top: 4px !important;
+}
+
 /* Save Button */
 .settings-actions {
     padding: 20px 0;
@@ -2150,7 +2341,7 @@ body.light-theme .shortcut-desc {
     background: #444;
     color: var(--text-color);
     border: none;
-    border-radius: 12px;
+    border-radius: 10px;
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
@@ -2193,7 +2384,7 @@ body.light-theme .shortcut-desc {
     overflow: hidden;
 }
 
-.bookmarks-panel:not(.hidden) {
+.bookmarks-panel:not(.hidden):not(.bookmarks-closing) {
     transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
     opacity: 1;
     visibility: visible;
@@ -2211,7 +2402,13 @@ body.light-theme .shortcut-desc {
 
 /* Enhanced exit animation */
 .bookmarks-panel.bookmarks-closing {
-    animation: bookmarksPanelSlideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: bookmarksPanelSlideOut 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards !important;
+    transition: none !important;
+    visibility: visible !important;
+    will-change: transform, opacity;
+    transform-origin: center center;
+    backface-visibility: hidden;
+    contain: layout style paint;
 }
 
 @keyframes bookmarksPanelSlideIn {
@@ -2231,11 +2428,15 @@ body.light-theme .shortcut-desc {
 
 @keyframes bookmarksPanelSlideOut {
     0% {
-        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
+        transform: translate(-50%, -50%) translateZ(0) scale(1) rotateY(0deg);
         opacity: 1;
     }
+    50% {
+        transform: translate(-50%, -50%) translateZ(0) scale(0.95) rotateY(8deg) translateX(-8px);
+        opacity: 0.6;
+    }
     100% {
-        transform: translate(-50%, -50%) scale(0.8) rotateY(15deg) translateX(-20px);
+        transform: translate(-50%, -50%) translateZ(0) scale(0.8) rotateY(15deg) translateX(-20px);
         opacity: 0;
     }
 }
@@ -2344,7 +2545,7 @@ body.light-theme .shortcut-desc {
     max-height: 80vh;
     background: var(--tab-background);
     border: 1px solid #333;
-    border-radius: 28px;
+    border-radius: 10px;
     z-index: 1001;
     opacity: 0;
     visibility: hidden;
@@ -2377,7 +2578,7 @@ body.light-theme .shortcut-desc {
     max-height: 80vh;
     background: var(--tab-background);
     border: 1px solid #333;
-    border-radius: 28px;
+    border-radius: 10px;
     z-index: 1001;
     opacity: 0;
     visibility: hidden;
@@ -2411,7 +2612,9 @@ body.light-theme .shortcut-desc {
     transform: translate(-50%, -50%) scale(0.85) rotateY(-10deg) translateX(15px);
     width: 600px;
     max-width: 90vw;
+    height: auto;
     max-height: 85vh;
+    min-height: 400px;
     background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 24px;
@@ -2429,7 +2632,7 @@ body.light-theme .shortcut-desc {
     overflow: hidden;
 }
 
-.downloads-panel:not(.hidden) {
+.downloads-panel:not(.hidden):not(.downloads-closing) {
     transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
     opacity: 1;
     visibility: visible;
@@ -2447,7 +2650,13 @@ body.light-theme .shortcut-desc {
 
 /* Enhanced exit animation */
 .downloads-panel.downloads-closing {
-    animation: downloadsPanelSlideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: downloadsPanelSlideOut 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards !important;
+    transition: none !important;
+    visibility: visible !important;
+    will-change: transform, opacity;
+    transform-origin: center center;
+    backface-visibility: hidden;
+    contain: layout style paint;
 }
 
 @keyframes downloadsPanelSlideIn {
@@ -2467,11 +2676,15 @@ body.light-theme .shortcut-desc {
 
 @keyframes downloadsPanelSlideOut {
     0% {
-        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
+        transform: translate(-50%, -50%) translateZ(0) scale(1) rotateY(0deg);
         opacity: 1;
     }
+    50% {
+        transform: translate(-50%, -50%) translateZ(0) scale(0.95) rotateY(8deg) translateX(-8px);
+        opacity: 0.6;
+    }
     100% {
-        transform: translate(-50%, -50%) scale(0.8) rotateY(15deg) translateX(-20px);
+        transform: translate(-50%, -50%) translateZ(0) scale(0.8) rotateY(15deg) translateX(-20px);
         opacity: 0;
     }
 }
@@ -2519,14 +2732,14 @@ body.light-theme .shortcut-desc {
 /* Professional Context Menu */
 .context-menu {
     position: fixed;
-    background: rgba(42, 42, 42, 0.95);
+    background: var(--sidebar-background);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 16px;
+    border-radius: 10px;
     padding: 8px 0;
     z-index: 1002;
     min-width: 150px;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(15px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(10px);
     display: none;
     opacity: 0;
     transform: scale(0.95) translateY(-5px);
@@ -2539,28 +2752,77 @@ body.light-theme .shortcut-desc {
     transform: scale(1) translateY(0);
 }
 
+.context-menu.closing {
+    animation: contextMenuSlideOut 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .context-menu-item {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 8px 12px;
     color: var(--text-color-secondary);
     cursor: pointer;
     font-size: 13px;
-    transition: all 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
-    border-radius: 10px;
+    border-radius: 8px;
     margin: 2px 6px;
+    background: transparent;
+    border: none;
+    width: calc(100% - 12px);
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transform: translateX(-5px);
+    opacity: 0;
+    animation: contextMenuItemSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
-.context-menu-item:hover {
-    background: rgba(58, 58, 58, 0.8);
-    color: var(--text-color);
-}
+/* Context menu hover effect is now handled by premium hover effects */
 
 .context-menu-item i {
     width: 14px;
     font-size: 11px;
+}
+
+.context-menu-item:nth-child(1) { animation-delay: 0.05s; }
+.context-menu-item:nth-child(2) { animation-delay: 0.1s; }
+.context-menu-item:nth-child(3) { animation-delay: 0.15s; }
+.context-menu-item:nth-child(4) { animation-delay: 0.2s; }
+
+@keyframes contextMenuSlideIn {
+    0% {
+        opacity: 0;
+        transform: translateY(-10px) scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes contextMenuItemSlideIn {
+    0% {
+        opacity: 0;
+        transform: translateX(-5px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes contextMenuSlideOut {
+    0% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+    100% {
+        opacity: 0;
+        transform: scale(0.95) translateY(-5px);
+    }
 }
 
 .context-menu-separator {
@@ -2614,7 +2876,7 @@ body.light-theme .shortcut-desc {
     border: none;
     background: #444;
     color: var(--text-color-secondary);
-    border-radius: 12px;
+    border-radius: 10px;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -2732,7 +2994,7 @@ body.light-theme .shortcut-desc {
     background: transparent;
     color: var(--text-color-secondary);
     cursor: pointer;
-    border-radius: 12px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2752,7 +3014,7 @@ body.light-theme .shortcut-desc {
     background: transparent;
     color: var(--text-color-secondary);
     cursor: pointer;
-    border-radius: 12px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2879,9 +3141,13 @@ body.light-theme .shortcut-desc {
 .downloads-content {
     padding: 20px 24px;
     overflow-y: auto;
+    overflow-x: hidden;
     flex: 1;
+    min-height: 0;
     background: linear-gradient(135deg, rgba(20, 20, 20, 0.4) 0%, rgba(15, 15, 15, 0.6) 100%);
     position: relative;
+    display: flex;
+    flex-direction: column;
 }
 
 .downloads-content::before {
@@ -2899,6 +3165,8 @@ body.light-theme .shortcut-desc {
     flex-direction: column;
     gap: 8px;
     animation: downloadsListSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 100%;
+    min-height: fit-content;
 }
 
 @keyframes downloadsListSlideIn {
@@ -3043,7 +3311,7 @@ body.light-theme .shortcut-desc {
     max-height: 80vh;
     background: rgba(42, 42, 42, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 28px;
+    border-radius: 10px;
     backdrop-filter: blur(20px);
     box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
     transform: scale(0.8) rotateY(-15deg) translateX(20px);
@@ -3145,7 +3413,7 @@ body.light-theme .shortcut-desc {
     padding: 20px 24px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(42, 42, 42, 0.8);
-    border-radius: 28px 28px 0 0;
+    border-radius: 10px 10px 0 0;
 }
 
 .security-status {
@@ -3192,7 +3460,7 @@ body.light-theme .shortcut-desc {
     padding: 12px 16px;
     background: rgba(26, 26, 26, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
+    border-radius: 10px;
     transition: all 0.2s ease;
 }
 
@@ -3228,7 +3496,7 @@ body.light-theme .shortcut-desc {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.15);
     color: rgba(255, 255, 255, 0.6);
-    border-radius: 12px;
+    border-radius: 10px;
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
@@ -3290,15 +3558,15 @@ body.light-theme .shortcut-desc {
     position: relative;
     width: 600px;
     max-width: 90vw;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    backdrop-filter: none;
-    box-shadow: none;
+    background: rgba(20, 20, 20, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
     padding: 0;
     transform: scale(0.9) translateY(30px);
     transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
-    overflow: hidden;
+    overflow: hidden; /* ensure children respect rounded corners */
 }
 
 .spotlight-search:not(.hidden) .spotlight-content {
@@ -3313,22 +3581,24 @@ body.light-theme .shortcut-desc {
 
 .spotlight-input-container input {
     width: 100%;
-    height: 50px;
+    height: 54px;
     background: transparent;
     border: none;
-    border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+    border-bottom: none;
     border-radius: 0;
-    padding: 0 0 0 40px;
+    padding: 0 0 0 44px;
     color: var(--text-color);
-    font-size: 18px;
-    font-weight: 300;
+    font-size: 20px;
+    font-weight: 400;
+    letter-spacing: 0.2px;
     outline: none;
-    transition: all 0.3s ease;
+    caret-color: rgba(255, 255, 255, 0.9);
+    transition: all 0.2s ease;
     text-align: left;
 }
 
 .spotlight-input-container input:focus {
-    border-bottom-color: rgba(255, 255, 255, 0.8);
+    border-bottom: none;
     background: transparent;
 }
 
@@ -3340,10 +3610,10 @@ body.light-theme .shortcut-desc {
 
 .spotlight-search-icon {
     position: absolute;
-    left: 0;
+    left: 12px;
     top: 50%;
     transform: translateY(-50%);
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 18px;
     pointer-events: none;
 }
@@ -3360,6 +3630,14 @@ body.light-theme .shortcut-desc {
     opacity: 0;
     transform: translateY(-10px);
     transition: all 0.3s ease;
+    padding: 8px 4px;
+    /* Disable browser scroll hints */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.spotlight-suggestions::-webkit-scrollbar {
+    display: none;
 }
 
 .spotlight-suggestions.show {
@@ -3377,14 +3655,14 @@ body.light-theme .shortcut-desc {
 .spotlight-suggestion-item {
     display: flex;
     align-items: center;
-    padding: 12px 20px;
-    margin: 0;
+    padding: 12px 14px;
+    margin: 4px 6px;
     background: transparent;
-    border-radius: 0;
+    border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease-out, transform 0.15s cubic-bezier(0.23, 1, 0.32, 1);
     position: relative;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: none;
     transform: translateX(0);
     opacity: 1;
 }
@@ -3394,31 +3672,19 @@ body.light-theme .shortcut-desc {
 }
 
 .spotlight-suggestion-item:hover {
-    background: rgba(255, 255, 255, 0.08);
-    transform: translateX(0) scale(1.02);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    background: rgba(255, 255, 255, 0.07);
+    transform: translateX(3px);
+}
+
+.spotlight-suggestion-item:active {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateX(2px) translateY(1px);
+    transition: all 0.08s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .spotlight-suggestion-item.active {
-    background: rgba(60, 60, 60, 0.8);
-    transform: translateX(0) scale(1.01);
-}
-
-/* Removed animation delays for smoother updates */
-
-.spotlight-suggestion-item::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-    transition: left 0.5s ease;
-}
-
-.spotlight-suggestion-item:hover::before {
-    left: 100%;
+    background: rgba(255, 255, 255, 0.09);
+    transform: translateX(2px);
 }
 
 .spotlight-suggestion-icon {
@@ -3428,6 +3694,11 @@ body.light-theme .shortcut-desc {
     color: rgba(255, 255, 255, 0.7);
     font-size: 16px;
     flex-shrink: 0;
+    transition: color 0.2s ease-out;
+}
+
+.spotlight-suggestion-item:hover .spotlight-suggestion-icon {
+    color: rgba(255, 255, 255, 0.85);
 }
 
 .spotlight-suggestion-text {
@@ -3439,21 +3710,22 @@ body.light-theme .shortcut-desc {
 }
 
 .spotlight-suggestion-action {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.75);
     font-size: 12px;
     padding: 4px 8px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    transition: all 0.2s ease;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    border: none;
+    transition: background-color 0.2s ease-out, color 0.2s ease-out;
     display: flex;
     align-items: center;
     gap: 4px;
+    font-weight: 500;
 }
 
 .spotlight-suggestion-item:hover .spotlight-suggestion-action {
-    background: rgba(255, 255, 255, 0.15);
-    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
 }
 
 /* Loading indicator for suggestions */
@@ -3569,7 +3841,7 @@ body.light-theme .shortcut-desc {
     background: transparent;
     color: var(--text-color-secondary);
     cursor: pointer;
-    border-radius: 12px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3642,7 +3914,8 @@ body.light-theme .shortcut-desc {
     pointer-events: none;
 }
 
-.tab:hover {
+/* Hover state - only for non-active tabs when actually hovering */
+.tab:hover:not(.active) {
     transform: translateY(-2px) scale(1.02);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     background: rgba(255, 255, 255, 0.08);
@@ -3672,6 +3945,14 @@ body.light-theme .shortcut-desc {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Ensure inactive tabs are transparent - override conflicting rules */
+.tab:not(.active):not(:hover):not(.pinned):not(.dragging) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    transform: none !important;
 }
 
 .tab.pinned {
@@ -3856,11 +4137,10 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Consistent hover effects for all buttons */
+/* Consistent hover effects for all buttons - excluding tab buttons */
 .nav-btn:hover:not(:disabled),
 .url-icon:hover,
 .add-tab-btn:hover,
-.tab-close:hover,
 .settings-btn:hover,
 .bookmark-btn:hover,
 .security-btn:hover {
@@ -3876,36 +4156,65 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 .sidebar-footer .nav-btn {
     position: relative;
     overflow: hidden;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: transparent;
+    border: none;
+    transition: all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
+/* Ensure sidebar footer buttons get the same animations as nav-menu-btn */
+.sidebar-footer .nav-btn:hover {
+    transform: translateY(-1px) scale(1.02);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.sidebar-footer .nav-btn:active {
+    transform: scale(0.96) translateY(1px);
+    box-shadow: 
+        0 2px 8px rgba(0, 0, 0, 0.3),
+        inset 0 1px 2px rgba(255, 255, 255, 0.1);
+    transition: all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.sidebar-footer .nav-btn:hover i {
+    transform: rotate(2deg);
+    transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Remove sidebar footer shimmer to match nav menu button */
 .sidebar-footer .nav-btn::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-    transition: left 0.5s ease;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.1) 50%, transparent 70%);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    pointer-events: none;
+    opacity: 0;
+    z-index: 1;
 }
 
-.sidebar-footer .nav-btn:hover::before {
-    left: 100%;
+.sidebar-footer .nav-btn:active::before {
+    width: 80px;
+    height: 80px;
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1);
 }
 
 /* Removed duplicate url-icon hover animation */
 
-.tab:hover {
-    background: #444;
-    transform: translateY(-2px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.tab.active {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+/* Inactive tabs should be transparent - override any conflicting rules */
+.tab:not(.active):not(:hover) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    transform: none !important;
 }
 
 .add-tab-btn:hover {
@@ -3936,7 +4245,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 .webview-container {
     position: relative;
     overflow: hidden;
-    border-radius: 12px;
+    border-radius: 10px;
 }
 
 .webview-container::before {
@@ -3956,7 +4265,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     opacity: 0;
     transition: opacity 0.3s ease;
     pointer-events: none;
-    border-radius: 12px;
+    border-radius: 10px;
 }
 
 .webview-container.loading::before {
@@ -4172,7 +4481,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 }
 
 /* Premium Popup Menu Click Animation */
-.nav-menu-item:active, .add-tab-menu-item:active {
+.nav-menu-item:active, .add-tab-menu-item:active, .context-menu-item:active {
     transform: scale(0.98) translateY(0.5px);
     box-shadow: 
         0 1px 4px rgba(0, 0, 0, 0.2),
@@ -4180,14 +4489,14 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     transition: all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-/* Refined Hover Effects */
-.nav-btn:hover, .tab-close:hover, .url-icon:hover, .add-tab-btn:hover, .settings-btn:hover, .bookmark-btn:hover, .security-btn:hover, .nav-menu-btn:hover, .download-btn:hover, .bookmark-delete:hover, .close-settings:hover, .refresh-btn:hover, .clear-btn:hover {
+/* Refined Hover Effects - excluding tab buttons */
+.nav-btn:hover, .url-icon:hover, .add-tab-btn:hover, .settings-btn:hover, .bookmark-btn:hover, .security-btn:hover, .nav-menu-btn:hover, .download-btn:hover, .bookmark-delete:hover, .close-settings:hover, .refresh-btn:hover, .clear-btn:hover {
     transform: translateY(-1px) scale(1.02);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 /* Premium Popup Menu Hover Effects */
-.nav-menu-item:hover, .add-tab-menu-item:hover {
+.nav-menu-item:hover, .add-tab-menu-item:hover, .context-menu-item:hover {
     transform: translateY(-0.5px) scale(1.01);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     background: rgba(255, 255, 255, 0.05);
@@ -4195,7 +4504,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 }
 
 /* Subtle Icon Rotation on Hover */
-.nav-btn:hover i, .url-icon:hover i, .add-tab-btn:hover i, .settings-btn:hover i, .bookmark-btn:hover i, .security-btn:hover i, .nav-menu-btn:hover i, .download-btn:hover i, .bookmark-delete:hover i, .close-settings:hover i, .refresh-btn:hover i, .clear-btn:hover i, .nav-menu-item:hover i, .add-tab-menu-item:hover i {
+.nav-btn:hover i, .url-icon:hover i, .add-tab-btn:hover i, .settings-btn:hover i, .bookmark-btn:hover i, .security-btn:hover i, .nav-menu-btn:hover i, .download-btn:hover i, .bookmark-delete:hover i, .close-settings:hover i, .refresh-btn:hover i, .clear-btn:hover i, .nav-menu-item:hover i, .add-tab-menu-item:hover i, .context-menu-item:hover i, .tab-close:hover i, .tab-pin:hover i {
     transform: rotate(2deg);
     transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
@@ -4207,21 +4516,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 }
 
 /* Refined Tab Interactions */
-.tab {
-    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    position: relative;
-    overflow: hidden;
-}
-
-.tab:hover {
-    transform: translateY(-1px) scale(1.01);
-    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
-}
-
-.tab.active {
-    transform: translateY(-1px) scale(1.02);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
+/* Note: Tab styles are defined above - this section removed to avoid conflicts */
 
 .tab-close {
     transition: all 0.15s ease;
@@ -4290,7 +4585,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     right: 20px;
     background: linear-gradient(135deg, rgba(30, 30, 30, 0.95) 0%, rgba(20, 20, 20, 0.98) 100%);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 16px 20px;
     color: var(--text-color);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
@@ -4498,25 +4793,21 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 }
 
 .left-pane.active, .right-pane.active {
-    background: rgba(255, 255, 255, 0.05);
-    border: 2px solid rgba(74, 144, 226, 0.6);
-    border-radius: 8px;
-    box-shadow: 0 0 0 1px rgba(74, 144, 226, 0.3);
-    position: relative;
+    /* No special styling for active panes */
 }
 
 /* Split view webview containers */
 .left-pane .webview-container,
 .right-pane .webview-container {
-    width: 100%;
-    height: 100%;
+    width: calc(100% - 4px);
+    height: calc(100% - 4px);
     flex: 1;
     overflow: hidden;
     position: relative;
     background: transparent;
     border: none;
     border-radius: 0;
-    margin: 0;
+    margin: 2px;
     box-shadow: none;
 }
 
@@ -4536,18 +4827,8 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 }
 
 .left-pane.active::before, .right-pane.active::before {
-    content: 'Active';
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: rgba(74, 144, 226, 0.8);
-    color: white;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 600;
-    z-index: 1000;
-    pointer-events: none;
+    /* No active indicator */
+    display: none;
 }
 
 .split-divider {
@@ -4559,6 +4840,8 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     display: flex;
     align-items: center;
     justify-content: center;
+    z-index: 1001;
+    pointer-events: auto;
 }
 
 .split-divider:hover {
@@ -4571,6 +4854,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     background: rgba(255, 255, 255, 0.3);
     border-radius: 1px;
     transition: all 0.2s ease;
+    pointer-events: none;
 }
 
 .split-divider:hover .split-handle {
@@ -4653,4 +4937,215 @@ body {
 #nav-bar,
 #tab-bar {
     transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Preserve rounded outer corners for split panes */
+.left-pane .webview-container,
+.left-pane webview,
+.left-pane .webview-container::after {
+    border-top-left-radius: 10px;
+    border-bottom-left-radius: 10px;
+}
+
+.right-pane .webview-container,
+.right-pane webview,
+.right-pane .webview-container::after {
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+/* Ensure clipping respects the radii */
+.left-pane .webview-container,
+.right-pane .webview-container {
+    overflow: hidden;
+}
+
+/* Enforce macOS 10px corners in split view (higher specificity) */
+#split-view .left-pane,
+#split-view .right-pane {
+    overflow: hidden;
+}
+
+#split-view .left-pane,
+#split-view .left-pane .webview-container,
+#split-view .left-pane webview,
+#split-view .left-pane .webview-container::after {
+    border-top-left-radius: 10px !important;
+    border-bottom-left-radius: 10px !important;
+}
+
+#split-view .right-pane,
+#split-view .right-pane .webview-container,
+#split-view .right-pane webview,
+#split-view .right-pane .webview-container::after {
+    border-top-right-radius: 10px !important;
+    border-bottom-right-radius: 10px !important;
+}
+
+/* Larger, invisible hit area for split divider to improve grab-ability */
+.split-divider {
+    position: relative;
+}
+
+.split-divider::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -6px;
+    right: -6px;
+    /* Expands hit area to ~16px total without visual change */
+    background: transparent;
+    cursor: col-resize;
+}
+
+/* Reduce accidental interactions while resizing */
+body.resizing #split-view webview {
+    pointer-events: none;
+}
+
+/* Improve drag UX: disable transitions during resize and show proper cursor */
+body.resizing {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+body.resizing .left-pane,
+body.resizing .right-pane {
+    transition: none !important;
+}
+
+/* Quit confirmation modal */
+.quit-modal-card {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.92);
+    width: 440px;
+    max-width: 90vw;
+    background: linear-gradient(135deg, rgba(30,30,30,0.98) 0%, rgba(18,18,18,0.98) 100%);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 18px;
+    z-index: 1001;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 280ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+                visibility 0s linear 320ms;
+    box-shadow:
+        0 30px 60px rgba(0,0,0,0.55),
+        0 0 0 1px rgba(255,255,255,0.05),
+        inset 0 1px 0 rgba(255,255,255,0.06);
+    backdrop-filter: blur(18px);
+}
+
+.modal-backdrop:not(.hidden) .quit-modal-card {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, -50%) scale(1);
+    transition-delay: 0s;
+}
+
+.quit-modal-content {
+    padding: 28px 24px 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.quit-modal-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 16px;
+    background: radial-gradient(120px 120px at 30% 20%, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    color: rgba(255,255,255,0.85);
+    margin-bottom: 16px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 8px 24px rgba(0,0,0,0.35);
+}
+
+.quit-modal-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    color: #fff;
+}
+
+.quit-modal-subtitle {
+    margin-top: 8px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.65);
+}
+
+.quit-modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 22px;
+}
+
+.btn-primary,
+.btn-secondary {
+    padding: 10px 16px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background 180ms ease, color 180ms ease, border-color 180ms ease,
+                transform 120ms ease;
+}
+
+.btn-secondary {
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.85);
+    border-color: rgba(255,255,255,0.10);
+}
+
+.btn-secondary:hover {
+    background: rgba(255,255,255,0.10);
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #ff4d4f 0%, #ff3b3d 100%);
+    color: #fff;
+    border-color: rgba(255, 77, 79, 0.55);
+}
+
+.btn-primary:hover {
+    filter: brightness(1.05);
+}
+
+/* Prevent background scroll when modal open */
+body.modal-open {
+    overflow: hidden;
+}
+
+/* Light theme tweaks */
+body.light-theme .quit-modal-card {
+    background: #fff;
+    border-color: #e7e7e7;
+    box-shadow: 0 30px 60px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+}
+
+body.light-theme .quit-modal-subtitle {
+    color: rgba(0,0,0,0.55);
+}
+
+body.light-theme .btn-secondary {
+    background: #f4f4f4;
+    color: #333;
+    border-color: #e7e7e7;
+}
+
+body.light-theme .btn-secondary:hover {
+    background: #efefef;
+}
+
+body.light-theme .btn-primary {
+    border-color: rgba(255, 77, 79, 0.45);
 }
