@@ -552,6 +552,32 @@ body.resizing .resize-handle {
 .nav-menu-item:nth-child(3) { animation-delay: 0.15s; }
 .nav-menu-item:nth-child(4) { animation-delay: 0.2s; }
 
+/* Grey out disabled split view buttons */
+.nav-menu-item:disabled,
+.nav-menu-item[disabled],
+#split-view-btn {
+    opacity: 0.5 !important;
+    cursor: not-allowed !important;
+    pointer-events: none !important;
+    filter: grayscale(100%);
+}
+
+.nav-menu-item:disabled:hover,
+.nav-menu-item[disabled]:hover,
+#split-view-btn:hover {
+    background: transparent !important;
+    transform: none !important;
+}
+
+/* Context menu disabled item styling */
+.context-menu-item[style*="pointer-events: none"],
+#split-view-option {
+    opacity: 0.5 !important;
+    cursor: not-allowed !important;
+    pointer-events: none !important;
+    filter: grayscale(100%);
+}
+
 .nav-menu-item:hover {
     background: rgba(58, 58, 58, 0.8);
     color: var(--text-color);
@@ -810,6 +836,91 @@ body.resizing .resize-handle {
     flex-direction: column;
 }
 
+/* Separator between pinned and unpinned tabs */
+.tabs-separator {
+    height: 1px;
+    background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.08), transparent);
+    margin: 12px 8px;
+    border-radius: 0.5px;
+    flex-shrink: 0;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    pointer-events: auto;
+}
+
+.tabs-separator::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 10%;
+    right: 10%;
+    height: 0.5px;
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateY(-50%);
+}
+
+/* Separator drag-over state - subtle highlight */
+.tabs-separator.separator-drag-over {
+    background: linear-gradient(to right, transparent, rgba(255, 193, 7, 0.25), transparent);
+    height: 2px;
+    margin: 11px 6px;
+    box-shadow: 0 0 8px rgba(255, 193, 7, 0.2);
+}
+
+.tabs-separator.separator-drag-over::before {
+    background: rgba(255, 193, 7, 0.4);
+    height: 1px;
+    left: 5%;
+    right: 5%;
+}
+
+/* Hide separator if it's the first child (no pinned tabs above) */
+.tabs-separator:first-child {
+    display: none;
+}
+
+/* Visual feedback when dragging tabs into pinned section */
+.tabs-container.pinned-drop-zone-active {
+    position: relative;
+}
+
+.tabs-container.pinned-drop-zone-active::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: rgba(255, 193, 7, 0.05);
+    border-radius: 12px 12px 0 0;
+    pointer-events: none;
+    z-index: 1;
+    border: 1px dashed rgba(255, 193, 7, 0.3);
+    border-bottom: none;
+    transition: all 0.2s ease;
+}
+
+/* Visual feedback when dragging tabs out of pinned section (unpinning) */
+.tabs-container.unpinned-drop-zone-active {
+    position: relative;
+}
+
+.tabs-container.unpinned-drop-zone-active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 0 0 12px 12px;
+    pointer-events: none;
+    z-index: 1;
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border-top: none;
+    transition: all 0.2s ease;
+}
+
 .tab {
     width: 100%;
     min-height: 40px;
@@ -824,6 +935,16 @@ body.resizing .resize-handle {
     overflow: hidden;
     flex-shrink: 0;
     user-select: none;
+}
+
+/* Smooth close animation: shrink height and fade out so siblings move smoothly */
+.tab.closing {
+    height: 0 !important;
+    min-height: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    opacity: 0 !important;
+    transform: translateY(-4px) !important;
 }
 
 .tab.dragging {
@@ -846,12 +967,12 @@ body.resizing .resize-handle {
     border-bottom: 3px solid rgba(255, 255, 255, 0.6);
 }
 
-/* Hover state - only applies to inactive tabs when actually hovering */
+/* Hover state - only for non-active tabs when actually hovering */
 .tab:hover:not(.active) {
-    background: var(--tab-background-hover);
-    transform: translateY(-1px);
-    border-color: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    transform: none; /* keep size and position stable */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+    border: none; /* avoid layout shift from border */
 }
 
 .tab.active {
@@ -2743,17 +2864,22 @@ body.light-theme .shortcut-desc {
     display: none;
     opacity: 0;
     transform: scale(0.95) translateY(-5px);
-    transition: all 0.2s ease;
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), 
+                transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
 }
 
 .context-menu:not(.hidden) {
     display: block;
     opacity: 1;
     transform: scale(1) translateY(0);
+    pointer-events: auto;
 }
 
 .context-menu.closing {
-    animation: contextMenuSlideOut 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0 !important;
+    transform: scale(0.95) translateY(-5px) !important;
+    pointer-events: none;
 }
 
 .context-menu-item {
@@ -2814,16 +2940,7 @@ body.light-theme .shortcut-desc {
     }
 }
 
-@keyframes contextMenuSlideOut {
-    0% {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
-    100% {
-        opacity: 0;
-        transform: scale(0.95) translateY(-5px);
-    }
-}
+/* Removed contextMenuSlideOut animation - using CSS transitions instead for smoother fade */
 
 .context-menu-separator {
     height: 1px;
@@ -3916,10 +4033,10 @@ body.light-theme .shortcut-desc {
 
 /* Hover state - only for non-active tabs when actually hovering */
 .tab:hover:not(.active) {
-    transform: translateY(-2px) scale(1.02);
+    transform: none;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: none;
 }
 
 .tab:hover::before {
