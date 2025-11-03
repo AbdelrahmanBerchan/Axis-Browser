@@ -55,7 +55,10 @@
 
             <div class="sidebar-section tabs-section">
                     <div class="tabs-container vertical">
-                        <!-- Tabs will be dynamically added here -->
+                        <!-- Pinned tabs will be added above the separator -->
+                        <!-- Separator between pinned and unpinned tabs -->
+                        <div id="tabs-separator" class="tabs-separator"></div>
+                        <!-- Unpinned tabs will be added below the separator -->
                     </div>
                 </div>
 
@@ -115,13 +118,12 @@
                         <webview id="webview" 
                                  src="about:blank" 
                                  allowpopups 
-                                 webpreferences="allowRunningInsecureContent,experimentalFeatures,contextIsolation=false,nodeIntegration=false,webSecurity=false,allowDisplayingInsecureContent,allowRunningInsecureContent,accelerated2dCanvas=true,acceleratedJpegDecoding=true,acceleratedVideoDecode=true,acceleratedVideoEncode=true,enableWebGL=true,enableWebGL2=true,enableAcceleratedVideoDecode=true,enableAcceleratedVideoEncode=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,enableAggressiveDomStorageFlushing=true,enableExperimentalWebPlatformFeatures=true,enableTcpFastOpen=true,enableQuic=true,aggressiveCacheDiscard=true,enableNetworkService=true,enableNetworkServiceLogging=true,enableBlinkFeatures=CSSContainerQueries,enableThrottleForegroundTimers=true,enableWebGPU=true,enableWebGPUDawn=true"
+                                 webpreferences="contextIsolation=false,nodeIntegration=false,webSecurity=false,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true"
                                  partition="persist:main"
                                  useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                                 preload=""
                                  autosize="true"
                                  disablewebsecurity="true"
-                                 style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; perspective: 1000px;">
+                                 style="will-change: transform; transform: translateZ(0); backface-visibility: hidden;">
                         </webview>
                         <!-- Empty State Welcome Message -->
                         <div id="empty-state" class="empty-state">
@@ -156,13 +158,12 @@
                                 <webview id="webview-left" 
                                          src="about:blank" 
                                          allowpopups 
-                                         webpreferences="allowRunningInsecureContent,experimentalFeatures,contextIsolation=false,nodeIntegration=false,webSecurity=false,allowDisplayingInsecureContent,allowRunningInsecureContent,accelerated2dCanvas=true,acceleratedJpegDecoding=true,acceleratedVideoDecode=true,acceleratedVideoEncode=true,enableWebGL=true,enableWebGL2=true,enableAcceleratedVideoDecode=true,enableAcceleratedVideoEncode=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,enableAggressiveDomStorageFlushing=true,enableExperimentalWebPlatformFeatures=true,enableTcpFastOpen=true,enableQuic=true,aggressiveCacheDiscard=true,enableNetworkService=true,enableNetworkServiceLogging=true,enableBlinkFeatures=CSSContainerQueries,enableThrottleForegroundTimers=true,enableWebGPU=true,enableWebGPUDawn=true"
+                                         webpreferences="contextIsolation=false,nodeIntegration=false,webSecurity=false,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true"
                                          partition="persist:main"
                                          useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                                         preload=""
                                          autosize="true"
                                          disablewebsecurity="true"
-                                         style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; perspective: 1000px;">
+                                         style="will-change: transform; transform: translateZ(0); backface-visibility: hidden;">
                                 </webview>
                             </div>
                         </div>
@@ -183,13 +184,12 @@
                                 <webview id="webview-right" 
                                          src="about:blank" 
                                          allowpopups 
-                                         webpreferences="allowRunningInsecureContent,experimentalFeatures,contextIsolation=false,nodeIntegration=false,webSecurity=false,allowDisplayingInsecureContent,allowRunningInsecureContent,accelerated2dCanvas=true,acceleratedJpegDecoding=true,acceleratedVideoDecode=true,acceleratedVideoEncode=true,enableWebGL=true,enableWebGL2=true,enableAcceleratedVideoDecode=true,enableAcceleratedVideoEncode=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,enableAggressiveDomStorageFlushing=true,enableExperimentalWebPlatformFeatures=true,enableTcpFastOpen=true,enableQuic=true,aggressiveCacheDiscard=true,enableNetworkService=true,enableNetworkServiceLogging=true,enableBlinkFeatures=CSSContainerQueries,enableThrottleForegroundTimers=true,enableWebGPU=true,enableWebGPUDawn=true"
+                                         webpreferences="contextIsolation=false,nodeIntegration=false,webSecurity=false,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true"
                                          partition="persist:main"
                                          useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                                         preload=""
                                          autosize="true"
                                          disablewebsecurity="true"
-                                         style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; perspective: 1000px;">
+                                         style="will-change: transform; transform: translateZ(0); backface-visibility: hidden;">
                                 </webview>
                             </div>
                         </div>
@@ -207,7 +207,7 @@
                 <i class="fas fa-bars"></i>
                 <span>Toggle Sidebar</span>
             </button>
-            <button id="split-view-btn" class="nav-menu-item">
+            <button id="split-view-btn" class="nav-menu-item" disabled style="opacity: 0.5; cursor: not-allowed;">
                 <i class="fas fa-columns"></i>
                 <span>Split View</span>
             </button>
@@ -230,9 +230,13 @@
             <i class="fas fa-copy"></i>
             <span>Duplicate Tab</span>
         </div>
-        <div class="context-menu-item" id="split-view-option">
+        <div class="context-menu-item" id="split-view-option" style="opacity: 0.5; cursor: not-allowed; pointer-events: none;">
             <i class="fas fa-columns"></i>
             <span>Split View</span>
+        </div>
+        <div class="context-menu-item" id="pin-tab-option">
+            <i class="fas fa-thumbtack"></i>
+            <span id="pin-tab-text">Pin Tab</span>
         </div>
         <div class="context-menu-item" id="close-tab-option">
             <i class="fas fa-times"></i>
