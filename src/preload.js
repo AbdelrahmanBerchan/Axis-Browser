@@ -28,5 +28,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
   
   // Incognito window
-  openIncognitoWindow: () => ipcRenderer.invoke('open-incognito-window')
+  openIncognitoWindow: () => ipcRenderer.invoke('open-incognito-window'),
+  
+  // Notes management
+  getNotes: () => ipcRenderer.invoke('get-notes'),
+  saveNote: (note) => ipcRenderer.invoke('save-note', note),
+  deleteNote: (id) => ipcRenderer.invoke('delete-note', id)
 });
