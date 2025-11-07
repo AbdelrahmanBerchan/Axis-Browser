@@ -96,6 +96,10 @@
                                     <i class="fas fa-mask"></i>
                                     <span>New Incognito Tab</span>
                                 </button>
+                                <button id="new-note-menu-btn" class="add-tab-menu-item">
+                                    <i class="fas fa-sticky-note"></i>
+                                    <span>Notes</span>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -520,6 +524,55 @@
                     <i class="fas fa-bookmark" style="font-size: 48px; color: #666; margin-bottom: 16px;"></i>
                     <p>No bookmarks yet</p>
                     <p style="color: #999; font-size: 12px;">Click the bookmark button to save pages</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notes Panel -->
+        <div id="notes-panel" class="notes-panel hidden">
+            <div class="notes-header">
+                <h3>Notes</h3>
+                <div class="notes-header-actions">
+                    <button id="new-note-btn" class="new-note-btn" title="New Note">
+                        <i class="fas fa-plus"></i>
+                        <span>New Note</span>
+                    </button>
+                    <button id="close-notes" class="close-settings">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="notes-search">
+                <input type="text" id="notes-search-input" placeholder="Search notes...">
+            </div>
+            <div class="notes-content">
+                <div id="notes-list">
+                    <!-- Notes will be populated here -->
+                </div>
+                <div id="no-notes" class="no-notes hidden">
+                    <i class="fas fa-sticky-note" style="font-size: 48px; color: #666; margin-bottom: 16px;"></i>
+                    <p>No notes yet</p>
+                    <p style="color: #999; font-size: 12px;">Create your first note to get started</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Note Editor Modal -->
+        <div id="note-editor-modal" class="note-editor-modal hidden">
+            <div class="note-editor-content">
+                <div class="note-editor-header">
+                    <input type="text" id="note-title-input" class="note-title-input" placeholder="Note title...">
+                    <div class="note-editor-actions">
+                        <button id="save-note-btn" class="save-note-btn" title="Save (Ctrl+S)">
+                            <i class="fas fa-save"></i>
+                        </button>
+                        <button id="close-note-editor" class="close-note-editor" title="Close (Esc)">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="note-editor-body">
+                    <textarea id="note-content-textarea" class="note-content-textarea" placeholder="Start writing your note..."></textarea>
                 </div>
             </div>
         </div>
