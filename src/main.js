@@ -10,6 +10,7 @@ const store = new Store();
 // Initialize history and downloads stores
 const historyStore = new Store({ name: 'history' });
 const downloadsStore = new Store({ name: 'downloads' });
+const notesStore = new Store({ name: 'notes' });
 
 // Keep a global reference of the window object
 let mainWindow;
@@ -497,6 +498,46 @@ ipcMain.handle('open-incognito-window', () => {
     incognitoSession.clearHostResolverCache();
   });
 
+  return true;
+});
+
+// Notes management
+ipcMain.handle('get-notes', () => {
+  return notesStore.get('items', []);
+});
+
+ipcMain.handle('save-note', (event, note) => {
+  const notes = notesStore.get('items', []);
+  const existingIndex = notes.findIndex(n => n.id === note.id);
+  
+  if (existingIndex !== -1) {
+    // Update existing note
+    notes[existingIndex] = {
+      ...notes[existingIndex],
+      title: note.title,
+      content: note.content,
+      updatedAt: new Date().toISOString()
+    };
+  } else {
+    // Add new note
+    const newNote = {
+      id: note.id || Date.now(),
+      title: note.title || 'Untitled Note',
+      content: note.content || '',
+      createdAt: note.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    notes.unshift(newNote);
+  }
+  
+  notesStore.set('items', notes);
+  return notes[existingIndex !== -1 ? existingIndex : 0];
+});
+
+ipcMain.handle('delete-note', (event, id) => {
+  const notes = notesStore.get('items', []);
+  const filtered = notes.filter(note => note.id !== id);
+  notesStore.set('items', filtered);
   return true;
 });
 
