@@ -15,6 +15,9 @@ class AxisBrowser {
         
         // Add button interactions immediately
         this.addButtonInteractions();
+
+        // Listen for messages from embedded note pages
+        window.addEventListener('message', (event) => this.onEmbeddedMessage(event));
     }
 
     async init() {
@@ -559,6 +562,15 @@ class AxisBrowser {
                 document.getElementById('url-bar').focus();
                 document.getElementById('url-bar').select();
             }
+
+            // Alt + P - Toggle pin on active tab
+            if (e.altKey && (e.key === 'p' || e.key === 'P')) {
+                const activeTabEl = document.querySelector('.tab.active');
+                if (activeTabEl) {
+                    const activeTabId = parseInt(activeTabEl.dataset.tabId);
+                    this.togglePinTab(activeTabId, activeTabEl, null);
+                }
+            }
             
             // Split view shortcuts - disabled for now
             // if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'S') {
@@ -810,9 +822,30 @@ class AxisBrowser {
         });
 
         // Handle page title updates (may fire independently of navigation)
-        webview.addEventListener('page-title-updated', (event) => {
+        webview.addEventListener('page-title-updated', async (event) => {
             if (!this.isBenchmarking) {
                 this.updateTabTitle();
+                
+                // If this is a note tab with 'new' URL, try to update it after first save
+                const tab = this.tabs.get(this.currentTab);
+                if (tab && tab.url === 'axis:note://new') {
+                    // Check if note was saved by getting the latest note with this title
+                    const title = webview.getTitle();
+                    if (title && title !== 'New Note') {
+                        try {
+                            const notes = await window.electronAPI.getNotes();
+                            const savedNote = notes.find(n => n.title === title);
+                            if (savedNote) {
+                                // Update tab URL to use the saved note ID
+                                tab.url = `axis:note://${savedNote.id}`;
+                                tab.noteId = savedNote.id;
+                                this.tabs.set(this.currentTab, tab);
+                            }
+                        } catch (err) {
+                            console.error('Error updating note tab URL:', err);
+                        }
+                    }
+                }
             }
         });
 
@@ -1609,6 +1642,24 @@ class AxisBrowser {
 
     switchToTab(tabId) {
         if (!tabId || !this.tabs.has(tabId)) {
+            // If trying to switch to invalid tab and we have no current tab, try to find any valid tab
+            if (!this.currentTab && this.tabs.size > 0) {
+                const firstTab = Array.from(this.tabs.keys())[0];
+                if (firstTab && this.tabs.has(firstTab) && firstTab !== tabId) {
+                    // Recursively call with valid tab (but only if different to avoid infinite loop)
+                    return this.switchToTab(firstTab);
+                } else if (this.tabs.size === 0) {
+                    // No tabs left, show empty state
+                    this.currentTab = null;
+                    const webview = document.getElementById('webview');
+                    if (webview) {
+                        webview.src = 'about:blank';
+                    }
+                    this.updateEmptyState();
+                    this.updateUrlBar();
+                    this.updateNavigationButtons();
+                }
+            }
             return;
         }
 
@@ -1629,8 +1680,12 @@ class AxisBrowser {
         if (tab) {
             const webview = document.getElementById('webview');
             if (webview) {
-                // Navigate to tab's URL if it exists and is valid
-                if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
+                // Check if this is a note tab
+                if (tab.url && tab.url.startsWith('axis:note://')) {
+                    // This is a note tab - inject note HTML
+                    const noteId = tab.url.replace('axis:note://', '');
+                    this.loadNoteInWebview(noteId);
+                } else if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
                     const sanitizedTabUrl = this.sanitizeUrl(tab.url);
                     webview.src = sanitizedTabUrl || 'https://www.google.com';
                 } else {
@@ -1717,13 +1772,44 @@ class AxisBrowser {
             tabElement.addEventListener('transitionend', onTransitionEnd);
         }
 
-        this.tabs.delete(tabId);
-
-        // If we closed the active tab, switch to another tab or show empty state
+        // If we closed the active tab, switch to another tab BEFORE deleting
         if (this.currentTab === tabId) {
-            const remainingTabs = Array.from(this.tabs.keys());
+            // Get remaining tabs BEFORE deleting the current one
+            const remainingTabs = Array.from(this.tabs.keys()).filter(id => id !== tabId);
+            
             if (remainingTabs.length > 0) {
-                this.switchToTab(remainingTabs[remainingTabs.length - 1]);
+                // Switch to the last remaining tab (or first if that's all that's left)
+                const tabToSwitchTo = remainingTabs[remainingTabs.length - 1];
+                // Verify the tab still exists before switching
+                if (this.tabs.has(tabToSwitchTo)) {
+                    this.switchToTab(tabToSwitchTo);
+                } else if (remainingTabs.length > 1) {
+                    // Fallback to first tab if last one doesn't exist
+                    const fallbackTab = remainingTabs[0];
+                    if (this.tabs.has(fallbackTab)) {
+                        this.switchToTab(fallbackTab);
+                    } else {
+                        // No valid tabs found, show empty state
+                        this.currentTab = null;
+                        const webview = document.getElementById('webview');
+                        if (webview) {
+                            webview.src = 'about:blank';
+                        }
+                        this.updateEmptyState();
+                        this.updateUrlBar();
+                        this.updateNavigationButtons();
+                    }
+                } else {
+                    // Only one tab left but it doesn't exist, show empty state
+                    this.currentTab = null;
+                    const webview = document.getElementById('webview');
+                    if (webview) {
+                        webview.src = 'about:blank';
+                    }
+                    this.updateEmptyState();
+                    this.updateUrlBar();
+                    this.updateNavigationButtons();
+                }
             } else {
                 // No more tabs - show empty state
                 this.currentTab = null;
@@ -1736,6 +1822,9 @@ class AxisBrowser {
                 this.updateNavigationButtons();
             }
         }
+
+        // Delete the tab AFTER switching (if needed)
+        this.tabs.delete(tabId);
     }
 
     recoverClosedTab() {
@@ -1936,6 +2025,15 @@ class AxisBrowser {
         if (!this.currentTab || !this.tabs.has(this.currentTab)) {
             urlBar.value = '';
             urlBar.classList.remove('summarized');
+            return;
+        }
+
+        const tab = this.tabs.get(this.currentTab);
+        
+        // Handle note tabs
+        if (tab && tab.url && tab.url.startsWith('axis:note://')) {
+            urlBar.value = 'Note: ' + (tab.title || 'Untitled Note');
+            urlBar.classList.add('summarized');
             return;
         }
 
@@ -2248,6 +2346,821 @@ class AxisBrowser {
             this.saveSetting('bookmarks', bookmarks);
             this.populateBookmarks();
             this.showNotification(`Bookmark "${bookmark.title}" deleted`, 'success');
+    }
+
+    // Notes functionality - now works as tabs
+    async openNoteAsTab(noteId = null) {
+        // Create a new tab for the note
+        const tabId = Date.now();
+        const noteUrl = noteId ? `axis:note://${noteId}` : `axis:note://new`;
+        
+        // Create tab element
+        const tabElement = document.createElement('div');
+        tabElement.className = 'tab';
+        tabElement.dataset.tabId = tabId;
+        
+        const noteTitle = noteId ? 'Loading...' : 'New Note';
+        tabElement.innerHTML = `
+            <div class="tab-content">
+                <div class="tab-left">
+                    <i class="fas fa-sticky-note tab-note-icon" style="color: #ffd700; margin-right: 8px; font-size: 14px;"></i>
+                    <span class="tab-title">${this.escapeHtml(noteTitle)}</span>
+                </div>
+                <div class="tab-right">
+                    <button class="tab-close"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+        `;
+
+        // Add tab to container
+        const tabsContainer = document.querySelector('.tabs-container');
+        const separator = document.getElementById('tabs-separator');
+        
+        const tabData = {
+            id: tabId,
+            url: noteUrl,
+            title: noteTitle,
+            canGoBack: false,
+            canGoForward: false,
+            history: [noteUrl],
+            historyIndex: 0,
+            pinned: false,
+            isNote: true,
+            noteId: noteId
+        };
+        
+        this.tabs.set(tabId, tabData);
+        
+        // Insert tab below separator
+        if (separator && separator.parentNode === tabsContainer) {
+            tabsContainer.insertBefore(tabElement, separator.nextSibling);
+        } else {
+            tabsContainer.appendChild(tabElement);
+        }
+
+        // Set up tab event listeners
+        this.setupTabEventListeners(tabElement, tabId);
+
+        // Switch to new tab
+        this.switchToTab(tabId);
+        this.updateEmptyState();
+        
+        // Load note content
+        if (noteId) {
+            // Load existing note
+            const notes = await window.electronAPI.getNotes();
+            const note = notes.find(n => n.id === parseInt(noteId));
+            if (note) {
+                tabData.title = note.title || 'Untitled Note';
+                const titleEl = tabElement.querySelector('.tab-title');
+                if (titleEl) titleEl.textContent = tabData.title;
+            }
+        }
+    }
+
+    async onEmbeddedMessage(event) {
+        if (!event.data || event.data.type !== 'saveNote') return;
+        
+        const { note } = event.data;
+        try {
+            const savedNote = await window.electronAPI.saveNote(note);
+            
+            // Update current tab if it's a note tab
+            const tab = this.tabs.get(this.currentTab);
+            if (tab && tab.url && tab.url.startsWith('axis:note://')) {
+                // Update tab data
+                tab.title = savedNote.title || 'Untitled Note';
+                this.tabs.set(this.currentTab, tab);
+                
+                // Update tab element
+                const tabElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
+                if (tabElement) {
+                    const titleEl = tabElement.querySelector('.tab-title');
+                    if (titleEl) titleEl.textContent = tab.title;
+                }
+                
+                // Update URL bar
+                this.updateUrlBar();
+                
+                // If this was a new note, update the URL
+                if (tab.url === 'axis:note://new' && savedNote.id) {
+                    tab.url = `axis:note://${savedNote.id}`;
+                    tab.noteId = savedNote.id;
+                    this.tabs.set(this.currentTab, tab);
+                }
+                
+                // Send confirmation back to webview
+                const webview = document.getElementById('webview');
+                if (webview) {
+                    webview.executeJavaScript(`
+                        (function() {
+                            if (window.updateSaveStatus) {
+                                window.updateSaveStatus(true);
+                            }
+                            window.postMessage({ type: 'noteSaved' }, '*');
+                        })();
+                    `);
+                }
+                
+                // Refresh notes list if panel is open
+                const notesPanel = document.getElementById('notes-panel');
+                if (notesPanel && !notesPanel.classList.contains('hidden')) {
+                    await this.populateNotes();
+                }
+            }
+        } catch (error) {
+            console.error('Error saving note:', error);
+            const webview = document.getElementById('webview');
+            if (webview) {
+                webview.executeJavaScript(`
+                    if (window.updateSaveStatus) {
+                        window.updateSaveStatus(false);
+                    }
+                `);
+            }
+        }
+    }
+
+    async loadNoteInWebview(noteId) {
+        const webview = document.getElementById('webview');
+        if (!webview) return;
+
+        let note = null;
+        if (noteId !== 'new') {
+            const notes = await window.electronAPI.getNotes();
+            note = notes.find(n => n.id === parseInt(noteId));
+        }
+
+        const noteTitle = note ? (note.title || 'Untitled Note') : '';
+        const noteContent = note ? (note.content || '') : '';
+
+        // Create beautiful HTML for note editor
+        const noteHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${this.escapeHtml(noteTitle || 'New Note')}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #0f0f0f;
+            color: #fff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .note-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: #151515;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .note-title-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-size: 20px;
+            font-weight: 600;
+            outline: none;
+            padding: 8px 0;
+            transition: all 0.2s ease;
+        }
+        .note-title-input:focus {
+            color: #fff;
+        }
+        .note-title-input::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+            font-weight: 400;
+        }
+        .note-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .note-status {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+            padding: 4px 8px;
+            background: transparent;
+            border-radius: 4px;
+            min-width: 60px;
+            text-align: center;
+            transition: all 0.2s ease;
+        }
+        .note-status.saving {
+            color: #ffd700;
+        }
+        .note-status.saved {
+            color: #4caf50;
+        }
+        .note-status.error {
+            color: #ff6b6b;
+        }
+        .note-btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            padding: 6px 12px;
+            font-size: 12px;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .note-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        .note-btn.save {
+            background: rgba(76, 175, 80, 0.2);
+            border-color: rgba(76, 175, 80, 0.3);
+            color: #4caf50;
+        }
+        .note-btn.save:hover {
+            background: rgba(76, 175, 80, 0.3);
+            border-color: rgba(76, 175, 80, 0.4);
+        }
+        .note-content {
+            flex: 1;
+            padding: 32px;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+            background: #0f0f0f;
+        }
+        .note-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        .note-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .note-content::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        .note-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .note-textarea {
+            width: 100%;
+            height: 100%;
+            min-height: 500px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 15px;
+            line-height: 1.7;
+            outline: none;
+            resize: none;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            caret-color: #ffd700;
+            padding: 0;
+        }
+        .note-textarea::placeholder {
+            color: rgba(255, 255, 255, 0.3);
+        }
+        .note-meta {
+            padding: 12px 24px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.4);
+            background: #151515;
+            position: sticky;
+            bottom: 0;
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .note-meta-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .word-count {
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 11px;
+        }
+        .word-count span {
+            color: rgba(255, 255, 255, 0.5);
+            margin-left: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="note-header">
+        <input type="text" id="note-title" class="note-title-input" placeholder="Untitled Note" value="${this.escapeHtml(noteTitle)}">
+        <div class="note-actions">
+            <div class="note-status" id="note-status"></div>
+            <button class="note-btn save" onclick="saveNote()" title="Save (Ctrl+S)">
+                💾
+            </button>
+        </div>
+    </div>
+    <div class="note-content">
+        <textarea id="note-content" class="note-textarea" placeholder="Start writing...">${this.escapeHtml(noteContent)}</textarea>
+    </div>
+    <div class="note-meta" id="note-meta">
+        <div class="note-meta-left">
+            <span id="note-date">${note ? this.formatNoteDate(note.updatedAt || note.createdAt) : 'New note'}</span>
+        </div>
+        <div class="word-count" id="word-count">0 words<span> • 0 chars</span></div>
+    </div>
+    <script>
+        const noteId = ${noteId === 'new' ? 'null' : noteId};
+        let isSaving = false;
+        
+        function formatDate(dateString) {
+            if (!dateString) return 'New note';
+            const date = new Date(dateString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return diffMins + ' minute' + (diffMins !== 1 ? 's' : '') + ' ago';
+            if (diffHours < 24) return diffHours + ' hour' + (diffHours !== 1 ? 's' : '') + ' ago';
+            if (diffDays < 7) return diffDays + ' day' + (diffDays !== 1 ? 's' : '') + ' ago';
+            
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+        }
+        
+        function saveNote() {
+            if (isSaving) return;
+            
+            const title = document.getElementById('note-title').value.trim() || 'Untitled Note';
+            const content = document.getElementById('note-content').value;
+            
+            // Update document title immediately
+            document.title = title;
+            
+            // Update status
+            updateSaveStatus('saving');
+            isSaving = true;
+            
+            try {
+                window.parent.postMessage({ 
+                    type: 'saveNote', 
+                    note: { 
+                        id: noteId || null, 
+                        title, 
+                        content, 
+                        createdAt: noteId ? undefined : new Date().toISOString() 
+                    } 
+                }, '*');
+            } catch (e) { 
+                console.error('Failed to post saveNote message', e);
+                updateSaveStatus(false);
+                isSaving = false;
+            }
+        }
+        
+        // Auto-save on Ctrl+S
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                saveNote();
+            }
+        });
+        
+        // Auto-save on title/content change (debounced - increased to 2 seconds)
+        let saveTimeout;
+        function debouncedSave() {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                if (!isSaving) {
+                    saveNote();
+                }
+            }, 2000);
+        }
+        
+        function updateWordCount() {
+            const content = document.getElementById('note-content').value;
+            const words = content.trim() ? content.trim().split(/\\s+/).filter(function(word) { return word.length > 0; }).length : 0;
+            const characters = content.length;
+            const wordCountEl = document.getElementById('word-count');
+            if (wordCountEl) {
+                wordCountEl.innerHTML = words + ' word' + (words !== 1 ? 's' : '') + '<span> • ' + characters.toLocaleString() + ' chars</span>';
+            }
+        }
+        
+        function updateSaveStatus(status) {
+            const statusEl = document.getElementById('note-status');
+            const metaEl = document.getElementById('note-meta');
+            const dateEl = document.getElementById('note-date');
+            if (!statusEl) return;
+            
+            statusEl.className = 'note-status';
+            if (status === 'saving') {
+                statusEl.textContent = 'Saving...';
+                statusEl.classList.add('saving');
+            } else if (status === true) {
+                statusEl.textContent = 'Saved';
+                statusEl.classList.add('saved');
+                isSaving = false;
+                if (dateEl) {
+                    dateEl.textContent = formatDate(new Date().toISOString());
+                }
+                setTimeout(() => {
+                    statusEl.textContent = '';
+                    statusEl.className = 'note-status';
+                }, 2000);
+            } else if (status === false) {
+                statusEl.textContent = 'Error';
+                statusEl.classList.add('error');
+                isSaving = false;
+                setTimeout(() => {
+                    statusEl.textContent = '';
+                    statusEl.className = 'note-status';
+                }, 3000);
+            }
+        }
+        
+        window.updateSaveStatus = updateSaveStatus;
+        
+        document.getElementById('note-title').addEventListener('input', (e) => {
+            // Update document title as user types
+            const title = e.target.value.trim() || 'Untitled Note';
+            document.title = title;
+            if (!isSaving) {
+                updateSaveStatus('saving');
+            }
+            debouncedSave();
+        });
+        
+        document.getElementById('note-content').addEventListener('input', (e) => {
+            updateWordCount();
+            if (!isSaving) {
+                updateSaveStatus('saving');
+            }
+            debouncedSave();
+        });
+        
+        // Initial word count
+        updateWordCount();
+        
+        // Listen for save status updates from parent
+        window.addEventListener('message', (e) => {
+            if (!e || !e.data) return;
+            if (e.data.type === 'noteSaved') {
+                updateSaveStatus(true);
+            } else if (e.data.type === 'noteSaveError') {
+                updateSaveStatus(false);
+            }
+        });
+    </script>
+</body>
+</html>`;
+
+        // Use data URL to load the note HTML
+        const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(noteHtml);
+        webview.src = dataUrl;
+    }
+
+    async toggleNotes() {
+        const notesPanel = document.getElementById('notes-panel');
+        const settingsPanel = document.getElementById('settings-panel');
+        const downloadsPanel = document.getElementById('downloads-panel');
+        const bookmarksPanel = document.getElementById('bookmarks-panel');
+        const securityPanel = document.getElementById('security-panel');
+        const backdrop = document.getElementById('modal-backdrop');
+        
+        // Close other panels with animation
+        if (!settingsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(settingsPanel);
+        }
+        if (!downloadsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(downloadsPanel);
+        }
+        if (!bookmarksPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(bookmarksPanel);
+        }
+        if (!securityPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(securityPanel);
+        }
+        
+        if (notesPanel.classList.contains('hidden')) {
+            // Enhanced opening animation
+            notesPanel.classList.remove('hidden');
+            if (backdrop) {
+                backdrop.classList.remove('hidden');
+                backdrop.style.transition = 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)';
+            }
+            
+            // Add entrance animation class
+            notesPanel.classList.add('notes-entering');
+            
+            // Populate notes immediately
+            await this.populateNotes();
+            notesPanel.classList.remove('notes-entering');
+            
+            // Setup event listeners
+            this.setupNotesEventListeners();
+            
+            // Refresh popup themes
+            this.refreshPopupThemes();
+            
+        } else {
+            // Enhanced closing animation
+            notesPanel.classList.add('notes-closing');
+            
+            setTimeout(() => {
+                notesPanel.classList.add('hidden');
+                notesPanel.classList.remove('notes-closing');
+                if (backdrop) backdrop.classList.add('hidden');
+            }, 500);
+        }
+    }
+
+    async populateNotes() {
+        const notesList = document.getElementById('notes-list');
+        const noNotes = document.getElementById('no-notes');
+        
+        try {
+            const notes = await window.electronAPI.getNotes();
+            
+            // Clear immediately
+            notesList.innerHTML = '';
+            
+            if (!notes || notes.length === 0) {
+                noNotes.classList.remove('hidden');
+                return;
+            }
+            
+            noNotes.classList.add('hidden');
+            
+            // Add items
+            notes.forEach((note) => {
+                const noteElement = document.createElement('div');
+                noteElement.className = 'note-item';
+                noteElement.dataset.noteId = note.id;
+                
+                const preview = (note.content || '').substring(0, 100).replace(/\n/g, ' ');
+                const date = new Date(note.updatedAt || note.createdAt);
+                const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                
+                noteElement.innerHTML = `
+                    <div class="note-item-header">
+                        <h4 class="note-item-title">${this.escapeHtml(note.title || 'Untitled Note')}</h4>
+                        <div class="note-item-actions">
+                            <button class="note-item-delete" data-note-id="${note.id}">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <p class="note-item-preview">${this.escapeHtml(preview || 'No content')}</p>
+                    <div class="note-item-meta">${formattedDate}</div>
+                `;
+                
+                // Click to open as tab
+                noteElement.addEventListener('click', (e) => {
+                    if (!e.target.closest('.note-item-delete')) {
+                        this.openNoteAsTab(note.id);
+                        this.toggleNotes(); // Close notes panel
+                    }
+                });
+                
+                // Delete note
+                const deleteBtn = noteElement.querySelector('.note-item-delete');
+                deleteBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    await this.deleteNote(note.id);
+                });
+                
+                notesList.appendChild(noteElement);
+            });
+        } catch (error) {
+            console.error('Error loading notes:', error);
+            this.showNotification('Error loading notes', 'error');
+        }
+    }
+
+    openNoteEditor(noteId = null) {
+        const editorModal = document.getElementById('note-editor-modal');
+        const titleInput = document.getElementById('note-title-input');
+        const contentTextarea = document.getElementById('note-content-textarea');
+        
+        this.currentEditingNoteId = noteId;
+        
+        if (noteId) {
+            // Edit existing note
+            window.electronAPI.getNotes().then(notes => {
+                const note = notes.find(n => n.id === noteId);
+                if (note) {
+                    titleInput.value = note.title || '';
+                    contentTextarea.value = note.content || '';
+                }
+            });
+        } else {
+            // New note
+            titleInput.value = '';
+            contentTextarea.value = '';
+        }
+        
+        editorModal.classList.remove('hidden');
+        titleInput.focus();
+        
+        // Setup editor event listeners
+        this.setupNoteEditorListeners();
+    }
+
+    setupNoteEditorListeners() {
+        const editorModal = document.getElementById('note-editor-modal');
+        const titleInput = document.getElementById('note-title-input');
+        const contentTextarea = document.getElementById('note-content-textarea');
+        const saveBtn = document.getElementById('save-note-btn');
+        const closeBtn = document.getElementById('close-note-editor');
+        
+        // Save button
+        saveBtn.onclick = async () => {
+            await this.saveCurrentNote();
+        };
+        
+        // Close button
+        closeBtn.onclick = () => {
+            editorModal.classList.add('hidden');
+            this.currentEditingNoteId = null;
+        };
+        
+        // Close on backdrop click
+        editorModal.onclick = (e) => {
+            if (e.target === editorModal) {
+                editorModal.classList.add('hidden');
+                this.currentEditingNoteId = null;
+            }
+        };
+        
+        // Save on Ctrl+S
+        const handleKeyDown = async (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                await this.saveCurrentNote();
+            } else if (e.key === 'Escape') {
+                editorModal.classList.add('hidden');
+                this.currentEditingNoteId = null;
+            }
+        };
+        
+        // Remove old listener and add new one
+        document.removeEventListener('keydown', this.noteEditorKeyHandler);
+        this.noteEditorKeyHandler = handleKeyDown;
+        document.addEventListener('keydown', handleKeyDown);
+    }
+
+    async saveCurrentNote() {
+        const titleInput = document.getElementById('note-title-input');
+        const contentTextarea = document.getElementById('note-content-textarea');
+        const editorModal = document.getElementById('note-editor-modal');
+        
+        const title = titleInput.value.trim() || 'Untitled Note';
+        const content = contentTextarea.value;
+        
+        try {
+            const note = {
+                id: this.currentEditingNoteId || Date.now(),
+                title: title,
+                content: content,
+                createdAt: this.currentEditingNoteId ? undefined : new Date().toISOString()
+            };
+            
+            await window.electronAPI.saveNote(note);
+            
+            // Close editor
+            editorModal.classList.add('hidden');
+            this.currentEditingNoteId = null;
+            
+            // Refresh notes list
+            await this.populateNotes();
+            
+            this.showNotification('Note saved!', 'success');
+        } catch (error) {
+            console.error('Error saving note:', error);
+            this.showNotification('Error saving note', 'error');
+        }
+    }
+
+    async deleteNote(noteId) {
+        try {
+            const notes = await window.electronAPI.getNotes();
+            const note = notes.find(n => n.id === noteId);
+            
+            if (note && confirm(`Delete note "${note.title}"?`)) {
+                await window.electronAPI.deleteNote(noteId);
+                await this.populateNotes();
+                this.showNotification('Note deleted', 'success');
+            }
+        } catch (error) {
+            console.error('Error deleting note:', error);
+            this.showNotification('Error deleting note', 'error');
+        }
+    }
+
+    setupNotesEventListeners() {
+        const newNoteBtn = document.getElementById('new-note-btn');
+        const closeNotesBtn = document.getElementById('close-notes');
+        const notesSearchInput = document.getElementById('notes-search-input');
+        
+        // New note button
+        if (newNoteBtn) {
+            newNoteBtn.onclick = () => {
+                this.openNoteAsTab();
+                this.toggleNotes(); // Close notes panel
+            };
+        }
+        
+        // Close button
+        if (closeNotesBtn) {
+            closeNotesBtn.onclick = () => {
+                this.toggleNotes();
+            };
+        }
+        
+        // Search notes
+        if (notesSearchInput) {
+            const searchNotes = this.debounce(async (query) => {
+                const notesList = document.getElementById('notes-list');
+                const notes = await window.electronAPI.getNotes();
+                
+                if (!query || query.trim() === '') {
+                    await this.populateNotes();
+                    return;
+                }
+                
+                const filtered = notes.filter(note => {
+                    const title = (note.title || '').toLowerCase();
+                    const content = (note.content || '').toLowerCase();
+                    const search = query.toLowerCase();
+                    return title.includes(search) || content.includes(search);
+                });
+                
+                notesList.innerHTML = '';
+                
+                if (filtered.length === 0) {
+                    const noNotes = document.getElementById('no-notes');
+                    noNotes.classList.remove('hidden');
+                    return;
+                }
+                
+                const noNotes = document.getElementById('no-notes');
+                noNotes.classList.add('hidden');
+                
+                filtered.forEach((note) => {
+                    const noteElement = document.createElement('div');
+                    noteElement.className = 'note-item';
+                    noteElement.dataset.noteId = note.id;
+                    
+                    const preview = (note.content || '').substring(0, 100).replace(/\n/g, ' ');
+                    const date = new Date(note.updatedAt || note.createdAt);
+                    const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    
+                    noteElement.innerHTML = `
+                        <div class="note-item-header">
+                            <h4 class="note-item-title">${this.escapeHtml(note.title || 'Untitled Note')}</h4>
+                            <div class="note-item-actions">
+                                <button class="note-item-delete" data-note-id="${note.id}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <p class="note-item-preview">${this.escapeHtml(preview || 'No content')}</p>
+                        <div class="note-item-meta">${formattedDate}</div>
+                    `;
+                    
+                    noteElement.addEventListener('click', (e) => {
+                        if (!e.target.closest('.note-item-delete')) {
+                            this.openNoteEditor(note.id);
+                        }
+                    });
+                    
+                    const deleteBtn = noteElement.querySelector('.note-item-delete');
+                    deleteBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        await this.deleteNote(note.id);
+                    });
+                    
+                    notesList.appendChild(noteElement);
+                });
+            }, 200);
+            
+            notesSearchInput.oninput = (e) => {
+                searchNotes(e.target.value);
+            };
+        }
     }
 
     // preview color helpers removed
@@ -2603,13 +3516,14 @@ class AxisBrowser {
         // Update visual state
         if (isPinned) {
             tabElement.classList.add('pinned');
+            tabElement.classList.add('just-pinned');
+            setTimeout(() => tabElement.classList.remove('just-pinned'), 400);
         } else {
             tabElement.classList.remove('pinned');
+            tabElement.classList.add('just-unpinned');
+            setTimeout(() => tabElement.classList.remove('just-unpinned'), 400);
         }
         
-        if (pinBtn) {
-            pinBtn.style.color = isPinned ? '#ffd700' : '#666';
-        }
         
         // Move tab to correct section
         this.organizeTabsByPinnedState();
@@ -2626,6 +3540,12 @@ class AxisBrowser {
         const tabs = allChildren.filter(el => 
             el.classList.contains('tab') && el.id !== 'tabs-separator'
         );
+
+        // FLIP: First - record current positions
+        const firstRects = new Map();
+        tabs.forEach(el => {
+            firstRects.set(el, el.getBoundingClientRect());
+        });
         
         // Get current order
         const tabOrder = tabs.map(t => parseInt(t.dataset.tabId));
@@ -2671,6 +3591,40 @@ class AxisBrowser {
                 tabsContainer.insertBefore(tab, separator.nextSibling);
             } else {
                 tabsContainer.appendChild(tab);
+            }
+        });
+
+        // FLIP: Last - compute new positions and play animations
+        const allTabsAfter = Array.from(tabsContainer.querySelectorAll('.tab'));
+        allTabsAfter.forEach(el => {
+            const first = firstRects.get(el);
+            const last = el.getBoundingClientRect();
+            if (!first) return; // newly created tabs won't animate here
+            const deltaX = first.left - last.left;
+            const deltaY = first.top - last.top;
+            const deltaW = first.width / Math.max(1, last.width);
+            const deltaH = first.height / Math.max(1, last.height);
+
+            if (deltaX || deltaY || deltaW !== 1 || deltaH !== 1) {
+                el.style.transformOrigin = 'top left';
+                el.style.willChange = 'transform, opacity';
+                el.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(${deltaW}, ${deltaH})`;
+                el.style.opacity = '0.9';
+
+                // Force reflow to ensure the transform is applied before transitioning
+                // eslint-disable-next-line no-unused-expressions
+                el.offsetHeight;
+
+                el.style.transition = 'transform 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 220ms ease';
+                el.style.transform = '';
+                el.style.opacity = '';
+
+                const cleanup = () => {
+                    el.style.transition = '';
+                    el.style.willChange = '';
+                    el.removeEventListener('transitionend', cleanup);
+                };
+                el.addEventListener('transitionend', cleanup);
             }
         });
     }
@@ -2802,6 +3756,9 @@ class AxisBrowser {
         const toggleBtn = document.getElementById('toggle-sidebar-btn');
         const icon = toggleBtn.querySelector('i');
         
+        // Remove slide-out class if present (when toggling from slide-out state)
+        sidebar.classList.remove('slide-out');
+        
         sidebar.classList.toggle('hidden');
         
         // Close nav menu when sidebar is hidden
@@ -2863,6 +3820,15 @@ class AxisBrowser {
             if (sidebar.classList.contains('hidden')) {
                 clearTimeout(slideBackTimeout);
                 sidebar.classList.add('slide-out');
+                
+                // Ensure sidebar uses the current theme color from CSS variable
+                // The CSS variable is already set by the theme system
+                const computedStyle = getComputedStyle(document.documentElement);
+                const sidebarBg = computedStyle.getPropertyValue('--sidebar-background').trim();
+                if (sidebarBg) {
+                    sidebar.style.background = sidebarBg;
+                }
+                
                 console.log('Sidebar slide-out triggered, classes:', sidebar.className);
             }
         });
@@ -2918,6 +3884,15 @@ class AxisBrowser {
             contextMenu.style.top = e.pageY + 'px';
             contextMenu.style.display = 'block';
             this.contextMenuTabId = tabId;
+            
+            // Reset animations on all menu items to ensure they play
+            const menuItems = contextMenu.querySelectorAll('.context-menu-item');
+            menuItems.forEach(item => {
+                // Force animation restart
+                item.style.animation = 'none';
+                item.offsetHeight; // Trigger reflow
+                item.style.animation = '';
+            });
             
             // Update pin/unpin option text and icon based on current state
             const tab = this.tabs.get(tabId);
@@ -3687,6 +4662,15 @@ class AxisBrowser {
             this.createIncognitoTab();
         });
 
+        // Notes option
+        const newNoteMenuBtn = document.getElementById('new-note-menu-btn');
+        if (newNoteMenuBtn) {
+            newNoteMenuBtn.addEventListener('click', () => {
+                this.closeAddTabMenu();
+                this.openNoteAsTab();
+            });
+        }
+
         // Close menu when clicking outside
         document.addEventListener('click', (e) => {
             if (!addTabBtn.contains(e.target) && !addTabMenu.contains(e.target)) {
@@ -3720,6 +4704,15 @@ class AxisBrowser {
         const addTabMenu = document.getElementById('add-tab-menu');
         addTabMenu.classList.remove('hidden');
         addTabMenu.classList.remove('closing');
+        
+        // Reset animations on all menu items to ensure they play
+        const menuItems = addTabMenu.querySelectorAll('.add-tab-menu-item');
+        menuItems.forEach(item => {
+            // Force animation restart
+            item.style.animation = 'none';
+            item.offsetHeight; // Trigger reflow
+            item.style.animation = '';
+        });
     }
 
     closeAddTabMenu() {
@@ -3892,19 +4885,48 @@ class AxisBrowser {
             separator.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
-                separator.classList.add('separator-drag-over');
-            });
-
-            separator.addEventListener('dragleave', (e) => {
-                // Only remove if we're not entering the separator or its children
-                if (!separator.contains(e.relatedTarget)) {
-                    separator.classList.remove('separator-drag-over');
+                
+                // Update visual feedback on separator
+                if (draggedTab) {
+                    const tabId = parseInt(draggedTab.dataset.tabId);
+                    const tab = this.tabs.get(tabId);
+                    const isCurrentlyPinned = tab && tab.pinned;
+                    
+                    // Remove all classes first
+                    separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
+                    tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
+                    
+                    // Calculate separator position for accurate outline
+                    const separatorRect = separator.getBoundingClientRect();
+                    const containerRect = tabsContainer.getBoundingClientRect();
+                    const separatorTop = separatorRect.top - containerRect.top;
+                    const separatorBottom = separatorRect.bottom - containerRect.top;
+                    
+                    // Set CSS custom properties for accurate outline positioning
+                    tabsContainer.style.setProperty('--separator-top', separatorTop + 'px');
+                    tabsContainer.style.setProperty('--separator-bottom', separatorBottom + 'px');
+                    
+                    // Determine which section based on drop position - use midpoint for accuracy
+                    const separatorMidpoint = separatorRect.top + separatorRect.height / 2;
+                    const dropY = e.clientY;
+                    const isAbove = dropY < separatorMidpoint;
+                    
+                    if (!isCurrentlyPinned && isAbove) {
+                        separator.classList.add('drag-over-pinned');
+                        tabsContainer.classList.add('drag-into-pinned');
+                    } else if (isCurrentlyPinned && !isAbove) {
+                        separator.classList.add('drag-over-unpinned');
+                        tabsContainer.classList.add('drag-into-unpinned');
+                    }
                 }
             });
 
             separator.addEventListener('drop', (e) => {
                 e.preventDefault();
-                separator.classList.remove('separator-drag-over');
+                
+                // Remove drag visual feedback
+                separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
+                tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
                 
                 if (draggedTab) {
                     const tabId = parseInt(draggedTab.dataset.tabId);
@@ -3953,48 +4975,52 @@ class AxisBrowser {
                 const containerRect = tabsContainer.getBoundingClientRect();
                 const dropY = e.clientY;
                 
-                // Larger, more forgiving threshold for easier pinning/unpinning
-                const separatorThreshold = 150; // Increased from 80px to 150px
+                // Use separator midpoint as exact boundary
+                const separatorMidpoint = separatorRect.top + separatorRect.height / 2;
                 const tabId = parseInt(draggedTab.dataset.tabId);
                 const tab = this.tabs.get(tabId);
                 const isCurrentlyPinned = tab && tab.pinned;
                 
-                // Check if we're above the separator (in pinned section) or near it
-                const isInPinnedArea = dropY < separatorRect.top + separatorThreshold;
-                const distanceFromSeparator = Math.abs(dropY - separatorRect.top);
-                const isNearSeparator = distanceFromSeparator < separatorThreshold;
+                // Accurate check: above separator = pinned section, below = unpinned section
+                const isInPinnedArea = dropY < separatorMidpoint;
+                const isInUnpinnedArea = dropY > separatorMidpoint;
                 
-                // Check if we're below the separator (in unpinned section)
-                const isInUnpinnedArea = dropY > separatorRect.bottom - separatorThreshold;
-                const isAtTop = dropY < separatorRect.top && dropY > containerRect.top + 20;
-                
-                // Highlight if:
+                // Allow drop if:
                 // 1. Dragging unpinned tab above separator (to pin)
                 // 2. Dragging pinned tab below separator (to unpin)
-                // 3. Near separator in general
-                const shouldHighlight = separator.offsetParent !== null && (
-                    (!isCurrentlyPinned && (isInPinnedArea || isNearSeparator || isAtTop)) ||
-                    (isCurrentlyPinned && (isInUnpinnedArea || isNearSeparator))
+                const shouldAllowDrop = separator.offsetParent !== null && (
+                    (!isCurrentlyPinned && isInPinnedArea) ||
+                    (isCurrentlyPinned && isInUnpinnedArea)
                 );
                 
-                if (shouldHighlight) {
+                // Update visual feedback for drag animations - be more accurate
+                if (separator.offsetParent !== null) {
+                    // Remove all drag classes first
+                    separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
+                    tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
+                    
+                    // Calculate separator position relative to container for accurate outline
+                    const separatorTop = separatorRect.top - containerRect.top;
+                    const separatorBottom = separatorRect.bottom - containerRect.top;
+                    const containerHeight = containerRect.height;
+                    
+                    // Set CSS custom properties for accurate outline positioning
+                    tabsContainer.style.setProperty('--separator-top', separatorTop + 'px');
+                    tabsContainer.style.setProperty('--separator-bottom', separatorBottom + 'px');
+                    
+                    // Add appropriate classes based on exact position relative to separator
+                    if (!isCurrentlyPinned && isInPinnedArea) {
+                        separator.classList.add('drag-over-pinned');
+                        tabsContainer.classList.add('drag-into-pinned');
+                    } else if (isCurrentlyPinned && isInUnpinnedArea) {
+                        separator.classList.add('drag-over-unpinned');
+                        tabsContainer.classList.add('drag-into-unpinned');
+                    }
+                }
+                
+                if (shouldAllowDrop) {
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
-                    separator.classList.add('separator-drag-over');
-                    
-                    // Add visual feedback class based on direction
-                    if (!isCurrentlyPinned) {
-                        // Dragging unpinned tab up - show pinned drop zone
-                        tabsContainer.classList.add('pinned-drop-zone-active');
-                        tabsContainer.classList.remove('unpinned-drop-zone-active');
-                    } else {
-                        // Dragging pinned tab down - show unpinned drop zone
-                        tabsContainer.classList.add('unpinned-drop-zone-active');
-                        tabsContainer.classList.remove('pinned-drop-zone-active');
-                    }
-                } else {
-                    separator.classList.remove('separator-drag-over');
-                    tabsContainer.classList.remove('pinned-drop-zone-active', 'unpinned-drop-zone-active');
                 }
             };
 
@@ -4006,27 +5032,26 @@ class AxisBrowser {
                 
                 const separatorRect = separator.getBoundingClientRect();
                 const dropY = e.clientY;
-                const containerRect = tabsContainer.getBoundingClientRect();
                 const tabId = parseInt(draggedTab.dataset.tabId);
                 const tab = this.tabs.get(tabId);
                 
                 if (!tab) {
-                    tabsContainer.classList.remove('pinned-drop-zone-active', 'unpinned-drop-zone-active');
                     return;
                 }
                 
-                // More forgiving threshold - consider any drop above or near separator
-                const threshold = 150;
-                const isAbove = dropY < separatorRect.top + threshold;
-                const isBelow = dropY > separatorRect.bottom - threshold;
-                const isAtTop = dropY < separatorRect.top && dropY > containerRect.top + 20;
+                // Use separator midpoint as exact boundary
+                const separatorMidpoint = separatorRect.top + separatorRect.height / 2;
+                const isAbove = dropY < separatorMidpoint;
+                const isBelow = dropY > separatorMidpoint;
+                
+                // Remove drag visual feedback
+                separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
+                tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
                 
                 // Handle pinning: unpinned tab dropped above separator
-                if ((isAbove || isAtTop) && separator.offsetParent !== null && !tab.pinned) {
+                if (isAbove && separator.offsetParent !== null && !tab.pinned) {
                     e.preventDefault();
                     e.stopPropagation();
-                    separator.classList.remove('separator-drag-over');
-                    tabsContainer.classList.remove('pinned-drop-zone-active');
                     
                     // Pin the tab
                     tab.pinned = true;
@@ -4041,8 +5066,6 @@ class AxisBrowser {
                 else if (isBelow && separator.offsetParent !== null && tab.pinned) {
                     e.preventDefault();
                     e.stopPropagation();
-                    separator.classList.remove('separator-drag-over');
-                    tabsContainer.classList.remove('unpinned-drop-zone-active');
                     
                     // Unpin the tab
                     tab.pinned = false;
@@ -4052,16 +5075,14 @@ class AxisBrowser {
                     // Move to unpinned section
                     this.organizeTabsByPinnedState();
                     this.savePinnedTabs();
-                } else {
-                    tabsContainer.classList.remove('pinned-drop-zone-active', 'unpinned-drop-zone-active');
                 }
             };
 
             const handleContainerDragLeave = (e) => {
-                // Only remove separator highlight if leaving the container entirely
+                // Remove drag visual feedback when leaving container
                 if (!tabsContainer.contains(e.relatedTarget)) {
-                    separator.classList.remove('separator-drag-over');
-                    tabsContainer.classList.remove('pinned-drop-zone-active', 'unpinned-drop-zone-active');
+                    separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
+                    tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
                 }
             };
 
@@ -4094,10 +5115,12 @@ class AxisBrowser {
                 document.querySelectorAll('.tab').forEach(t => {
                     t.classList.remove('drag-over', 'drag-over-top', 'drag-over-bottom');
                 });
+                
+                // Remove drag section indicators
                 if (separator) {
-                    separator.classList.remove('separator-drag-over');
+                    separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
                 }
-                tabsContainer.classList.remove('pinned-drop-zone-active', 'unpinned-drop-zone-active');
+                tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
             });
 
             tab.addEventListener('dragover', (e) => {
@@ -4485,11 +5508,11 @@ class AxisBrowser {
         }
     }
 
-    updateSpotlightSuggestions(query) {
+    async updateSpotlightSuggestions(query) {
         const suggestionsContainer = document.getElementById('spotlight-suggestions');
         
         // Always show suggestions (5 default when empty, 5 when typing)
-        const suggestions = query.length < 1 ? this.getDefaultSuggestions() : this.generateAdvancedSuggestions(query);
+        const suggestions = query.length < 1 ? this.getDefaultSuggestions() : await this.generateAdvancedSuggestions(query);
         
         if (suggestions.length > 0) {
             // Show loading state only for typed queries
@@ -4560,7 +5583,13 @@ class AxisBrowser {
                     } else if (suggestion.text === 'Open Settings') {
                         this.closeSpotlightSearch();
                         this.toggleSettings();
+                    } else if (suggestion.text === 'New Note') {
+                        this.closeSpotlightSearch();
+                        this.openNoteAsTab();
                     }
+                } else if (suggestion.isNote && suggestion.noteId) {
+                    this.closeSpotlightSearch();
+                    this.openNoteAsTab(suggestion.noteId);
                 } else                 if (suggestion.isSearch) {
                     this.closeSpotlightSearch();
                     this.createNewTab();
@@ -4604,7 +5633,7 @@ class AxisBrowser {
         }, 50);
     }
 
-    generateAdvancedSuggestions(query) {
+    async generateAdvancedSuggestions(query) {
         const suggestions = [];
         const lowerQuery = query.toLowerCase();
         
@@ -4651,6 +5680,34 @@ class AxisBrowser {
                 });
             }
         });
+        
+        // Add notes search
+        if (lowerQuery.includes('note')) {
+            // Always show "New Note" when searching for notes
+            suggestions.push({
+                text: 'New Note',
+                icon: 'fas fa-sticky-note',
+                isAction: true
+            });
+            
+            try {
+                const notes = await window.electronAPI.getNotes();
+                notes.slice(0, 3).forEach(note => {
+                    const titleMatch = note.title && note.title.toLowerCase().includes(lowerQuery);
+                    const contentMatch = note.content && note.content.toLowerCase().includes(lowerQuery);
+                    if (titleMatch || contentMatch || lowerQuery === 'note') {
+                        suggestions.push({
+                            text: note.title || 'Untitled Note',
+                            icon: 'fas fa-sticky-note',
+                            noteId: note.id,
+                            isNote: true
+                        });
+                    }
+                });
+            } catch (err) {
+                // Ignore errors
+            }
+        }
         
         // Add recent history items
         if (this.settings.history && this.settings.history.length > 0) {
@@ -5445,6 +6502,12 @@ class AxisBrowser {
             isAction: true
         });
         
+        suggestions.push({
+            text: 'New Note',
+            icon: 'fas fa-sticky-note',
+            isAction: true
+        });
+        
         // Add recent searches if available
         if (this.settings.recentSearches && this.settings.recentSearches.length > 0) {
             const recentSearches = this.settings.recentSearches.slice(0, 2);
@@ -5619,6 +6682,24 @@ class AxisBrowser {
         } catch (_) {
             return false;
         }
+    }
+
+    // Format note date for display
+    formatNoteDate(dateString) {
+        if (!dateString) return 'New note';
+        const date = new Date(dateString);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return diffMins + ' minute' + (diffMins !== 1 ? 's' : '') + ' ago';
+        if (diffHours < 24) return diffHours + ' hour' + (diffHours !== 1 ? 's' : '') + ' ago';
+        if (diffDays < 7) return diffDays + ' day' + (diffDays !== 1 ? 's' : '') + ' ago';
+        
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
     }
 
     // HTML escape function to prevent XSS
