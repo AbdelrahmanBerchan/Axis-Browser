@@ -13,6 +13,7 @@
     --button-text-hover: #fff;
     --sidebar-background: #111;
     --url-bar-background: #111;
+    --url-bar-focus-background: #1a1a1a;
     --url-bar-text: #fff;
     --url-bar-text-muted: #ccc;
     --tab-background: #2a2a2a;
@@ -38,6 +39,19 @@
     --shadow-light: 0 4px 20px rgba(0, 0, 0, 0.1);
     --shadow-medium: 0 8px 30px rgba(0, 0, 0, 0.2);
     --shadow-heavy: 0 15px 50px rgba(0, 0, 0, 0.3);
+    /* Animation colors - theme-aware */
+    --animation-glow: rgba(255, 255, 255, 0.3);
+    --animation-overlay: rgba(255, 255, 255, 0.05);
+    --animation-overlay-hover: rgba(255, 255, 255, 0.1);
+    --animation-shadow: rgba(0, 0, 0, 0.2);
+    --animation-shadow-light: rgba(0, 0, 0, 0.1);
+    --animation-shadow-medium: rgba(0, 0, 0, 0.3);
+    --animation-shimmer: rgba(255, 255, 255, 0.8);
+    --animation-shimmer-light: rgba(255, 255, 255, 0.9);
+    --animation-border: rgba(255, 255, 255, 0.1);
+    --animation-border-hover: rgba(255, 255, 255, 0.2);
+    --animation-focus-ring: rgba(255, 255, 255, 0.15);
+    --animation-focus-ring-light: rgba(255, 255, 255, 0.1);
 }
 
 /* Reset and base styles - Optimized */
@@ -53,10 +67,7 @@
     box-sizing: border-box;
 }
 
-/* Performance optimizations */
-* {
-    will-change: auto;
-}
+/* Performance optimizations - removed global will-change: auto as it's bad for performance */
 
 /* Optimize for animations */
 .animated {
@@ -101,6 +112,8 @@ body {
     perspective: 1000px;
     /* GPU acceleration */
     will-change: auto;
+    /* Smooth theme fade transitions */
+    transition: background-color 80ms ease, color 80ms ease;
 }
 
 /* Main app container - no rounded corners to avoid conflict with macOS */
@@ -153,7 +166,7 @@ body {
     height: 100%;
     background: linear-gradient(90deg, 
         transparent 0%, 
-        rgba(255, 255, 255, 0.8) 50%, 
+        var(--animation-shimmer) 50%, 
         transparent 100%);
     animation: loadingShimmer 1.5s ease-in-out infinite;
 }
@@ -186,7 +199,7 @@ body {
     pointer-events: none;
     /* Enhanced visual effects */
     backdrop-filter: blur(2px);
-    box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+    box-shadow: 0 0 20px var(--animation-glow);
 }
 
 .loading-bar::before {
@@ -198,12 +211,12 @@ body {
     height: 100%;
     background: linear-gradient(90deg, 
         transparent 0%, 
-        rgba(255, 255, 255, 0.9) 50%, 
+        var(--animation-shimmer-light) 50%, 
         transparent 100%);
     transform: translateX(-100%);
     animation: loading-sweep 1.5s ease-in-out infinite;
     /* Enhanced visual effects */
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    box-shadow: 0 0 10px var(--animation-glow);
     border-radius: 2px;
 }
 
@@ -233,6 +246,8 @@ body {
 #nav-bar {
     -webkit-app-region: drag;
     position: relative;
+    /* Smooth theme fade transitions */
+    transition: background-color 80ms ease, color 80ms ease;
 }
 
 #nav-bar::before {
@@ -355,7 +370,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    transition: all 0.3s ease;
+    transition: width 0.3s ease, transform 0.3s ease, opacity 0.3s ease, background-color 80ms ease, color 80ms ease;
     position: relative;
     min-width: 200px;
     max-width: 500px;
@@ -473,9 +488,6 @@ body.resizing .resize-handle {
     margin: 1px 0;
 }
 
-.sidebar-controls {
-}
-
 .nav-controls {
     display: flex;
     gap: 4px;
@@ -502,12 +514,12 @@ body.resizing .resize-handle {
     padding: 8px 0;
     min-width: 180px;
     max-width: 200px;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 20px var(--animation-shadow-medium);
     backdrop-filter: blur(10px);
     z-index: 999999 !important;
     opacity: 0;
     transform: translateY(-10px) scale(0.95);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1), background-color 80ms ease, color 80ms ease;
     pointer-events: none;
     visibility: hidden;
 }
@@ -552,10 +564,9 @@ body.resizing .resize-handle {
 .nav-menu-item:nth-child(3) { animation-delay: 0.15s; }
 .nav-menu-item:nth-child(4) { animation-delay: 0.2s; }
 
-/* Grey out disabled split view buttons */
+/* Grey out disabled buttons */
 .nav-menu-item:disabled,
-.nav-menu-item[disabled],
-#split-view-btn {
+.nav-menu-item[disabled] {
     opacity: 0.5 !important;
     cursor: not-allowed !important;
     pointer-events: none !important;
@@ -563,15 +574,13 @@ body.resizing .resize-handle {
 }
 
 .nav-menu-item:disabled:hover,
-.nav-menu-item[disabled]:hover,
-#split-view-btn:hover {
+.nav-menu-item[disabled]:hover {
     background: transparent !important;
     transform: none !important;
 }
 
 /* Context menu disabled item styling */
-.context-menu-item[style*="pointer-events: none"],
-#split-view-option {
+.context-menu-item[style*="pointer-events: none"] {
     opacity: 0.5 !important;
     cursor: not-allowed !important;
     pointer-events: none !important;
@@ -623,14 +632,14 @@ body.resizing .resize-handle {
     background: var(--button-hover);
     color: var(--text-color);
     transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 2px 8px var(--animation-shadow-medium);
 }
 
 /* Removed duplicate nav-btn hover animation */
 
 .nav-btn:active:not(:disabled) {
     transform: translateY(0);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 1px 4px var(--animation-shadow);
     transition: all 0.1s ease;
 }
 
@@ -644,6 +653,7 @@ body.resizing .resize-handle {
     position: relative;
     display: flex;
     align-items: center;
+    padding: 0 8px;
 }
 
 .url-bar-container.vertical {
@@ -656,29 +666,33 @@ body.resizing .resize-handle {
 #url-bar {
     width: 100%;
     height: 32px;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--url-bar-background);
+    border: none;
     border-radius: 10px;
-    padding: 0 16px 0 16px;
+    padding: 8px 16px;
     padding-right: 60px;
-    color: var(--text-color);
+    color: var(--url-bar-text-muted);
     font-size: 14px;
     font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-weight: 400;
     outline: none;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+    box-shadow: none;
+    transform: scale(1);
+    box-sizing: border-box;
 }
 
 #url-bar:focus {
-    border-color: rgba(255, 255, 255, 0.6);
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
-    background: transparent;
+    border: none;
+    box-shadow: 0 0 0 2px var(--animation-focus-ring);
+    background: var(--url-bar-focus-background, var(--url-bar-background));
+    transform: scale(1.02);
+    color: var(--url-bar-text);
 }
 
 #url-bar.summarized {
-    color: var(--text-color-secondary);
+    color: var(--url-bar-text-muted);
     font-weight: 500;
     cursor: pointer;
 }
@@ -716,7 +730,7 @@ body.resizing .resize-handle {
     align-items: center;
     gap: 8px;
     backdrop-filter: blur(20px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 8px 24px var(--animation-shadow-medium);
     color: var(--text-color);
     font-size: 14px;
     font-weight: 500;
@@ -830,6 +844,9 @@ body.resizing .resize-handle {
     box-sizing: border-box;
     padding: 4px 8px;
     margin: 0px 0;
+    /* Align with URL bar - same horizontal padding */
+    padding-left: 8px;
+    padding-right: 8px;
 }
 
 .tabs-container.vertical {
@@ -840,7 +857,7 @@ body.resizing .resize-handle {
 .tabs-separator {
     height: 0.5px;
     background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.08), transparent);
-    margin: 12px 3px;
+    margin: 8px 0;
     border-radius: 0.5px;
     flex-shrink: 0;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -852,8 +869,8 @@ body.resizing .resize-handle {
     content: '';
     position: absolute;
     top: 50%;
-    left: 5%;
-    right: 5%;
+    left: 0;
+    right: 0;
     height: 0.5px;
     background: rgba(255, 255, 255, 0.12);
     transform: translateY(-50%);
@@ -880,75 +897,53 @@ body.resizing .resize-handle {
 }
 
 .tabs-separator.drag-over-pinned::after {
-    border-color: rgba(255, 215, 0, 0.6);
+    border-color: rgba(255, 215, 0, 0.7);
     opacity: 1;
-    animation: outlinePulse 1.5s ease-in-out infinite;
+    animation: outlinePulse 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
+    transform: scale(1);
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .tabs-separator.drag-over-unpinned::after {
-    border-color: rgba(255, 255, 255, 0.6);
+    border-color: rgba(255, 255, 255, 0.7);
     opacity: 1;
-    animation: outlinePulseUnpinned 1.5s ease-in-out infinite;
+    animation: outlinePulseUnpinned 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
+    transform: scale(1);
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 @keyframes outlinePulse {
     0%, 100% {
-        box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.4);
-        border-color: rgba(255, 215, 0, 0.6);
+        box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.5), 0 0 20px rgba(255, 215, 0, 0.2);
+        border-color: rgba(255, 215, 0, 0.7);
+        transform: scale(1);
     }
     50% {
-        box-shadow: 0 0 0 4px rgba(255, 215, 0, 0);
-        border-color: rgba(255, 215, 0, 0.8);
+        box-shadow: 0 0 0 6px rgba(255, 215, 0, 0), 0 0 30px rgba(255, 215, 0, 0.3);
+        border-color: rgba(255, 215, 0, 0.95);
+        transform: scale(1.02);
     }
 }
 
 @keyframes outlinePulseUnpinned {
     0%, 100% {
-        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4);
-        border-color: rgba(255, 255, 255, 0.6);
+        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.5), 0 0 20px rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.7);
+        transform: scale(1);
     }
     50% {
-        box-shadow: 0 0 0 4px rgba(255, 255, 255, 0);
-        border-color: rgba(255, 255, 255, 0.8);
+        box-shadow: 0 0 0 6px rgba(255, 255, 255, 0), 0 0 30px rgba(255, 255, 255, 0.3);
+        border-color: rgba(255, 255, 255, 0.95);
+        transform: scale(1.02);
     }
 }
 
-/* Pinned section drag indicator - uses dynamic separator position */
-.tabs-container.drag-into-pinned::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: var(--separator-top, 50%);
-    border: 2px dashed rgba(255, 215, 0, 0.5);
-    border-radius: 8px;
-    pointer-events: none;
-    opacity: 0;
-    animation: fadeInOutline 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    z-index: 1;
-}
-
-/* Unpinned section drag indicator - uses dynamic separator position */
-.tabs-container.drag-into-unpinned::after {
-    content: '';
-    position: absolute;
-    top: var(--separator-bottom, 50%);
-    left: 0;
-    right: 0;
-    bottom: 0;
-    border: 2px dashed rgba(255, 255, 255, 0.5);
-    border-radius: 8px;
-    pointer-events: none;
-    opacity: 0;
-    animation: fadeInOutline 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    z-index: 1;
-}
+/* Removed dotted drag indicators for pinned/unpinned sections - using separator animation only */
 
 @keyframes fadeInOutline {
     from {
         opacity: 0;
-        transform: scale(0.98);
+        transform: scale(0.99);
     }
     to {
         opacity: 1;
@@ -962,14 +957,20 @@ body.resizing .resize-handle {
     background: transparent;
     border-radius: 10px;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background-color 80ms ease,
+                background 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                box-shadow 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                outline 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                color 80ms ease;
     position: relative;
     border: none;
     box-shadow: none;
+    outline: 1px solid transparent;
     box-sizing: border-box;
     overflow: hidden;
     flex-shrink: 0;
     user-select: none;
+    will-change: transform, background, box-shadow;
 }
 
 /* Smooth close animation: shrink height and fade out so siblings move smoothly */
@@ -983,44 +984,55 @@ body.resizing .resize-handle {
 }
 
 .tab.dragging {
-    opacity: 0.5;
-    transform: rotate(5deg);
+    opacity: 0.4;
+    transform: rotate(2deg) scale(0.95);
     z-index: 1000;
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 12px 32px var(--animation-shadow-medium), 0 0 0 1px var(--animation-border);
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    filter: blur(0.5px);
 }
 
 .tab.drag-over {
-    border-top: 3px solid rgba(255, 255, 255, 0.6);
+    border-top: 3px solid rgba(74, 144, 226, 0.8);
     transform: translateY(-2px);
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .tab.drag-over-top {
-    border-top: 3px solid rgba(255, 255, 255, 0.6);
+    border-top: 3px solid rgba(74, 144, 226, 0.8);
+    transform: translateY(-3px) scale(1.02);
+    background: rgba(74, 144, 226, 0.1);
+    box-shadow: 0 4px 16px rgba(74, 144, 226, 0.2);
+    transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .tab.drag-over-bottom {
-    border-bottom: 3px solid rgba(255, 255, 255, 0.6);
+    border-bottom: 3px solid rgba(74, 144, 226, 0.8);
+    transform: translateY(3px) scale(1.02);
+    background: rgba(74, 144, 226, 0.1);
+    box-shadow: 0 4px 16px rgba(74, 144, 226, 0.2);
+    transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-/* Hover state - only for non-active tabs when actually hovering */
+/* Hover state - only for non-active tabs when actually hovering - EXACTLY LIKE FOLDERS */
 .tab:hover:not(.active) {
-    transform: none; /* keep size and position stable */
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    background: rgba(255, 255, 255, 0.08);
-    border: none; /* avoid layout shift from border */
+    transform: none;
+    box-shadow: 0 4px 12px var(--animation-shadow-light);
+    background: var(--animation-overlay-hover);
+    border: none;
 }
 
 .tab.active {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    background: var(--animation-overlay);
+    outline: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 2px 8px var(--animation-shadow);
 }
 
 /* Ensure inactive tabs without hover are transparent */
 .tab:not(.active):not(:hover) {
     background: transparent !important;
     border: none !important;
+    outline: 1px solid transparent !important;
     box-shadow: none !important;
 }
 
@@ -1028,7 +1040,7 @@ body.resizing .resize-handle {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 12px;
+    padding: 8px 16px;
     min-height: 34px;
     position: relative;
     z-index: 2;
@@ -1067,7 +1079,7 @@ body.resizing .resize-handle {
     width: 14px;
     height: 14px;
     border-radius: 4px;
-    transition: transform 0.15s ease-out;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 80ms ease;
 }
 
 .tab-title {
@@ -1078,7 +1090,7 @@ body.resizing .resize-handle {
     text-overflow: ellipsis;
     flex: 1;
     font-weight: 600;
-    transition: color 0.15s ease-out;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 80ms ease;
 }
 
 .tab.active .tab-title {
@@ -1283,10 +1295,10 @@ body.resizing .resize-handle {
     flex: 1;
     background: var(--sidebar-background);
     position: relative;
-    overflow: hidden;
+    overflow: visible;
     border-radius: 0 0 24px 0;
     -webkit-app-region: drag;
-    padding: 2px;
+    padding: 8px;
     min-width: 0;
     max-height: 100vh;
 }
@@ -1304,14 +1316,17 @@ body.resizing .resize-handle {
 }
 
 .webview-container {
-    width: calc(100% - 4px);
-    height: calc(100% - 4px);
+    width: 100%;
+    height: 100%;
     overflow: hidden;
     position: relative;
     background: transparent;
     border-radius: 10px;
-    margin: 2px;
-    /* Shadow removed */
+    margin: 0;
+    box-shadow: 
+        0 8px 24px rgba(0, 0, 0, 0.15),
+        0 4px 8px rgba(0, 0, 0, 0.1),
+        0 2px 4px rgba(0, 0, 0, 0.08);
     backdrop-filter: blur(8px);
     min-width: 0;
     flex-shrink: 1;
@@ -1523,7 +1538,8 @@ body.resizing .resize-handle {
     opacity: 1;
     backdrop-filter: blur(20px);
     pointer-events: auto;
-    animation: backdropFadeIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    animation: backdropFadeIn 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    will-change: opacity, backdrop-filter;
 }
 
 @keyframes backdropFadeIn {
@@ -1542,24 +1558,26 @@ body.resizing .resize-handle {
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%) scale(0.85) rotateY(-10deg) translateX(15px);
+    transform: translate3d(-50%, -50%, 0);
+    backface-visibility: hidden;
+    perspective: 1000px;
     width: 600px;
     max-width: 90vw;
     max-height: 85vh;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(15, 15, 15, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 24px;
     z-index: 1001;
     opacity: 0;
     visibility: hidden;
-    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    transition: opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), visibility 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     display: flex;
     flex-direction: column;
     box-shadow: 
-        0 32px 64px rgba(0, 0, 0, 0.6),
-        0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 40px 80px rgba(0, 0, 0, 0.8),
+        0 0 0 1px rgba(255, 255, 255, 0.06),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(25px);
+    backdrop-filter: blur(40px);
     overflow: hidden;
 }
 
@@ -1772,68 +1790,25 @@ body.resizing .resize-handle {
 
 
 .settings-panel:not(.hidden):not(.settings-closing) {
-    transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
     opacity: 1;
     visibility: visible;
-    backdrop-filter: blur(25px);
-    box-shadow: 
-        0 40px 80px rgba(0, 0, 0, 0.7),
-        0 0 0 1px rgba(255, 255, 255, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
-/* Enhanced entrance animation */
 .settings-panel.settings-entering {
-    animation: settingsPanelSlideIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    animation: notesPanelFadeIn 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    will-change: transform, opacity;
 }
 
-/* Enhanced exit animation */
 .settings-panel.settings-closing {
-    animation: settingsPanelSlideOut 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards !important;
+    animation: notesPanelFadeOut 0.15s cubic-bezier(0.55, 0.06, 0.68, 0.19) forwards !important;
     transition: none !important;
     visibility: visible !important;
     will-change: transform, opacity;
-    transform-origin: center center;
-    backface-visibility: hidden;
-    contain: layout style paint;
-}
-
-@keyframes settingsPanelSlideIn {
-    0% {
-        transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
-        opacity: 0;
-    }
-    50% {
-        transform: translate(-50%, -50%) scale(1.02) rotateY(-2deg) translateX(2px);
-        opacity: 0.8;
-    }
-    100% {
-        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
-        opacity: 1;
-    }
-}
-
-@keyframes settingsPanelSlideOut {
-    0% {
-        transform: translate(-50%, -50%) translateZ(0) scale(1) rotateY(0deg);
-        opacity: 1;
-    }
-    50% {
-        transform: translate(-50%, -50%) translateZ(0) scale(0.95) rotateY(8deg) translateX(-8px);
-        opacity: 0.6;
-    }
-    100% {
-        transform: translate(-50%, -50%) translateZ(0) scale(0.8) rotateY(15deg) translateX(-20px);
-        opacity: 0;
-    }
 }
 
 .settings-panel.hidden {
-    transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
     opacity: 0;
     visibility: hidden;
-    backdrop-filter: blur(0px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
 }
 
 .settings-header {
@@ -1927,9 +1902,6 @@ body.resizing .resize-handle {
 }
 
 /* Sidebar footer */
-.sidebar-footer {
-}
-
 .quick-actions {
     display: flex;
     justify-content: space-between;
@@ -2523,90 +2495,49 @@ body.light-theme .shortcut-desc {
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%) scale(0.85) rotateY(-10deg) translateX(15px);
+    transform: translate3d(-50%, -50%, 0);
+    backface-visibility: hidden;
+    perspective: 1000px;
     width: 600px;
     max-width: 90vw;
     max-height: 85vh;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(15, 15, 15, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 24px;
     z-index: 1001;
     opacity: 0;
     visibility: hidden;
-    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    transition: opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), visibility 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     display: flex;
     flex-direction: column;
     box-shadow: 
-        0 32px 64px rgba(0, 0, 0, 0.6),
-        0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 40px 80px rgba(0, 0, 0, 0.8),
+        0 0 0 1px rgba(255, 255, 255, 0.06),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(25px);
+    backdrop-filter: blur(40px);
     overflow: hidden;
 }
 
 .bookmarks-panel:not(.hidden):not(.bookmarks-closing) {
-    transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
     opacity: 1;
     visibility: visible;
-    backdrop-filter: blur(25px);
-    box-shadow: 
-        0 40px 80px rgba(0, 0, 0, 0.7),
-        0 0 0 1px rgba(255, 255, 255, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
-/* Enhanced entrance animation */
 .bookmarks-panel.bookmarks-entering {
-    animation: bookmarksPanelSlideIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    animation: notesPanelFadeIn 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    will-change: transform, opacity;
 }
 
-/* Enhanced exit animation */
 .bookmarks-panel.bookmarks-closing {
-    animation: bookmarksPanelSlideOut 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards !important;
+    animation: notesPanelFadeOut 0.15s cubic-bezier(0.55, 0.06, 0.68, 0.19) forwards !important;
     transition: none !important;
     visibility: visible !important;
     will-change: transform, opacity;
-    transform-origin: center center;
-    backface-visibility: hidden;
-    contain: layout style paint;
-}
-
-@keyframes bookmarksPanelSlideIn {
-    0% {
-        transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
-        opacity: 0;
-    }
-    50% {
-        transform: translate(-50%, -50%) scale(1.02) rotateY(-2deg) translateX(2px);
-        opacity: 0.8;
-    }
-    100% {
-        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
-        opacity: 1;
-    }
-}
-
-@keyframes bookmarksPanelSlideOut {
-    0% {
-        transform: translate(-50%, -50%) translateZ(0) scale(1) rotateY(0deg);
-        opacity: 1;
-    }
-    50% {
-        transform: translate(-50%, -50%) translateZ(0) scale(0.95) rotateY(8deg) translateX(-8px);
-        opacity: 0.6;
-    }
-    100% {
-        transform: translate(-50%, -50%) translateZ(0) scale(0.8) rotateY(15deg) translateX(-20px);
-        opacity: 0;
-    }
 }
 
 .bookmarks-panel.hidden {
-    transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
     opacity: 0;
     visibility: hidden;
-    backdrop-filter: blur(0px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
 }
 
 /* Bookmarks Search Bar - Matching Downloads */
@@ -2694,81 +2625,74 @@ body.light-theme .shortcut-desc {
     background: rgba(255, 255, 255, 0.4);
 }
 
-/* Notes Panel - Enhanced to match Bookmarks */
+/* Notes Panel - Clean and Minimal */
 .notes-panel {
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%) scale(0.85) rotateY(-10deg) translateX(15px);
-    width: 600px;
+    transform: translate3d(-50%, -50%, 0);
+    backface-visibility: hidden;
+    perspective: 1000px;
+    width: 750px;
     max-width: 90vw;
     max-height: 85vh;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(15, 15, 15, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 24px;
     z-index: 1001;
     opacity: 0;
     visibility: hidden;
-    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    transition: opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), visibility 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     display: flex;
     flex-direction: column;
     box-shadow: 
-        0 32px 64px rgba(0, 0, 0, 0.6),
-        0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 40px 80px rgba(0, 0, 0, 0.8),
+        0 0 0 1px rgba(255, 255, 255, 0.06),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(25px);
+    backdrop-filter: blur(40px);
     overflow: hidden;
 }
 
 .notes-panel:not(.hidden):not(.notes-closing) {
-    transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
     opacity: 1;
     visibility: visible;
-    backdrop-filter: blur(25px);
-    box-shadow: 
-        0 40px 80px rgba(0, 0, 0, 0.7),
-        0 0 0 1px rgba(255, 255, 255, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .notes-panel.notes-entering {
-    animation: notesPanelSlideIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    animation: notesPanelFadeIn 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    will-change: transform, opacity;
 }
 
 .notes-panel.notes-closing {
-    animation: notesPanelSlideOut 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards !important;
+    animation: notesPanelFadeOut 0.15s cubic-bezier(0.55, 0.06, 0.68, 0.19) forwards !important;
     transition: none !important;
     visibility: visible !important;
     will-change: transform, opacity;
-    transform-origin: center center;
-    backface-visibility: hidden;
-    contain: layout style paint;
 }
 
-@keyframes notesPanelSlideIn {
+@keyframes notesPanelFadeIn {
     0% {
-        transform: translate(-50%, -50%) scale(0.85) rotateY(-10deg) translateX(15px);
         opacity: 0;
+        transform: translate3d(-50%, -50%, 0) scale(0.98);
     }
     100% {
-        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
         opacity: 1;
+        transform: translate3d(-50%, -50%, 0) scale(1);
     }
 }
 
-@keyframes notesPanelSlideOut {
+@keyframes notesPanelFadeOut {
     0% {
-        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
         opacity: 1;
+        transform: translate3d(-50%, -50%, 0) scale(1);
     }
     100% {
-        transform: translate(-50%, -50%) scale(0.85) rotateY(-10deg) translateX(15px);
         opacity: 0;
+        transform: translate3d(-50%, -50%, 0) scale(0.98);
     }
 }
 
 .notes-panel.hidden {
-    transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
     opacity: 0;
     visibility: hidden;
 }
@@ -2777,74 +2701,155 @@ body.light-theme .shortcut-desc {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 24px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(42, 42, 42, 0.3);
+    padding: 24px 32px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: transparent;
     flex-shrink: 0;
 }
 
 .notes-header h3 {
-    font-size: 20px;
+    font-size: 24px;
     font-weight: 600;
-    color: var(--text-color);
+    color: rgba(255, 255, 255, 0.95);
     margin: 0;
+    letter-spacing: -0.4px;
+}
+
+/* Create New Note Section */
+.notes-create-section {
+    padding: 24px 32px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    flex-shrink: 0;
+}
+
+.new-note-btn-large {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 24px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    color: rgba(255, 255, 255, 0.95);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    text-align: left;
+}
+
+.new-note-btn-large:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 215, 0, 0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.new-note-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.2) 0%, rgba(255, 215, 0, 0.15) 100%);
+    border: 1px solid rgba(255, 215, 0, 0.25);
+    border-radius: 10px;
+    color: #ffd700;
+    font-size: 20px;
+    flex-shrink: 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.new-note-btn-large:hover .new-note-icon {
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.3) 0%, rgba(255, 215, 0, 0.25) 100%);
+    border-color: rgba(255, 215, 0, 0.4);
+    transform: scale(1.05);
+}
+
+.new-note-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
     flex: 1;
 }
 
-.notes-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+.new-note-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: -0.2px;
 }
 
-.new-note-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    color: var(--text-color);
+.new-note-subtitle {
     font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.new-note-btn:hover {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.2);
-    transform: translateY(-1px);
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 400;
 }
 
 .notes-search {
-    padding: 16px 24px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 20px 32px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     flex-shrink: 0;
+    background: transparent;
 }
 
 .notes-search input {
     width: 100%;
-    padding: 10px 16px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    color: var(--text-color);
+    padding: 12px 18px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.95);
     font-size: 14px;
     outline: none;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-weight: 500;
 }
 
 .notes-search input:focus {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 215, 0, 0.25);
+    box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.08);
+}
+
+.notes-search input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Saved Notes Section */
+.notes-saved-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.notes-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 32px 16px 32px;
+    flex-shrink: 0;
+}
+
+.notes-section-header h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.notes-count {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 500;
 }
 
 .notes-content {
     flex: 1;
     overflow-y: auto;
-    padding: 16px 20px;
+    padding: 0 32px 24px 32px;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -2869,45 +2874,63 @@ body.light-theme .shortcut-desc {
 }
 
 .note-item {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.02) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 14px;
-    padding: 18px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 20px;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(20px);
+    overflow: hidden;
+}
+
+.note-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, rgba(255, 215, 0, 0.5) 0%, rgba(255, 215, 0, 0) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
 }
 
 .note-item:hover {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.05) 100%);
-    border-color: rgba(255, 215, 0, 0.3);
-    transform: translateY(-3px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 215, 0, 0.1);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 215, 0, 0.25);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 215, 0, 0.15);
+}
+
+.note-item:hover::before {
+    opacity: 1;
 }
 
 .note-item-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
+    gap: 12px;
 }
 
 .note-item-title {
-    font-size: 16px;
+    font-size: 17px;
     font-weight: 600;
-    color: var(--text-color);
+    color: rgba(255, 255, 255, 0.95);
     margin: 0;
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    letter-spacing: 0.2px;
+    letter-spacing: -0.2px;
 }
 
 .note-item-actions {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     opacity: 0;
     transition: opacity 0.2s ease;
 }
@@ -2917,38 +2940,47 @@ body.light-theme .shortcut-desc {
 }
 
 .note-item-delete {
-    background: transparent;
-    border: none;
-    color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.6);
     cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 4px;
+    padding: 6px 10px;
+    border-radius: 8px;
     transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .note-item-delete:hover {
-    background: rgba(255, 0, 0, 0.1);
-    color: #ff4444;
+    background: rgba(248, 113, 113, 0.15);
+    border-color: rgba(248, 113, 113, 0.3);
+    color: #f87171;
+    transform: scale(1.05);
 }
 
 .note-item-preview {
     font-size: 14px;
-    color: rgba(255, 255, 255, 0.65);
-    line-height: 1.6;
-    margin: 10px 0 0 0;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.7;
+    margin: 0;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    letter-spacing: 0.1px;
+    letter-spacing: 0.01em;
 }
 
 .note-item-meta {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.5);
-    margin-top: 12px;
+    margin-top: 14px;
     font-weight: 500;
-    letter-spacing: 0.2px;
+    letter-spacing: 0.01em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .no-notes {
@@ -2959,6 +2991,27 @@ body.light-theme .shortcut-desc {
     padding: 60px 20px;
     text-align: center;
     color: rgba(255, 255, 255, 0.5);
+}
+
+.no-notes i {
+    font-size: 48px;
+    color: rgba(255, 255, 255, 0.2);
+    margin-bottom: 16px;
+}
+
+.no-notes p {
+    margin: 4px 0;
+    font-size: 14px;
+}
+
+.no-notes p:first-of-type {
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 500;
+}
+
+.no-notes p:last-of-type {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
 }
 
 /* Note Editor Modal */
@@ -3157,92 +3210,51 @@ body.light-theme .shortcut-desc {
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%) scale(0.85) rotateY(-10deg) translateX(15px);
+    transform: translate3d(-50%, -50%, 0);
+    backface-visibility: hidden;
+    perspective: 1000px;
     width: 600px;
     max-width: 90vw;
     height: auto;
     max-height: 85vh;
     min-height: 400px;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(15, 15, 15, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 24px;
     z-index: 1001;
     opacity: 0;
     visibility: hidden;
-    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    transition: opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), visibility 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     display: flex;
     flex-direction: column;
     box-shadow: 
-        0 32px 64px rgba(0, 0, 0, 0.6),
-        0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 40px 80px rgba(0, 0, 0, 0.8),
+        0 0 0 1px rgba(255, 255, 255, 0.06),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(25px);
+    backdrop-filter: blur(40px);
     overflow: hidden;
 }
 
 .downloads-panel:not(.hidden):not(.downloads-closing) {
-    transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
     opacity: 1;
     visibility: visible;
-    backdrop-filter: blur(25px);
-    box-shadow: 
-        0 40px 80px rgba(0, 0, 0, 0.7),
-        0 0 0 1px rgba(255, 255, 255, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
-/* Enhanced entrance animation */
 .downloads-panel.downloads-entering {
-    animation: downloadsPanelSlideIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    animation: notesPanelFadeIn 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    will-change: transform, opacity;
 }
 
-/* Enhanced exit animation */
 .downloads-panel.downloads-closing {
-    animation: downloadsPanelSlideOut 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards !important;
+    animation: notesPanelFadeOut 0.15s cubic-bezier(0.55, 0.06, 0.68, 0.19) forwards !important;
     transition: none !important;
     visibility: visible !important;
     will-change: transform, opacity;
-    transform-origin: center center;
-    backface-visibility: hidden;
-    contain: layout style paint;
-}
-
-@keyframes downloadsPanelSlideIn {
-    0% {
-        transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
-        opacity: 0;
-    }
-    50% {
-        transform: translate(-50%, -50%) scale(1.02) rotateY(-2deg) translateX(2px);
-        opacity: 0.8;
-    }
-    100% {
-        transform: translate(-50%, -50%) scale(1) rotateY(0deg) translateX(0px);
-        opacity: 1;
-    }
-}
-
-@keyframes downloadsPanelSlideOut {
-    0% {
-        transform: translate(-50%, -50%) translateZ(0) scale(1) rotateY(0deg);
-        opacity: 1;
-    }
-    50% {
-        transform: translate(-50%, -50%) translateZ(0) scale(0.95) rotateY(8deg) translateX(-8px);
-        opacity: 0.6;
-    }
-    100% {
-        transform: translate(-50%, -50%) translateZ(0) scale(0.8) rotateY(15deg) translateX(-20px);
-        opacity: 0;
-    }
 }
 
 .downloads-panel.hidden {
-    transform: translate(-50%, -50%) scale(0.8) rotateY(-15deg) translateX(20px);
     opacity: 0;
     visibility: hidden;
-    backdrop-filter: blur(0px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
 }
 
 /* Downloads Search Bar */
@@ -3281,11 +3293,13 @@ body.light-theme .shortcut-desc {
 .context-menu {
     position: fixed;
     background: var(--sidebar-background);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--animation-border);
     border-radius: 10px;
     padding: 8px 0;
     z-index: 1002;
     min-width: 150px;
+    /* Smooth theme fade transitions */
+    transition: background-color 80ms ease, color 80ms ease;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(10px);
     display: none;
@@ -3834,85 +3848,66 @@ body.light-theme .shortcut-desc {
 /* Security Panel */
 .security-panel {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(0, 0, 0, 0.3);
-    backdrop-filter: blur(10px);
-    z-index: 1000;
+    top: 50%;
+    left: 50%;
+    transform: translate3d(-50%, -50%, 0);
+    backface-visibility: hidden;
+    perspective: 1000px;
+    width: 450px;
+    max-width: 90vw;
+    max-height: 85vh;
+    background: rgba(15, 15, 15, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 24px;
+    z-index: 1001;
     opacity: 0;
     visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), visibility 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
+    box-shadow: 
+        0 40px 80px rgba(0, 0, 0, 0.8),
+        0 0 0 1px rgba(255, 255, 255, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(40px);
+    overflow: hidden;
 }
 
 .security-panel-content {
     position: relative;
-    width: 450px;
-    max-width: 90vw;
-    max-height: 80vh;
-    background: rgba(42, 42, 42, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
-    transform: scale(0.8) rotateY(-15deg) translateX(20px);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    backdrop-filter: none;
+    box-shadow: none;
+    transform: none;
+    transition: none;
     overflow: hidden;
 }
 
-.security-panel:not(.hidden) {
+.security-panel:not(.hidden):not(.security-closing) {
     opacity: 1;
     visibility: visible;
-    animation: securitySlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.security-panel.closing {
-    animation: securitySlideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+.security-panel.security-entering {
+    animation: notesPanelFadeIn 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    will-change: transform, opacity;
 }
 
-.security-panel:not(.hidden) .security-panel-content {
-    transform: scale(1) rotateY(0deg) translateX(0px);
+.security-panel.security-closing {
+    animation: notesPanelFadeOut 0.15s cubic-bezier(0.55, 0.06, 0.68, 0.19) forwards !important;
+    transition: none !important;
+    visibility: visible !important;
+    will-change: transform, opacity;
 }
 
 .security-panel.hidden {
     opacity: 0;
     visibility: hidden;
-}
-
-.security-panel.hidden .security-panel-content {
-    transform: scale(0.8) rotateY(-15deg) translateX(20px);
-}
-
-/* Security panel slide-in animation */
-@keyframes securitySlideIn {
-    0% {
-        opacity: 0;
-        transform: scale(0.8) rotateY(-15deg) translateX(20px);
-    }
-    50% {
-        opacity: 1;
-        transform: scale(1.05) rotateY(-5deg) translateX(5px);
-    }
-    100% {
-        opacity: 1;
-        transform: scale(1) rotateY(0deg) translateX(0px);
-    }
-}
-
-/* Security panel slide-out animation */
-@keyframes securitySlideOut {
-    0% {
-        opacity: 1;
-        transform: scale(1) rotateY(0deg) translateX(0px);
-    }
-    100% {
-        opacity: 0;
-        transform: scale(0.8) rotateY(15deg) translateX(-20px);
-    }
 }
 
 /* Settings panel slide-out animation */
@@ -4459,23 +4454,19 @@ body.light-theme .shortcut-desc {
     pointer-events: none;
 }
 
-/* Hover state - only for non-active tabs when actually hovering */
+/* Hover state - EXACTLY LIKE FOLDERS */
 .tab:hover:not(.active) {
     transform: none;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 12px var(--animation-shadow-light);
+    background: var(--animation-overlay-hover);
     border: none;
 }
 
-.tab:hover::before {
-    left: 100%;
-}
-
-.tab:hover .tab-title {
+.tab:hover:not(.active) .tab-title {
     color: var(--text-color);
 }
 
-.tab:hover .tab-favicon {
+.tab:hover:not(.active) .tab-favicon {
     transform: scale(1.05);
 }
 
@@ -4486,10 +4477,15 @@ body.light-theme .shortcut-desc {
 }
 
 .tab.active {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 8px var(--animation-shadow);
+    background: var(--animation-overlay);
+    outline: 1px solid var(--animation-border-hover);
+}
+
+.tab.pinned.active {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(255, 193, 7, 0.15);
     background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: none;
 }
 
 /* Ensure inactive tabs are transparent - override conflicting rules */
@@ -4500,18 +4496,25 @@ body.light-theme .shortcut-desc {
     transform: none !important;
 }
 
+.tab.pinned:not(.active):not(:hover) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: 0 0 0 0.5px rgba(255, 193, 7, 0.15) !important;
+    transform: none !important;
+}
+
 .tab.pinned {
-    transform: translateY(-1px) scale(1.02);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 193, 7, 0.3);
-    background: rgba(255, 193, 7, 0.1);
-    border: 1px solid rgba(255, 193, 7, 0.3);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(255, 193, 7, 0.15);
+    background: transparent;
+    border: none;
     animation: pinAnimation 0.3s ease;
     margin: 2px 0;
     z-index: 10;
 }
 
 .tab.just-pinned {
-    box-shadow: 0 4px 14px rgba(255, 193, 7, 0.25), 0 0 0 1px rgba(255, 193, 7, 0.35);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(255, 193, 7, 0.2);
 }
 
 .tab.just-unpinned {
@@ -4520,13 +4523,245 @@ body.light-theme .shortcut-desc {
 
 @keyframes pinAnimation {
     0% {
-        transform: translateY(-1px) scale(1);
+        transform: translateY(-1px);
     }
     50% {
-        transform: translateY(-1px) scale(1.05);
+        transform: translateY(-1px);
     }
     100% {
-        transform: translateY(-1px) scale(1.02);
+        transform: translateY(-1px);
+    }
+}
+
+/* Folder Styles - Simple, no highlighting */
+.folder {
+    width: 100%;
+    min-height: 34px;
+    background: transparent;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                background-color 80ms ease,
+                background 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                box-shadow 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                border 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                color 80ms ease;
+    position: relative;
+    border: none;
+    box-shadow: none;
+    box-sizing: border-box;
+    overflow: visible;
+    flex-shrink: 0;
+    user-select: none;
+    margin: 2px 0;
+    display: flex;
+    flex-direction: column;
+    will-change: transform, background, box-shadow;
+}
+
+.folder:hover {
+    transform: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+}
+
+.folder:hover .folder-icon {
+    transform: scale(1.05);
+}
+
+.folder:hover .folder-name-input {
+    color: var(--text-color);
+}
+
+.folder .tab-content {
+    height: 34px;
+    min-height: 34px;
+    flex-shrink: 0;
+    padding: 8px 16px;
+}
+
+.folder-icon {
+    color: var(--text-color-muted);
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    opacity: 0.7;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.folder-icon-animate {
+    animation: folderIconOpen 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes folderIconOpen {
+    0% {
+        transform: scale(1) rotate(0deg);
+    }
+    50% {
+        transform: scale(1.15) rotate(-5deg);
+    }
+    100% {
+        transform: scale(1) rotate(0deg);
+    }
+}
+
+.folder-name-input {
+    flex: 1;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-color);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0;
+    margin: 0;
+    outline: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 80ms ease;
+    font-family: 'Nunito', sans-serif;
+    min-width: 0;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.folder-name-input:read-only {
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.folder-name-input:not(:read-only) {
+    cursor: text;
+    user-select: auto;
+}
+
+.folder-name-input:focus {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin: -2px -6px;
+}
+
+
+.folder.drag-over-folder {
+    background: rgba(74, 144, 226, 0.2);
+    border: 2px solid rgba(74, 144, 226, 0.6);
+    transform: scale(1.02);
+    box-shadow: 0 6px 20px rgba(74, 144, 226, 0.3), inset 0 0 0 1px rgba(74, 144, 226, 0.2);
+    transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.folder.drag-over-folder .folder-icon {
+    transform: scale(1.1);
+    color: rgba(74, 144, 226, 1);
+    transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.folder-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    opacity: 0;
+    padding: 0 16px;
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    position: relative;
+    z-index: 1;
+    visibility: hidden;
+    width: 100%;
+    box-sizing: border-box;
+    will-change: max-height, opacity;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+}
+
+.folder-content.open {
+    opacity: 1;
+    padding: 8px 16px 12px 16px;
+    visibility: visible;
+    display: flex;
+    transition: max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.folder.toggling .folder-content {
+    pointer-events: none;
+}
+
+/* Removed dotted folder-content drag-over - using only folder.drag-over-folder instead */
+
+.folder-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-color-muted);
+    font-size: 12px;
+    font-style: italic;
+    opacity: 0.5;
+}
+
+.folder .tab {
+    margin: 0;
+    transform: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    opacity: 1;
+    visibility: visible;
+    display: block;
+}
+
+.folder .tab:hover {
+    transform: translateX(4px);
+    background: var(--animation-overlay);
+}
+
+.folder .tab-content {
+    opacity: 1 !important;
+    visibility: visible !important;
+    display: flex !important;
+}
+
+.folder .tab {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+.folder .tab-right {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+    transform: translateX(8px);
+}
+
+.folder:hover .tab-right {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+}
+
+.folder-delete {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+@keyframes folderSlideIn {
+    0% {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.98);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
     }
 }
 
@@ -4679,9 +4914,7 @@ body.light-theme .settings-actions {
 
 /* Apply animations to elements */
 
-.settings-panel {
-    animation: slideInFromRight 0.3s ease-out;
-}
+/* Animation now handled by -entering class, matching notes panel */
 
 /* Removed pulse animation that was causing freezing */
 
@@ -4720,7 +4953,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 /* Ensure sidebar footer buttons get the same animations as nav-menu-btn */
 .sidebar-footer .nav-btn:hover {
     transform: translateY(-1px) scale(1.02);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 12px var(--animation-shadow-light);
 }
 
 .sidebar-footer .nav-btn:active {
@@ -4779,10 +5012,10 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 
 /* Enhanced URL bar */
 #url-bar:focus {
-    border-color: #555;
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
-    transform: translateY(-1px);
-    background: transparent;
+    border: none;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
+    transform: scale(1.02);
+    background: #4A4850;
 }
 
 /* Smooth tab transitions */
@@ -4865,13 +5098,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     }
 }
 
-/* Enhanced settings panel */
-.settings-panel {
-    backdrop-filter: blur(20px);
-    background: rgba(42, 42, 42, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
-}
+/* Settings panel styles are defined above, matching notes panel */
 
 /* Popup entrance animations */
 @keyframes settingsSlideIn {
@@ -4919,30 +5146,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     }
 }
 
-/* Apply animations to visible panels */
-.settings-panel:not(.hidden) {
-    animation: settingsSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.settings-panel.closing {
-    animation: settingsSlideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.downloads-panel:not(.hidden) {
-    animation: downloadsSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.downloads-panel.closing {
-    animation: downloadsSlideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.bookmarks-panel:not(.hidden) {
-    animation: bookmarksSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.bookmarks-panel.closing {
-    animation: bookmarksSlideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
+/* Animations are now handled by -entering and -closing classes, matching notes panel */
 
 /* Smooth scrollbar */
 ::-webkit-scrollbar {
@@ -4954,13 +5158,13 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--animation-border-hover);
     border-radius: 3px;
     transition: background 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.4);
+    background: var(--animation-overlay-hover);
 }
 
 /* ===== REFINED MICRO-INTERACTIONS ===== */
@@ -5037,7 +5241,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 .nav-menu-item:active, .add-tab-menu-item:active, .context-menu-item:active {
     transform: scale(0.98) translateY(0.5px);
     box-shadow: 
-        0 1px 4px rgba(0, 0, 0, 0.2),
+        0 1px 4px var(--animation-shadow),
         inset 0 1px 1px rgba(255, 255, 255, 0.1);
     transition: all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
@@ -5045,14 +5249,14 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 /* Refined Hover Effects - excluding tab buttons */
 .nav-btn:hover, .url-icon:hover, .add-tab-btn:hover, .settings-btn:hover, .bookmark-btn:hover, .security-btn:hover, .nav-menu-btn:hover, .download-btn:hover, .bookmark-delete:hover, .close-settings:hover, .refresh-btn:hover, .clear-btn:hover {
     transform: translateY(-1px) scale(1.02);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 12px var(--animation-shadow-light);
 }
 
 /* Premium Popup Menu Hover Effects */
 .nav-menu-item:hover, .add-tab-menu-item:hover, .context-menu-item:hover {
     transform: translateY(-0.5px) scale(1.01);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    background: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 2px 8px var(--animation-shadow-light);
+    background: var(--animation-overlay);
     transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
@@ -5087,7 +5291,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 
 .url-bar:focus-within {
     transform: scale(1.01);
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 2px var(--animation-focus-ring-light);
 }
 
 .url-icon {
@@ -5206,7 +5410,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
 /* Smooth Focus Rings */
 input:focus, select:focus, button:focus {
     outline: none;
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 3px var(--animation-focus-ring-light);
     transition: box-shadow 0.2s ease;
 }
 
@@ -5214,8 +5418,8 @@ input:focus, select:focus, button:focus {
 .download-item:hover, .bookmark-item:hover, .setting-group:hover {
     transform: translateY(-1px) scale(1.005);
     box-shadow: 
-        0 4px 12px rgba(0, 0, 0, 0.15),
-        0 0 0 1px rgba(255, 255, 255, 0.05);
+        0 4px 12px var(--animation-shadow-light),
+        0 0 0 1px var(--animation-overlay);
     transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
@@ -5224,29 +5428,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     transition: all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-/* Smooth Popup Closing Animations */
-.downloads-panel.closing, .bookmarks-panel.closing, .settings-panel.closing {
-    animation: popupClose 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-    pointer-events: none;
-}
-
-.downloads-panel.closing .downloads-content, 
-.bookmarks-panel.closing .bookmarks-content, 
-.settings-panel.closing .settings-content {
-    animation: contentFadeOut 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-}
-
-.downloads-panel.closing .downloads-header, 
-.bookmarks-panel.closing .bookmarks-header, 
-.settings-panel.closing .settings-header {
-    animation: headerSlideUp 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-}
-
-.downloads-panel.closing .downloads-list,
-.bookmarks-panel.closing .bookmarks-list,
-.settings-panel.closing .settings-tabs {
-    animation: listFadeOut 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-}
+/* Closing animations are now handled by -closing classes, matching notes panel */
 
 @keyframes popupClose {
     0% {
@@ -5332,7 +5514,9 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     width: 100%;
     height: 100%;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
+    padding: 8px;
+    box-sizing: border-box;
 }
 
 .left-pane, .right-pane {
@@ -5340,28 +5524,29 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     height: 100%;
     position: relative;
     transition: all 0.3s ease;
-    overflow: hidden;
+    overflow: visible;
     display: flex;
     flex-direction: column;
-}
-
-.left-pane.active, .right-pane.active {
-    /* No special styling for active panes */
+    padding: 0 4px;
+    box-sizing: border-box;
 }
 
 /* Split view webview containers */
 .left-pane .webview-container,
 .right-pane .webview-container {
-    width: calc(100% - 4px);
-    height: calc(100% - 4px);
+    width: 100%;
+    height: 100%;
     flex: 1;
     overflow: hidden;
     position: relative;
     background: transparent;
     border: none;
     border-radius: 0;
-    margin: 2px;
-    box-shadow: none;
+    margin: 0;
+    box-shadow: 
+        0 8px 24px rgba(0, 0, 0, 0.15),
+        0 4px 8px rgba(0, 0, 0, 0.1),
+        0 2px 4px rgba(0, 0, 0, 0.08);
 }
 
 .left-pane webview,
