@@ -3,13 +3,18 @@ class AxisBrowser {
     constructor() {
         this.currentTab = null; // Start with no tabs
         this.tabs = new Map(); // Start with empty tabs
+        this.folders = new Map(); // Store folders: { id, name, tabIds: [], open: true }
         this.settings = {};
         this.closedTabs = []; // Store recently closed tabs for recovery
-        this.isSplitView = false; // Split view disabled - always false
+        this.isSplitView = false; // Split view state
         this.isBenchmarking = false; // suppress non-critical work on Speedometer
         this.activePane = 'left'; // 'left' or 'right' (not used when split view disabled)
         this.splitRatio = 0.5; // 50/50 split (not used when split view disabled)
         this.spotlightSelectedIndex = -1; // Track selected suggestion index
+        this.contextMenuFolderId = null; // Track which folder context menu is open
+        
+        // Cache frequently accessed DOM elements for performance
+        this.cacheDOMElements();
         
         this.init();
         
@@ -19,10 +24,52 @@ class AxisBrowser {
         // Listen for messages from embedded note pages
         window.addEventListener('message', (event) => this.onEmbeddedMessage(event));
     }
+    
+    // Cache DOM elements to avoid repeated queries
+    cacheDOMElements() {
+        // Cache all frequently accessed elements
+        this.elements = {
+            sidebar: document.getElementById('sidebar'),
+            tabsContainer: document.getElementById('tabs-container'),
+            urlBar: document.getElementById('url-bar'),
+            webview: document.getElementById('webview'),
+            backBtn: document.getElementById('back-btn'),
+            forwardBtn: document.getElementById('forward-btn'),
+            refreshBtn: document.getElementById('refresh-btn'),
+            toggleSidebarBtn: document.getElementById('toggle-sidebar-btn'),
+            splitViewBtn: document.getElementById('split-view-btn'),
+            navMenuBtn: document.getElementById('nav-menu-btn'),
+            settingsBtnFooter: document.getElementById('settings-btn-footer'),
+            closeSettings: document.getElementById('close-settings'),
+            downloadsBtnFooter: document.getElementById('downloads-btn-footer'),
+            closeDownloads: document.getElementById('close-downloads'),
+            refreshDownloads: document.getElementById('refresh-downloads'),
+            bookmarksBtnFooter: document.getElementById('bookmarks-btn-footer'),
+            closeBookmarks: document.getElementById('close-bookmarks'),
+            closeSecurity: document.getElementById('close-security'),
+            viewCertificate: document.getElementById('view-certificate'),
+            securitySettings: document.getElementById('security-settings'),
+            securityPanel: document.getElementById('security-panel'),
+            spotlightInput: document.getElementById('spotlight-input'),
+            spotlightSearch: document.getElementById('spotlight-search'),
+            searchClose: document.getElementById('search-close'),
+            emptyState: document.getElementById('empty-state'),
+            emptyStateBtn: document.getElementById('empty-state-new-tab'),
+            emptyStateBtnEmpty: document.getElementById('empty-state-new-tab-empty'),
+            contentArea: document.getElementById('content-area'),
+            singleView: document.getElementById('single-view'),
+            splitView: document.getElementById('split-view'),
+            settingsPanel: document.getElementById('settings-panel'),
+            downloadsPanel: document.getElementById('downloads-panel'),
+            bookmarksPanel: document.getElementById('bookmarks-panel'),
+            notesPanel: document.getElementById('notes-panel'),
+            modalBackdrop: document.getElementById('modal-backdrop')
+        };
+    }
 
     async init() {
         await this.loadSettings();
-        this.applySavedTheme();
+        this.resetToBlackTheme(); // Start with black theme
         this.setupEventListeners();
         this.setupWebview();
         this.setupTabSearch();
@@ -32,6 +79,9 @@ class AxisBrowser {
         
         // Load pinned tabs from saved state
         await this.loadPinnedTabs();
+        
+        // Load folders from saved state
+        await this.loadFolders();
 
         // Defer non-critical work to idle time to improve first interaction latency
         this.runWhenIdle(() => {
@@ -56,6 +106,26 @@ class AxisBrowser {
             timeoutId = setTimeout(() => fn.apply(this, args), wait);
         };
     }
+    
+    throttle(fn, wait) {
+        let lastTime = 0;
+        let timeoutId = null;
+        return (...args) => {
+            const now = Date.now();
+            const timeSinceLastCall = now - lastTime;
+            
+            if (timeSinceLastCall >= wait) {
+                lastTime = now;
+                fn.apply(this, args);
+            } else {
+                if (timeoutId !== null) clearTimeout(timeoutId);
+                timeoutId = setTimeout(() => {
+                    lastTime = Date.now();
+                    fn.apply(this, args);
+                }, wait - timeSinceLastCall);
+            }
+        };
+    }
 
     runWhenIdle(cb) {
         const invoke = () => {
@@ -66,6 +136,19 @@ class AxisBrowser {
         } else {
             setTimeout(invoke, 0);
         }
+    }
+    
+    // Batch DOM updates to reduce reflows
+    batchDOMUpdates(updates) {
+        requestAnimationFrame(() => {
+            updates.forEach(update => {
+                try {
+                    update();
+                } catch (e) {
+                    console.error('Batch update error:', e);
+                }
+            });
+        });
     }
 
     async loadSettings() {
@@ -92,72 +175,52 @@ class AxisBrowser {
     }
 
     setupEventListeners() {
-        // Navigation controls
-        document.getElementById('back-btn').addEventListener('click', () => {
-            this.goBack();
-        });
-
-        document.getElementById('forward-btn').addEventListener('click', () => {
-            this.goForward();
-        });
-
-        document.getElementById('refresh-btn').addEventListener('click', () => {
-            this.refresh();
-        });
-
-        document.getElementById('toggle-sidebar-btn').addEventListener('click', () => {
-            this.toggleSidebar();
-        });
-
-        // Split view button - disabled for now
-        // document.getElementById('split-view-btn').addEventListener('click', () => {
-        //     this.toggleSplitView();
-        // });
-
-        // URL bar
-        const urlBar = document.getElementById('url-bar');
-        urlBar.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                this.navigate(urlBar.value);
-            }
-        });
-
-        urlBar.addEventListener('focus', () => {
-            // Show full URL and select all text
-            const fullUrl = urlBar.getAttribute('data-full-url') || urlBar.value;
-            urlBar.value = fullUrl;
-            urlBar.classList.remove('summarized');
-            urlBar.classList.add('expanded');
-            urlBar.select();
-        });
-
-        urlBar.addEventListener('blur', () => {
-            // Collapse back to summarized view when clicking away
-            this.summarizeUrlBar();
-        });
-
-        // Tab controls handled in setupAddTabMenu to avoid double toggle
-
-        // Nav menu toggle
-        document.getElementById('nav-menu-btn').addEventListener('click', (e) => {
+        const el = this.elements;
+        if (!el) return; // Safety check
+        
+        // Navigation controls - use cached elements
+        el.backBtn?.addEventListener('click', () => this.goBack());
+        el.forwardBtn?.addEventListener('click', () => this.goForward());
+        el.refreshBtn?.addEventListener('click', () => this.refresh());
+        el.toggleSidebarBtn?.addEventListener('click', () => this.toggleSidebar());
+        el.splitViewBtn?.addEventListener('click', () => this.toggleSplitView());
+        el.navMenuBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.toggleNavMenu();
         });
 
+        // Sidebar right-click for context menu (on empty space)
+        this.setupSidebarContextMenu();
+
+        // URL bar - use cached element
+        if (el.urlBar) {
+            el.urlBar.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    this.navigate(el.urlBar.value);
+                }
+            });
+
+            el.urlBar.addEventListener('focus', () => {
+                const fullUrl = el.urlBar.getAttribute('data-full-url') || el.urlBar.value;
+                el.urlBar.value = fullUrl;
+                el.urlBar.classList.remove('summarized');
+                el.urlBar.classList.add('expanded');
+                el.urlBar.select();
+            });
+
+            el.urlBar.addEventListener('blur', () => {
+                this.summarizeUrlBar();
+            });
+        }
+
         // Sidebar slide-back functionality
         this.setupSidebarSlideBack();
 
-        // Settings
-        document.getElementById('settings-btn-footer').addEventListener('click', () => {
-            this.toggleSettings();
-        });
-
-        document.getElementById('close-settings').addEventListener('click', () => {
-            this.toggleSettings();
-        });
+        // Settings - use cached elements
+        el.settingsBtnFooter?.addEventListener('click', () => this.toggleSettings());
+        el.closeSettings?.addEventListener('click', () => this.toggleSettings());
 
         // Custom color picker
-        this.setupCustomColorPicker();
 
         // Settings tabs
         document.querySelectorAll('.settings-tab').forEach(tab => {
@@ -179,70 +242,41 @@ class AxisBrowser {
 
         // History - now handled through settings panel
 
-        // Downloads
-        document.getElementById('downloads-btn-footer').addEventListener('click', () => {
-            this.toggleDownloads();
-        });
-        document.getElementById('close-downloads').addEventListener('click', () => {
-            this.toggleDownloads();
-        });
-        document.getElementById('refresh-downloads').addEventListener('click', () => {
-            this.refreshDownloads();
-        });
+        // Downloads - use cached elements
+        el.downloadsBtnFooter?.addEventListener('click', () => this.toggleDownloads());
+        el.closeDownloads?.addEventListener('click', () => this.toggleDownloads());
+        el.refreshDownloads?.addEventListener('click', () => this.refreshDownloads());
 
-        // Clear history button
-        document.getElementById('clear-history').addEventListener('click', () => {
-            this.clearAllHistory();
-        });
-
-        // Clear downloads button
-        document.getElementById('clear-downloads').addEventListener('click', () => {
-            this.clearAllDownloads();
-        });
+        // Clear history/downloads buttons
+        const clearHistoryBtn = document.getElementById('clear-history');
+        clearHistoryBtn?.addEventListener('click', () => this.clearAllHistory());
+        const clearDownloadsBtn = document.getElementById('clear-downloads');
+        clearDownloadsBtn?.addEventListener('click', () => this.clearAllDownloads());
 
         // Downloads search functionality (debounced)
         const onDownloadsInput = this.debounce((value) => this.filterDownloads(value), 120);
-        document.getElementById('downloads-search-input').addEventListener('input', (e) => {
+        const downloadsSearchInput = document.getElementById('downloads-search-input');
+        downloadsSearchInput?.addEventListener('input', (e) => {
             onDownloadsInput(e.target.value);
         });
 
-        // Empty state new tab buttons - open spotlight search
-        const emptyStateBtn = document.getElementById('empty-state-new-tab');
-        if (emptyStateBtn) {
-            emptyStateBtn.addEventListener('click', () => {
-                this.showSpotlightSearch();
-            });
-        }
-        const emptyStateBtnEmpty = document.getElementById('empty-state-new-tab-empty');
-        if (emptyStateBtnEmpty) {
-            emptyStateBtnEmpty.addEventListener('click', () => {
-                this.showSpotlightSearch();
-            });
-        }
+        // Empty state new tab buttons - use cached elements
+        el.emptyStateBtn?.addEventListener('click', () => this.showSpotlightSearch());
+        el.emptyStateBtnEmpty?.addEventListener('click', () => this.showSpotlightSearch());
 
-        // Security panel
-        document.getElementById('close-security').addEventListener('click', () => {
-            this.toggleSecurity();
-        });
-
-        document.getElementById('view-certificate').addEventListener('click', () => {
-            this.viewCertificate();
-        });
-
-        document.getElementById('security-settings').addEventListener('click', () => {
-            this.openSecuritySettings();
-        });
-
-        // Close security panel when clicking background
-        document.getElementById('security-panel').addEventListener('click', (e) => {
+        // Security panel - use cached elements
+        el.closeSecurity?.addEventListener('click', () => this.toggleSecurity());
+        el.viewCertificate?.addEventListener('click', () => this.viewCertificate());
+        el.securitySettings?.addEventListener('click', () => this.openSecuritySettings());
+        el.securityPanel?.addEventListener('click', (e) => {
             if (e.target.id === 'security-panel') {
                 this.toggleSecurity();
             }
         });
 
-        // Spotlight search functionality (buttons removed, only keyboard/click events)
-
-        document.getElementById('spotlight-input').addEventListener('keydown', (e) => {
+        // Spotlight search functionality - use cached element with throttling
+        if (el.spotlightInput) {
+            el.spotlightInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 // If a suggestion is selected, click it; otherwise perform search
@@ -265,38 +299,37 @@ class AxisBrowser {
             }
         });
 
-        document.getElementById('spotlight-input').addEventListener('input', (e) => {
-            // Immediate suggestions for maximum speed
-                this.updateSpotlightSuggestions(e.target.value);
-                // Reset selection when typing
+            // Throttle input for better performance
+            const throttledUpdateSuggestions = this.throttle((value) => {
+                this.updateSpotlightSuggestions(value);
                 this.spotlightSelectedIndex = -1;
-        });
+            }, 50);
+            
+            el.spotlightInput.addEventListener('input', (e) => {
+                throttledUpdateSuggestions(e.target.value);
+            });
+        }
 
-        // Close spotlight when clicking background or backdrop
-        document.getElementById('spotlight-search').addEventListener('click', (e) => {
+        // Close spotlight when clicking background or backdrop - use cached element
+        el.spotlightSearch?.addEventListener('click', (e) => {
             if (e.target.id === 'spotlight-search' || e.target.classList.contains('spotlight-backdrop')) {
                 this.closeSpotlightSearch();
             }
         });
 
-        // Bookmarks
-        document.getElementById('bookmarks-btn-footer').addEventListener('click', () => {
-            this.toggleBookmarks();
-        });
-
-        document.getElementById('close-bookmarks').addEventListener('click', () => {
-            this.toggleBookmarks();
-        });
+        // Bookmarks - use cached elements
+        el.bookmarksBtnFooter?.addEventListener('click', () => this.toggleBookmarks());
+        el.closeBookmarks?.addEventListener('click', () => this.toggleBookmarks());
 
         // Keyboard shortcuts - now handled through settings panel
 
-        // Backdrop click closes any open modal
-        const backdrop = document.getElementById('modal-backdrop');
-        if (backdrop) {
-        backdrop.addEventListener('click', () => {
-            const settingsPanel = document.getElementById('settings-panel');
-            const downloadsPanel = document.getElementById('downloads-panel');
-            const bookmarksPanel = document.getElementById('bookmarks-panel');
+        // Backdrop click closes any open modal - use cached elements
+        if (el.modalBackdrop) {
+        el.modalBackdrop.addEventListener('click', () => {
+            const settingsPanel = el.settingsPanel;
+            const downloadsPanel = el.downloadsPanel;
+            const bookmarksPanel = el.bookmarksPanel;
+            const notesPanel = el.notesPanel;
             
             // Close settings with animation
             if (settingsPanel && !settingsPanel.classList.contains('hidden')) {
@@ -304,7 +337,7 @@ class AxisBrowser {
                 setTimeout(() => {
                     settingsPanel.classList.add('hidden');
                     settingsPanel.classList.remove('settings-closing');
-                }, 500);
+                }, 150);
             }
             
             // Close downloads with animation
@@ -313,7 +346,7 @@ class AxisBrowser {
                 setTimeout(() => {
                     downloadsPanel.classList.add('hidden');
                     downloadsPanel.classList.remove('downloads-closing');
-                }, 500);
+                }, 150);
             }
             
             // Close bookmarks with animation
@@ -322,10 +355,21 @@ class AxisBrowser {
                 setTimeout(() => {
                     bookmarksPanel.classList.add('hidden');
                     bookmarksPanel.classList.remove('bookmarks-closing');
-                }, 500);
+                }, 150);
             }
             
-            backdrop.classList.add('hidden');
+            // Close notes with animation
+            if (notesPanel && !notesPanel.classList.contains('hidden')) {
+                notesPanel.classList.add('notes-closing');
+                setTimeout(() => {
+                    notesPanel.classList.add('hidden');
+                    notesPanel.classList.remove('notes-closing');
+                    el.modalBackdrop.classList.add('hidden');
+                }, 150);
+                return;
+            }
+            
+            el.modalBackdrop.classList.add('hidden');
         });
         }
 
@@ -343,11 +387,11 @@ class AxisBrowser {
             this.duplicateCurrentTab();
         });
 
-        // Split view option - disabled for now
-        // document.getElementById('split-view-option').addEventListener('click', () => {
-        //     this.toggleSplitView();
-        //     this.hideTabContextMenu();
-        // });
+        // Split view option
+        document.getElementById('split-view-option').addEventListener('click', () => {
+            this.toggleSplitView();
+            this.hideTabContextMenu();
+        });
 
         document.getElementById('pin-tab-option').addEventListener('click', () => {
             this.togglePinCurrentTab();
@@ -357,6 +401,33 @@ class AxisBrowser {
         document.getElementById('close-tab-option').addEventListener('click', () => {
             this.closeCurrentTab();
             this.hideTabContextMenu();
+        });
+
+        // Sidebar context menu event listeners
+        document.getElementById('sidebar-new-tab-option').addEventListener('click', () => {
+            this.showSpotlightSearch();
+            this.hideSidebarContextMenu();
+        });
+
+        document.getElementById('sidebar-new-note-option').addEventListener('click', () => {
+            this.toggleNotes();
+            this.hideSidebarContextMenu();
+        });
+
+        document.getElementById('sidebar-new-folder-option').addEventListener('click', () => {
+            this.createNewFolder();
+            this.hideSidebarContextMenu();
+        });
+
+        // Folder context menu event listeners
+        document.getElementById('rename-folder-option').addEventListener('click', () => {
+            this.renameCurrentFolder();
+            this.hideFolderContextMenu();
+        });
+
+        document.getElementById('delete-folder-option').addEventListener('click', () => {
+            this.deleteCurrentFolder();
+            this.hideFolderContextMenu();
         });
 
         // Search functionality
@@ -421,9 +492,11 @@ class AxisBrowser {
 
         // Click outside to close context menu and nav menu
         document.addEventListener('click', (e) => {
-            if (!e.target.closest('.context-menu') && !e.target.closest('.tab')) {
+            if (!e.target.closest('.context-menu') && !e.target.closest('.tab') && !e.target.closest('.folder')) {
                 this.hideTabContextMenu();
                 this.hideWebpageContextMenu();
+                this.hideSidebarContextMenu();
+                this.hideFolderContextMenu();
             }
             if (!e.target.closest('.nav-menu') && !e.target.closest('#nav-menu-btn')) {
                 this.hideNavMenu();
@@ -439,9 +512,11 @@ class AxisBrowser {
 
         // Right-click outside to close context menu
         document.addEventListener('contextmenu', (e) => {
-            if (!e.target.closest('.tab') && !e.target.closest('#webview')) {
+            if (!e.target.closest('.tab') && !e.target.closest('#webview') && !e.target.closest('#sidebar') && !e.target.closest('.folder')) {
                 this.hideTabContextMenu();
                 this.hideWebpageContextMenu();
+                this.hideSidebarContextMenu();
+                this.hideFolderContextMenu();
             }
         });
 
@@ -572,23 +647,23 @@ class AxisBrowser {
                 }
             }
             
-            // Split view shortcuts - disabled for now
-            // if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'S') {
-            //     e.preventDefault();
-            //     this.toggleSplitView();
-            // }
-            // if ((e.metaKey || e.ctrlKey) && e.key === '[' && this.isSplitView) {
-            //     e.preventDefault();
-            //     this.setActivePane('left');
-            // }
-            // if ((e.metaKey || e.ctrlKey) && e.key === ']' && this.isSplitView) {
-            //     e.preventDefault();
-            //     this.setActivePane('right');
-            // }
-            // if (e.key === 'Escape' && this.isSplitView) {
-            //     e.preventDefault();
-            //     this.toggleSplitView();
-            // }
+            // Split view shortcuts
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'S') {
+                e.preventDefault();
+                this.toggleSplitView();
+            }
+            if ((e.metaKey || e.ctrlKey) && e.key === '[' && this.isSplitView) {
+                e.preventDefault();
+                this.setActivePane('left');
+            }
+            if ((e.metaKey || e.ctrlKey) && e.key === ']' && this.isSplitView) {
+                e.preventDefault();
+                this.setActivePane('right');
+            }
+            if (e.key === 'Escape' && this.isSplitView) {
+                e.preventDefault();
+                this.toggleSplitView();
+            }
             
             // Cmd/Ctrl + N - New window
             if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
@@ -662,7 +737,7 @@ class AxisBrowser {
     }
 
     setupWebview() {
-        const webview = document.getElementById('webview');
+        const webview = this.elements?.webview;
         if (!webview) return;
         
         // Optimize webview for performance
@@ -706,12 +781,14 @@ class AxisBrowser {
             this.errorRetryCount = 0;
             this.dnsRetryCount = 0;
             
-            // Batch all updates for maximum speed
-            this.updateNavigationButtons();
-            this.updateUrlBar();
-            this.updateTabTitle();
-            this.updateSecurityIndicator();
-            this.updateBookmarkButton();
+            // Batch all updates for maximum speed using requestAnimationFrame
+            this.batchDOMUpdates([
+                () => this.updateNavigationButtons(),
+                () => this.updateUrlBar(),
+                () => this.updateTabTitle(),
+                () => this.updateSecurityIndicator(),
+                () => this.updateBookmarkButton()
+            ]);
             
             // Update current tab state
             if (this.currentTab && this.tabs.has(this.currentTab)) {
@@ -740,6 +817,9 @@ class AxisBrowser {
             if (tabElement && !this.isBenchmarking) {
                 this.updateTabFavicon(this.currentTab, tabElement);
             }
+            
+            // Extract and apply webpage colors immediately (no delays)
+            this.extractAndApplyWebpageColors(webview);
         });
 
         // Add did-stop-loading event as backup
@@ -747,10 +827,25 @@ class AxisBrowser {
             // Skip ALL UI updates during benchmarks
             if (!this.isBenchmarking) {
                 this.hideLoadingIndicator();
-                this.updateUrlBar();
-                this.updateNavigationButtons();
-                this.updateTabTitle();
+                // Batch DOM updates
+                this.batchDOMUpdates([
+                    () => this.updateUrlBar(),
+                    () => this.updateNavigationButtons(),
+                    () => this.updateTabTitle()
+                ]);
+                // Also extract theme when loading stops immediately (no delays)
+                this.extractAndApplyWebpageColors(webview);
             }
+        });
+        
+        // Suppress WebGPU deprecation warnings from webview console
+        webview.addEventListener('console-message', (e) => {
+            // Filter out the DawnExperimentalSubgroupLimits deprecation warning
+            if (e.message && e.message.includes('DawnExperimentalSubgroupLimits') && e.message.includes('deprecated')) {
+                // Suppress this specific warning
+                return;
+            }
+            // Allow other console messages through (optional - you can remove this if you want to suppress all)
         });
 
         webview.addEventListener('did-fail-load', (event) => {
@@ -806,8 +901,10 @@ class AxisBrowser {
         webview.addEventListener('did-navigate', (event) => {
             // Skip ALL UI updates during benchmarks - they slow down Speedometer
             if (!this.isBenchmarking) {
-                this.updateUrlBar();
-                this.updateNavigationButtons();
+                this.batchDOMUpdates([
+                    () => this.updateUrlBar(),
+                    () => this.updateNavigationButtons()
+                ]);
             }
         });
 
@@ -815,9 +912,11 @@ class AxisBrowser {
         webview.addEventListener('did-navigate-in-page', (event) => {
             // Skip ALL UI updates during benchmarks
             if (!this.isBenchmarking) {
-                this.updateUrlBar();
-                this.updateNavigationButtons();
-                this.updateTabTitle();
+                this.batchDOMUpdates([
+                    () => this.updateUrlBar(),
+                    () => this.updateNavigationButtons(),
+                    () => this.updateTabTitle()
+                ]);
             }
         });
 
@@ -1095,34 +1194,6 @@ class AxisBrowser {
 
     // Removed broken performance monitoring that was slowing things down
 
-    setupCustomColorPicker() {
-        const colorPicker = document.getElementById('main-color-picker');
-
-        // Load saved color or use default
-        this.currentColor = this.settings.mainColor || '#4a90e2';
-        
-        // Set the color picker value
-        if (colorPicker) {
-            colorPicker.value = this.currentColor;
-        }
-
-        // Initialize color scheme
-        this.generateColorScheme(this.currentColor);
-
-        // Color picker change event
-        if (colorPicker) {
-            colorPicker.addEventListener('change', (e) => {
-                const color = e.target.value;
-                this.selectColor(color);
-            });
-        }
-    }
-
-    selectColor(color) {
-        this.currentColor = color;
-        this.generateColorScheme(color);
-        this.saveSetting('mainColor', color);
-    }
 
 
     setupColorWheel(wheel, handle) {
@@ -1374,118 +1445,577 @@ class AxisBrowser {
         const hsl = this.hexToHsl(hex);
         return hsl.l < 50;
     }
+    
+    // Calculate relative luminance for contrast ratio
+    getLuminance(hex) {
+        const rgb = this.hexToRgb(hex);
+        const [r, g, b] = [rgb.r / 255, rgb.g / 255, rgb.b / 255].map(val => {
+            return val <= 0.03928 ? val / 12.92 : Math.pow((val + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+    
+    // Calculate contrast ratio between two colors
+    getContrastRatio(color1, color2) {
+        const lum1 = this.getLuminance(color1);
+        const lum2 = this.getLuminance(color2);
+        const lighter = Math.max(lum1, lum2);
+        const darker = Math.min(lum1, lum2);
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+    
+    // Get readable text color based on background (WCAG AA standard: 4.5:1 for normal text)
+    getReadableTextColor(backgroundColor, minContrast = 4.5) {
+        const white = '#ffffff';
+        const black = '#000000';
+        
+        const whiteContrast = this.getContrastRatio(backgroundColor, white);
+        const blackContrast = this.getContrastRatio(backgroundColor, black);
+        
+        // If white has better contrast, use white; otherwise use black
+        if (whiteContrast >= minContrast && whiteContrast >= blackContrast) {
+            return white;
+        } else if (blackContrast >= minContrast && blackContrast > whiteContrast) {
+            return black;
+        } else {
+            // If neither meets minimum, use the one with better contrast
+            return whiteContrast > blackContrast ? white : black;
+        }
+    }
+    
+    // Convert hex to RGB
+    hexToRgb(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : { r: 0, g: 0, b: 0 };
+    }
+
+    extractAndApplyWebpageColors(webview, retryCount = 0) {
+        try {
+            if (!webview) {
+                this.resetToBlackTheme();
+                return;
+            }
+            
+            const url = webview.getURL();
+            
+            // Reset to black theme if no valid page
+            if (!url || url === 'about:blank' || url.startsWith('data:') || url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+                this.resetToBlackTheme();
+                return;
+            }
+            
+            // Check if webview is ready
+            if (!webview.isLoading && webview.getURL() === 'about:blank') {
+                // Webview not ready yet, retry very quickly (single RAF for speed)
+                if (retryCount < 1) {
+                    requestAnimationFrame(() => {
+                        this.extractAndApplyWebpageColors(webview, retryCount + 1);
+                    });
+                } else {
+                    this.resetToBlackTheme();
+                }
+                return;
+            }
+            
+            // Extract colors from webpage - try multiple times to ensure it works
+            const extractColors = () => {
+                try {
+                    webview.executeJavaScript(`
+                        (function() {
+                            try {
+                                const body = document.body;
+                                const html = document.documentElement;
+                                
+                                if (!body || !html) {
+                                    return null;
+                                }
+                                
+                                // Helper to convert rgba/rgb to hex
+                                function rgbToHex(rgb) {
+                                    if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') {
+                                        return null;
+                                    }
+                                    const match = rgb.match(/\\d+/g);
+                                    if (match && match.length >= 3) {
+                                        const r = parseInt(match[0]);
+                                        const g = parseInt(match[1]);
+                                        const b = parseInt(match[2]);
+                                        // If alpha is very low, treat as transparent
+                                        if (match.length >= 4 && parseFloat(match[3]) < 0.1) {
+                                            return null;
+                                        }
+                                        return '#' + 
+                                            r.toString(16).padStart(2, '0') +
+                                            g.toString(16).padStart(2, '0') +
+                                            b.toString(16).padStart(2, '0');
+                                    }
+                                    return null;
+                                }
+                                
+                                // Helper to convert hex to RGB
+                                function hexToRgb(hex) {
+                                    const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
+                                    return result ? {
+                                        r: parseInt(result[1], 16),
+                                        g: parseInt(result[2], 16),
+                                        b: parseInt(result[3], 16)
+                                    } : null;
+                                }
+                                
+                                // Calculate color distance (Euclidean distance in RGB space)
+                                function colorDistance(hex1, hex2) {
+                                    const rgb1 = hexToRgb(hex1);
+                                    const rgb2 = hexToRgb(hex2);
+                                    if (!rgb1 || !rgb2) return Infinity;
+                                    const dr = rgb1.r - rgb2.r;
+                                    const dg = rgb1.g - rgb2.g;
+                                    const db = rgb1.b - rgb2.b;
+                                    return Math.sqrt(dr * dr + dg * dg + db * db);
+                                }
+                                
+                                // Check if color is too close to white/black
+                                function isNeutralColor(hex) {
+                                    if (!hex) return true;
+                                    const rgb = hexToRgb(hex);
+                                    if (!rgb) return true;
+                                    // Check if it's very close to white (all channels > 240)
+                                    if (rgb.r > 240 && rgb.g > 240 && rgb.b > 240) return true;
+                                    // Check if it's very close to black (all channels < 15)
+                                    if (rgb.r < 15 && rgb.g < 15 && rgb.b < 15) return true;
+                                    // Check if it's very gray (low saturation)
+                                    const max = Math.max(rgb.r, rgb.g, rgb.b);
+                                    const min = Math.min(rgb.r, rgb.g, rgb.b);
+                                    const saturation = max === 0 ? 0 : (max - min) / max;
+                                    if (saturation < 0.1) return true; // Very low saturation = gray
+                                    return false;
+                                }
+                                
+                                // Get meta theme-color first (most reliable)
+                                const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+                                let themeColor = null;
+                                if (themeColorMeta) {
+                                    themeColor = themeColorMeta.getAttribute('content');
+                                    // Convert to hex if needed
+                                    if (themeColor && themeColor.startsWith('rgb')) {
+                                        themeColor = rgbToHex(themeColor);
+                                    }
+                                }
+                                
+                                // Sample colors from various elements on the page
+                                const colorSamples = [];
+                                const selectors = [
+                                    'header', 'nav', '.header', '.nav', '.navbar', '.navigation',
+                                    'main', '[role="main"]', '.main', '#main',
+                                    '.content', '#content', '.container', '.page', '.app',
+                                    'article', 'section', '.section',
+                                    'button', '.button', '.btn', 'a.button',
+                                    '.card', '.panel', '.box', '.widget',
+                                    '[class*="bg"]', '[class*="background"]',
+                                    'body', 'html'
+                                ];
+                                
+                                // Sample from up to 50 elements (reduced for speed)
+                                let sampleCount = 0;
+                                for (const selector of selectors) {
+                                    if (sampleCount >= 50) break;
+                                    try {
+                                        const elements = document.querySelectorAll(selector);
+                                        for (let i = 0; i < Math.min(elements.length, 5); i++) {
+                                            if (sampleCount >= 50) break;
+                                            const element = elements[i];
+                                            if (!element) continue;
+                                            
+                                            // Skip if element is not visible
+                                            const rect = element.getBoundingClientRect();
+                                            if (rect.width === 0 || rect.height === 0) continue;
+                                            
+                                            const style = window.getComputedStyle(element);
+                                            
+                                            // Sample background color
+                                            const bg = style.backgroundColor;
+                                            if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
+                                                const hex = rgbToHex(bg);
+                                                if (hex && !isNeutralColor(hex)) {
+                                                    colorSamples.push(hex);
+                                                    sampleCount++;
+                                                }
+                                            }
+                                            
+                                            // Sample border color (often used for accents)
+                                            const border = style.borderColor;
+                                            if (border && border !== 'transparent') {
+                                                const hex = rgbToHex(border);
+                                                if (hex && !isNeutralColor(hex)) {
+                                                    colorSamples.push(hex);
+                                                    sampleCount++;
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        // Continue if selector fails
+                                    }
+                                }
+                                
+                                // Find the most common color by clustering similar colors
+                                let dominantColor = null;
+                                if (colorSamples.length > 0) {
+                                    // Group similar colors together (within 30 units distance)
+                                    const clusters = {};
+                                    const clusterThreshold = 30;
+                                    
+                                    for (const color of colorSamples) {
+                                        let foundCluster = false;
+                                        for (const clusterColor in clusters) {
+                                            if (colorDistance(color, clusterColor) < clusterThreshold) {
+                                                clusters[clusterColor]++;
+                                                foundCluster = true;
+                                                break;
+                                            }
+                                        }
+                                        if (!foundCluster) {
+                                            clusters[color] = 1;
+                                        }
+                                    }
+                                    
+                                    // Find the cluster with the most occurrences
+                                    let maxCount = 0;
+                                    for (const clusterColor in clusters) {
+                                        if (clusters[clusterColor] > maxCount) {
+                                            maxCount = clusters[clusterColor];
+                                            dominantColor = clusterColor;
+                                        }
+                                    }
+                                }
+                                
+                                // Fallback: try to find main container background
+                                let bgColor = dominantColor;
+                                if (!bgColor) {
+                                    const mainSelectors = ['main', '[role="main"]', '.main', '#main', '.content', '#content', 
+                                                          '.container', '.page', '.app', 'article', 'section'];
+                                    
+                                    for (const selector of mainSelectors) {
+                                        const element = document.querySelector(selector);
+                                        if (element) {
+                                            const style = window.getComputedStyle(element);
+                                            const bg = style.backgroundColor;
+                                            if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
+                                                const hex = rgbToHex(bg);
+                                                if (hex && !isNeutralColor(hex)) {
+                                                    bgColor = hex;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Last resort: check body/html
+                                    if (!bgColor) {
+                                        const bodyStyle = window.getComputedStyle(body);
+                                        const bodyBg = bodyStyle.backgroundColor;
+                                        if (bodyBg && bodyBg !== 'transparent' && bodyBg !== 'rgba(0, 0, 0, 0)') {
+                                            const hex = rgbToHex(bodyBg);
+                                            if (hex && !isNeutralColor(hex)) {
+                                                bgColor = hex;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Extract text color
+                                let textColor = null;
+                                const bodyStyle = window.getComputedStyle(body);
+                                const bodyTextColor = bodyStyle.color;
+                                if (bodyTextColor) {
+                                    textColor = rgbToHex(bodyTextColor);
+                                }
+                                
+                                return {
+                                    backgroundColor: bgColor,
+                                    textColor: textColor,
+                                    themeColor: themeColor
+                                };
+                            } catch (e) {
+                                return null;
+                            }
+                        })();
+                    `).then((colors) => {
+                        // Prioritize theme-color meta tag, then background color
+                        if (colors && colors.themeColor) {
+                            // Use theme color from meta tag (most reliable)
+                            this.applyWebpageTheme({ themeColor: colors.themeColor, backgroundColor: colors.themeColor, textColor: colors.textColor });
+                        } else if (colors && colors.backgroundColor && colors.backgroundColor !== '#ffffff' && colors.backgroundColor !== '#000000') {
+                            // Use extracted background color
+                            this.applyWebpageTheme(colors);
+                        } else if (retryCount < 1) {
+                            // Retry once quickly (single RAF for speed)
+                            requestAnimationFrame(() => {
+                                this.extractAndApplyWebpageColors(webview, retryCount + 1);
+                            });
+                        } else {
+                            // Only reset to black if we truly can't find colors
+                            this.resetToBlackTheme();
+                        }
+                    }).catch((error) => {
+                        // Only log if it's not a common error
+                        if (!error.message || (!error.message.includes('Object has been destroyed') && !error.message.includes('WebContents'))) {
+                            console.error('Error executing JavaScript for color extraction:', error);
+                        }
+                        // Retry once quickly (single RAF for speed)
+                        if (retryCount < 1) {
+                            requestAnimationFrame(() => {
+                                this.extractAndApplyWebpageColors(webview, retryCount + 1);
+                            });
+                        } else {
+                            this.resetToBlackTheme();
+                        }
+                    });
+                } catch (error) {
+                    console.error('Error in extractColors:', error);
+                    if (retryCount < 1) {
+                        requestAnimationFrame(() => {
+                            this.extractAndApplyWebpageColors(webview, retryCount + 1);
+                        });
+                    } else {
+                        this.resetToBlackTheme();
+                    }
+                }
+            };
+            
+            extractColors();
+        } catch (error) {
+            console.error('Error extracting webpage colors:', error);
+            if (retryCount < 1) {
+                requestAnimationFrame(() => {
+                    this.extractAndApplyWebpageColors(webview, retryCount + 1);
+                });
+            } else {
+                this.resetToBlackTheme();
+            }
+        }
+    }
+    
+    applyWebpageTheme(webpageColors) {
+        let primary = webpageColors.themeColor || webpageColors.backgroundColor || '#1a1a1a';
+        
+        // Make theme a bit darker than website colors
+        const isDark = this.isDarkColor(primary);
+        if (isDark) {
+            // For dark colors, darken them a bit
+            primary = this.darkenColor(primary, 0.05);
+        } else {
+            // For light colors, darken a bit more
+            primary = this.darkenColor(primary, 0.08);
+        }
+        
+        // Use minimal variations for secondary and accent (darker)
+        const secondary = this.darkenColor(primary, 0.02);
+        const accent = this.darkenColor(primary, 0.03);
+        
+        // Get readable text color based on contrast ratio (WCAG AA standard)
+        const text = this.getReadableTextColor(primary, 4.5);
+        const isTextDark = text === '#000000';
+        
+        // Calculate secondary and muted text colors with good contrast
+        const textSecondary = isTextDark ? '#333333' : '#cccccc';
+        const textMuted = isTextDark ? '#666666' : '#999999';
+        
+        const colors = {
+            primary: primary,
+            secondary: secondary,
+            accent: accent,
+            text: text,
+            textSecondary: textSecondary,
+            textMuted: textMuted,
+            border: isTextDark ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)',
+            borderLight: isTextDark ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255, 255, 255, 0.12)'
+        };
+        
+        this.applyCustomTheme(colors);
+    }
+    
+    resetToBlackTheme() {
+        const colors = {
+            primary: '#1a1a1a', // Lighter black instead of pure black
+            secondary: '#222222', // Less contrast
+            accent: '#2a2a2a', // Subtle accent
+            text: '#ffffff',
+            textSecondary: '#cccccc',
+            textMuted: '#999999',
+            border: 'rgba(255, 255, 255, 0.08)', // Less visible borders
+            borderLight: 'rgba(255, 255, 255, 0.12)'
+        };
+        this.applyCustomTheme(colors);
+    }
+    
+    lightenColor(color, amount) {
+        const hex = color.replace('#', '');
+        const r = Math.min(255, parseInt(hex.substr(0, 2), 16) + Math.round(255 * amount));
+        const g = Math.min(255, parseInt(hex.substr(2, 2), 16) + Math.round(255 * amount));
+        const b = Math.min(255, parseInt(hex.substr(4, 2), 16) + Math.round(255 * amount));
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
 
     applyCustomTheme(colors) {
-        // Create gradient from primary and secondary colors
-        const gradient = `linear-gradient(135deg, ${colors.secondary} 0%, ${colors.primary} 50%, ${this.darkenColor(colors.primary, 0.3)} 100%)`;
+        // Use solid color - a bit darker than website colors
+        // Keep primary as is (already darkened in applyWebpageTheme)
+        const darkerPrimary = colors.primary;
         
-        // Apply theme to body
-        document.body.style.background = gradient;
+        // Apply theme to body with darker background (fastest - direct access)
+        document.body.style.background = darkerPrimary;
         document.body.style.color = colors.text;
         
-        // Apply theme to sidebar
-        const sidebar = document.getElementById('sidebar');
-        if (sidebar) {
-            sidebar.style.background = colors.primary;
+        // Apply theme to cached elements first (fastest)
+        const el = this.elements;
+        if (el?.sidebar) {
+            el.sidebar.style.background = darkerPrimary;
         }
         
-        // Apply theme to nav bar
+        // Apply theme to nav bar - use darker color
         const navBar = document.getElementById('nav-bar');
         if (navBar) {
-            navBar.style.background = colors.primary;
+            navBar.style.background = darkerPrimary;
         }
         
-        // Apply theme to tabs
-        const tabs = document.querySelectorAll('.tab');
-        tabs.forEach(tab => {
-            tab.style.background = colors.secondary;
+        // Batch DOM queries for better performance
+        requestAnimationFrame(() => {
+            // Apply theme to tabs - transparent for less contrast
+            const tabs = document.querySelectorAll('.tab');
+            for (let i = 0; i < tabs.length; i++) {
+                tabs[i].style.background = 'transparent';
+            }
+            
+            // Apply theme to webview container - transparent so webview stands out
+            const webviewContainer = document.querySelector('.webview-container');
+            if (webviewContainer) {
+                webviewContainer.style.background = 'transparent';
+            }
+            
+            // Apply theme to popups - use darker colors
+            const popups = document.querySelectorAll('.downloads-panel, .bookmarks-panel, .settings-panel, .nav-menu, .add-tab-menu, .context-menu');
+            for (let i = 0; i < popups.length; i++) {
+                popups[i].style.background = darkerPrimary;
+            }
+            
+            // Apply theme to popup headers - use darker variation
+            const popupHeaders = document.querySelectorAll('.downloads-header, .bookmarks-header, .settings-header');
+            const headerBg = this.darkenColor(colors.primary, 0.03);
+            for (let i = 0; i < popupHeaders.length; i++) {
+                popupHeaders[i].style.background = headerBg;
+            }
+            
+            // Apply theme to popup content areas - use darker color
+            const popupContents = document.querySelectorAll('.downloads-content, .bookmarks-content, .settings-content');
+            for (let i = 0; i < popupContents.length; i++) {
+                popupContents[i].style.background = darkerPrimary;
+            }
+            
+            // Apply theme to popup items
+            const popupItems = document.querySelectorAll('.download-item, .bookmark-item, .setting-item, .nav-menu-item, .add-tab-menu-item, .context-menu-item');
+            for (let i = 0; i < popupItems.length; i++) {
+                popupItems[i].style.color = colors.text;
+            }
+            
+            // Apply theme to popup text elements
+            const popupTextElements = document.querySelectorAll('.bookmark-title, .bookmark-url, .history-url, .history-time, .download-url, .shortcut-desc, .setting-item label');
+            for (let i = 0; i < popupTextElements.length; i++) {
+                popupTextElements[i].style.color = colors.text;
+            }
+            
+            // Apply theme to buttons - use transparent for less contrast
+            const buttons = document.querySelectorAll('.nav-btn, .tab-close, .url-icon, .add-tab-btn, .settings-btn, .bookmark-btn, .security-btn, .nav-menu-btn, .download-btn, .bookmark-delete, .close-settings, .refresh-btn, .clear-btn, .save-btn');
+            for (let i = 0; i < buttons.length; i++) {
+                buttons[i].style.background = 'transparent';
+                buttons[i].style.color = colors.text;
+            }
+            
+            // Apply theme to settings tabs - use darker colors
+            const settingsTabs = document.querySelectorAll('.settings-tab');
+            const tabBg = this.darkenColor(colors.primary, 0.03);
+            for (let i = 0; i < settingsTabs.length; i++) {
+                settingsTabs[i].style.background = tabBg;
+                settingsTabs[i].style.color = colors.text;
+            }
+            
+            // Apply theme to setting groups - use darker color
+            const settingGroups = document.querySelectorAll('.setting-group');
+            for (let i = 0; i < settingGroups.length; i++) {
+                settingGroups[i].style.background = darkerPrimary;
+            }
         });
         
-        // Apply theme to webview container
-        const webviewContainer = document.querySelector('.webview-container');
-        if (webviewContainer) {
-            webviewContainer.style.background = colors.primary;
-        }
-        
-        // Apply theme to popups
-        const popups = document.querySelectorAll('.downloads-panel, .bookmarks-panel, .settings-panel, .nav-menu, .add-tab-menu, .context-menu');
-        popups.forEach(popup => {
-            popup.style.background = colors.primary;
-        });
-        
-        // Apply theme to popup headers
-        const popupHeaders = document.querySelectorAll('.downloads-header, .bookmarks-header, .settings-header');
-        popupHeaders.forEach(header => {
-            header.style.background = colors.secondary;
-        });
-        
-        // Apply theme to popup content areas
-        const popupContents = document.querySelectorAll('.downloads-content, .bookmarks-content, .settings-content');
-        popupContents.forEach(content => {
-            content.style.background = colors.primary;
-        });
-        
-        // Apply theme to popup items
-        const popupItems = document.querySelectorAll('.download-item, .bookmark-item, .setting-item, .nav-menu-item, .add-tab-menu-item, .context-menu-item');
-        popupItems.forEach(item => {
-            item.style.color = colors.text;
-        });
-        
-        // Apply theme to popup text elements
-        const popupTextElements = document.querySelectorAll('.bookmark-title, .bookmark-url, .history-url, .history-time, .download-url, .shortcut-desc, .setting-item label');
-        popupTextElements.forEach(element => {
-            element.style.color = colors.text;
-        });
-        
-        // Apply theme to buttons
-        const buttons = document.querySelectorAll('.nav-btn, .tab-close, .url-icon, .add-tab-btn, .settings-btn, .bookmark-btn, .security-btn, .nav-menu-btn, .download-btn, .bookmark-delete, .close-settings, .refresh-btn, .clear-btn, .save-btn');
-        buttons.forEach(button => {
-            button.style.background = colors.secondary;
-            button.style.color = colors.text;
-        });
-        
-        // Apply theme to settings tabs
-        const settingsTabs = document.querySelectorAll('.settings-tab');
-        settingsTabs.forEach(tab => {
-            tab.style.background = colors.secondary;
-            tab.style.color = colors.text;
-        });
-        
-        // Apply theme to setting groups
-        const settingGroups = document.querySelectorAll('.setting-group');
-        settingGroups.forEach(group => {
-            group.style.background = colors.primary;
-        });
-        
-        // Update CSS variables for comprehensive theming
-        document.documentElement.style.setProperty('--background-color', colors.primary);
+        // Update CSS variables for comprehensive theming - use darker colors
+        document.documentElement.style.setProperty('--background-color', darkerPrimary);
         document.documentElement.style.setProperty('--text-color', colors.text);
         document.documentElement.style.setProperty('--text-color-secondary', colors.textSecondary || colors.text);
         document.documentElement.style.setProperty('--text-color-muted', colors.textMuted || colors.text);
-        document.documentElement.style.setProperty('--popup-background', colors.primary);
-        document.documentElement.style.setProperty('--popup-header', colors.secondary);
-        document.documentElement.style.setProperty('--button-background', colors.secondary);
-        document.documentElement.style.setProperty('--button-hover', colors.accent);
+        document.documentElement.style.setProperty('--popup-background', darkerPrimary);
+        document.documentElement.style.setProperty('--popup-header', this.darkenColor(colors.primary, 0.03));
+        document.documentElement.style.setProperty('--button-background', 'transparent');
+        document.documentElement.style.setProperty('--button-hover', this.darkenColor(colors.primary, 0.05));
         document.documentElement.style.setProperty('--button-text', colors.text);
         document.documentElement.style.setProperty('--button-text-hover', colors.text);
-        document.documentElement.style.setProperty('--sidebar-background', colors.primary);
-        document.documentElement.style.setProperty('--url-bar-background', colors.primary);
+        document.documentElement.style.setProperty('--sidebar-background', darkerPrimary);
+        // URL bar should be slightly darker than sidebar to create depth, but neutral (no color cast)
+        const urlBarBg = this.darkenColor(colors.primary, 0.08);
+        const urlBarFocusBg = this.darkenColor(colors.primary, 0.03);
+        document.documentElement.style.setProperty('--url-bar-background', urlBarBg);
+        document.documentElement.style.setProperty('--url-bar-focus-background', urlBarFocusBg);
         document.documentElement.style.setProperty('--url-bar-text', colors.text);
         document.documentElement.style.setProperty('--url-bar-text-muted', colors.textSecondary || colors.text);
-        document.documentElement.style.setProperty('--tab-background', colors.secondary);
-        document.documentElement.style.setProperty('--tab-background-hover', colors.accent);
-        document.documentElement.style.setProperty('--tab-background-active', colors.accent);
+        document.documentElement.style.setProperty('--tab-background', 'transparent');
+        document.documentElement.style.setProperty('--tab-background-hover', this.darkenColor(colors.primary, 0.03));
+        document.documentElement.style.setProperty('--tab-background-active', this.darkenColor(colors.primary, 0.02));
         document.documentElement.style.setProperty('--tab-text', colors.text);
         document.documentElement.style.setProperty('--tab-text-active', colors.text);
         document.documentElement.style.setProperty('--tab-close-color', colors.textSecondary || colors.text);
         document.documentElement.style.setProperty('--tab-close-hover', colors.text);
         document.documentElement.style.setProperty('--icon-color', colors.textSecondary || colors.text);
         document.documentElement.style.setProperty('--icon-hover', colors.text);
-        document.documentElement.style.setProperty('--border-color', colors.border || 'rgba(255, 255, 255, 0.1)');
-        document.documentElement.style.setProperty('--border-color-light', colors.borderLight || 'rgba(255, 255, 255, 0.2)');
+        document.documentElement.style.setProperty('--border-color', colors.border || 'rgba(255, 255, 255, 0.08)');
+        document.documentElement.style.setProperty('--border-color-light', colors.borderLight || 'rgba(255, 255, 255, 0.12)');
         document.documentElement.style.setProperty('--accent-color', colors.accent);
-        document.documentElement.style.setProperty('--primary-color', colors.primary);
-        document.documentElement.style.setProperty('--secondary-color', colors.secondary);
+        document.documentElement.style.setProperty('--primary-color', darkerPrimary);
+        document.documentElement.style.setProperty('--secondary-color', this.darkenColor(colors.primary, 0.02));
+        
+        // Set theme-aware animation colors
+        const isDark = this.isDarkColor(colors.primary);
+        
+        // Animation colors adapt to theme brightness
+        if (isDark) {
+            // Dark theme: use white/light overlays and glows
+            document.documentElement.style.setProperty('--animation-glow', `rgba(255, 255, 255, 0.3)`);
+            document.documentElement.style.setProperty('--animation-overlay', `rgba(255, 255, 255, 0.05)`);
+            document.documentElement.style.setProperty('--animation-overlay-hover', `rgba(255, 255, 255, 0.1)`);
+            document.documentElement.style.setProperty('--animation-shimmer', `rgba(255, 255, 255, 0.8)`);
+            document.documentElement.style.setProperty('--animation-shimmer-light', `rgba(255, 255, 255, 0.9)`);
+            document.documentElement.style.setProperty('--animation-border', `rgba(255, 255, 255, 0.1)`);
+            document.documentElement.style.setProperty('--animation-border-hover', `rgba(255, 255, 255, 0.2)`);
+            document.documentElement.style.setProperty('--animation-focus-ring', `rgba(255, 255, 255, 0.15)`);
+            document.documentElement.style.setProperty('--animation-focus-ring-light', `rgba(255, 255, 255, 0.1)`);
+        } else {
+            // Light theme: use darker overlays and glows
+            document.documentElement.style.setProperty('--animation-glow', `rgba(0, 0, 0, 0.2)`);
+            document.documentElement.style.setProperty('--animation-overlay', `rgba(0, 0, 0, 0.03)`);
+            document.documentElement.style.setProperty('--animation-overlay-hover', `rgba(0, 0, 0, 0.08)`);
+            document.documentElement.style.setProperty('--animation-shimmer', `rgba(255, 255, 255, 0.6)`);
+            document.documentElement.style.setProperty('--animation-shimmer-light', `rgba(255, 255, 255, 0.7)`);
+            document.documentElement.style.setProperty('--animation-border', `rgba(0, 0, 0, 0.1)`);
+            document.documentElement.style.setProperty('--animation-border-hover', `rgba(0, 0, 0, 0.15)`);
+            document.documentElement.style.setProperty('--animation-focus-ring', `rgba(0, 0, 0, 0.15)`);
+            document.documentElement.style.setProperty('--animation-focus-ring-light', `rgba(0, 0, 0, 0.1)`);
+        }
+        
+        // Shadow colors adapt to theme brightness (darker shadows for light themes)
+        const shadowOpacity = isDark ? 0.2 : 0.15;
+        const shadowOpacityLight = isDark ? 0.1 : 0.08;
+        const shadowOpacityMedium = isDark ? 0.3 : 0.25;
+        document.documentElement.style.setProperty('--animation-shadow', `rgba(0, 0, 0, ${shadowOpacity})`);
+        document.documentElement.style.setProperty('--animation-shadow-light', `rgba(0, 0, 0, ${shadowOpacityLight})`);
+        document.documentElement.style.setProperty('--animation-shadow-medium', `rgba(0, 0, 0, ${shadowOpacityMedium})`);
     }
 
     // Helper function to darken colors
@@ -1497,29 +2027,6 @@ class AxisBrowser {
         return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
     }
     
-    // Toggle between light and dark themes
-    toggleTheme() {
-        const body = document.body;
-        if (body.classList.contains('light-theme')) {
-            body.classList.remove('light-theme');
-            this.saveSetting('theme', 'dark');
-        } else {
-            body.classList.add('light-theme');
-            this.saveSetting('theme', 'light');
-        }
-    }
-    
-    // Apply saved theme on startup
-    applySavedTheme() {
-        const savedTheme = this.settings.theme || 'dark';
-        const body = document.body;
-        
-        if (savedTheme === 'light') {
-            body.classList.add('light-theme');
-        } else {
-            body.classList.remove('light-theme');
-        }
-    }
     
     // Refresh popup themes when they're opened
     refreshPopupThemes() {
@@ -1613,6 +2120,9 @@ class AxisBrowser {
         
         // Save pinned tabs state
         this.savePinnedTabs();
+        
+        // Re-render folders in case tab organization changed
+        this.renderFolders();
     }
 
     setupTabEventListeners(tabElement, tabId) {
@@ -1649,9 +2159,10 @@ class AxisBrowser {
                     // Recursively call with valid tab (but only if different to avoid infinite loop)
                     return this.switchToTab(firstTab);
                 } else if (this.tabs.size === 0) {
-                    // No tabs left, show empty state
+                    // No tabs left, show empty state and reset to black theme
                     this.currentTab = null;
-                    const webview = document.getElementById('webview');
+                    this.resetToBlackTheme();
+                    const webview = this.elements?.webview;
                     if (webview) {
                         webview.src = 'about:blank';
                     }
@@ -1663,14 +2174,22 @@ class AxisBrowser {
             return;
         }
 
-        // Update active tab
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.classList.remove('active');
-        });
-        
+        // Fast tab switching: use cached elements and batch DOM updates
+        const el = this.elements;
         const activeTab = document.querySelector(`[data-tab-id="${tabId}"]`);
-        if (activeTab) {
-            activeTab.classList.add('active');
+        
+        // Only update active state if tab changed
+        if (this.currentTab !== tabId) {
+            // Remove active from previous tab (if exists)
+            if (this.currentTab) {
+                const prevTab = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
+                if (prevTab) prevTab.classList.remove('active');
+            }
+            
+            // Add active to new tab
+            if (activeTab) {
+                activeTab.classList.add('active');
+            }
         }
 
         this.currentTab = tabId;
@@ -1678,16 +2197,26 @@ class AxisBrowser {
         // Update webview content for the active tab
         const tab = this.tabs.get(tabId);
         if (tab) {
-            const webview = document.getElementById('webview');
+            const webview = el?.webview;
             if (webview) {
                 // Check if this is a note tab
                 if (tab.url && tab.url.startsWith('axis:note://')) {
                     // This is a note tab - inject note HTML
                     const noteId = tab.url.replace('axis:note://', '');
                     this.loadNoteInWebview(noteId);
+                    // Reset to black theme for notes
+                    this.resetToBlackTheme();
                 } else if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
                     const sanitizedTabUrl = this.sanitizeUrl(tab.url);
-                    webview.src = sanitizedTabUrl || 'https://www.google.com';
+                    const currentSrc = webview.getURL();
+                    // Only change src if it's different
+                    if (currentSrc !== sanitizedTabUrl) {
+                        webview.src = sanitizedTabUrl || 'https://www.google.com';
+                        // Theme will be extracted in did-finish-load event
+                    } else {
+                        // Page is already loaded, extract theme immediately (no delays)
+                        this.extractAndApplyWebpageColors(webview);
+                    }
                 } else {
                     // If tab has no valid URL, set to Google and update tab data
                     webview.src = 'https://www.google.com';
@@ -1701,10 +2230,12 @@ class AxisBrowser {
             }
         }
         
-        // Hide empty state when switching to a tab
-        this.updateEmptyState();
-        this.updateNavigationButtons();
-        this.updateUrlBar();
+        // Batch UI updates for faster switching
+        this.batchDOMUpdates([
+            () => this.updateEmptyState(),
+            () => this.updateNavigationButtons(),
+            () => this.updateUrlBar()
+        ]);
     }
 
     updateEmptyState() {
@@ -1714,9 +2245,10 @@ class AxisBrowser {
         const emptyContent = document.getElementById('empty-state-empty');
         
         if (this.tabs.size === 0 || this.currentTab === null) {
-            // Show empty state
+            // Show empty state and reset to black theme
             emptyState.classList.remove('hidden');
             if (emptyContent) emptyContent.classList.remove('hidden');
+            this.resetToBlackTheme();
         } else {
             // Hide empty state
             emptyState.classList.add('hidden');
@@ -1789,19 +2321,21 @@ class AxisBrowser {
                     if (this.tabs.has(fallbackTab)) {
                         this.switchToTab(fallbackTab);
                     } else {
-                        // No valid tabs found, show empty state
+                        // No valid tabs found, show empty state and reset to black theme
                         this.currentTab = null;
                         const webview = document.getElementById('webview');
                         if (webview) {
                             webview.src = 'about:blank';
                         }
+                        this.resetToBlackTheme();
                         this.updateEmptyState();
                         this.updateUrlBar();
                         this.updateNavigationButtons();
                     }
                 } else {
-                    // Only one tab left but it doesn't exist, show empty state
+                    // Only one tab left but it doesn't exist, show empty state and reset to black theme
                     this.currentTab = null;
+                    this.resetToBlackTheme();
                     const webview = document.getElementById('webview');
                     if (webview) {
                         webview.src = 'about:blank';
@@ -1811,8 +2345,9 @@ class AxisBrowser {
                     this.updateNavigationButtons();
                 }
             } else {
-                // No more tabs - show empty state
+                // No more tabs - show empty state and reset to black theme
                 this.currentTab = null;
+                this.resetToBlackTheme();
                 const webview = document.getElementById('webview');
                 if (webview) {
                     webview.src = 'about:blank';
@@ -1881,21 +2416,21 @@ class AxisBrowser {
             return;
         }
 
-        // Split view disabled for now - always use single view
-        // if (this.isSplitView) {
-        //     // Navigate in the active pane
-        //     const activeWebview = this.activePane === 'left' ? 
-        //         document.getElementById('webview-left') : 
-        //         document.getElementById('webview-right');
-        //     
-        //     if (activeWebview) {
-        //         this.navigateInPane(activeWebview, sanitizedUrl);
-        //     }
-        // } else {
+        // Navigate based on view mode
+        if (this.isSplitView) {
+            // Navigate in the active pane
+            const activeWebview = this.activePane === 'left' ? 
+                document.getElementById('webview-left') : 
+                document.getElementById('webview-right');
+            
+            if (activeWebview) {
+                this.navigateInPane(activeWebview, sanitizedUrl);
+            }
+        } else {
             // Navigate in single view
             const webview = document.getElementById('webview');
             this.navigateInPane(webview, sanitizedUrl);
-        // }
+        }
 
         // Update tab data and add to history
         const tab = this.tabs.get(this.currentTab);
@@ -1927,6 +2462,19 @@ class AxisBrowser {
 
     goBack() {
         if (!this.currentTab || !this.tabs.has(this.currentTab)) return;
+        
+        // Get the appropriate webview based on view mode
+        let webview;
+        if (this.isSplitView) {
+            webview = this.activePane === 'left' ? 
+                document.getElementById('webview-left') : 
+                document.getElementById('webview-right');
+        } else {
+            webview = document.getElementById('webview');
+        }
+        
+        if (!webview) return;
+        
         const currentTab = this.tabs.get(this.currentTab);
         if (currentTab && currentTab.history && currentTab.history.length > 1 && currentTab.historyIndex > 0) {
             // Move back in tab's history
@@ -1940,8 +2488,7 @@ class AxisBrowser {
             this.updateNavigationButtons();
         } else {
             // Fallback to webview navigation
-            const webview = document.getElementById('webview');
-            if (webview && webview.canGoBack()) {
+            if (webview.canGoBack()) {
                 webview.goBack();
                 this.updateNavigationButtons();
             }
@@ -1950,6 +2497,19 @@ class AxisBrowser {
 
     goForward() {
         if (!this.currentTab || !this.tabs.has(this.currentTab)) return;
+        
+        // Get the appropriate webview based on view mode
+        let webview;
+        if (this.isSplitView) {
+            webview = this.activePane === 'left' ? 
+                document.getElementById('webview-left') : 
+                document.getElementById('webview-right');
+        } else {
+            webview = document.getElementById('webview');
+        }
+        
+        if (!webview) return;
+        
         const currentTab = this.tabs.get(this.currentTab);
         if (currentTab && currentTab.history && currentTab.history.length > 1 && currentTab.historyIndex < currentTab.history.length - 1) {
             // Move forward in tab's history
@@ -1963,8 +2523,7 @@ class AxisBrowser {
             this.updateNavigationButtons();
         } else {
             // Fallback to webview navigation
-            const webview = document.getElementById('webview');
-            if (webview && webview.canGoForward()) {
+            if (webview.canGoForward()) {
                 webview.goForward();
                 this.updateNavigationButtons();
             }
@@ -1972,7 +2531,16 @@ class AxisBrowser {
     }
 
     navigateToUrlInCurrentTab(url) {
-        const webview = document.getElementById('webview');
+        // Get the appropriate webview based on view mode
+        let webview;
+        if (this.isSplitView) {
+            webview = this.activePane === 'left' ? 
+                document.getElementById('webview-left') : 
+                document.getElementById('webview-right');
+        } else {
+            webview = document.getElementById('webview');
+        }
+        
         if (webview) {
             const sanitizedUrl = this.sanitizeUrl(url);
             webview.src = sanitizedUrl || 'https://www.google.com';
@@ -1990,20 +2558,49 @@ class AxisBrowser {
 
     refresh() {
         if (!this.currentTab || !this.tabs.has(this.currentTab)) return;
-        const webview = document.getElementById('webview');
+        
+        // Get the appropriate webview based on view mode
+        let webview;
+        if (this.isSplitView) {
+            webview = this.activePane === 'left' ? 
+                document.getElementById('webview-left') : 
+                document.getElementById('webview-right');
+        } else {
+            webview = document.getElementById('webview');
+        }
+        
         if (webview) {
             webview.reload();
         }
     }
 
     updateNavigationButtons() {
-        const backBtn = document.getElementById('back-btn');
-        const forwardBtn = document.getElementById('forward-btn');
+        const el = this.elements;
+        const backBtn = el?.backBtn;
+        const forwardBtn = el?.forwardBtn;
+        
+        if (!backBtn || !forwardBtn) return;
         
         if (!this.currentTab || !this.tabs.has(this.currentTab)) {
-            if (backBtn) backBtn.disabled = true;
-            if (forwardBtn) forwardBtn.disabled = true;
+            backBtn.disabled = true;
+            forwardBtn.disabled = true;
             return;
+        }
+
+        // Get the appropriate webview based on view mode - cache webviews
+        let webview;
+        if (this.isSplitView) {
+            if (!this.cachedWebviews) {
+                this.cachedWebviews = {
+                    left: document.getElementById('webview-left'),
+                    right: document.getElementById('webview-right')
+                };
+            }
+            webview = this.activePane === 'left' ? 
+                this.cachedWebviews.left : 
+                this.cachedWebviews.right;
+        } else {
+            webview = el?.webview;
         }
 
         const currentTab = this.tabs.get(this.currentTab);
@@ -2011,7 +2608,7 @@ class AxisBrowser {
             // Use tab-specific history for navigation buttons
             backBtn.disabled = currentTab.historyIndex <= 0;
             forwardBtn.disabled = currentTab.historyIndex >= currentTab.history.length - 1;
-        } else {
+        } else if (webview) {
             // Fallback to webview navigation
             backBtn.disabled = !webview.canGoBack();
             forwardBtn.disabled = !webview.canGoForward();
@@ -2019,7 +2616,8 @@ class AxisBrowser {
     }
 
     updateUrlBar() {
-        const urlBar = document.getElementById('url-bar');
+        const el = this.elements;
+        const urlBar = el?.urlBar;
         if (!urlBar) return;
 
         if (!this.currentTab || !this.tabs.has(this.currentTab)) {
@@ -2037,7 +2635,22 @@ class AxisBrowser {
             return;
         }
 
-        const webview = document.getElementById('webview');
+        // Get the appropriate webview based on view mode - use cached webviews
+        let webview;
+        if (this.isSplitView) {
+            if (!this.cachedWebviews) {
+                this.cachedWebviews = {
+                    left: document.getElementById('webview-left'),
+                    right: document.getElementById('webview-right')
+                };
+            }
+            webview = this.activePane === 'left' ? 
+                this.cachedWebviews.left : 
+                this.cachedWebviews.right;
+        } else {
+            webview = el?.webview;
+        }
+        
         if (!webview) return;
         
         const newUrl = webview.getURL();
@@ -2117,7 +2730,24 @@ class AxisBrowser {
     }
 
     updateTabTitle() {
-        const webview = document.getElementById('webview');
+        // Get the appropriate webview based on view mode - use cached webviews
+        let webview;
+        if (this.isSplitView) {
+            if (!this.cachedWebviews) {
+                this.cachedWebviews = {
+                    left: document.getElementById('webview-left'),
+                    right: document.getElementById('webview-right')
+                };
+            }
+            webview = this.activePane === 'left' ? 
+                this.cachedWebviews.left : 
+                this.cachedWebviews.right;
+        } else {
+            webview = this.elements?.webview;
+        }
+        
+        if (!webview) return;
+        
         const title = webview.getTitle() || 'New Tab';
         
         // Direct DOM updates for maximum speed
@@ -2163,7 +2793,7 @@ class AxisBrowser {
             settingsPanel.classList.remove('hidden');
             if (backdrop) {
                 backdrop.classList.remove('hidden');
-                backdrop.style.transition = 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)';
+                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
             }
             
             // Add entrance animation class
@@ -2173,19 +2803,23 @@ class AxisBrowser {
                 this.populateSettings();
                 // Default to general tab when opening
                 this.switchSettingsTab('general');
+            
+            // Remove animation class after animation completes (200ms)
+            setTimeout(() => {
                 settingsPanel.classList.remove('settings-entering');
+            }, 200);
             // Refresh popup themes
             this.refreshPopupThemes();
             
         } else {
-            // Enhanced closing animation
+            // Smooth fade-out animation
             settingsPanel.classList.add('settings-closing');
             
             setTimeout(() => {
                 settingsPanel.classList.add('hidden');
                 settingsPanel.classList.remove('settings-closing');
                 if (backdrop) backdrop.classList.add('hidden');
-            }, 500);
+            }, 150);
         }
     }
 
@@ -2258,7 +2892,7 @@ class AxisBrowser {
             bookmarksPanel.classList.remove('hidden');
             if (backdrop) {
                 backdrop.classList.remove('hidden');
-                backdrop.style.transition = 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)';
+                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
             }
             
             // Add entrance animation class
@@ -2266,19 +2900,23 @@ class AxisBrowser {
             
             // Populate bookmarks immediately
                 this.populateBookmarks();
+            
+            // Remove animation class after animation completes (200ms)
+            setTimeout(() => {
                 bookmarksPanel.classList.remove('bookmarks-entering');
+            }, 200);
             // Refresh popup themes
             this.refreshPopupThemes();
             
         } else {
-            // Enhanced closing animation
+            // Smooth fade-out animation
             bookmarksPanel.classList.add('bookmarks-closing');
             
             setTimeout(() => {
                 bookmarksPanel.classList.add('hidden');
                 bookmarksPanel.classList.remove('bookmarks-closing');
                 if (backdrop) backdrop.classList.add('hidden');
-            }, 500);
+            }, 150);
         }
     }
 
@@ -2494,7 +3132,7 @@ class AxisBrowser {
         const noteTitle = note ? (note.title || 'Untitled Note') : '';
         const noteContent = note ? (note.content || '') : '';
 
-        // Create beautiful HTML for note editor
+        // Create modern HTML for note editor
         const noteHtml = `
 <!DOCTYPE html>
 <html>
@@ -2506,7 +3144,7 @@ class AxisBrowser {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #0f0f0f;
+            background: linear-gradient(135deg, #0a0a0a 0%, #0f0f0f 100%);
             color: #fff;
             height: 100vh;
             display: flex;
@@ -2514,149 +3152,172 @@ class AxisBrowser {
             overflow: hidden;
         }
         .note-header {
-            padding: 16px 24px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            background: #151515;
+            padding: 20px 32px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(15, 15, 15, 0.8);
+            backdrop-filter: blur(20px);
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 16px;
             position: sticky;
             top: 0;
             z-index: 10;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
         }
         .note-title-input {
             flex: 1;
             background: transparent;
             border: none;
             color: #fff;
-            font-size: 20px;
+            font-size: 24px;
             font-weight: 600;
             outline: none;
             padding: 8px 0;
             transition: all 0.2s ease;
+            letter-spacing: -0.3px;
         }
         .note-title-input:focus {
             color: #fff;
         }
         .note-title-input::placeholder {
-            color: rgba(255, 255, 255, 0.4);
-            font-weight: 400;
+            color: rgba(255, 255, 255, 0.3);
+            font-weight: 500;
         }
         .note-actions {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
         }
         .note-status {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.5);
-            padding: 4px 8px;
-            background: transparent;
-            border-radius: 4px;
-            min-width: 60px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.4);
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            min-width: 70px;
             text-align: center;
-            transition: all 0.2s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-weight: 500;
+            opacity: 0;
+            transform: translateY(-2px);
+        }
+        .note-status.visible {
+            opacity: 1;
+            transform: translateY(0);
         }
         .note-status.saving {
             color: #ffd700;
+            background: rgba(255, 215, 0, 0.1);
         }
         .note-status.saved {
-            color: #4caf50;
+            color: #4ade80;
+            background: rgba(74, 222, 128, 0.1);
         }
         .note-status.error {
-            color: #ff6b6b;
+            color: #f87171;
+            background: rgba(248, 113, 113, 0.1);
         }
         .note-btn {
             background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
             color: #fff;
             cursor: pointer;
-            padding: 6px 12px;
-            font-size: 12px;
-            transition: all 0.2s ease;
+            padding: 10px 16px;
+            font-size: 13px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
+            font-weight: 500;
         }
         .note-btn:hover {
             background: rgba(255, 255, 255, 0.12);
             border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
         }
         .note-btn.save {
-            background: rgba(76, 175, 80, 0.2);
-            border-color: rgba(76, 175, 80, 0.3);
-            color: #4caf50;
+            background: linear-gradient(135deg, rgba(74, 222, 128, 0.2) 0%, rgba(74, 222, 128, 0.15) 100%);
+            border-color: rgba(74, 222, 128, 0.3);
+            color: #4ade80;
         }
         .note-btn.save:hover {
-            background: rgba(76, 175, 80, 0.3);
-            border-color: rgba(76, 175, 80, 0.4);
+            background: linear-gradient(135deg, rgba(74, 222, 128, 0.3) 0%, rgba(74, 222, 128, 0.25) 100%);
+            border-color: rgba(74, 222, 128, 0.4);
+            box-shadow: 0 4px 12px rgba(74, 222, 128, 0.2);
         }
         .note-content {
             flex: 1;
-            padding: 32px;
+            padding: 48px;
             overflow-y: auto;
             scroll-behavior: smooth;
-            background: #0f0f0f;
+            background: transparent;
         }
         .note-content::-webkit-scrollbar {
-            width: 8px;
+            width: 10px;
         }
         .note-content::-webkit-scrollbar-track {
             background: transparent;
         }
         .note-content::-webkit-scrollbar-thumb {
             background: rgba(255, 255, 255, 0.1);
-            border-radius: 4px;
+            border-radius: 5px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
         }
         .note-content::-webkit-scrollbar-thumb:hover {
             background: rgba(255, 255, 255, 0.2);
+            background-clip: padding-box;
         }
         .note-textarea {
             width: 100%;
             height: 100%;
             min-height: 500px;
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
             background: transparent;
             border: none;
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 15px;
-            line-height: 1.7;
+            color: rgba(255, 255, 255, 0.95);
+            font-size: 16px;
+            line-height: 1.8;
             outline: none;
             resize: none;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             caret-color: #ffd700;
             padding: 0;
+            letter-spacing: 0.01em;
         }
         .note-textarea::placeholder {
-            color: rgba(255, 255, 255, 0.3);
+            color: rgba(255, 255, 255, 0.25);
         }
         .note-meta {
-            padding: 12px 24px;
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.4);
-            background: #151515;
+            padding: 16px 32px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+            background: rgba(15, 15, 15, 0.8);
+            backdrop-filter: blur(20px);
             position: sticky;
             bottom: 0;
             z-index: 5;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.3);
         }
         .note-meta-left {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
         }
         .word-count {
-            color: rgba(255, 255, 255, 0.4);
-            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            font-weight: 500;
         }
         .word-count span {
-            color: rgba(255, 255, 255, 0.5);
-            margin-left: 4px;
+            color: rgba(255, 255, 255, 0.4);
+            margin-left: 6px;
         }
     </style>
 </head>
@@ -2666,7 +3327,12 @@ class AxisBrowser {
         <div class="note-actions">
             <div class="note-status" id="note-status"></div>
             <button class="note-btn save" onclick="saveNote()" title="Save (Ctrl+S)">
-                💾
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                    <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                    <polyline points="7 3 7 8 15 8"></polyline>
+                </svg>
+                Save
             </button>
         </div>
     </div>
@@ -2682,6 +3348,9 @@ class AxisBrowser {
     <script>
         const noteId = ${noteId === 'new' ? 'null' : noteId};
         let isSaving = false;
+        let saveTimeout = null;
+        let lastSavedContent = '';
+        let lastSavedTitle = '';
         
         function formatDate(dateString) {
             if (!dateString) return 'New note';
@@ -2706,10 +3375,15 @@ class AxisBrowser {
             const title = document.getElementById('note-title').value.trim() || 'Untitled Note';
             const content = document.getElementById('note-content').value;
             
+            // Check if nothing changed
+            if (title === lastSavedTitle && content === lastSavedContent) {
+                return;
+            }
+            
             // Update document title immediately
             document.title = title;
             
-            // Update status
+            // Show saving status
             updateSaveStatus('saving');
             isSaving = true;
             
@@ -2723,6 +3397,10 @@ class AxisBrowser {
                         createdAt: noteId ? undefined : new Date().toISOString() 
                     } 
                 }, '*');
+                
+                // Store last saved values
+                lastSavedTitle = title;
+                lastSavedContent = content;
             } catch (e) { 
                 console.error('Failed to post saveNote message', e);
                 updateSaveStatus(false);
@@ -2738,15 +3416,14 @@ class AxisBrowser {
             }
         });
         
-        // Auto-save on title/content change (debounced - increased to 2 seconds)
-        let saveTimeout;
+        // Real auto-save with 1 second debounce
         function debouncedSave() {
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(() => {
                 if (!isSaving) {
                     saveNote();
                 }
-            }, 2000);
+            }, 1000);
         }
         
         function updateWordCount() {
@@ -2761,53 +3438,56 @@ class AxisBrowser {
         
         function updateSaveStatus(status) {
             const statusEl = document.getElementById('note-status');
-            const metaEl = document.getElementById('note-meta');
             const dateEl = document.getElementById('note-date');
             if (!statusEl) return;
             
             statusEl.className = 'note-status';
+            
             if (status === 'saving') {
                 statusEl.textContent = 'Saving...';
-                statusEl.classList.add('saving');
+                statusEl.classList.add('saving', 'visible');
             } else if (status === true) {
                 statusEl.textContent = 'Saved';
-                statusEl.classList.add('saved');
+                statusEl.classList.add('saved', 'visible');
                 isSaving = false;
                 if (dateEl) {
                     dateEl.textContent = formatDate(new Date().toISOString());
                 }
                 setTimeout(() => {
-                    statusEl.textContent = '';
-                    statusEl.className = 'note-status';
-                }, 2000);
-            } else if (status === false) {
-                statusEl.textContent = 'Error';
-                statusEl.classList.add('error');
-                isSaving = false;
+                    statusEl.classList.remove('visible');
                 setTimeout(() => {
                     statusEl.textContent = '';
                     statusEl.className = 'note-status';
+                    }, 300);
+                }, 2000);
+            } else if (status === false) {
+                statusEl.textContent = 'Error saving';
+                statusEl.classList.add('error', 'visible');
+                isSaving = false;
+                setTimeout(() => {
+                    statusEl.classList.remove('visible');
+                setTimeout(() => {
+                    statusEl.textContent = '';
+                    statusEl.className = 'note-status';
+                    }, 300);
                 }, 3000);
             }
         }
         
         window.updateSaveStatus = updateSaveStatus;
         
+        // Initialize last saved values
+        lastSavedTitle = document.getElementById('note-title').value.trim() || 'Untitled Note';
+        lastSavedContent = document.getElementById('note-content').value;
+        
         document.getElementById('note-title').addEventListener('input', (e) => {
-            // Update document title as user types
             const title = e.target.value.trim() || 'Untitled Note';
             document.title = title;
-            if (!isSaving) {
-                updateSaveStatus('saving');
-            }
             debouncedSave();
         });
         
         document.getElementById('note-content').addEventListener('input', (e) => {
             updateWordCount();
-            if (!isSaving) {
-                updateSaveStatus('saving');
-            }
             debouncedSave();
         });
         
@@ -2855,11 +3535,11 @@ class AxisBrowser {
         }
         
         if (notesPanel.classList.contains('hidden')) {
-            // Enhanced opening animation
+            // Smooth fade-in animation
             notesPanel.classList.remove('hidden');
             if (backdrop) {
                 backdrop.classList.remove('hidden');
-                backdrop.style.transition = 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)';
+                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
             }
             
             // Add entrance animation class
@@ -2867,7 +3547,11 @@ class AxisBrowser {
             
             // Populate notes immediately
             await this.populateNotes();
+            
+            // Remove animation class after animation completes (200ms)
+            setTimeout(() => {
             notesPanel.classList.remove('notes-entering');
+            }, 200);
             
             // Setup event listeners
             this.setupNotesEventListeners();
@@ -2876,23 +3560,30 @@ class AxisBrowser {
             this.refreshPopupThemes();
             
         } else {
-            // Enhanced closing animation
+            // Smooth fade-out animation
             notesPanel.classList.add('notes-closing');
             
             setTimeout(() => {
                 notesPanel.classList.add('hidden');
                 notesPanel.classList.remove('notes-closing');
                 if (backdrop) backdrop.classList.add('hidden');
-            }, 500);
+            }, 150);
         }
     }
 
     async populateNotes() {
         const notesList = document.getElementById('notes-list');
         const noNotes = document.getElementById('no-notes');
+        const notesCount = document.getElementById('notes-count');
         
         try {
             const notes = await window.electronAPI.getNotes();
+            
+            // Update notes count
+            if (notesCount) {
+                const count = notes ? notes.length : 0;
+                notesCount.textContent = `${count} note${count !== 1 ? 's' : ''}`;
+            }
             
             // Clear immediately
             notesList.innerHTML = '';
@@ -3061,7 +3752,7 @@ class AxisBrowser {
             
             if (note && confirm(`Delete note "${note.title}"?`)) {
                 await window.electronAPI.deleteNote(noteId);
-                await this.populateNotes();
+                await this.populateNotes(); // This will update the count automatically
                 this.showNotification('Note deleted', 'success');
             }
         } catch (error) {
@@ -3535,10 +4226,12 @@ class AxisBrowser {
         const separator = document.getElementById('tabs-separator');
         if (!tabsContainer || !separator) return;
         
-        // Get all tabs (preserve order)
+        // Get all tabs that are NOT in folders (preserve order)
         const allChildren = Array.from(tabsContainer.children);
         const tabs = allChildren.filter(el => 
-            el.classList.contains('tab') && el.id !== 'tabs-separator'
+            el.classList.contains('tab') && 
+            el.id !== 'tabs-separator' &&
+            !el.closest('.folder') // Exclude tabs inside folders
         );
 
         // FLIP: First - record current positions
@@ -3558,6 +4251,9 @@ class AxisBrowser {
             const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
             if (!tabElement) continue;
             
+            // Skip tabs that are in folders
+            if (tabElement.closest('.folder')) continue;
+            
             const tab = this.tabs.get(tabId);
             if (tab && tab.pinned) {
                 pinnedTabs.push(tabElement);
@@ -3566,7 +4262,7 @@ class AxisBrowser {
             }
         }
         
-        // Remove all tabs temporarily
+        // Remove all tabs temporarily (only those not in folders)
         tabs.forEach(tab => {
             if (tab.parentNode === tabsContainer) {
                 tab.remove();
@@ -3578,8 +4274,10 @@ class AxisBrowser {
             tabsContainer.insertBefore(tab, separator);
         });
         
-        // Show/hide separator based on pinned tabs
-        if (pinnedTabs.length > 0) {
+        // Show/hide separator based on pinned tabs or folders
+        const hasPinnedTabs = pinnedTabs.length > 0;
+        const hasFolders = this.folders.size > 0;
+        if (hasPinnedTabs || hasFolders) {
             separator.style.display = 'block';
         } else {
             separator.style.display = 'none';
@@ -3874,6 +4572,610 @@ class AxisBrowser {
 
     // Removed setupSidebarResizing method
 
+    createNewFolder() {
+        const folderId = Date.now();
+        const folderName = `Folder ${this.folders.size + 1}`;
+        
+        const folder = {
+            id: folderId,
+            name: folderName,
+            tabIds: [],
+            open: true,
+            order: this.folders.size
+        };
+        
+        this.folders.set(folderId, folder);
+        this.renderFolders();
+        this.saveFolders();
+        
+        // Focus the folder name for editing when newly created
+        setTimeout(() => {
+            const folderElement = document.querySelector(`[data-folder-id="${folderId}"]`);
+            if (folderElement) {
+                const nameInput = folderElement.querySelector('.folder-name-input');
+                if (nameInput) {
+                    nameInput.readOnly = false;
+                    nameInput.focus();
+                    nameInput.select();
+                }
+            }
+        }, 100);
+    }
+
+    renderFolders() {
+        const tabsContainer = document.querySelector('.tabs-container');
+        const separator = document.getElementById('tabs-separator');
+        if (!tabsContainer || !separator) return;
+
+        // Remove existing folder elements
+        const existingFolders = tabsContainer.querySelectorAll('.folder');
+        existingFolders.forEach(folder => folder.remove());
+
+        // Get all folders sorted by order
+        const foldersArray = Array.from(this.folders.values()).sort((a, b) => (a.order || 0) - (b.order || 0));
+
+        // Insert folders before separator (in pinned section)
+        foldersArray.forEach(folder => {
+            const folderElement = this.createFolderElement(folder);
+            tabsContainer.insertBefore(folderElement, separator);
+        });
+    }
+
+    createFolderElement(folder) {
+        const folderElement = document.createElement('div');
+        folderElement.className = 'folder';
+        folderElement.dataset.folderId = folder.id;
+        folderElement.classList.add('pinned'); // Folders are always in pinned section
+        
+        const isOpen = folder.open !== false; // Default to open
+        
+        // Get folder tabs
+        const folderTabs = folder.tabIds
+            .map(tabId => {
+                const tab = this.tabs.get(tabId);
+                const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+                return { tab, tabElement, tabId };
+            })
+            .filter(item => item.tab && item.tab.pinned); // Only show pinned tabs
+
+        folderElement.innerHTML = `
+            <div class="tab-content">
+                <div class="tab-left">
+                    <i class="fas ${isOpen ? 'fa-folder-open' : 'fa-folder'} tab-favicon folder-icon"></i>
+                    <input type="text" class="folder-name-input tab-title" value="${this.escapeHtml(folder.name)}" placeholder="Folder name" readonly>
+                </div>
+                <div class="tab-right">
+                    <button class="folder-delete tab-close" title="Delete folder">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="folder-content ${isOpen ? 'open' : ''}">
+                ${folderTabs.length > 0 ? '' : '<div class="folder-empty">Drag tabs here</div>'}
+            </div>
+        `;
+
+        // Set up folder event listeners
+        this.setupFolderEventListeners(folderElement, folder);
+
+        // Add tab elements to folder content
+        const folderContent = folderElement.querySelector('.folder-content');
+        
+        folderTabs.forEach(({ tabElement, tabId }) => {
+            if (tabElement && folderContent) {
+                // Only add if not already in a folder
+                if (!tabElement.closest('.folder')) {
+                    folderContent.appendChild(tabElement);
+                    // Ensure event listeners are set up
+                    this.setupTabEventListeners(tabElement, tabId);
+                }
+            } else if (folderContent && !tabElement) {
+                // Tab element doesn't exist, create it
+                const tab = this.tabs.get(tabId);
+                if (tab) {
+                    const newTabElement = document.createElement('div');
+                    newTabElement.className = 'tab pinned';
+                    newTabElement.dataset.tabId = tabId;
+                    newTabElement.innerHTML = `
+                        <div class="tab-content">
+                            <div class="tab-left">
+                                <img class="tab-favicon" src="" alt="" onerror="this.style.visibility='hidden'">
+                                <span class="tab-title">${this.escapeHtml(tab.title || 'New Tab')}</span>
+                            </div>
+                            <div class="tab-right">
+                                <button class="tab-close"><i class="fas fa-times"></i></button>
+                            </div>
+                        </div>
+                    `;
+                    folderContent.appendChild(newTabElement);
+                    this.setupTabEventListeners(newTabElement, tabId);
+                    this.updateTabFavicon(tabId, newTabElement);
+                }
+            }
+        });
+        
+        // Set initial state if folder is open (after tabs are added)
+        if (isOpen) {
+            // Use setTimeout to ensure DOM is ready and tabs are added
+            setTimeout(() => {
+                folderContent.style.display = 'flex';
+                folderContent.style.visibility = 'visible';
+                folderContent.style.maxHeight = 'none';
+                const height = folderContent.scrollHeight;
+                folderContent.style.maxHeight = height + 'px';
+                folderContent.style.opacity = '1';
+                folderContent.classList.add('open');
+            }, 50);
+        } else {
+            folderContent.style.display = 'none';
+            folderContent.style.visibility = 'hidden';
+        }
+
+        return folderElement;
+    }
+
+    setupFolderEventListeners(folderElement, folder) {
+        const nameInput = folderElement.querySelector('.folder-name-input');
+        const deleteBtn = folderElement.querySelector('.folder-delete');
+        const folderContent = folderElement.querySelector('.folder-content');
+        const tabContent = folderElement.querySelector('.tab-content');
+
+        // Toggle folder - click anywhere on the folder tab (including the name)
+        tabContent.addEventListener('click', (e) => {
+            // Don't toggle if clicking on delete button
+            if (e.target.closest('.folder-delete')) {
+                return;
+            }
+            // If clicking on the input and it's readonly, just toggle (don't rename)
+            if (e.target.closest('.folder-name-input') && nameInput.readOnly) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggleFolder(folder.id);
+                return;
+            }
+            // If input is not readonly (being edited), don't toggle
+            if (e.target.closest('.folder-name-input') && !nameInput.readOnly) {
+                return;
+            }
+            e.stopPropagation();
+            this.toggleFolder(folder.id);
+        });
+        
+        // Prevent input from being focused when readonly
+        nameInput.addEventListener('mousedown', (e) => {
+            if (nameInput.readOnly) {
+                e.preventDefault();
+                // Trigger toggle instead
+                this.toggleFolder(folder.id);
+            }
+        });
+
+        // Right-click for context menu
+        folderElement.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.showFolderContextMenu(e, folder.id);
+        });
+
+        // Rename folder - only when input is made editable
+        nameInput.addEventListener('blur', () => {
+            const newName = nameInput.value.trim() || `Folder ${folder.id}`;
+            folder.name = newName;
+            this.folders.set(folder.id, folder);
+            this.saveFolders();
+            // Make it readonly again
+            nameInput.readOnly = true;
+        });
+
+        nameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                nameInput.blur();
+            }
+            if (e.key === 'Escape') {
+                nameInput.value = folder.name;
+                nameInput.blur();
+            }
+        });
+
+        // Delete folder - make it always visible but styled
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (confirm(`Delete folder "${folder.name}"? Tabs will be moved back to the sidebar.`)) {
+                this.deleteFolder(folder.id);
+            }
+        });
+
+        // Make folder a drop zone - handle drag events on the folder element itself
+        folderElement.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+            
+            // Highlight folder (undotted animation)
+            folderElement.classList.add('drag-over-folder');
+        });
+
+        folderElement.addEventListener('dragleave', (e) => {
+            // Only remove if actually leaving the folder
+            if (!folderElement.contains(e.relatedTarget)) {
+                folderElement.classList.remove('drag-over-folder');
+            }
+        });
+
+        folderElement.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            folderElement.classList.remove('drag-over-folder');
+            
+            // Get tab ID from drag data
+            let tabId = null;
+            
+            // Try to get from dataTransfer
+            const htmlData = e.dataTransfer.getData('text/html');
+            if (htmlData) {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(htmlData, 'text/html');
+                const tabEl = doc.querySelector('.tab');
+                if (tabEl && tabEl.dataset.tabId) {
+                    tabId = parseInt(tabEl.dataset.tabId);
+                }
+            }
+            
+            // Also check if there's a dragged tab element
+            const draggedTab = document.querySelector('.tab.dragging');
+            if (draggedTab && draggedTab.dataset.tabId) {
+                tabId = parseInt(draggedTab.dataset.tabId);
+            }
+            
+            if (tabId && this.tabs.has(tabId)) {
+                this.addTabToFolder(tabId, folder.id);
+            }
+        });
+    }
+
+    toggleFolder(folderId) {
+        const folder = this.folders.get(folderId);
+        if (!folder) return;
+
+        const folderElement = document.querySelector(`[data-folder-id="${folderId}"]`);
+        if (!folderElement) return;
+        
+        const folderContent = folderElement.querySelector('.folder-content');
+        const folderIcon = folderElement.querySelector('.folder-icon');
+        
+        if (!folderContent) return;
+        
+        // Prevent multiple toggles
+        if (folderElement.classList.contains('toggling')) return;
+        folderElement.classList.add('toggling');
+        
+        const isOpening = !folder.open;
+        folder.open = isOpening;
+        this.folders.set(folderId, folder);
+        
+        // Update icon immediately
+        if (folderIcon) {
+            folderIcon.classList.remove('fa-folder', 'fa-folder-open');
+            folderIcon.classList.add(isOpening ? 'fa-folder-open' : 'fa-folder');
+            folderIcon.classList.add('folder-icon-animate');
+            setTimeout(() => {
+                folderIcon.classList.remove('folder-icon-animate');
+            }, 300);
+        }
+        
+        if (isOpening) {
+            // Opening: measure height first, then animate
+            folderContent.style.display = 'flex';
+            folderContent.style.visibility = 'visible';
+            folderContent.style.maxHeight = 'none';
+            folderContent.style.opacity = '0';
+            folderContent.style.transition = 'none';
+            
+            // Force multiple reflows to ensure content is fully laid out
+            folderContent.offsetHeight;
+            requestAnimationFrame(() => {
+                folderContent.offsetHeight; // Force another reflow
+                
+                const targetHeight = folderContent.scrollHeight;
+                
+                // Add some buffer to ensure full expansion
+                const bufferedHeight = targetHeight + 10;
+                
+                // Reset to closed state
+                folderContent.style.maxHeight = '0px';
+                folderContent.style.opacity = '0';
+                folderContent.style.transition = 'max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                
+                // Animate to open
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        folderContent.classList.add('open');
+                        folderContent.style.maxHeight = bufferedHeight + 'px';
+                        folderContent.style.opacity = '1';
+                        
+                        // After animation completes, set to a very large value to allow full expansion
+                        setTimeout(() => {
+                            folderElement.classList.remove('toggling');
+                            // Set to a very large value to allow full expansion without jump
+                            folderContent.style.transition = 'none';
+                            folderContent.style.maxHeight = '9999px';
+                            // Re-enable transition for future animations
+                            setTimeout(() => {
+                                folderContent.style.transition = '';
+                            }, 50);
+                        }, 400);
+                    });
+                });
+            });
+        } else {
+            // Closing: get current height, then animate to 0
+            const currentHeight = folderContent.scrollHeight;
+            folderContent.style.maxHeight = currentHeight + 'px';
+            folderContent.style.opacity = '1';
+            folderContent.style.transition = 'max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            
+            // Force reflow
+            folderContent.offsetHeight;
+            
+            // Animate to closed
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    folderContent.classList.remove('open');
+                    folderContent.style.maxHeight = '0px';
+                    folderContent.style.opacity = '0';
+                    
+                    // Clean up after animation completes (350ms + small buffer)
+                    setTimeout(() => {
+                        folderContent.style.visibility = 'hidden';
+                        folderContent.style.display = 'none';
+                        folderContent.style.maxHeight = '';
+                        folderContent.style.transition = '';
+                        folderElement.classList.remove('toggling');
+                    }, 380);
+                });
+            });
+        }
+        
+        this.saveFolders();
+    }
+
+    addTabToFolder(tabId, folderId) {
+        const tab = this.tabs.get(tabId);
+        const folder = this.folders.get(folderId);
+        
+        if (!tab || !folder) return;
+        
+        // Only add pinned tabs to folders
+        if (!tab.pinned) {
+            // Auto-pin the tab
+            const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+            if (tabElement) {
+                this.togglePinTab(tabId, tabElement, null);
+            }
+        }
+        
+        // Remove tab from any other folder
+        this.folders.forEach((f, id) => {
+            if (id !== folderId && f.tabIds.includes(tabId)) {
+                f.tabIds = f.tabIds.filter(id => id !== tabId);
+                this.folders.set(id, f);
+            }
+        });
+        
+        // Add to this folder if not already there
+        if (!folder.tabIds.includes(tabId)) {
+            folder.tabIds.push(tabId);
+            this.folders.set(folderId, folder);
+        }
+        
+        // Remove tab from main container if it's there
+        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+        if (tabElement && tabElement.parentNode && !tabElement.closest('.folder')) {
+            tabElement.remove();
+        }
+        
+        this.saveFolders();
+        this.renderFolders();
+        
+        // Ensure folder is open to show the added tab
+        const updatedFolder = this.folders.get(folderId);
+        if (updatedFolder && !updatedFolder.open) {
+            this.toggleFolder(folderId);
+        }
+    }
+
+    removeTabFromFolder(tabId, folderId) {
+        const folder = this.folders.get(folderId);
+        if (!folder) return;
+        
+        folder.tabIds = folder.tabIds.filter(id => id !== tabId);
+        this.folders.set(folderId, folder);
+        
+        // Move tab back to main container
+        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+        const tabsContainer = document.querySelector('.tabs-container');
+        const separator = document.getElementById('tabs-separator');
+        
+        if (tabElement && tabsContainer && separator) {
+            tabElement.remove();
+            // Insert in pinned section
+            tabsContainer.insertBefore(tabElement, separator);
+        }
+        
+        this.saveFolders();
+        this.renderFolders();
+    }
+
+    deleteFolder(folderId) {
+        const folder = this.folders.get(folderId);
+        if (!folder) return;
+        
+        // Move all tabs back to main container
+        folder.tabIds.forEach(tabId => {
+            const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+            const tabsContainer = document.querySelector('.tabs-container');
+            const separator = document.getElementById('tabs-separator');
+            
+            if (tabElement && tabsContainer && separator) {
+                tabElement.remove();
+                tabsContainer.insertBefore(tabElement, separator);
+            }
+        });
+        
+        // Remove folder
+        this.folders.delete(folderId);
+        this.saveFolders();
+        this.renderFolders();
+    }
+
+    saveFolders() {
+        const foldersArray = Array.from(this.folders.values()).map(folder => ({
+            id: folder.id,
+            name: folder.name,
+            tabIds: folder.tabIds,
+            open: folder.open,
+            order: folder.order
+        }));
+        
+        this.saveSetting('folders', foldersArray);
+    }
+
+    async loadFolders() {
+        try {
+            const foldersData = this.settings.folders || [];
+            if (!Array.isArray(foldersData)) return;
+            
+            foldersData.forEach(folderData => {
+                this.folders.set(folderData.id, {
+                    id: folderData.id,
+                    name: folderData.name || `Folder ${folderData.id}`,
+                    tabIds: folderData.tabIds || [],
+                    open: folderData.open !== false, // Default to open
+                    order: folderData.order || 0
+                });
+            });
+            
+            this.renderFolders();
+        } catch (error) {
+            console.error('Error loading folders:', error);
+        }
+    }
+
+    showFolderContextMenu(e, folderId) {
+        const contextMenu = document.getElementById('folder-context-menu');
+        if (contextMenu) {
+            // Hide other context menus
+            this.hideTabContextMenu();
+            this.hideWebpageContextMenu();
+            this.hideSidebarContextMenu();
+            
+            // Remove closing state and reset opacity before showing
+            contextMenu.classList.remove('closing', 'hidden');
+            contextMenu.style.opacity = '';
+            contextMenu.style.left = e.pageX + 'px';
+            contextMenu.style.top = e.pageY + 'px';
+            contextMenu.style.display = 'block';
+            this.contextMenuFolderId = folderId;
+            
+            // Reset animations on all menu items
+            const menuItems = contextMenu.querySelectorAll('.context-menu-item');
+            menuItems.forEach(item => {
+                item.style.animation = 'none';
+                item.offsetHeight; // Trigger reflow
+                item.style.animation = '';
+            });
+            
+            // Add slide-in animation
+            contextMenu.style.animation = 'contextMenuSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+        }
+    }
+
+    hideFolderContextMenu() {
+        const contextMenu = document.getElementById('folder-context-menu');
+        if (contextMenu && !contextMenu.classList.contains('hidden')) {
+            contextMenu.classList.add('closing');
+            contextMenu.classList.remove('expanded');
+            
+            setTimeout(() => {
+                contextMenu.classList.add('hidden');
+                contextMenu.classList.remove('closing');
+                contextMenu.style.display = 'none';
+                contextMenu.style.opacity = '0';
+            }, 250);
+        }
+        this.contextMenuFolderId = null;
+    }
+
+    renameCurrentFolder() {
+        if (this.contextMenuFolderId) {
+            const folderElement = document.querySelector(`[data-folder-id="${this.contextMenuFolderId}"]`);
+            if (folderElement) {
+                const nameInput = folderElement.querySelector('.folder-name-input');
+                if (nameInput) {
+                    nameInput.readOnly = false;
+                    nameInput.focus();
+                    nameInput.select();
+                }
+            }
+        }
+    }
+
+    deleteCurrentFolder() {
+        if (this.contextMenuFolderId) {
+            const folder = this.folders.get(this.contextMenuFolderId);
+            if (folder && confirm(`Delete folder "${folder.name}"? Tabs will be moved back to the sidebar.`)) {
+                this.deleteFolder(this.contextMenuFolderId);
+            }
+        }
+    }
+
+    setupSidebarContextMenu() {
+        const sidebar = document.getElementById('sidebar');
+        if (!sidebar) {
+            console.error('Sidebar element not found for context menu setup');
+            return;
+        }
+        
+        console.log('Setting up sidebar context menu');
+        sidebar.addEventListener('contextmenu', (e) => {
+            console.log('Sidebar contextmenu event fired', e.target);
+            
+            // Only show menu if clicking on empty space (not on tabs, buttons, inputs, or resize handle)
+            const target = e.target;
+            
+            // Check what we're clicking on
+            const isTab = target.closest('.tab');
+            const isButton = target.closest('button');
+            const isInput = target.tagName === 'INPUT' || target.closest('input');
+            const isResizeHandle = target.closest('#sidebar-resize-handle');
+            const isContextMenu = target.closest('.context-menu');
+            
+            console.log('Click checks:', {
+                target: target.tagName,
+                targetClasses: target.className,
+                isTab: !!isTab,
+                isButton: !!isButton,
+                isInput: !!isInput,
+                isResizeHandle: !!isResizeHandle,
+                isContextMenu: !!isContextMenu
+            });
+            
+            // Allow right-click on empty space - be more permissive
+            // Only block if it's clearly an interactive element
+            if (!isTab && !isButton && !isInput && !isResizeHandle && !isContextMenu) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('✓ Showing sidebar context menu');
+                this.showSidebarContextMenu(e);
+            } else {
+                console.log('✗ Blocked sidebar context menu');
+            }
+        }, true); // Use capture phase to catch it early
+    }
+
     showTabContextMenu(e, tabId) {
         const contextMenu = document.getElementById('tab-context-menu');
         if (contextMenu) {
@@ -3979,9 +5281,24 @@ class AxisBrowser {
             console.log('createNewTab returned:', newTabId);
             
             // Update URL bar to reflect the new tab's URL
+            // Ensure URL bar is collapsed and summarized
+            const urlBar = this.elements?.urlBar;
+            if (urlBar && urlBar.classList.contains('expanded')) {
+                urlBar.classList.remove('expanded');
+            }
+            
+            // Use multiple attempts to ensure URL bar is updated and summarized
             setTimeout(() => {
                 this.updateUrlBar();
-            }, 100); // Small delay to ensure the new tab is fully loaded
+                // Explicitly summarize to ensure it's not showing full URL
+                this.summarizeUrlBar();
+            }, 100);
+            
+            // Also update after page loads (backup)
+            setTimeout(() => {
+                this.updateUrlBar();
+                this.summarizeUrlBar();
+            }, 500);
             
             // Show success message
             this.showToast('Tab duplicated successfully');
@@ -3995,6 +5312,70 @@ class AxisBrowser {
     closeCurrentTab() {
         if (this.contextMenuTabId) {
             this.closeTab(this.contextMenuTabId);
+        }
+    }
+
+    showSidebarContextMenu(e) {
+        console.log('showSidebarContextMenu called', e);
+        const contextMenu = document.getElementById('sidebar-context-menu');
+        console.log('Sidebar context menu element:', contextMenu);
+        if (!contextMenu) {
+            console.error('Sidebar context menu element not found!');
+            return;
+        }
+        
+        // Hide other context menus
+        this.hideTabContextMenu();
+        this.hideWebpageContextMenu();
+        
+        // Remove closing state and hidden class - CSS will handle display
+        contextMenu.classList.remove('closing', 'hidden');
+        contextMenu.style.left = e.pageX + 'px';
+        contextMenu.style.top = e.pageY + 'px';
+        contextMenu.style.opacity = '';
+        contextMenu.style.display = '';
+        contextMenu.style.visibility = '';
+        contextMenu.style.zIndex = '10000';
+        
+        // Force a reflow to ensure styles are applied
+        contextMenu.offsetHeight;
+        
+        console.log('Menu should be visible now. Styles:', {
+            display: getComputedStyle(contextMenu).display,
+            left: contextMenu.style.left,
+            top: contextMenu.style.top,
+            opacity: getComputedStyle(contextMenu).opacity,
+            classes: contextMenu.className,
+            hidden: contextMenu.classList.contains('hidden')
+        });
+        
+        // Reset animations on all menu items to ensure they play
+        const menuItems = contextMenu.querySelectorAll('.context-menu-item');
+        menuItems.forEach(item => {
+            // Force animation restart
+            item.style.animation = 'none';
+            item.offsetHeight; // Trigger reflow
+            item.style.animation = '';
+        });
+        
+        // Add slide-in animation like tab context menu
+        contextMenu.style.animation = 'contextMenuSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+    }
+
+    hideSidebarContextMenu() {
+        const contextMenu = document.getElementById('sidebar-context-menu');
+        if (contextMenu && !contextMenu.classList.contains('hidden')) {
+            // Add closing class to trigger fade-out animation
+            contextMenu.classList.add('closing');
+            contextMenu.classList.remove('expanded');
+            
+            // Remove the menu after fade-out animation completes
+            setTimeout(() => {
+                contextMenu.classList.add('hidden');
+                contextMenu.classList.remove('closing');
+                contextMenu.style.display = 'none';
+                contextMenu.style.opacity = '0';
+            }, 250); // Slightly longer than animation duration to ensure smooth fade
         }
     }
 
@@ -4296,33 +5677,36 @@ class AxisBrowser {
         }
         
         if (downloadsPanel.classList.contains('hidden')) {
-            // Enhanced opening animation
+            // Smooth fade-in animation
             downloadsPanel.classList.remove('hidden');
             if (backdrop) {
                 backdrop.classList.remove('hidden');
-                backdrop.style.transition = 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)';
+                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
             }
             
             // Add entrance animation class
             downloadsPanel.classList.add('downloads-entering');
             
-            // Populate downloads with delay for smooth animation
-            setTimeout(() => {
+            // Populate downloads immediately
                 this.populateDownloads();
+            
+            // Remove animation class after animation completes (200ms)
+            setTimeout(() => {
                 downloadsPanel.classList.remove('downloads-entering');
+            }, 200);
+            
                 // Refresh popup themes
                 this.refreshPopupThemes();
-            }, 100);
             
         } else {
-            // Enhanced closing animation
+            // Smooth fade-out animation
             downloadsPanel.classList.add('downloads-closing');
             
             setTimeout(() => {
                 downloadsPanel.classList.add('hidden');
                 downloadsPanel.classList.remove('downloads-closing');
                 if (backdrop) backdrop.classList.add('hidden');
-            }, 500);
+            }, 150);
         }
     }
 
@@ -4666,8 +6050,8 @@ class AxisBrowser {
         const newNoteMenuBtn = document.getElementById('new-note-menu-btn');
         if (newNoteMenuBtn) {
             newNoteMenuBtn.addEventListener('click', () => {
+                this.toggleNotes();
                 this.closeAddTabMenu();
-                this.openNoteAsTab();
             });
         }
 
@@ -5039,6 +6423,15 @@ class AxisBrowser {
                     return;
                 }
                 
+                // Check if tab was dragged from a folder
+                const draggedTabParentFolder = draggedTab.closest('.folder');
+                if (draggedTabParentFolder) {
+                    const folderId = parseInt(draggedTabParentFolder.dataset.folderId);
+                    if (folderId) {
+                        this.removeTabFromFolder(tabId, folderId);
+                    }
+                }
+                
                 // Use separator midpoint as exact boundary
                 const separatorMidpoint = separatorRect.top + separatorRect.height / 2;
                 const isAbove = dropY < separatorMidpoint;
@@ -5108,6 +6501,24 @@ class AxisBrowser {
 
             tab.addEventListener('dragend', (e) => {
                 tab.classList.remove('dragging');
+                
+                // Check if tab was dragged out of a folder
+                const tabId = parseInt(tab.dataset.tabId);
+                if (tabId) {
+                    // Find which folder this tab belongs to
+                    const parentFolder = tab.closest('.folder');
+                    if (parentFolder) {
+                        const folderId = parseInt(parentFolder.dataset.folderId);
+                        const folder = this.folders.get(folderId);
+                        
+                        // Check if tab is still in the folder or was moved out
+                        if (folder && !parentFolder.contains(tab)) {
+                            // Tab was moved out of folder
+                            this.removeTabFromFolder(tabId, folderId);
+                        }
+                    }
+                }
+                
                 draggedTab = null;
                 draggedIndex = -1;
                 
@@ -5158,6 +6569,15 @@ class AxisBrowser {
                     const dropTabId = parseInt(tab.dataset.tabId);
                     const dropTabData = this.tabs.get(dropTabId);
                     
+                    // Check if dragged tab was in a folder
+                    const draggedTabParentFolder = draggedTab.closest('.folder');
+                    if (draggedTabParentFolder) {
+                        const folderId = parseInt(draggedTabParentFolder.dataset.folderId);
+                        if (folderId) {
+                            this.removeTabFromFolder(tabId, folderId);
+                        }
+                    }
+                    
                     if (draggedTabData && dropTabData) {
                         const dropIndex = Array.from(tabsContainer.children).indexOf(tab);
                         const isAbove = tab.classList.contains('drag-over-top');
@@ -5194,10 +6614,10 @@ class AxisBrowser {
             });
         };
 
-        // Make existing tabs draggable
+        // Make existing tabs draggable (including those in folders)
         document.querySelectorAll('.tab').forEach(makeTabDraggable);
 
-        // Observer for new tabs
+        // Observer for new tabs in main container
         const observer = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
@@ -5208,7 +6628,41 @@ class AxisBrowser {
             });
         });
 
-        observer.observe(tabsContainer, { childList: true });
+        observer.observe(tabsContainer, { childList: true, subtree: true });
+        
+        // Also observe folder content for tabs added to folders
+        const folderObserver = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                mutation.addedNodes.forEach((node) => {
+                    if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('tab')) {
+                        makeTabDraggable(node);
+                    }
+                });
+            });
+        });
+        
+        // Observe all folder content areas
+        document.querySelectorAll('.folder-content').forEach(folderContent => {
+            folderObserver.observe(folderContent, { childList: true });
+        });
+        
+        // Also observe when new folders are created
+        const folderContainerObserver = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                mutation.addedNodes.forEach((node) => {
+                    if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('folder')) {
+                        const folderContent = node.querySelector('.folder-content');
+                        if (folderContent) {
+                            folderObserver.observe(folderContent, { childList: true });
+                            // Make existing tabs in this folder draggable
+                            folderContent.querySelectorAll('.tab').forEach(makeTabDraggable);
+                        }
+                    }
+                });
+            });
+        });
+        
+        folderContainerObserver.observe(tabsContainer, { childList: true });
     }
 
     moveTab(fromIndex, toIndex) {
@@ -5305,10 +6759,36 @@ class AxisBrowser {
         }
         
         if (securityPanel.classList.contains('hidden')) {
+            // Smooth fade-in animation
             securityPanel.classList.remove('hidden');
+            if (backdrop) {
+                backdrop.classList.remove('hidden');
+                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            }
+            
+            // Add entrance animation class
+            securityPanel.classList.add('security-entering');
+            
+            // Update security info immediately
             this.updateSecurityInfo();
+            
+            // Remove animation class after animation completes (200ms)
+            setTimeout(() => {
+                securityPanel.classList.remove('security-entering');
+            }, 200);
+            
+            // Refresh popup themes
+            this.refreshPopupThemes();
+            
         } else {
-            this.closePanelWithAnimation(securityPanel);
+            // Smooth fade-out animation
+            securityPanel.classList.add('security-closing');
+            
+            setTimeout(() => {
+                securityPanel.classList.add('hidden');
+                securityPanel.classList.remove('security-closing');
+                if (backdrop) backdrop.classList.add('hidden');
+            }, 150);
         }
     }
 
@@ -5393,26 +6873,40 @@ class AxisBrowser {
     }
 
     closePanelWithAnimation(panel) {
+        // Determine the correct closing class based on panel ID
+        let closingClass = 'closing';
+        if (panel.id === 'settings-panel') {
+            closingClass = 'settings-closing';
+        } else if (panel.id === 'downloads-panel') {
+            closingClass = 'downloads-closing';
+        } else if (panel.id === 'bookmarks-panel') {
+            closingClass = 'bookmarks-closing';
+        } else if (panel.id === 'notes-panel') {
+            closingClass = 'notes-closing';
+        } else if (panel.id === 'security-panel') {
+            closingClass = 'security-closing';
+        }
+        
         // Add closing animation class
-        panel.classList.add('closing');
+        panel.classList.add(closingClass);
         
         // Add backdrop fade out
         const backdrop = document.getElementById('modal-backdrop');
         if (backdrop && !backdrop.classList.contains('hidden')) {
-            backdrop.style.transition = 'opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            backdrop.style.transition = 'opacity 0.15s cubic-bezier(0.55, 0.06, 0.68, 0.19)';
             backdrop.style.opacity = '0';
         }
         
-        // Remove the panel after animation completes
+        // Remove the panel after animation completes (150ms for fast closing)
         setTimeout(() => {
             panel.classList.add('hidden');
-            panel.classList.remove('closing');
+            panel.classList.remove(closingClass);
             if (backdrop) {
                 backdrop.classList.add('hidden');
                 backdrop.style.opacity = '';
                 backdrop.style.transition = '';
             }
-        }, 300); // Match animation duration
+        }, 150);
     }
 
     showSpotlightSearch() {
@@ -6712,11 +8206,8 @@ class AxisBrowser {
         return div.innerHTML;
     }
 
-    // Split View Functionality - DISABLED FOR NOW (will be remade later)
+    // Split View Functionality
     toggleSplitView() {
-        // Split view is disabled - do nothing
-        return;
-        /*
         this.isSplitView = !this.isSplitView;
         
         const singleView = document.getElementById('single-view');
@@ -6769,16 +8260,12 @@ class AxisBrowser {
                 this.cleanupSplitView();
             }, 300);
         }
-        */
     }
 
-    // Split view functions - DISABLED FOR NOW
+    // Split view functions
     initializeSplitView() {
-        return;
-        /*
         const leftPane = document.querySelector('.left-pane');
         const rightPane = document.querySelector('.right-pane');
-        const divider = document.querySelector('.split-divider');
         
         // Set initial split ratio
         this.updateSplitRatio();
@@ -6814,13 +8301,25 @@ class AxisBrowser {
         // Set active pane
         this.setActivePane('left');
         
-        // No click handlers needed for pane switching
+        // Setup pane click handlers for switching active pane
+        if (leftPane) {
+            leftPane.addEventListener('click', () => {
+                if (this.isSplitView) {
+                    this.setActivePane('left');
+                }
+            });
+        }
+        
+        if (rightPane) {
+            rightPane.addEventListener('click', () => {
+                if (this.isSplitView) {
+                    this.setActivePane('right');
+                }
+            });
+        }
     }
 
     setupSplitDivider() {
-        // Split view disabled - do nothing
-        return;
-        /*
         const divider = document.querySelector('.split-divider');
         let isDragging = false;
         let frameRequested = false;
@@ -6878,13 +8377,9 @@ class AxisBrowser {
             e.preventDefault();
             e.stopPropagation();
         });
-        */
     }
 
     updateSplitRatio() {
-        // Split view disabled - do nothing
-        return;
-        /*
         const leftPane = document.querySelector('.left-pane');
         const rightPane = document.querySelector('.right-pane');
         
@@ -6892,13 +8387,9 @@ class AxisBrowser {
             leftPane.style.flex = this.splitRatio;
             rightPane.style.flex = 1 - this.splitRatio;
         }
-        */
     }
 
     setupSplitWebviews() {
-        // Split view disabled - do nothing
-        return;
-        /*
         const leftWebview = document.getElementById('webview-left');
         const rightWebview = document.getElementById('webview-right');
         
@@ -6911,12 +8402,10 @@ class AxisBrowser {
         if (rightWebview) {
             this.setupWebviewEvents(rightWebview, 'right');
         }
-        */
     }
 
     setupWebviewEvents(webview, pane) {
-        // Split view disabled - this function still used but won't be called for split view
-        // Keeping it active but split view functions won't call it
+        // Setup webview event listeners for split view panes
         if (!webview) return;
         
         // Copy all the webview event listeners from the main setupWebview method
@@ -6930,12 +8419,29 @@ class AxisBrowser {
             if ((pane === 'left' && this.activePane === 'left') || 
                 (pane === 'right' && this.activePane === 'right')) {
                 this.updateTabTitle();
+                // Extract theme for active pane immediately
+                this.extractAndApplyWebpageColors(webview);
+                // Quick retry using requestAnimationFrame
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        this.extractAndApplyWebpageColors(webview);
+                    });
+                });
             }
         });
 
         webview.addEventListener('did-fail-load', (event) => {
             this.hideLoadingIndicator(pane);
             this.handleNavigationError(event, pane);
+        });
+        
+        // Suppress WebGPU deprecation warnings from webview console
+        webview.addEventListener('console-message', (e) => {
+            // Filter out the DawnExperimentalSubgroupLimits deprecation warning
+            if (e.message && e.message.includes('DawnExperimentalSubgroupLimits') && e.message.includes('deprecated')) {
+                // Suppress this specific warning
+                return;
+            }
         });
 
         webview.addEventListener('new-window', (event) => {
@@ -7010,12 +8516,34 @@ class AxisBrowser {
     }
 
     setActivePane(pane) {
-        // Split view disabled - do nothing
-        return;
-        /*
+        if (!this.isSplitView) return;
+        
         this.activePane = pane;
-        // No visual indicators needed
-        */
+        
+        const leftPane = document.querySelector('.left-pane');
+        const rightPane = document.querySelector('.right-pane');
+        
+        // Update active class
+        if (leftPane && rightPane) {
+            if (pane === 'left') {
+                leftPane.classList.add('active');
+                rightPane.classList.remove('active');
+            } else {
+                rightPane.classList.add('active');
+                leftPane.classList.remove('active');
+            }
+        }
+        
+        // Update URL bar and navigation buttons based on active pane
+        const activeWebview = pane === 'left' ? 
+            document.getElementById('webview-left') : 
+            document.getElementById('webview-right');
+        
+        if (activeWebview) {
+            this.updateUrlBar();
+            this.updateNavigationButtons();
+            this.updateTabTitle();
+        }
     }
 
     navigateInPane(webview, url) {
@@ -7129,3 +8657,5 @@ class AxisBrowser {
 document.addEventListener('DOMContentLoaded', () => {
     new AxisBrowser();
 });
+
+
