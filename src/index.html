@@ -211,7 +211,7 @@
                 <i class="fas fa-bars"></i>
                 <span>Toggle Sidebar</span>
             </button>
-            <button id="split-view-btn" class="nav-menu-item" disabled style="opacity: 0.5; cursor: not-allowed;">
+            <button id="split-view-btn" class="nav-menu-item">
                 <i class="fas fa-columns"></i>
                 <span>Split View</span>
             </button>
@@ -234,7 +234,7 @@
             <i class="fas fa-copy"></i>
             <span>Duplicate Tab</span>
         </div>
-        <div class="context-menu-item" id="split-view-option" style="opacity: 0.5; cursor: not-allowed; pointer-events: none;">
+        <div class="context-menu-item" id="split-view-option">
             <i class="fas fa-columns"></i>
             <span>Split View</span>
         </div>
@@ -245,6 +245,34 @@
         <div class="context-menu-item" id="close-tab-option">
             <i class="fas fa-times"></i>
             <span>Close Tab</span>
+        </div>
+    </div>
+    
+    <!-- Folder Context Menu -->
+    <div id="folder-context-menu" class="context-menu hidden">
+        <div class="context-menu-item" id="rename-folder-option">
+            <i class="fas fa-edit"></i>
+            <span>Rename Folder</span>
+        </div>
+        <div class="context-menu-item" id="delete-folder-option">
+            <i class="fas fa-times"></i>
+            <span>Delete Folder</span>
+        </div>
+    </div>
+    
+    <!-- Sidebar Context Menu -->
+    <div id="sidebar-context-menu" class="context-menu hidden">
+        <div class="context-menu-item" id="sidebar-new-tab-option">
+            <i class="fas fa-plus"></i>
+            <span>New Tab</span>
+        </div>
+        <div class="context-menu-item" id="sidebar-new-folder-option">
+            <i class="fas fa-folder"></i>
+            <span>New Folder</span>
+        </div>
+        <div class="context-menu-item" id="sidebar-new-note-option">
+            <i class="fas fa-sticky-note"></i>
+            <span>Notes</span>
         </div>
     </div>
     
@@ -322,15 +350,6 @@
                 <!-- General Settings Tab -->
                 <div class="settings-tab-content active" id="general-tab">
                      <div class="setting-group">
-                         <h4>Custom Theme</h4>
-                         <div class="setting-item">
-                             <label>Choose Your Color</label>
-                             <div class="color-picker-container">
-                                 <input type="color" id="main-color-picker" value="#4a90e2">
-                             </div>
-                         </div>
-                     </div>
-                     <div class="setting-group">
                          <h4>Privacy & Security</h4>
                          <div class="setting-item">
                              <label>
@@ -352,7 +371,7 @@
                          </div>
                      </div>
                     <div class="settings-actions">
-                        <button id="save-settings" class="save-btn">Save Changes</button>
+                        <button id="save-settings" class="save-btn hidden">Save Changes</button>
                     </div>
                 </div>
                 
@@ -532,27 +551,44 @@
         <div id="notes-panel" class="notes-panel hidden">
             <div class="notes-header">
                 <h3>Notes</h3>
-                <div class="notes-header-actions">
-                    <button id="new-note-btn" class="new-note-btn" title="New Note">
-                        <i class="fas fa-plus"></i>
-                        <span>New Note</span>
-                    </button>
                     <button id="close-notes" class="close-settings">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
+            
+            <!-- Create New Note Section -->
+            <div class="notes-create-section">
+                <button id="new-note-btn" class="new-note-btn-large">
+                    <div class="new-note-icon">
+                        <i class="fas fa-plus"></i>
+                    </div>
+                    <div class="new-note-text">
+                        <span class="new-note-title">Create New Note</span>
+                        <span class="new-note-subtitle">Start writing your thoughts</span>
+                    </div>
+                </button>
             </div>
+            
+            <!-- Search Section -->
             <div class="notes-search">
                 <input type="text" id="notes-search-input" placeholder="Search notes...">
+            </div>
+            
+            <!-- Saved Notes Section -->
+            <div class="notes-saved-section">
+                <div class="notes-section-header">
+                    <h4>Saved Notes</h4>
+                    <span id="notes-count" class="notes-count">0 notes</span>
             </div>
             <div class="notes-content">
                 <div id="notes-list">
                     <!-- Notes will be populated here -->
                 </div>
                 <div id="no-notes" class="no-notes hidden">
-                    <i class="fas fa-sticky-note" style="font-size: 48px; color: #666; margin-bottom: 16px;"></i>
+                        <i class="fas fa-sticky-note"></i>
                     <p>No notes yet</p>
-                    <p style="color: #999; font-size: 12px;">Create your first note to get started</p>
+                        <p>Create your first note to get started</p>
+                    </div>
                 </div>
             </div>
         </div>
