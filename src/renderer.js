@@ -1577,21 +1577,38 @@ class AxisBrowser {
                                     return Math.sqrt(dr * dr + dg * dg + db * db);
                                 }
                                 
-                                // Check if color is too close to white/black
+                                // Check if color is too close to white/black (more lenient)
                                 function isNeutralColor(hex) {
                                     if (!hex) return true;
                                     const rgb = hexToRgb(hex);
                                     if (!rgb) return true;
-                                    // Check if it's very close to white (all channels > 240)
-                                    if (rgb.r > 240 && rgb.g > 240 && rgb.b > 240) return true;
-                                    // Check if it's very close to black (all channels < 15)
-                                    if (rgb.r < 15 && rgb.g < 15 && rgb.b < 15) return true;
-                                    // Check if it's very gray (low saturation)
+                                    // Only filter out pure white (all channels > 250)
+                                    if (rgb.r > 250 && rgb.g > 250 && rgb.b > 250) return true;
+                                    // Only filter out pure black (all channels < 5)
+                                    if (rgb.r < 5 && rgb.g < 5 && rgb.b < 5) return true;
+                                    // Allow light and dark colors, only filter very gray ones
                                     const max = Math.max(rgb.r, rgb.g, rgb.b);
                                     const min = Math.min(rgb.r, rgb.g, rgb.b);
                                     const saturation = max === 0 ? 0 : (max - min) / max;
-                                    if (saturation < 0.1) return true; // Very low saturation = gray
+                                    // Only filter if it's extremely gray (saturation < 0.05)
+                                    if (saturation < 0.05) return true;
                                     return false;
+                                }
+                                
+                                // Calculate color brightness (0-255)
+                                function getBrightness(hex) {
+                                    const rgb = hexToRgb(hex);
+                                    if (!rgb) return 128;
+                                    return (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+                                }
+                                
+                                // Calculate color saturation
+                                function getSaturation(hex) {
+                                    const rgb = hexToRgb(hex);
+                                    if (!rgb) return 0;
+                                    const max = Math.max(rgb.r, rgb.g, rgb.b);
+                                    const min = Math.min(rgb.r, rgb.g, rgb.b);
+                                    return max === 0 ? 0 : (max - min) / max;
                                 }
                                 
                                 // Get meta theme-color first (most reliable)
@@ -1602,30 +1619,39 @@ class AxisBrowser {
                                     // Convert to hex if needed
                                     if (themeColor && themeColor.startsWith('rgb')) {
                                         themeColor = rgbToHex(themeColor);
+                                    } else if (themeColor && !themeColor.startsWith('#')) {
+                                        // Try to parse as hex without #
+                                        if (/^[0-9A-Fa-f]{6}$/.test(themeColor)) {
+                                            themeColor = '#' + themeColor;
+                                        }
                                     }
                                 }
                                 
-                                // Sample colors from various elements on the page
-                                const colorSamples = [];
-                                const selectors = [
-                                    'header', 'nav', '.header', '.nav', '.navbar', '.navigation',
+                                // Priority selectors (check these first for better accuracy)
+                                const prioritySelectors = [
                                     'main', '[role="main"]', '.main', '#main',
                                     '.content', '#content', '.container', '.page', '.app',
-                                    'article', 'section', '.section',
-                                    'button', '.button', '.btn', 'a.button',
-                                    '.card', '.panel', '.box', '.widget',
-                                    '[class*="bg"]', '[class*="background"]',
+                                    'article', 'section', '[class*="content"]', '[class*="container"]',
+                                    '[id*="content"]', '[id*="container"]', '[id*="main"]'
+                                ];
+                                
+                                // Secondary selectors
+                                const secondarySelectors = [
+                                    'header', 'nav', '.header', '.nav', '.navbar', '.navigation',
+                                    '.card', '.panel', '.box', '.widget', '.tile', '.item',
+                                    '[class*="bg"]', '[class*="background"]', '[class*="theme"]',
                                     'body', 'html'
                                 ];
                                 
-                                // Sample from up to 50 elements (reduced for speed)
-                                let sampleCount = 0;
-                                for (const selector of selectors) {
-                                    if (sampleCount >= 50) break;
+                                // Sample colors with weights (priority selectors get higher weight)
+                                const colorSamples = [];
+                                const colorWeights = {};
+                                
+                                // Sample from priority selectors first
+                                for (const selector of prioritySelectors) {
                                     try {
                                         const elements = document.querySelectorAll(selector);
-                                        for (let i = 0; i < Math.min(elements.length, 5); i++) {
-                                            if (sampleCount >= 50) break;
+                                        for (let i = 0; i < Math.min(elements.length, 3); i++) {
                                             const element = elements[i];
                                             if (!element) continue;
                                             
@@ -1635,23 +1661,18 @@ class AxisBrowser {
                                             
                                             const style = window.getComputedStyle(element);
                                             
-                                            // Sample background color
+                                            // Sample background color (weight: 3 for priority)
                                             const bg = style.backgroundColor;
                                             if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
                                                 const hex = rgbToHex(bg);
-                                                if (hex && !isNeutralColor(hex)) {
-                                                    colorSamples.push(hex);
-                                                    sampleCount++;
-                                                }
-                                            }
-                                            
-                                            // Sample border color (often used for accents)
-                                            const border = style.borderColor;
-                                            if (border && border !== 'transparent') {
-                                                const hex = rgbToHex(border);
-                                                if (hex && !isNeutralColor(hex)) {
-                                                    colorSamples.push(hex);
-                                                    sampleCount++;
+                                                if (hex) {
+                                                    // Don't filter neutral colors here, just collect them
+                                                    if (!colorWeights[hex]) {
+                                                        colorSamples.push(hex);
+                                                        colorWeights[hex] = 3; // Higher weight for priority
+                                                    } else {
+                                                        colorWeights[hex] += 3;
+                                                    }
                                                 }
                                             }
                                         }
@@ -1660,42 +1681,112 @@ class AxisBrowser {
                                     }
                                 }
                                 
-                                // Find the most common color by clustering similar colors
-                                let dominantColor = null;
-                                if (colorSamples.length > 0) {
-                                    // Group similar colors together (within 30 units distance)
-                                    const clusters = {};
-                                    const clusterThreshold = 30;
-                                    
-                                    for (const color of colorSamples) {
-                                        let foundCluster = false;
-                                        for (const clusterColor in clusters) {
-                                            if (colorDistance(color, clusterColor) < clusterThreshold) {
-                                                clusters[clusterColor]++;
-                                                foundCluster = true;
-                                                break;
+                                // Sample from secondary selectors
+                                for (const selector of secondarySelectors) {
+                                    try {
+                                        const elements = document.querySelectorAll(selector);
+                                        for (let i = 0; i < Math.min(elements.length, 2); i++) {
+                                            const element = elements[i];
+                                            if (!element) continue;
+                                            
+                                            const rect = element.getBoundingClientRect();
+                                            if (rect.width === 0 || rect.height === 0) continue;
+                                            
+                                            const style = window.getComputedStyle(element);
+                                            
+                                            // Sample background color (weight: 1 for secondary)
+                                            const bg = style.backgroundColor;
+                                            if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
+                                                const hex = rgbToHex(bg);
+                                                if (hex) {
+                                                    if (!colorWeights[hex]) {
+                                                        colorSamples.push(hex);
+                                                        colorWeights[hex] = 1;
+                                                    } else {
+                                                        colorWeights[hex] += 1;
+                                                    }
+                                                }
+                                            }
+                                            
+                                            // Sample border color (weight: 1)
+                                            const border = style.borderColor;
+                                            if (border && border !== 'transparent') {
+                                                const hex = rgbToHex(border);
+                                                if (hex) {
+                                                    if (!colorWeights[hex]) {
+                                                        colorSamples.push(hex);
+                                                        colorWeights[hex] = 1;
+                                                    } else {
+                                                        colorWeights[hex] += 1;
+                                                    }
+                                                }
                                             }
                                         }
-                                        if (!foundCluster) {
-                                            clusters[color] = 1;
-                                        }
+                                    } catch (e) {
+                                        // Continue if selector fails
                                     }
-                                    
-                                    // Find the cluster with the most occurrences
-                                    let maxCount = 0;
-                                    for (const clusterColor in clusters) {
-                                        if (clusters[clusterColor] > maxCount) {
-                                            maxCount = clusters[clusterColor];
-                                            dominantColor = clusterColor;
+                                }
+                                
+                                // Use meta theme-color if available and valid
+                                if (themeColor && !isNeutralColor(themeColor)) {
+                                    dominantColor = themeColor;
+                                } else {
+                                    // Find the most common color by clustering similar colors with weights
+                                    if (colorSamples.length > 0) {
+                                        // Group similar colors together (within 40 units distance - more lenient)
+                                        const clusters = {};
+                                        const clusterWeights = {};
+                                        const clusterThreshold = 40;
+                                        
+                                        for (const color of colorSamples) {
+                                            let foundCluster = false;
+                                            for (const clusterColor in clusters) {
+                                                if (colorDistance(color, clusterColor) < clusterThreshold) {
+                                                    clusters[clusterColor]++;
+                                                    clusterWeights[clusterColor] += (colorWeights[color] || 1);
+                                                    foundCluster = true;
+                                                    break;
+                                                }
+                                            }
+                                            if (!foundCluster) {
+                                                clusters[color] = 1;
+                                                clusterWeights[color] = colorWeights[color] || 1;
+                                            }
+                                        }
+                                        
+                                        // Find the cluster with the highest weighted score
+                                        // Score = count * weight * saturation (prefer more saturated colors)
+                                        let maxScore = 0;
+                                        for (const clusterColor in clusters) {
+                                            const count = clusters[clusterColor];
+                                            const weight = clusterWeights[clusterColor];
+                                            const saturation = getSaturation(clusterColor);
+                                            const brightness = getBrightness(clusterColor);
+                                            
+                                            // Prefer colors that are not too bright or too dark
+                                            // But allow a wider range (brightness 20-235)
+                                            const brightnessScore = (brightness >= 20 && brightness <= 235) ? 1 : 0.3;
+                                            
+                                            // Calculate score: prioritize weighted count, saturation, and good brightness
+                                            const score = count * weight * (0.5 + saturation * 0.5) * brightnessScore;
+                                            
+                                            if (score > maxScore) {
+                                                maxScore = score;
+                                                dominantColor = clusterColor;
+                                            }
                                         }
                                     }
                                 }
                                 
-                                // Fallback: try to find main container background
+                                // Fallback: try to find main container background (more thorough)
                                 let bgColor = dominantColor;
-                                if (!bgColor) {
-                                    const mainSelectors = ['main', '[role="main"]', '.main', '#main', '.content', '#content', 
-                                                          '.container', '.page', '.app', 'article', 'section'];
+                                if (!bgColor || isNeutralColor(bgColor)) {
+                                    const mainSelectors = [
+                                        'main', '[role="main"]', '.main', '#main', 
+                                        '.content', '#content', '.container', '.page', '.app', 
+                                        'article', 'section', '[class*="content"]', '[class*="container"]',
+                                        '[id*="content"]', '[id*="container"]', '[id*="main"]'
+                                    ];
                                     
                                     for (const selector of mainSelectors) {
                                         const element = document.querySelector(selector);
@@ -1704,22 +1795,42 @@ class AxisBrowser {
                                             const bg = style.backgroundColor;
                                             if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
                                                 const hex = rgbToHex(bg);
-                                                if (hex && !isNeutralColor(hex)) {
-                                                    bgColor = hex;
-                                                    break;
+                                                if (hex) {
+                                                    // Accept any color that's not pure white/black
+                                                    if (!isNeutralColor(hex)) {
+                                                        bgColor = hex;
+                                                        break;
+                                                    } else {
+                                                        // Even if neutral, use it as fallback if we have nothing
+                                                        if (!bgColor) {
+                                                            bgColor = hex;
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                     
-                                    // Last resort: check body/html
-                                    if (!bgColor) {
+                                    // Last resort: check body/html (accept any color)
+                                    if (!bgColor || isNeutralColor(bgColor)) {
                                         const bodyStyle = window.getComputedStyle(body);
                                         const bodyBg = bodyStyle.backgroundColor;
                                         if (bodyBg && bodyBg !== 'transparent' && bodyBg !== 'rgba(0, 0, 0, 0)') {
                                             const hex = rgbToHex(bodyBg);
-                                            if (hex && !isNeutralColor(hex)) {
+                                            if (hex) {
                                                 bgColor = hex;
+                                            }
+                                        }
+                                        
+                                        // Try html element too
+                                        if (!bgColor || isNeutralColor(bgColor)) {
+                                            const htmlStyle = window.getComputedStyle(html);
+                                            const htmlBg = htmlStyle.backgroundColor;
+                                            if (htmlBg && htmlBg !== 'transparent' && htmlBg !== 'rgba(0, 0, 0, 0)') {
+                                                const hex = rgbToHex(htmlBg);
+                                                if (hex) {
+                                                    bgColor = hex;
+                                                }
                                             }
                                         }
                                     }
