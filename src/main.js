@@ -15,6 +15,7 @@ const notesStore = new Store({ name: 'notes' });
 // Keep a global reference of the window object
 let mainWindow;
 let isQuitConfirmed = false;
+let isUserQuitting = false;
 
 // Apply consolidated Chromium/Electron performance flags as early as possible
 (function applyPerformanceFlags() {
@@ -146,9 +147,18 @@ function createWindow() {
     mainWindow = null;
   });
 
-  // Intercept close to show quit confirmation
+  // Intercept close - only show quit confirmation for actual quit actions, not window close
   mainWindow.on('close', (e) => {
-    if (!isQuitConfirmed) {
+    // On macOS, clicking X should just hide the window, not quit
+    if (process.platform === 'darwin' && !isUserQuitting) {
+      // Just hide the window instead of closing it
+      e.preventDefault();
+      mainWindow.hide();
+      return;
+    }
+    
+    // For actual quit actions, show confirmation
+    if (!isQuitConfirmed && isUserQuitting) {
       e.preventDefault();
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('request-quit');
@@ -277,6 +287,7 @@ function createMenu() {
           label: 'Quit',
           accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Ctrl+Q',
           click: () => {
+            isUserQuitting = true;
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('request-quit');
             } else {
@@ -335,8 +346,24 @@ app.on('window-all-closed', () => {
   }
 });
 
+// Handle Cmd+Q on macOS (before-quit fires before window close)
+app.on('before-quit', (e) => {
+  if (process.platform === 'darwin' && !isQuitConfirmed) {
+    isUserQuitting = true;
+    // Prevent default quit, let the window close handler show confirmation
+    e.preventDefault();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('request-quit');
+    }
+  }
+});
+
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  // On macOS, show the window if it exists but is hidden
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+  } else if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
 });
@@ -543,6 +570,13 @@ ipcMain.handle('delete-note', (event, id) => {
 
 ipcMain.on('confirm-quit', () => {
   isQuitConfirmed = true;
+  isUserQuitting = true;
   app.quit();
+});
+
+ipcMain.on('cancel-quit', () => {
+  // Reset flags when user cancels quit confirmation
+  isQuitConfirmed = false;
+  isUserQuitting = false;
 });
 
