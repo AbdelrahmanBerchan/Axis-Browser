@@ -6,6 +6,8 @@ class AxisBrowser {
         this.folders = new Map(); // Store folders: { id, name, tabIds: [], open: true }
         this.settings = {};
         this.closedTabs = []; // Store recently closed tabs for recovery
+        this.loadingTimeout = null; // Timeout for stuck loading pages (main view)
+        this.splitViewLoadingTimeouts = new Map(); // Timeouts for split view panes
         this.isSplitView = false; // Split view state
         this.isBenchmarking = false; // suppress non-critical work on Speedometer
         this.activePane = 'left'; // 'left' or 'right' (not used when split view disabled)
@@ -602,7 +604,21 @@ class AxisBrowser {
             this.showQuitConfirmation();
         });
 
-        // Keyboard shortcuts
+        // Keyboard shortcuts - Cmd+W must be in capture phase to intercept before webview handles it
+        document.addEventListener('keydown', (e) => {
+            // Cmd/Ctrl + W - Close tab (critical: handle in capture phase)
+            if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                if (this.currentTab) {
+                    this.closeTab(this.currentTab);
+                }
+                return false;
+            }
+        }, true); // Capture phase - intercepts before webview
+        
+        // Other keyboard shortcuts (normal phase)
         document.addEventListener('keydown', (e) => {
             // Cmd/Ctrl + T - Show spotlight search
             if ((e.metaKey || e.ctrlKey) && e.key === 't') {
@@ -614,15 +630,6 @@ class AxisBrowser {
             if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
                 e.preventDefault();
                 this.toggleSidebar();
-            }
-            
-            // Cmd/Ctrl + W - Close tab
-            if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
-                e.preventDefault();
-                e.stopPropagation();
-                if (this.currentTab) {
-                    this.closeTab(this.currentTab);
-                }
             }
             
             // Cmd/Ctrl + R - Refresh
@@ -642,7 +649,7 @@ class AxisBrowser {
             if (e.altKey && (e.key === 'p' || e.key === 'P')) {
                 const activeTabEl = document.querySelector('.tab.active');
                 if (activeTabEl) {
-                    const activeTabId = parseInt(activeTabEl.dataset.tabId);
+                    const activeTabId = parseInt(activeTabEl.dataset.tabId, 10);
                     this.togglePinTab(activeTabId, activeTabEl, null);
                 }
             }
@@ -760,12 +767,43 @@ class AxisBrowser {
             // Skip ALL UI updates during benchmarks
             if (this.isBenchmarking) return;
             
+            // Clear any existing timeout
+            if (this.loadingTimeout) {
+                clearTimeout(this.loadingTimeout);
+                this.loadingTimeout = null;
+            }
+            
             // Show loading indicator
             this.showLoadingIndicator();
             this.updateNavigationButtons();
+            
+            // Set timeout to handle stuck loading (30 seconds)
+            this.loadingTimeout = setTimeout(() => {
+                // Check if webview is still loading
+                if (webview && webview.isLoading) {
+                    console.log('Page taking too long to load, forcing stop');
+                    // Force stop loading if it's been too long
+                    try {
+                        webview.stop();
+                    } catch (e) {
+                        console.error('Error stopping webview:', e);
+                    }
+                    // Hide loading indicator
+                    this.hideLoadingIndicator();
+                    // Show error or allow user to continue
+                    this.showNotification('Page is taking too long to load. You can try refreshing.', 'warning');
+                }
+                this.loadingTimeout = null;
+            }, 30000); // 30 second timeout
         });
 
         webview.addEventListener('did-finish-load', () => {
+            // Clear loading timeout
+            if (this.loadingTimeout) {
+                clearTimeout(this.loadingTimeout);
+                this.loadingTimeout = null;
+            }
+            
             // Skip ALL UI updates during benchmarks - they slow down Speedometer
             if (this.isBenchmarking) {
                 // Only reset counters, no UI work
@@ -824,6 +862,12 @@ class AxisBrowser {
 
         // Add did-stop-loading event as backup
         webview.addEventListener('did-stop-loading', () => {
+            // Clear loading timeout
+            if (this.loadingTimeout) {
+                clearTimeout(this.loadingTimeout);
+                this.loadingTimeout = null;
+            }
+            
             // Skip ALL UI updates during benchmarks
             if (!this.isBenchmarking) {
                 this.hideLoadingIndicator();
@@ -849,6 +893,12 @@ class AxisBrowser {
         });
 
         webview.addEventListener('did-fail-load', (event) => {
+            // Clear loading timeout
+            if (this.loadingTimeout) {
+                clearTimeout(this.loadingTimeout);
+                this.loadingTimeout = null;
+            }
+            
             console.error('Failed to load:', event.errorDescription, 'Error code:', event.errorCode);
             // Hide loading indicator even on failure
             this.hideLoadingIndicator();
@@ -952,10 +1002,16 @@ class AxisBrowser {
         webview.addEventListener('page-favicon-updated', (event) => {
             const tabElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
             if (tabElement && event.favicons && event.favicons.length > 0) {
+                const faviconUrl = event.favicons[0];
                 const img = tabElement.querySelector('.tab-favicon');
                 if (img) {
                     img.style.visibility = 'visible';
-                    img.src = event.favicons[0]; // Use first favicon
+                    img.src = faviconUrl; // Use first favicon
+                    // Cache favicon in tab data
+                    const tab = this.tabs.get(this.currentTab);
+                    if (tab) {
+                        tab.favicon = faviconUrl;
+                    }
                 }
             }
         });
@@ -1964,9 +2020,9 @@ class AxisBrowser {
     
     lightenColor(color, amount) {
         const hex = color.replace('#', '');
-        const r = Math.min(255, parseInt(hex.substr(0, 2), 16) + Math.round(255 * amount));
-        const g = Math.min(255, parseInt(hex.substr(2, 2), 16) + Math.round(255 * amount));
-        const b = Math.min(255, parseInt(hex.substr(4, 2), 16) + Math.round(255 * amount));
+        const r = Math.min(255, parseInt(hex.slice(0, 2), 16) + Math.round(255 * amount));
+        const g = Math.min(255, parseInt(hex.slice(2, 4), 16) + Math.round(255 * amount));
+        const b = Math.min(255, parseInt(hex.slice(4, 6), 16) + Math.round(255 * amount));
         return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
     }
 
@@ -2132,9 +2188,9 @@ class AxisBrowser {
     // Helper function to darken colors
     darkenColor(color, amount) {
         const hex = color.replace('#', '');
-        const r = Math.max(0, parseInt(hex.substr(0, 2), 16) - Math.round(255 * amount));
-        const g = Math.max(0, parseInt(hex.substr(2, 2), 16) - Math.round(255 * amount));
-        const b = Math.max(0, parseInt(hex.substr(4, 2), 16) - Math.round(255 * amount));
+        const r = Math.max(0, parseInt(hex.slice(0, 2), 16) - Math.round(255 * amount));
+        const g = Math.max(0, parseInt(hex.slice(2, 4), 16) - Math.round(255 * amount));
+        const b = Math.max(0, parseInt(hex.slice(4, 6), 16) - Math.round(255 * amount));
         return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
     }
     
@@ -2181,6 +2237,7 @@ class AxisBrowser {
             id: tabId,
             url: url || null,
             title: 'New Tab',
+            favicon: null, // Cache favicon URL
             canGoBack: false,
             canGoForward: false,
             history: url ? [url] : [],
@@ -2341,6 +2398,11 @@ class AxisBrowser {
             }
         }
         
+        // Update favicon for the active tab
+        if (activeTab) {
+            this.updateTabFavicon(tabId, activeTab);
+        }
+        
         // Batch UI updates for faster switching
         this.batchDOMUpdates([
             () => this.updateEmptyState(),
@@ -2371,7 +2433,7 @@ class AxisBrowser {
         const tabElements = document.querySelectorAll('.tab');
         if (index >= 0 && index < tabElements.length) {
             const tabElement = tabElements[index];
-            const tabId = parseInt(tabElement.dataset.tabId);
+                const tabId = parseInt(tabElement.dataset.tabId, 10);
             this.switchToTab(tabId);
         }
     }
@@ -2415,10 +2477,13 @@ class AxisBrowser {
             tabElement.addEventListener('transitionend', onTransitionEnd);
         }
 
-        // If we closed the active tab, switch to another tab BEFORE deleting
+        // Delete the tab FIRST to get accurate remaining tabs count
+        this.tabs.delete(tabId);
+        
+        // If we closed the active tab, switch to another tab
         if (this.currentTab === tabId) {
-            // Get remaining tabs BEFORE deleting the current one
-            const remainingTabs = Array.from(this.tabs.keys()).filter(id => id !== tabId);
+            // Get remaining tabs AFTER deleting
+            const remainingTabs = Array.from(this.tabs.keys());
             
             if (remainingTabs.length > 0) {
                 // Switch to the last remaining tab (or first if that's all that's left)
@@ -2468,9 +2533,6 @@ class AxisBrowser {
                 this.updateNavigationButtons();
             }
         }
-
-        // Delete the tab AFTER switching (if needed)
-        this.tabs.delete(tabId);
     }
 
     recoverClosedTab() {
@@ -4018,34 +4080,47 @@ class AxisBrowser {
     renameTab(tabId, titleElement) {
         const currentTitle = titleElement.textContent;
         
-        // Create input element
+        // Get computed styles to match exactly
+        const computedStyle = window.getComputedStyle(titleElement);
+        
+        // Create input element with EXACT same flex properties as original
         const input = document.createElement('input');
         input.type = 'text';
         input.value = currentTitle;
+        input.className = titleElement.className; // Copy all classes
         input.style.cssText = `
+            flex: 1;
+            min-width: 0;
+            font-size: ${computedStyle.fontSize};
+            font-family: ${computedStyle.fontFamily};
+            font-weight: ${computedStyle.fontWeight};
+            line-height: ${computedStyle.lineHeight};
+            color: #fff;
             background: transparent;
             border: 1px solid #555;
             border-radius: 8px;
-            color: #fff;
-            padding: 4px 8px;
-            font-size: 12px;
-            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            font-weight: 400;
-            width: 100%;
+            padding: 0;
+            margin: 0;
             outline: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            box-sizing: border-box;
         `;
         
-        // Replace title with input
-        titleElement.style.display = 'none';
-        titleElement.parentNode.insertBefore(input, titleElement);
+        // Replace title with input inline - this preserves flex layout
+        titleElement.parentNode.replaceChild(input, titleElement);
         input.focus();
         input.select();
         
         const finishRename = () => {
             const newTitle = input.value.trim() || currentTitle;
-            titleElement.textContent = newTitle;
-            titleElement.style.display = '';
-            input.remove();
+            
+            // Restore the title element
+            const newTitleElement = document.createElement('span');
+            newTitleElement.className = 'tab-title';
+            newTitleElement.textContent = newTitle;
+            input.parentNode.replaceChild(newTitleElement, input);
             
             // Update tab data
             const tab = this.tabs.get(tabId);
@@ -4057,6 +4132,11 @@ class AxisBrowser {
         input.addEventListener('blur', finishRename);
         input.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
+                finishRename();
+            }
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
                 finishRename();
             }
         });
@@ -4289,15 +4369,31 @@ class AxisBrowser {
     }
 
     updateTabFavicon(tabId, tabElement) {
+        const img = tabElement.querySelector('.tab-favicon');
+        if (!img) return;
+        
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+        
+        // Use cached favicon if available
+        if (tab.favicon) {
+            img.style.visibility = 'visible';
+            img.src = tab.favicon;
+            return;
+        }
+        
+        // Fast fallback: Use Google's favicon service for immediate loading
         try {
-            const webview = document.getElementById('webview');
-            const currentUrl = new URL(webview.getURL());
-            const origin = `${currentUrl.protocol}//${currentUrl.host}`;
-            const faviconUrl = `${origin}/favicon.ico`;
-            const img = tabElement.querySelector('.tab-favicon');
-            if (img) {
+            const url = tab.url || (tabId === this.currentTab ? document.getElementById('webview')?.getURL() : null);
+            if (url) {
+                const urlObj = new URL(url);
+                const domain = urlObj.hostname;
+                // Google's favicon service is very fast and works for most sites
+                const fastFaviconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
                 img.style.visibility = 'visible';
-                img.src = faviconUrl;
+                img.src = fastFaviconUrl;
+                // Cache it
+                tab.favicon = fastFaviconUrl;
             }
         } catch (e) {
             // ignore invalid URL
@@ -4352,7 +4448,7 @@ class AxisBrowser {
         });
         
         // Get current order
-        const tabOrder = tabs.map(t => parseInt(t.dataset.tabId));
+        const tabOrder = tabs.map(t => parseInt(t.dataset.tabId, 10));
         
         // Separate pinned and unpinned while preserving relative order
         const pinnedTabs = [];
@@ -4452,13 +4548,14 @@ class AxisBrowser {
         for (let i = 0; i < separatorIndex; i++) {
             const child = allChildren[i];
             if (child.classList.contains('tab')) {
-                const tabId = parseInt(child.dataset.tabId);
+                const tabId = parseInt(child.dataset.tabId, 10);
                 const tab = this.tabs.get(tabId);
                 if (tab && tab.pinned) {
                     pinnedTabs.push({
                         id: tabId,
                         url: tab.url,
                         title: tab.title,
+                        favicon: tab.favicon || null, // Save favicon
                         order: i
                     });
                 }
@@ -4505,6 +4602,7 @@ class AxisBrowser {
                     id: tabId,
                     url: pinnedData.url || null,
                     title: pinnedData.title || 'New Tab',
+                    favicon: pinnedData.favicon || null, // Load cached favicon
                     canGoBack: false,
                     canGoForward: false,
                     history: pinnedData.url ? [pinnedData.url] : [],
@@ -4551,7 +4649,7 @@ class AxisBrowser {
             // Direct filtering for maximum speed
             tabs.forEach(tab => {
                 const title = tab.querySelector('.tab-title')?.textContent?.toLowerCase() || '';
-                const url = this.tabs.get(parseInt(tab.dataset.tabId))?.url?.toLowerCase() || '';
+                const url = this.tabs.get(parseInt(tab.dataset.tabId, 10))?.url?.toLowerCase() || '';
                 const match = title.includes(query) || url.includes(query);
                 tab.style.display = match ? '' : 'none';
             });
@@ -4706,6 +4804,8 @@ class AxisBrowser {
                 const nameInput = folderElement.querySelector('.folder-name-input');
                 if (nameInput) {
                     nameInput.readOnly = false;
+                    nameInput.removeAttribute('tabindex');
+                    nameInput.style.pointerEvents = 'auto';
                     nameInput.focus();
                     nameInput.select();
                 }
@@ -4761,8 +4861,7 @@ class AxisBrowser {
                     </button>
                 </div>
             </div>
-            <div class="folder-content ${isOpen ? 'open' : ''}">
-                ${folderTabs.length > 0 ? '' : '<div class="folder-empty">Drag tabs here</div>'}
+            <div class="folder-content ${isOpen && folderTabs.length > 0 ? 'open' : ''}">
             </div>
         `;
 
@@ -4805,8 +4904,8 @@ class AxisBrowser {
             }
         });
         
-        // Set initial state if folder is open (after tabs are added)
-        if (isOpen) {
+        // Set initial state if folder is open AND has tabs (after tabs are added)
+        if (isOpen && folderTabs.length > 0) {
             // Use setTimeout to ensure DOM is ready and tabs are added
             setTimeout(() => {
                 folderContent.style.display = 'flex';
@@ -4818,8 +4917,13 @@ class AxisBrowser {
                 folderContent.classList.add('open');
             }, 50);
         } else {
+            // Ensure empty folders have no expansion
             folderContent.style.display = 'none';
             folderContent.style.visibility = 'hidden';
+            folderContent.style.maxHeight = '0px';
+            folderContent.style.padding = '0';
+            folderContent.style.opacity = '0';
+            folderContent.classList.remove('open');
         }
 
         return folderElement;
@@ -4830,8 +4934,250 @@ class AxisBrowser {
         const deleteBtn = folderElement.querySelector('.folder-delete');
         const folderContent = folderElement.querySelector('.folder-content');
         const tabContent = folderElement.querySelector('.tab-content');
+        const tabsContainer = document.querySelector('.tabs-container');
+        
+        // Get reference to draggedFolder from setupTabDragDrop scope
+        // We'll use a closure or access it via the class
+        const getDraggedFolder = () => {
+            // Try to find it via the dragging class as fallback
+            return document.querySelector('.folder.dragging');
+        };
+        
+        // Use the shared insertion line from setupTabDragDrop (don't create a new one)
+        const getInsertionLine = () => document.querySelector('.drag-insertion-line');
+        
+        // Helper functions that use the shared insertion line
+        const showInsertionLine = (y) => {
+            const insertionLine = getInsertionLine();
+            if (insertionLine && tabsContainer) {
+                // Center the line in the 8px gap (4px offset from edge)
+                insertionLine.style.top = (y - 1) + 'px'; // -1px to center the 2px line
+                insertionLine.style.display = 'block';
+            }
+        };
+        
+        const hideInsertionLine = () => {
+            const insertionLine = getInsertionLine();
+            if (insertionLine) {
+                insertionLine.style.display = 'none';
+            }
+        };
 
+        // Make folder draggable - make sure child elements don't prevent dragging
+        folderElement.draggable = true;
+        
+        // Prevent child elements from being draggable (they should trigger parent drag)
+        nameInput.draggable = false;
+        deleteBtn.draggable = false;
+        const folderIcon = folderElement.querySelector('.folder-icon');
+        if (folderIcon) {
+            folderIcon.draggable = false;
+        }
+        
+        // Make input non-interactive when readonly to prevent focus
+        if (nameInput.readOnly) {
+            nameInput.style.pointerEvents = 'none';
+        }
+        
+        let isDragging = false;
+        let mouseDownPos = { x: 0, y: 0 };
+        let mouseDownTime = 0;
+        
+        // Track mouse down to distinguish click from drag
+        tabContent.addEventListener('mousedown', (e) => {
+            // Don't track if clicking on delete button or if input is being edited
+            if (e.target.closest('.folder-delete') || (!nameInput.readOnly && e.target.closest('.folder-name-input'))) {
+                return;
+            }
+            mouseDownPos = { x: e.clientX, y: e.clientY };
+            mouseDownTime = Date.now();
+        });
+        
+        folderElement.addEventListener('dragstart', (e) => {
+            // Don't start drag if clicking on delete button or if input is being edited
+            if (e.target.closest('.folder-delete') || (!nameInput.readOnly && e.target.closest('.folder-name-input'))) {
+                e.preventDefault();
+                return;
+            }
+            
+            // Aggressively prevent input focus during drag
+            if (nameInput.readOnly) {
+                nameInput.blur();
+                nameInput.style.pointerEvents = 'none';
+                // Force blur multiple times to be sure
+                requestAnimationFrame(() => {
+                    nameInput.blur();
+                    nameInput.style.pointerEvents = 'none';
+                });
+            }
+            
+            isDragging = true;
+            folderElement.classList.add('dragging');
+            
+            // Set drag data
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/html', folderElement.outerHTML);
+            e.dataTransfer.setData('application/folder-id', folder.id.toString());
+        });
+        
+        // Cache folder content element to avoid repeated queries
+        const cachedFolderContent = folderElement.querySelector('.folder-content');
+        
+        // Handle folder-to-folder dragging
+        folderElement.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+            
+            const draggedFolder = getDraggedFolder();
+            const draggedTab = document.querySelector('.tab.dragging');
+            
+            // Handle folder-to-folder dragging
+            if (draggedFolder && draggedFolder !== folderElement) {
+                const rect = folderElement.getBoundingClientRect();
+                const containerRect = tabsContainer.getBoundingClientRect();
+                const isAbove = e.clientY < rect.top + rect.height / 2;
+                
+                // Center in gap: gap is 8px, center is 4px from edge
+                const lineY = isAbove ? rect.top - containerRect.top - 4 : rect.bottom - containerRect.top + 4;
+                showInsertionLine(lineY);
+                folderElement.dataset.dropSide = isAbove ? 'top' : 'bottom';
+                return;
+            }
+            
+            // Handle tab-to-folder dragging
+            if (draggedTab) {
+                const folderRect = folderElement.getBoundingClientRect();
+                const containerRect = tabsContainer.getBoundingClientRect();
+                const mouseY = e.clientY;
+                
+                // Check if over content (only if folder is open)
+                const isOverContent = cachedFolderContent && 
+                                     cachedFolderContent.classList.contains('open') && 
+                                     cachedFolderContent.contains(e.target);
+                
+                // Check if in gap (4px threshold above/below folder)
+                const gapThreshold = 4;
+                const isInGapAbove = mouseY < folderRect.top && mouseY >= folderRect.top - gapThreshold;
+                const isInGapBelow = mouseY > folderRect.bottom && mouseY <= folderRect.bottom + gapThreshold;
+                
+                if (isOverContent) {
+                    // Over folder content - show folder animation, NO insertion line
+                    if (!folderElement.classList.contains('drag-over-folder')) {
+                        folderElement.classList.add('drag-over-folder');
+                    }
+                    hideInsertionLine();
+                    folderElement.dataset.dropSide = 'inside';
+                } else if (isInGapAbove || isInGapBelow) {
+                    // In gap - show insertion line ONLY, no folder animation
+                    if (folderElement.classList.contains('drag-over-folder')) {
+                        folderElement.classList.remove('drag-over-folder');
+                    }
+                    const isAbove = isInGapAbove;
+                    // Center in gap: gap is 8px, center is 4px from edge
+                    const lineY = isAbove ? folderRect.top - containerRect.top - 4 : folderRect.bottom - containerRect.top + 4;
+                    showInsertionLine(lineY);
+                    folderElement.dataset.dropSide = isAbove ? 'top' : 'bottom';
+                } else {
+                    // Over folder header - show folder animation, NO insertion line
+                    if (!folderElement.classList.contains('drag-over-folder')) {
+                        folderElement.classList.add('drag-over-folder');
+                    }
+                    hideInsertionLine();
+                    folderElement.dataset.dropSide = 'inside';
+                }
+            }
+        });
+        
+        folderElement.addEventListener('dragleave', (e) => {
+            if (!folderElement.contains(e.relatedTarget)) {
+                folderElement.classList.remove('drag-over-folder');
+                delete folderElement.dataset.dropSide;
+                hideInsertionLine();
+            }
+        });
+        
+        folderElement.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            hideInsertionLine();
+            
+            // Cache dropSide before cleanup
+            const dropSide = folderElement.dataset.dropSide;
+            folderElement.classList.remove('drag-over-folder');
+            delete folderElement.dataset.dropSide;
+            
+            const draggedFolderId = e.dataTransfer.getData('application/folder-id');
+            const draggedFolder = draggedFolderId ? document.querySelector(`[data-folder-id="${draggedFolderId}"]`) : getDraggedFolder();
+            const draggedTab = document.querySelector('.tab.dragging');
+            
+            // Handle folder drop
+            if (draggedFolder && draggedFolder !== folderElement) {
+                const isAbove = dropSide === 'top';
+                draggedFolder.remove();
+                if (isAbove) {
+                    tabsContainer.insertBefore(draggedFolder, folderElement);
+                } else {
+                    folderElement.insertAdjacentElement('afterend', draggedFolder);
+                }
+                return;
+            }
+            
+            // Handle tab drop
+            if (!draggedTab) return;
+            
+            const tabId = parseInt(draggedTab.dataset.tabId, 10);
+            if (!tabId || !this.tabs.has(tabId)) return;
+            
+            if (dropSide === 'inside') {
+                this.addTabToFolder(tabId, folder.id);
+            } else if (dropSide === 'top' || dropSide === 'bottom') {
+                const isAbove = dropSide === 'top';
+                const tab = this.tabs.get(tabId);
+                if (!tab) return;
+                
+                // Check parent folder before removing
+                const draggedTabParentFolder = draggedTab.closest('.folder');
+                if (draggedTabParentFolder) {
+                        const parentFolderId = parseInt(draggedTabParentFolder.dataset.folderId, 10);
+                    if (parentFolderId) {
+                        this.removeTabFromFolder(tabId, parentFolderId);
+                    }
+                }
+                
+                const wasPinned = tab.pinned;
+                const folderIsPinned = folderElement.classList.contains('pinned');
+                
+                draggedTab.remove();
+                if (isAbove) {
+                    tabsContainer.insertBefore(draggedTab, folderElement);
+                } else {
+                    folderElement.insertAdjacentElement('afterend', draggedTab);
+                }
+                
+                if (folderIsPinned && !wasPinned) {
+                    tab.pinned = true;
+                    this.tabs.set(tabId, tab);
+                    draggedTab.classList.add('pinned');
+                }
+                
+                if (wasPinned !== tab.pinned) {
+                    this.organizeTabsByPinnedState();
+                }
+                this.savePinnedTabs();
+            }
+        });
+        
+        folderElement.addEventListener('dragend', (e) => {
+            isDragging = false;
+            folderElement.classList.remove('dragging');
+            folderElement.classList.remove('drag-over-folder');
+            hideInsertionLine();
+            delete folderElement.dataset.dropSide;
+        });
+        
         // Toggle folder - click anywhere on the folder tab (including the name)
+        // Only toggle if it wasn't a drag operation
         tabContent.addEventListener('click', (e) => {
             // Don't toggle if clicking on delete button
             if (e.target.closest('.folder-delete')) {
@@ -4841,7 +5187,14 @@ class AxisBrowser {
             if (e.target.closest('.folder-name-input') && nameInput.readOnly) {
                 e.preventDefault();
                 e.stopPropagation();
-                this.toggleFolder(folder.id);
+                // Blur the input to prevent focus box
+                nameInput.blur();
+                // Only toggle if it wasn't a drag (check if mouse moved significantly)
+                const mouseMoved = Math.abs(e.clientX - mouseDownPos.x) > 5 || Math.abs(e.clientY - mouseDownPos.y) > 5;
+                const timeSinceMouseDown = Date.now() - mouseDownTime;
+                if (!isDragging && (!mouseMoved || timeSinceMouseDown < 300)) {
+                    this.toggleFolder(folder.id);
+                }
                 return;
             }
             // If input is not readonly (being edited), don't toggle
@@ -4849,17 +5202,47 @@ class AxisBrowser {
                 return;
             }
             e.stopPropagation();
-            this.toggleFolder(folder.id);
-        });
-        
-        // Prevent input from being focused when readonly
-        nameInput.addEventListener('mousedown', (e) => {
+            // Blur input if it somehow got focused
             if (nameInput.readOnly) {
-                e.preventDefault();
-                // Trigger toggle instead
+                nameInput.blur();
+            }
+            // Only toggle if it wasn't a drag (check if mouse moved significantly)
+            const mouseMoved = Math.abs(e.clientX - mouseDownPos.x) > 5 || Math.abs(e.clientY - mouseDownPos.y) > 5;
+            const timeSinceMouseDown = Date.now() - mouseDownTime;
+            if (!isDragging && (!mouseMoved || timeSinceMouseDown < 300)) {
                 this.toggleFolder(folder.id);
             }
         });
+        
+        // Prevent input from being focused when readonly
+        // Use tabindex to prevent keyboard focus, and blur handler for mouse focus
+        if (nameInput.readOnly) {
+            nameInput.setAttribute('tabindex', '-1');
+            nameInput.style.pointerEvents = 'none';
+        }
+        
+        // Prevent input from getting focus on click when readonly
+        nameInput.addEventListener('focus', (e) => {
+            if (nameInput.readOnly) {
+                // Immediately blur to prevent focus box - use requestAnimationFrame for immediate effect
+                requestAnimationFrame(() => {
+                    e.target.blur();
+                    e.target.style.pointerEvents = 'none';
+                });
+            }
+        }, true); // Use capture phase to catch it early
+        
+        // Also prevent focusin event
+        nameInput.addEventListener('focusin', (e) => {
+            if (nameInput.readOnly) {
+                e.preventDefault();
+                e.stopPropagation();
+                requestAnimationFrame(() => {
+                    e.target.blur();
+                    e.target.style.pointerEvents = 'none';
+                });
+            }
+        }, true);
 
         // Right-click for context menu
         folderElement.addEventListener('contextmenu', (e) => {
@@ -4876,6 +5259,8 @@ class AxisBrowser {
             this.saveFolders();
             // Make it readonly again
             nameInput.readOnly = true;
+            nameInput.setAttribute('tabindex', '-1');
+            nameInput.style.pointerEvents = 'none';
         });
 
         nameInput.addEventListener('keydown', (e) => {
@@ -4898,53 +5283,6 @@ class AxisBrowser {
             }
         });
 
-        // Make folder a drop zone - handle drag events on the folder element itself
-        folderElement.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            e.dataTransfer.dropEffect = 'move';
-            
-            // Highlight folder (undotted animation)
-            folderElement.classList.add('drag-over-folder');
-        });
-
-        folderElement.addEventListener('dragleave', (e) => {
-            // Only remove if actually leaving the folder
-            if (!folderElement.contains(e.relatedTarget)) {
-                folderElement.classList.remove('drag-over-folder');
-            }
-        });
-
-        folderElement.addEventListener('drop', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            folderElement.classList.remove('drag-over-folder');
-            
-            // Get tab ID from drag data
-            let tabId = null;
-            
-            // Try to get from dataTransfer
-            const htmlData = e.dataTransfer.getData('text/html');
-            if (htmlData) {
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(htmlData, 'text/html');
-                const tabEl = doc.querySelector('.tab');
-                if (tabEl && tabEl.dataset.tabId) {
-                    tabId = parseInt(tabEl.dataset.tabId);
-                }
-            }
-            
-            // Also check if there's a dragged tab element
-            const draggedTab = document.querySelector('.tab.dragging');
-            if (draggedTab && draggedTab.dataset.tabId) {
-                tabId = parseInt(draggedTab.dataset.tabId);
-            }
-            
-            if (tabId && this.tabs.has(tabId)) {
-                this.addTabToFolder(tabId, folder.id);
-            }
-        });
     }
 
     toggleFolder(folderId) {
@@ -4977,7 +5315,24 @@ class AxisBrowser {
             }, 300);
         }
         
+        // Check if folder has tabs - only open if it has content
+        const hasTabs = folder.tabIds.length > 0;
+        
         if (isOpening) {
+            // Don't open if folder is empty - just update icon and ensure no expansion
+            if (!hasTabs) {
+                // Explicitly set styles to prevent any expansion
+                folderContent.style.maxHeight = '0px';
+                folderContent.style.padding = '0';
+                folderContent.style.display = 'none';
+                folderContent.style.visibility = 'hidden';
+                folderContent.style.opacity = '0';
+                folderContent.classList.remove('open');
+                folderElement.classList.remove('toggling');
+                this.saveFolders();
+                return;
+            }
+            
             // Opening: measure height first, then animate
             folderContent.style.display = 'flex';
             folderContent.style.visibility = 'visible';
@@ -5068,13 +5423,14 @@ class AxisBrowser {
             }
         }
         
-        // Remove tab from any other folder
-        this.folders.forEach((f, id) => {
+        // Remove tab from any other folder (optimized - only check if needed)
+        for (const [id, f] of this.folders) {
             if (id !== folderId && f.tabIds.includes(tabId)) {
-                f.tabIds = f.tabIds.filter(id => id !== tabId);
+                f.tabIds = f.tabIds.filter(fid => fid !== tabId);
                 this.folders.set(id, f);
+                break; // Tab can only be in one folder at a time
             }
-        });
+        }
         
         // Add to this folder if not already there
         if (!folder.tabIds.includes(tabId)) {
@@ -5082,20 +5438,54 @@ class AxisBrowser {
             this.folders.set(folderId, folder);
         }
         
-        // Remove tab from main container if it's there
+        // Update folder UI directly without full re-render for better performance
+        const folderElement = document.querySelector(`[data-folder-id="${folderId}"]`);
         const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
-        if (tabElement && tabElement.parentNode && !tabElement.closest('.folder')) {
-            tabElement.remove();
+        
+        if (!folderElement || !tabElement) return;
+        
+        const folderContent = folderElement.querySelector('.folder-content');
+        if (!folderContent) {
+            // Fallback: just remove from main container
+            if (tabElement.parentNode && !tabElement.closest('.folder')) {
+                tabElement.remove();
+            }
+            return;
         }
+        
+        // Batch DOM operations
+        requestAnimationFrame(() => {
+            // Ensure folder is open
+            if (!folder.open) {
+                this.toggleFolder(folderId);
+            }
+            
+            // Remove tab from main container if it's there
+            if (tabElement.parentNode && !tabElement.closest('.folder')) {
+                tabElement.remove();
+            }
+            
+            // Add tab to folder content if not already there
+            if (!folderContent.contains(tabElement)) {
+                folderContent.appendChild(tabElement);
+                this.setupTabEventListeners(tabElement, tabId);
+                this.updateTabFavicon(tabId, tabElement);
+                // Make tab draggable immediately
+                if (this.makeTabDraggable) {
+                    this.makeTabDraggable(tabElement);
+                } else {
+                    tabElement.draggable = true;
+                }
+            }
+            
+            // Remove empty state if present (only query if needed)
+            const folderEmpty = folderContent.querySelector('.folder-empty');
+            if (folderEmpty) {
+                folderEmpty.remove();
+            }
+        });
         
         this.saveFolders();
-        this.renderFolders();
-        
-        // Ensure folder is open to show the added tab
-        const updatedFolder = this.folders.get(folderId);
-        if (updatedFolder && !updatedFolder.open) {
-            this.toggleFolder(folderId);
-        }
     }
 
     removeTabFromFolder(tabId, folderId) {
@@ -5109,15 +5499,74 @@ class AxisBrowser {
         const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
         const tabsContainer = document.querySelector('.tabs-container');
         const separator = document.getElementById('tabs-separator');
+        const folderElement = document.querySelector(`[data-folder-id="${folderId}"]`);
         
-        if (tabElement && tabsContainer && separator) {
+        if (!tabElement || !tabsContainer || !separator || !folderElement) return;
+        
+        // Clean up any drag-related classes and styles on folder first
+        folderElement.classList.remove('dragging', 'drag-over-folder', 'drag-over-folder-top', 'drag-over-folder-bottom');
+        
+        // Store original styles to restore later
+        const folderContent = folderElement.querySelector('.folder-content');
+        const originalFolderTransition = folderElement.style.transition;
+        const originalFolderPointerEvents = folderElement.style.pointerEvents;
+        const originalFolderTransform = folderElement.style.transform;
+        const originalFolderFilter = folderElement.style.filter;
+        const originalFolderOpacity = folderElement.style.opacity;
+        const originalTabTransition = tabElement.style.transition;
+        
+        // Temporarily disable transitions and reset any transform/filter/opacity that might be stuck
+        folderElement.style.transition = 'none';
+        folderElement.style.pointerEvents = 'none';
+        folderElement.style.transform = '';
+        folderElement.style.filter = '';
+        folderElement.style.opacity = '';
+        tabElement.style.transition = 'none';
+        
+        // Batch all DOM updates in a single frame
+        requestAnimationFrame(() => {
+            // Remove tab from folder content
             tabElement.remove();
+            
             // Insert in pinned section
             tabsContainer.insertBefore(tabElement, separator);
-        }
+            
+            // Remove any empty state message if it exists
+            const folderEmpty = folderContent?.querySelector('.folder-empty');
+            if (folderEmpty) {
+                folderEmpty.remove();
+            }
+            
+            // If folder was open but is now empty, close it completely
+            if (folder.open && folder.tabIds.length === 0) {
+                folder.open = false;
+                this.folders.set(folder.id, folder);
+                const folderIcon = folderElement.querySelector('.folder-icon');
+                if (folderIcon) {
+                    folderIcon.classList.remove('fa-folder-open');
+                    folderIcon.classList.add('fa-folder');
+                }
+                folderContent.classList.remove('open');
+                folderContent.style.display = 'none';
+                folderContent.style.visibility = 'hidden';
+                folderContent.style.maxHeight = '0px';
+                folderContent.style.padding = '0';
+                folderContent.style.opacity = '0';
+            }
+            
+            // Restore styles immediately (no need for double RAF)
+            folderElement.style.transition = originalFolderTransition || '';
+            folderElement.style.pointerEvents = originalFolderPointerEvents || '';
+            folderElement.style.transform = originalFolderTransform || '';
+            folderElement.style.filter = originalFolderFilter || '';
+            folderElement.style.opacity = originalFolderOpacity || '';
+            tabElement.style.transition = originalTabTransition || '';
+            
+            // Ensure all drag classes are removed
+            folderElement.classList.remove('dragging', 'drag-over-folder', 'drag-over-folder-top', 'drag-over-folder-bottom');
+        });
         
         this.saveFolders();
-        this.renderFolders();
     }
 
     deleteFolder(folderId) {
@@ -5226,9 +5675,72 @@ class AxisBrowser {
             if (folderElement) {
                 const nameInput = folderElement.querySelector('.folder-name-input');
                 if (nameInput) {
-                    nameInput.readOnly = false;
-                    nameInput.focus();
-                    nameInput.select();
+                    const currentName = nameInput.value;
+                    
+                    // Get computed styles to match exactly
+                    const computedStyle = window.getComputedStyle(nameInput);
+                    
+                    // Create input element with EXACT same flex properties as original
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = currentName;
+                    input.className = nameInput.className; // Copy all classes
+                    input.style.cssText = `
+                        flex: 1;
+                        min-width: 0;
+                        font-size: ${computedStyle.fontSize};
+                        font-family: ${computedStyle.fontFamily};
+                        font-weight: ${computedStyle.fontWeight};
+                        line-height: ${computedStyle.lineHeight};
+                        color: #fff;
+                        background: transparent;
+                        border: 1px solid #555;
+                        border-radius: 8px;
+                        padding: 0;
+                        margin: 0;
+                        outline: none;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        box-sizing: border-box;
+                    `;
+                    
+                    // Replace nameInput with input inline - this preserves flex layout
+                    nameInput.parentNode.replaceChild(input, nameInput);
+                    input.focus();
+                    input.select();
+                    
+                    const finishRename = () => {
+                        const newName = input.value.trim() || currentName;
+                        
+                        // Restore the nameInput element
+                        const newNameInput = document.createElement('input');
+                        newNameInput.type = 'text';
+                        newNameInput.className = 'folder-name-input tab-title';
+                        newNameInput.value = newName;
+                        newNameInput.readOnly = true;
+                        input.parentNode.replaceChild(newNameInput, input);
+                        
+                        // Update folder data
+                        const folder = this.folders.get(this.contextMenuFolderId);
+                        if (folder) {
+                            folder.name = newName;
+                            this.folders.set(this.contextMenuFolderId, folder);
+                            this.saveFolders();
+                        }
+                    };
+                    
+                    input.addEventListener('blur', finishRename);
+                    input.addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter') {
+                            finishRename();
+                        }
+                    });
+                    input.addEventListener('keydown', (e) => {
+                        if (e.key === 'Escape') {
+                            finishRename();
+                        }
+                    });
                 }
             }
         }
@@ -6018,8 +6530,17 @@ class AxisBrowser {
     }
 
     reopenLastClosedTab() {
-        // Placeholder for reopening last closed tab
-        this.showNotification('Reopen last closed tab not implemented yet', 'info');
+        if (this.closedTabs.length === 0) {
+            this.showNotification('No recently closed tabs', 'info');
+            return;
+        }
+        
+        const closedTab = this.closedTabs[0];
+        if (closedTab && closedTab.url) {
+            this.createNewTab(closedTab.url);
+            this.closedTabs.shift(); // Remove from closed tabs
+            this.showNotification('Reopened tab', 'success');
+        }
     }
 
     bookmarkCurrentPage() {
@@ -6098,7 +6619,6 @@ class AxisBrowser {
     showLoadingIndicator() {
         const loadingBar = document.getElementById('loading-bar');
         if (loadingBar) {
-            console.log('Showing loading indicator');
             loadingBar.classList.add('loading');
         }
     }
@@ -6106,13 +6626,7 @@ class AxisBrowser {
     hideLoadingIndicator() {
         const loadingBar = document.getElementById('loading-bar');
         if (loadingBar) {
-            console.log('Hiding loading indicator, current classes:', loadingBar.className);
             loadingBar.classList.remove('loading');
-            // Force clear any stuck animations
-            loadingBar.style.animation = 'none';
-            loadingBar.offsetHeight; // Trigger reflow
-            loadingBar.style.animation = null;
-            console.log('Loading indicator hidden, classes after:', loadingBar.className);
         }
     }
 
@@ -6374,44 +6888,65 @@ class AxisBrowser {
         const separator = document.getElementById('tabs-separator');
         let draggedTab = null;
         let draggedIndex = -1;
+        let lastDragState = null; // Track last state to prevent unnecessary updates
+        let containerLastDragState = null; // Track state for container drag
+        
+        // Create shared insertion line element
+        let insertionLine = document.querySelector('.drag-insertion-line');
+        if (!insertionLine) {
+            insertionLine = document.createElement('div');
+            insertionLine.className = 'drag-insertion-line';
+            tabsContainer.appendChild(insertionLine);
+        }
+        
+        // Helper function to show insertion line - centered in gap
+        const showInsertionLine = (y) => {
+            // Center the 2px line in the 8px gap (y is already at 4px offset, -1px to center the 2px line)
+            insertionLine.style.top = (y - 1) + 'px';
+            insertionLine.style.display = 'block';
+        };
+        
+        // Helper function to hide insertion line
+        const hideInsertionLine = () => {
+            insertionLine.style.display = 'none';
+        };
 
         // Setup separator drag handlers
         if (separator) {
+            
             separator.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
                 
                 // Update visual feedback on separator
                 if (draggedTab) {
-                    const tabId = parseInt(draggedTab.dataset.tabId);
+                    const tabId = parseInt(draggedTab.dataset.tabId, 10);
                     const tab = this.tabs.get(tabId);
                     const isCurrentlyPinned = tab && tab.pinned;
                     
-                    // Remove all classes first
-                    separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
-                    tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
-                    
-                    // Calculate separator position for accurate outline
-                    const separatorRect = separator.getBoundingClientRect();
-                    const containerRect = tabsContainer.getBoundingClientRect();
-                    const separatorTop = separatorRect.top - containerRect.top;
-                    const separatorBottom = separatorRect.bottom - containerRect.top;
-                    
-                    // Set CSS custom properties for accurate outline positioning
-                    tabsContainer.style.setProperty('--separator-top', separatorTop + 'px');
-                    tabsContainer.style.setProperty('--separator-bottom', separatorBottom + 'px');
-                    
                     // Determine which section based on drop position - use midpoint for accuracy
+                    const separatorRect = separator.getBoundingClientRect();
                     const separatorMidpoint = separatorRect.top + separatorRect.height / 2;
                     const dropY = e.clientY;
                     const isAbove = dropY < separatorMidpoint;
                     
+                    // Determine new state
+                    let newState = null;
                     if (!isCurrentlyPinned && isAbove) {
-                        separator.classList.add('drag-over-pinned');
-                        tabsContainer.classList.add('drag-into-pinned');
+                        newState = 'pinned';
                     } else if (isCurrentlyPinned && !isAbove) {
-                        separator.classList.add('drag-over-unpinned');
-                        tabsContainer.classList.add('drag-into-unpinned');
+                        newState = 'unpinned';
+                    }
+                    
+                    // Only update if state changed to prevent flickering
+                    if (newState !== lastDragState) {
+                        // Show insertion line at separator position
+                        const separatorRect = separator.getBoundingClientRect();
+                        const containerRect = tabsContainer.getBoundingClientRect();
+                        const lineY = separatorRect.top - containerRect.top;
+                        showInsertionLine(lineY);
+                        
+                        lastDragState = newState;
                     }
                 }
             });
@@ -6419,12 +6954,14 @@ class AxisBrowser {
             separator.addEventListener('drop', (e) => {
                 e.preventDefault();
                 
+                // Reset drag state
+                lastDragState = null;
+                
                 // Remove drag visual feedback
-                separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
-                tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
+                hideInsertionLine();
                 
                 if (draggedTab) {
-                    const tabId = parseInt(draggedTab.dataset.tabId);
+                    const tabId = parseInt(draggedTab.dataset.tabId, 10);
                     const tab = this.tabs.get(tabId);
                     const tabElement = draggedTab;
                     
@@ -6464,21 +7001,74 @@ class AxisBrowser {
                 if (!draggedTab) return;
                 
                 // Don't interfere with tab-to-tab dragging - let tabs handle their own dragover
-                if (e.target.classList.contains('tab') || e.target.closest('.tab')) return;
+                if (e.target.classList.contains('tab') || e.target.closest('.tab')) {
+                    hideInsertionLine();
+                    return;
+                }
+                // Don't interfere with folder dragging - let folders handle their own dragover
+                // Also hide insertion line if over folder content
+                if (e.target.classList.contains('folder') || 
+                    e.target.closest('.folder') || 
+                    e.target.closest('.folder-content')) {
+                    hideInsertionLine();
+                    return;
+                }
                 
                 const separatorRect = separator.getBoundingClientRect();
-                const containerRect = tabsContainer.getBoundingClientRect();
                 const dropY = e.clientY;
+                const containerRect = tabsContainer.getBoundingClientRect();
+                
+                // Check if we're near a folder (above or below it) - handle folder positioning
+                const allFolders = document.querySelectorAll('.folder');
+                for (const folder of allFolders) {
+                    const folderRect = folder.getBoundingClientRect();
+                    // Check if mouse is in the gap area above or below the folder
+                    const gapSize = 8; // Same as CSS gap
+                    const isNearFolderTop = dropY >= folderRect.top - gapSize && dropY < folderRect.top;
+                    const isNearFolderBottom = dropY > folderRect.bottom && dropY <= folderRect.bottom + gapSize;
+                    
+                    if (isNearFolderTop || isNearFolderBottom) {
+                        // Show insertion line near folder
+                        const isAbove = dropY < folderRect.top + folderRect.height / 2;
+                        const lineY = isAbove ? folderRect.top - containerRect.top - 4 : folderRect.bottom - containerRect.top + 4;
+                        showInsertionLine(lineY);
+                        folder.dataset.dropSide = isAbove ? 'top' : 'bottom';
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        return;
+                    }
+                }
                 
                 // Use separator midpoint as exact boundary
                 const separatorMidpoint = separatorRect.top + separatorRect.height / 2;
-                const tabId = parseInt(draggedTab.dataset.tabId);
+                const tabId = parseInt(draggedTab.dataset.tabId, 10);
                 const tab = this.tabs.get(tabId);
                 const isCurrentlyPinned = tab && tab.pinned;
                 
                 // Accurate check: above separator = pinned section, below = unpinned section
                 const isInPinnedArea = dropY < separatorMidpoint;
                 const isInUnpinnedArea = dropY > separatorMidpoint;
+                
+                // Determine new state
+                let newState = null;
+                if (separator.offsetParent !== null) {
+                    if (!isCurrentlyPinned && isInPinnedArea) {
+                        newState = 'pinned';
+                    } else if (isCurrentlyPinned && isInUnpinnedArea) {
+                        newState = 'unpinned';
+                    }
+                }
+                
+                // Only update if state changed to prevent flickering
+                if (newState !== containerLastDragState) {
+                    // Show insertion line at separator position
+                    const separatorRect = separator.getBoundingClientRect();
+                    const containerRect = tabsContainer.getBoundingClientRect();
+                    const lineY = separatorRect.top - containerRect.top;
+                    showInsertionLine(lineY);
+                    
+                    containerLastDragState = newState;
+                }
                 
                 // Allow drop if:
                 // 1. Dragging unpinned tab above separator (to pin)
@@ -6487,31 +7077,6 @@ class AxisBrowser {
                     (!isCurrentlyPinned && isInPinnedArea) ||
                     (isCurrentlyPinned && isInUnpinnedArea)
                 );
-                
-                // Update visual feedback for drag animations - be more accurate
-                if (separator.offsetParent !== null) {
-                    // Remove all drag classes first
-                    separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
-                    tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
-                    
-                    // Calculate separator position relative to container for accurate outline
-                    const separatorTop = separatorRect.top - containerRect.top;
-                    const separatorBottom = separatorRect.bottom - containerRect.top;
-                    const containerHeight = containerRect.height;
-                    
-                    // Set CSS custom properties for accurate outline positioning
-                    tabsContainer.style.setProperty('--separator-top', separatorTop + 'px');
-                    tabsContainer.style.setProperty('--separator-bottom', separatorBottom + 'px');
-                    
-                    // Add appropriate classes based on exact position relative to separator
-                    if (!isCurrentlyPinned && isInPinnedArea) {
-                        separator.classList.add('drag-over-pinned');
-                        tabsContainer.classList.add('drag-into-pinned');
-                    } else if (isCurrentlyPinned && isInUnpinnedArea) {
-                        separator.classList.add('drag-over-unpinned');
-                        tabsContainer.classList.add('drag-into-unpinned');
-                    }
-                }
                 
                 if (shouldAllowDrop) {
                     e.preventDefault();
@@ -6524,10 +7089,69 @@ class AxisBrowser {
                 
                 // Don't interfere with tab-to-tab dropping - let tabs handle their own drop
                 if (e.target.classList.contains('tab') || e.target.closest('.tab')) return;
+                // Don't interfere with folder dropping - let folders handle their own drop
+                if (e.target.classList.contains('folder') || e.target.closest('.folder')) return;
+                
+                // Check if we're dropping near a folder (in the gap above or below it)
+                const dropY = e.clientY;
+                const allFolders = document.querySelectorAll('.folder');
+                for (const folder of allFolders) {
+                    const folderRect = folder.getBoundingClientRect();
+                    const gapSize = 8;
+                    const isNearFolderTop = dropY >= folderRect.top - gapSize && dropY < folderRect.top;
+                    const isNearFolderBottom = dropY > folderRect.bottom && dropY <= folderRect.bottom + gapSize;
+                    
+                    if (isNearFolderTop || isNearFolderBottom) {
+                        // Handle drop near folder
+                        const tabId = parseInt(draggedTab.dataset.tabId, 10);
+                        const tab = this.tabs.get(tabId);
+                        if (!tab) return;
+                        
+                        // Check if tab was dragged from a folder
+                        const draggedTabParentFolder = draggedTab.closest('.folder');
+                        if (draggedTabParentFolder) {
+                            const folderId = parseInt(draggedTabParentFolder.dataset.folderId, 10);
+                            if (folderId) {
+                                this.removeTabFromFolder(tabId, folderId);
+                            }
+                        }
+                        
+                        const isAbove = dropY < folderRect.top + folderRect.height / 2;
+                        const folderIsPinned = folder.classList.contains('pinned');
+                        const wasPinned = tab.pinned;
+                        
+                        // Remove from current position
+                        draggedTab.remove();
+                        
+                        if (isAbove) {
+                            tabsContainer.insertBefore(draggedTab, folder);
+                            if (folderIsPinned && !wasPinned) {
+                                tab.pinned = true;
+                                this.tabs.set(tabId, tab);
+                                draggedTab.classList.add('pinned');
+                            }
+                        } else {
+                            folder.insertAdjacentElement('afterend', draggedTab);
+                            if (folderIsPinned && !wasPinned) {
+                                tab.pinned = true;
+                                this.tabs.set(tabId, tab);
+                                draggedTab.classList.add('pinned');
+                            }
+                        }
+                        
+                        if (wasPinned !== tab.pinned) {
+                            this.organizeTabsByPinnedState();
+                        }
+                        this.savePinnedTabs();
+                        
+                        // Hide insertion line
+                        hideInsertionLine();
+                        return;
+                    }
+                }
                 
                 const separatorRect = separator.getBoundingClientRect();
-                const dropY = e.clientY;
-                const tabId = parseInt(draggedTab.dataset.tabId);
+                const tabId = parseInt(draggedTab.dataset.tabId, 10);
                 const tab = this.tabs.get(tabId);
                 
                 if (!tab) {
@@ -6537,7 +7161,7 @@ class AxisBrowser {
                 // Check if tab was dragged from a folder
                 const draggedTabParentFolder = draggedTab.closest('.folder');
                 if (draggedTabParentFolder) {
-                    const folderId = parseInt(draggedTabParentFolder.dataset.folderId);
+                    const folderId = parseInt(draggedTabParentFolder.dataset.folderId, 10);
                     if (folderId) {
                         this.removeTabFromFolder(tabId, folderId);
                     }
@@ -6549,8 +7173,7 @@ class AxisBrowser {
                 const isBelow = dropY > separatorMidpoint;
                 
                 // Remove drag visual feedback
-                separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
-                tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
+                hideInsertionLine();
                 
                 // Handle pinning: unpinned tab dropped above separator
                 if (isAbove && separator.offsetParent !== null && !tab.pinned) {
@@ -6585,8 +7208,8 @@ class AxisBrowser {
             const handleContainerDragLeave = (e) => {
                 // Remove drag visual feedback when leaving container
                 if (!tabsContainer.contains(e.relatedTarget)) {
-                    separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
-                    tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
+                    containerLastDragState = null;
+                    lastDragState = null;
                 }
             };
 
@@ -6596,7 +7219,7 @@ class AxisBrowser {
             tabsContainer.addEventListener('dragleave', handleContainerDragLeave);
         }
 
-        // Make tabs draggable
+        // Make tabs draggable - store reference so it can be called from other methods
         const makeTabDraggable = (tab) => {
             tab.draggable = true;
             
@@ -6613,13 +7236,16 @@ class AxisBrowser {
             tab.addEventListener('dragend', (e) => {
                 tab.classList.remove('dragging');
                 
+                // Hide insertion line
+                hideInsertionLine();
+                
                 // Check if tab was dragged out of a folder
-                const tabId = parseInt(tab.dataset.tabId);
+                const tabId = parseInt(tab.dataset.tabId, 10);
                 if (tabId) {
                     // Find which folder this tab belongs to
                     const parentFolder = tab.closest('.folder');
                     if (parentFolder) {
-                        const folderId = parseInt(parentFolder.dataset.folderId);
+                        const folderId = parseInt(parentFolder.dataset.folderId, 10);
                         const folder = this.folders.get(folderId);
                         
                         // Check if tab is still in the folder or was moved out
@@ -6633,98 +7259,211 @@ class AxisBrowser {
                 draggedTab = null;
                 draggedIndex = -1;
                 
-                // Remove all drag-over classes
+                // Reset drag states
+                if (separator) {
+                    lastDragState = null;
+                    containerLastDragState = null;
+                }
+                
+                // Clean up drop side data
                 document.querySelectorAll('.tab').forEach(t => {
-                    t.classList.remove('drag-over', 'drag-over-top', 'drag-over-bottom');
+                    delete t.dataset.dropSide;
+                });
+                document.querySelectorAll('.folder').forEach(f => {
+                    delete f.dataset.dropSide;
                 });
                 
                 // Remove drag section indicators
                 if (separator) {
-                    separator.classList.remove('drag-over-pinned', 'drag-over-unpinned');
+                    hideInsertionLine();
                 }
-                tabsContainer.classList.remove('drag-into-pinned', 'drag-into-unpinned');
             });
 
             tab.addEventListener('dragover', (e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 e.dataTransfer.dropEffect = 'move';
                 
+                // Check if dragging a folder (use dragging class since getData doesn't work in dragover)
+                const draggedFolder = document.querySelector('.folder.dragging');
+                
+                if (draggedFolder) {
+                    // Handle folder dragging over tab
+                    const rect = tab.getBoundingClientRect();
+                    const containerRect = tabsContainer.getBoundingClientRect();
+                    const midpoint = rect.top + rect.height / 2;
+                    const isAbove = e.clientY < midpoint;
+                    
+                    // Position insertion line
+                    const lineY = isAbove ? rect.top - containerRect.top - 4 : rect.bottom - containerRect.top + 4;
+                    showInsertionLine(lineY);
+                    
+                    // Store which side for drop handler
+                    tab.dataset.dropSide = isAbove ? 'top' : 'bottom';
+                    return;
+                }
+                
+                if (!draggedTab || draggedTab === tab) return;
+                
                 const rect = tab.getBoundingClientRect();
+                const containerRect = tabsContainer.getBoundingClientRect();
                 const midpoint = rect.top + rect.height / 2;
                 const isAbove = e.clientY < midpoint;
                 
-                // Remove previous classes
-                tab.classList.remove('drag-over-top', 'drag-over-bottom');
+                // Position insertion line exactly in the gap between elements (gap is 8px, so 4px offset)
+                const lineY = isAbove ? rect.top - containerRect.top - 4 : rect.bottom - containerRect.top + 4;
+                showInsertionLine(lineY);
                 
-                // Add appropriate class
-                if (isAbove) {
-                    tab.classList.add('drag-over-top');
-                } else {
-                    tab.classList.add('drag-over-bottom');
-                }
+                // Store which side for drop handler
+                tab.dataset.dropSide = isAbove ? 'top' : 'bottom';
             });
 
             tab.addEventListener('dragleave', (e) => {
-                // Only remove classes if we're actually leaving the tab
+                // Only remove if actually leaving the tab
                 if (!tab.contains(e.relatedTarget)) {
-                    tab.classList.remove('drag-over', 'drag-over-top', 'drag-over-bottom');
+                    hideInsertionLine();
                 }
             });
 
             tab.addEventListener('drop', (e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 
-                if (draggedTab && draggedTab !== tab) {
-                    const tabId = parseInt(draggedTab.dataset.tabId);
-                    const draggedTabData = this.tabs.get(tabId);
-                    const dropTabId = parseInt(tab.dataset.tabId);
-                    const dropTabData = this.tabs.get(dropTabId);
+                // Hide insertion line
+                hideInsertionLine();
+                
+                // Check if dragging a folder (use getData in drop or dragging class)
+                const draggedFolderId = e.dataTransfer.getData('application/folder-id');
+                const currentDraggedFolder = (draggedFolderId ? document.querySelector(`[data-folder-id="${draggedFolderId}"]`) : null) || document.querySelector('.folder.dragging');
+                
+                if (currentDraggedFolder) {
+                    // Handle folder drop on tab
+                    const isAbove = tab.dataset.dropSide === 'top';
                     
-                    // Check if dragged tab was in a folder
-                    const draggedTabParentFolder = draggedTab.closest('.folder');
-                    if (draggedTabParentFolder) {
-                        const folderId = parseInt(draggedTabParentFolder.dataset.folderId);
-                        if (folderId) {
-                            this.removeTabFromFolder(tabId, folderId);
-                        }
+                    // Remove folder from DOM first
+                    currentDraggedFolder.remove();
+                    
+                    // Insert folder in correct position
+                    if (isAbove) {
+                        tabsContainer.insertBefore(currentDraggedFolder, tab);
+                    } else {
+                        tab.insertAdjacentElement('afterend', currentDraggedFolder);
                     }
                     
-                    if (draggedTabData && dropTabData) {
-                        const dropIndex = Array.from(tabsContainer.children).indexOf(tab);
-                        const isAbove = tab.classList.contains('drag-over-top');
-                        
-                        // Check if dropping crosses the separator boundary
-                        const separatorIndex = separator ? Array.from(tabsContainer.children).indexOf(separator) : -1;
-                        const draggedIsPinned = draggedTabData.pinned;
-                        const dropIsPinned = dropTabData.pinned;
-                        
-                        // If crossing separator, pin/unpin accordingly
-                        if (draggedIsPinned !== dropIsPinned) {
-                            // Tab is being moved across separator - update pin state
-                            if (isAbove && dropIsPinned && !draggedIsPinned) {
-                                // Moving unpinned tab above pinned tab - pin it
-                                draggedTabData.pinned = true;
-                                this.tabs.set(tabId, draggedTabData);
-                                draggedTab.classList.add('pinned');
-                            } else if (!isAbove && !dropIsPinned && draggedIsPinned) {
-                                // Moving pinned tab below unpinned tab - unpin it
-                                draggedTabData.pinned = false;
-                                this.tabs.set(tabId, draggedTabData);
-                                draggedTab.classList.remove('pinned');
-                            }
-                        }
-                        
-                        // Move the tab to new position
-                        this.organizeTabsByPinnedState();
-                        this.savePinnedTabs();
+                    // Clean up
+                    delete tab.dataset.dropSide;
+                    return;
+                }
+                
+                if (!draggedTab || draggedTab === tab) {
+                    // Clean up
+                    delete tab.dataset.dropSide;
+                    return;
+                }
+                
+                const tabId = parseInt(draggedTab.dataset.tabId, 10);
+                const draggedTabData = this.tabs.get(tabId);
+                const dropTabId = parseInt(tab.dataset.tabId, 10);
+                const dropTabData = this.tabs.get(dropTabId);
+                
+                if (!draggedTabData || !dropTabData) {
+                    // Clean up
+                    document.querySelectorAll('.tab').forEach(t => {
+                        delete t.dataset.dropSide;
+                    });
+                    document.querySelectorAll('.folder').forEach(f => {
+                        delete f.dataset.dropSide;
+                    });
+                    return;
+                }
+                
+                // Check if dragged tab was in a folder
+                const draggedTabParentFolder = draggedTab.closest('.folder');
+                if (draggedTabParentFolder) {
+                    const folderId = parseInt(draggedTabParentFolder.dataset.folderId, 10);
+                    if (folderId) {
+                        this.removeTabFromFolder(tabId, folderId);
                     }
                 }
                 
-                // Clean up
-                tab.classList.remove('drag-over', 'drag-over-top', 'drag-over-bottom');
+                const isAbove = tab.dataset.dropSide === 'top';
+                
+                // Get all tabs in order to find the correct insertion point
+                const allElements = Array.from(tabsContainer.children);
+                const targetIndex = allElements.indexOf(tab);
+                const draggedIndex = allElements.indexOf(draggedTab);
+                
+                // If dragging to same position, do nothing
+                if (draggedIndex !== -1 && targetIndex !== -1) {
+                    const newIndex = isAbove ? targetIndex : targetIndex + 1;
+                    if (draggedIndex < newIndex) {
+                        // Adjust for the fact that we're removing the dragged tab first
+                        if (newIndex > draggedIndex) {
+                            // We're moving forward, so the target index shifts
+                            const adjustedIndex = newIndex - 1;
+                            if (adjustedIndex === draggedIndex) {
+                                // Same position, do nothing
+                                return;
+                            }
+                        }
+                    }
+                }
+                
+                // Check if dropping crosses the separator boundary
+                const draggedIsPinned = draggedTabData.pinned;
+                const dropIsPinned = dropTabData.pinned;
+                
+                // If crossing separator, pin/unpin accordingly
+                if (draggedIsPinned !== dropIsPinned) {
+                    // Tab is being moved across separator - update pin state
+                    if (isAbove && dropIsPinned && !draggedIsPinned) {
+                        // Moving unpinned tab above pinned tab - pin it
+                        draggedTabData.pinned = true;
+                        this.tabs.set(tabId, draggedTabData);
+                        draggedTab.classList.add('pinned');
+                    } else if (!isAbove && !dropIsPinned && draggedIsPinned) {
+                        // Moving pinned tab below unpinned tab - unpin it
+                        draggedTabData.pinned = false;
+                        this.tabs.set(tabId, draggedTabData);
+                        draggedTab.classList.remove('pinned');
+                    }
+                }
+                
+                // Remove tab from DOM first
+                draggedTab.remove();
+                
+                // Insert tab in correct position
+                if (isAbove) {
+                    tabsContainer.insertBefore(draggedTab, tab);
+                } else {
+                    // Find the next sibling after tab
+                    const nextSibling = tab.nextElementSibling;
+                    if (nextSibling) {
+                        tabsContainer.insertBefore(draggedTab, nextSibling);
+                    } else {
+                        tabsContainer.appendChild(draggedTab);
+                    }
+                }
+                
+                // Move the tab to new position (only reorganize if pin state changed)
+                if (draggedIsPinned !== dropIsPinned) {
+                    this.organizeTabsByPinnedState();
+                }
+                this.savePinnedTabs();
+                
+                // Clean up - remove from all tabs and folders
+                document.querySelectorAll('.tab').forEach(t => {
+                    delete t.dataset.dropSide;
+                });
+                document.querySelectorAll('.folder').forEach(f => {
+                    delete f.dataset.dropSide;
+                });
             });
         };
 
+        // Store makeTabDraggable on class so it can be accessed from other methods
+        this.makeTabDraggable = makeTabDraggable;
+        
         // Make existing tabs draggable (including those in folders)
         document.querySelectorAll('.tab').forEach(makeTabDraggable);
 
@@ -6752,9 +7491,15 @@ class AxisBrowser {
             });
         });
         
+        // Track observed folder contents to prevent duplicate observations
+        const observedFolderContents = new WeakSet();
+        
         // Observe all folder content areas
         document.querySelectorAll('.folder-content').forEach(folderContent => {
-            folderObserver.observe(folderContent, { childList: true });
+            if (!observedFolderContents.has(folderContent)) {
+                folderObserver.observe(folderContent, { childList: true });
+                observedFolderContents.add(folderContent);
+            }
         });
         
         // Also observe when new folders are created
@@ -6763,8 +7508,9 @@ class AxisBrowser {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('folder')) {
                         const folderContent = node.querySelector('.folder-content');
-                        if (folderContent) {
+                        if (folderContent && !observedFolderContents.has(folderContent)) {
                             folderObserver.observe(folderContent, { childList: true });
+                            observedFolderContents.add(folderContent);
                             // Make existing tabs in this folder draggable
                             folderContent.querySelectorAll('.tab').forEach(makeTabDraggable);
                         }
@@ -6774,6 +7520,13 @@ class AxisBrowser {
         });
         
         folderContainerObserver.observe(tabsContainer, { childList: true });
+        
+        // Store observers on instance for potential cleanup (though they'll be cleaned up when page unloads)
+        this._dragDropObservers = {
+            mainObserver: observer,
+            folderObserver: folderObserver,
+            folderContainerObserver: folderContainerObserver
+        };
     }
 
     moveTab(fromIndex, toIndex) {
@@ -8521,10 +9274,44 @@ class AxisBrowser {
         
         // Copy all the webview event listeners from the main setupWebview method
         webview.addEventListener('did-start-loading', () => {
+            // Clear any existing timeout for this pane
+            const existingTimeout = this.splitViewLoadingTimeouts.get(pane);
+            if (existingTimeout) {
+                clearTimeout(existingTimeout);
+            }
+            
             this.showLoadingIndicator(pane);
+            
+            // Set timeout to handle stuck loading (30 seconds)
+            const timeout = setTimeout(() => {
+                // Check if webview is still loading
+                if (webview && webview.isLoading) {
+                    console.log(`Page in ${pane} pane taking too long to load, forcing stop`);
+                    // Force stop loading if it's been too long
+                    try {
+                        webview.stop();
+                    } catch (e) {
+                        console.error('Error stopping webview:', e);
+                    }
+                    // Hide loading indicator
+                    this.hideLoadingIndicator(pane);
+                    // Show error or allow user to continue
+                    this.showNotification(`Page in ${pane} pane is taking too long to load. You can try refreshing.`, 'warning');
+                }
+                this.splitViewLoadingTimeouts.delete(pane);
+            }, 30000); // 30 second timeout
+            
+            this.splitViewLoadingTimeouts.set(pane, timeout);
         });
 
         webview.addEventListener('did-finish-load', () => {
+            // Clear loading timeout for this pane
+            const timeout = this.splitViewLoadingTimeouts.get(pane);
+            if (timeout) {
+                clearTimeout(timeout);
+                this.splitViewLoadingTimeouts.delete(pane);
+            }
+            
             this.hideLoadingIndicator(pane);
             // Only update tab title if this is the active pane
             if ((pane === 'left' && this.activePane === 'left') || 
@@ -8542,8 +9329,27 @@ class AxisBrowser {
         });
 
         webview.addEventListener('did-fail-load', (event) => {
+            // Clear loading timeout for this pane
+            const timeout = this.splitViewLoadingTimeouts.get(pane);
+            if (timeout) {
+                clearTimeout(timeout);
+                this.splitViewLoadingTimeouts.delete(pane);
+            }
+            
             this.hideLoadingIndicator(pane);
             this.handleNavigationError(event, pane);
+        });
+        
+        // Add did-stop-loading event as backup for split view
+        webview.addEventListener('did-stop-loading', () => {
+            // Clear loading timeout for this pane
+            const timeout = this.splitViewLoadingTimeouts.get(pane);
+            if (timeout) {
+                clearTimeout(timeout);
+                this.splitViewLoadingTimeouts.delete(pane);
+            }
+            
+            this.hideLoadingIndicator(pane);
         });
         
         // Suppress WebGPU deprecation warnings from webview console
@@ -8613,12 +9419,18 @@ class AxisBrowser {
             if ((pane === 'left' && this.activePane === 'left') || 
                 (pane === 'right' && this.activePane === 'right')) {
                 if (event.favicons && event.favicons.length > 0) {
+                    const faviconUrl = event.favicons[0];
                     const tabElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
                     if (tabElement) {
                         const img = tabElement.querySelector('.tab-favicon');
                         if (img) {
                             img.style.visibility = 'visible';
-                            img.src = event.favicons[0]; // Use first favicon
+                            img.src = faviconUrl; // Use first favicon
+                            // Cache favicon in tab data
+                            const tab = this.tabs.get(this.currentTab);
+                            if (tab) {
+                                tab.favicon = faviconUrl;
+                            }
                         }
                     }
                 }
@@ -8687,7 +9499,7 @@ class AxisBrowser {
             document.getElementById(`loading-bar-${pane}`);
         
         if (indicator) {
-            indicator.style.display = 'block';
+            indicator.classList.add('loading');
         }
     }
 
@@ -8697,7 +9509,7 @@ class AxisBrowser {
             document.getElementById(`loading-bar-${pane}`);
         
         if (indicator) {
-            indicator.style.display = 'none';
+            indicator.classList.remove('loading');
         }
     }
 
@@ -8761,6 +9573,8 @@ class AxisBrowser {
         if (!backdrop) return;
         backdrop.classList.add('hidden');
         document.body.classList.remove('modal-open');
+        // Reset quit flag so X button works normally again
+        window.electronAPI.cancelQuit();
     }
 }
 
