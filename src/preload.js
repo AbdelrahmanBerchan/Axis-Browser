@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onCloseTab: (callback) => ipcRenderer.on('close-tab', callback),
   onRequestQuit: (callback) => ipcRenderer.on('request-quit', callback),
   confirmQuit: () => ipcRenderer.send('confirm-quit'),
+  cancelQuit: () => ipcRenderer.send('cancel-quit'),
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
   
   // Incognito window
