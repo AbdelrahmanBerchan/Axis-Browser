@@ -185,21 +185,21 @@ body {
     display: none;
 }
 
-/* Loading Bar - Completely Revamped */
+/* Loading Bar - Smooth and Elegant */
 .loading-bar {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
-    height: 3px;
+    height: 2px;
     background: transparent;
     z-index: 999999;
     opacity: 0;
-    transition: opacity 0.3s ease;
+    visibility: hidden;
+    transition: opacity 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                visibility 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     pointer-events: none;
-    /* Enhanced visual effects */
-    backdrop-filter: blur(2px);
-    box-shadow: 0 0 20px var(--animation-glow);
+    overflow: hidden;
 }
 
 .loading-bar::before {
@@ -211,34 +211,65 @@ body {
     height: 100%;
     background: linear-gradient(90deg, 
         transparent 0%, 
-        var(--animation-shimmer-light) 50%, 
+        rgba(255, 255, 255, 0.8) 30%,
+        rgba(255, 255, 255, 1) 50%,
+        rgba(255, 255, 255, 0.8) 70%,
         transparent 100%);
     transform: translateX(-100%);
-    animation: loading-sweep 1.5s ease-in-out infinite;
-    /* Enhanced visual effects */
-    box-shadow: 0 0 10px var(--animation-glow);
-    border-radius: 2px;
+    will-change: transform;
+}
+
+.loading-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, 
+        transparent 0%, 
+        rgba(255, 255, 255, 0.4) 50%,
+        transparent 100%);
+    transform: translateX(-100%);
+    will-change: transform;
 }
 
 .loading-bar.loading {
     opacity: 1;
+    visibility: visible;
 }
 
 .loading-bar.loading::before {
-    animation: loading-sweep 1.5s ease-in-out infinite;
+    animation: loading-sweep 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
-.loading-bar:not(.loading)::before {
+.loading-bar.loading::after {
+    animation: loading-glow 2s ease-in-out infinite;
+}
+
+.loading-bar:not(.loading)::before,
+.loading-bar:not(.loading)::after {
     animation: none;
     transform: translateX(-100%);
 }
 
 @keyframes loading-sweep {
     0% {
-        transform: translate3d(-100%, 0, 0);
+        transform: translateX(-100%);
     }
     100% {
-        transform: translate3d(100%, 0, 0);
+        transform: translateX(100%);
+    }
+}
+
+@keyframes loading-glow {
+    0%, 100% {
+        transform: translateX(-100%);
+        opacity: 0.4;
+    }
+    50% {
+        transform: translateX(0%);
+        opacity: 0.8;
     }
 }
 
@@ -452,16 +483,39 @@ body {
     border-radius: 2px;
 }
 
+/* Larger invisible hit area for easier grabbing without making it visually thicker */
+.resize-handle::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -8px;
+    right: -8px;
+    background: transparent;
+    cursor: col-resize;
+    z-index: -1;
+}
+
 .resize-handle:hover {
     background: rgba(255, 255, 255, 0.2);
     width: 6px;
     right: -3px;
 }
 
+.resize-handle:hover::before {
+    left: -7px;
+    right: -7px;
+}
+
 .resize-handle:active {
     background: rgba(255, 255, 255, 0.3);
     width: 6px;
     right: -3px;
+}
+
+.resize-handle:active::before {
+    left: -7px;
+    right: -7px;
 }
 
 /* Resizing state */
@@ -847,6 +901,7 @@ body.resizing .resize-handle {
     /* Align with URL bar - same horizontal padding */
     padding-left: 8px;
     padding-right: 8px;
+    position: relative;
 }
 
 .tabs-container.vertical {
@@ -881,61 +936,21 @@ body.resizing .resize-handle {
     display: none;
 }
 
-/* Drag outline animations for pinned/unpinned sections */
-.tabs-separator::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: -2px;
-    bottom: -2px;
-    border: 2px solid transparent;
-    border-radius: 8px;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/* Separator color change when dragging over pinned/unpinned sections */
+.tabs-separator.drag-over-pinned {
+    background: linear-gradient(to right, transparent, rgba(255, 193, 7, 0.6), transparent);
 }
 
-.tabs-separator.drag-over-pinned::after {
-    border-color: rgba(255, 215, 0, 0.7);
-    opacity: 1;
-    animation: outlinePulse 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
-    transform: scale(1);
-    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+.tabs-separator.drag-over-pinned::before {
+    background: rgba(255, 193, 7, 0.8);
 }
 
-.tabs-separator.drag-over-unpinned::after {
-    border-color: rgba(255, 255, 255, 0.7);
-    opacity: 1;
-    animation: outlinePulseUnpinned 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
-    transform: scale(1);
-    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+.tabs-separator.drag-over-unpinned {
+    background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.5), transparent);
 }
 
-@keyframes outlinePulse {
-    0%, 100% {
-        box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.5), 0 0 20px rgba(255, 215, 0, 0.2);
-        border-color: rgba(255, 215, 0, 0.7);
-        transform: scale(1);
-    }
-    50% {
-        box-shadow: 0 0 0 6px rgba(255, 215, 0, 0), 0 0 30px rgba(255, 215, 0, 0.3);
-        border-color: rgba(255, 215, 0, 0.95);
-        transform: scale(1.02);
-    }
-}
-
-@keyframes outlinePulseUnpinned {
-    0%, 100% {
-        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.5), 0 0 20px rgba(255, 255, 255, 0.2);
-        border-color: rgba(255, 255, 255, 0.7);
-        transform: scale(1);
-    }
-    50% {
-        box-shadow: 0 0 0 6px rgba(255, 255, 255, 0), 0 0 30px rgba(255, 255, 255, 0.3);
-        border-color: rgba(255, 255, 255, 0.95);
-        transform: scale(1.02);
-    }
+.tabs-separator.drag-over-unpinned::before {
+    background: rgba(255, 255, 255, 0.7);
 }
 
 /* Removed dotted drag indicators for pinned/unpinned sections - using separator animation only */
@@ -992,27 +1007,32 @@ body.resizing .resize-handle {
     filter: blur(0.5px);
 }
 
-.tab.drag-over {
-    border-top: 3px solid rgba(74, 144, 226, 0.8);
-    transform: translateY(-2px);
+.folder.dragging {
+    opacity: 0.4;
+    transform: rotate(2deg) scale(0.95);
+    z-index: 1000;
+    box-shadow: 0 12px 32px var(--animation-shadow-medium), 0 0 0 1px var(--animation-border);
     transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    filter: blur(0.5px);
 }
 
-.tab.drag-over-top {
-    border-top: 3px solid rgba(74, 144, 226, 0.8);
-    transform: translateY(-3px) scale(1.02);
-    background: rgba(74, 144, 226, 0.1);
-    box-shadow: 0 4px 16px rgba(74, 144, 226, 0.2);
-    transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+/* Elegant drag drop insertion line - appears BETWEEN elements */
+.drag-insertion-line {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.5),
+                0 0 4px rgba(255, 255, 255, 0.3);
+    z-index: 10000;
+    pointer-events: none;
+    display: none;
+    margin-top: -1px;
+    border-radius: 1px;
 }
 
-.tab.drag-over-bottom {
-    border-bottom: 3px solid rgba(74, 144, 226, 0.8);
-    transform: translateY(3px) scale(1.02);
-    background: rgba(74, 144, 226, 0.1);
-    box-shadow: 0 4px 16px rgba(74, 144, 226, 0.2);
-    transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
+/* Remove old indicators - insertion line handles all drag indicators */
 
 /* Hover state - only for non-active tabs when actually hovering - EXACTLY LIKE FOLDERS */
 .tab:hover:not(.active) {
@@ -4089,8 +4109,7 @@ body.light-theme .shortcut-desc {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(8px);
+    background: transparent;
     transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
@@ -4483,7 +4502,7 @@ body.light-theme .shortcut-desc {
 }
 
 .tab.pinned.active {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(255, 193, 7, 0.15);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     background: rgba(255, 255, 255, 0.05);
     border: none;
 }
@@ -4499,13 +4518,13 @@ body.light-theme .shortcut-desc {
 .tab.pinned:not(.active):not(:hover) {
     background: transparent !important;
     border: none !important;
-    box-shadow: 0 0 0 0.5px rgba(255, 193, 7, 0.15) !important;
+    box-shadow: none !important;
     transform: none !important;
 }
 
 .tab.pinned {
     transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(255, 193, 7, 0.15);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     background: transparent;
     border: none;
     animation: pinAnimation 0.3s ease;
@@ -4514,7 +4533,7 @@ body.light-theme .shortcut-desc {
 }
 
 .tab.just-pinned {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(255, 193, 7, 0.2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .tab.just-unpinned {
@@ -4540,12 +4559,11 @@ body.light-theme .shortcut-desc {
     background: transparent;
     border-radius: 10px;
     cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    transition: background 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
                 background-color 80ms ease,
-                background 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                box-shadow 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                border 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                border 0.15s cubic-bezier(0.4, 0, 0.2, 1),
                 color 80ms ease;
     position: relative;
     border: none;
@@ -4558,21 +4576,30 @@ body.light-theme .shortcut-desc {
     display: flex;
     flex-direction: column;
     will-change: transform, background, box-shadow;
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 
-.folder:hover {
+.folder:hover:not(.active) {
     transform: none;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 12px var(--animation-shadow-light);
+    background: transparent;
     border: none;
 }
 
-.folder:hover .folder-icon {
+.folder:hover:not(.active) .folder-icon {
     transform: scale(1.05);
 }
 
-.folder:hover .folder-name-input {
+.folder:hover:not(.active) .folder-name-input {
     color: var(--text-color);
+}
+
+/* Ensure folders without hover are transparent - same as tabs */
+.folder:not(:hover) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
 }
 
 .folder .tab-content {
@@ -4592,7 +4619,11 @@ body.light-theme .shortcut-desc {
     justify-content: center;
     flex-shrink: 0;
     opacity: 0.7;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: color, transform;
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 
 .folder-icon-animate {
@@ -4633,7 +4664,7 @@ body.light-theme .shortcut-desc {
 
 .folder-name-input:read-only {
     cursor: pointer;
-    pointer-events: auto;
+    pointer-events: none;
 }
 
 .folder-name-input:not(:read-only) {
@@ -4649,18 +4680,88 @@ body.light-theme .shortcut-desc {
 }
 
 
+/* Professional folder drag animations */
+.folder::before {
+    content: '';
+    position: absolute;
+    left: -2px;
+    right: -2px;
+    top: -2px;
+    bottom: -2px;
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 0 0 transparent;
+    z-index: 0;
+    will-change: opacity, border-color, box-shadow;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+}
+
 .folder.drag-over-folder {
-    background: rgba(74, 144, 226, 0.2);
-    border: 2px solid rgba(74, 144, 226, 0.6);
-    transform: scale(1.02);
-    box-shadow: 0 6px 20px rgba(74, 144, 226, 0.3), inset 0 0 0 1px rgba(74, 144, 226, 0.2);
-    transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.folder.drag-over-folder::before {
+    border-color: rgba(255, 255, 255, 0.6);
+    opacity: 1;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15),
+                0 4px 16px rgba(255, 255, 255, 0.25);
 }
 
 .folder.drag-over-folder .folder-icon {
-    transform: scale(1.1);
-    color: rgba(74, 144, 226, 1);
-    transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    color: rgba(255, 255, 255, 0.9);
+    transform: scale(1.05);
+}
+
+.folder.drag-over-folder-top,
+.folder.drag-over-folder-bottom {
+    position: relative;
+}
+
+.folder.drag-over-folder .folder-name-input {
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.folder.drag-over-folder .folder-content {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+}
+
+@keyframes fadeInFolder {
+    from {
+        background: transparent;
+    }
+    to {
+        background: rgba(255, 255, 255, 0.12);
+    }
+}
+
+@keyframes fadeInFolderBorder {
+    from {
+        opacity: 0;
+        border-color: transparent;
+        box-shadow: 0 0 0 0 transparent;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes fadeInFolderIcon {
+    from {
+        color: var(--text-color-muted);
+        transform: scale(1);
+    }
+    to {
+        color: rgba(255, 255, 255, 0.9);
+        transform: scale(1.05);
+    }
 }
 
 .folder-content {
@@ -5638,11 +5739,72 @@ button, input, select, .tab, .nav-btn, .url-icon, .add-tab-btn, .tab-close, .set
     left: 0;
     right: 0;
     height: 2px;
-    background: linear-gradient(90deg, transparent, #4a90e2, transparent);
-    background-size: 200% 100%;
-    animation: loading 1.5s infinite;
+    background: transparent;
     z-index: 1000;
-    display: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                visibility 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    pointer-events: none;
+    overflow: hidden;
+}
+
+#loading-bar-left::before,
+#loading-bar-right::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, 
+        transparent 0%, 
+        rgba(255, 255, 255, 0.8) 30%,
+        rgba(255, 255, 255, 1) 50%,
+        rgba(255, 255, 255, 0.8) 70%,
+        transparent 100%);
+    transform: translateX(-100%);
+    will-change: transform;
+}
+
+#loading-bar-left::after,
+#loading-bar-right::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, 
+        transparent 0%, 
+        rgba(255, 255, 255, 0.4) 50%,
+        transparent 100%);
+    transform: translateX(-100%);
+    will-change: transform;
+}
+
+#loading-bar-left.loading,
+#loading-bar-right.loading {
+    opacity: 1;
+    visibility: visible;
+}
+
+#loading-bar-left.loading::before,
+#loading-bar-right.loading::before {
+    animation: loading-sweep 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+#loading-bar-left.loading::after,
+#loading-bar-right.loading::after {
+    animation: loading-glow 2s ease-in-out infinite;
+}
+
+#loading-bar-left:not(.loading)::before,
+#loading-bar-left:not(.loading)::after,
+#loading-bar-right:not(.loading)::before,
+#loading-bar-right:not(.loading)::after {
+    animation: none;
+    transform: translateX(-100%);
 }
 
 #zoom-indicator-left, #zoom-indicator-right {
@@ -5834,8 +5996,9 @@ body.resizing .right-pane {
     letter-spacing: 0.2px;
     border: 1px solid transparent;
     cursor: pointer;
-    transition: background 180ms ease, color 180ms ease, border-color 180ms ease,
-                transform 120ms ease;
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .btn-secondary {
@@ -5845,7 +6008,16 @@ body.resizing .right-pane {
 }
 
 .btn-secondary:hover {
-    background: rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.20);
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25),
+                0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.btn-secondary:active {
+    transform: translateY(0) scale(0.98);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 
 .btn-primary {
@@ -5855,7 +6027,16 @@ body.resizing .right-pane {
 }
 
 .btn-primary:hover {
-    filter: brightness(1.05);
+    filter: brightness(1.1);
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 6px 16px rgba(255, 77, 79, 0.4),
+                0 0 0 1px rgba(255, 77, 79, 0.3);
+}
+
+.btn-primary:active {
+    transform: translateY(0) scale(0.98);
+    box-shadow: 0 2px 8px rgba(255, 77, 79, 0.3);
+    filter: brightness(0.95);
 }
 
 /* Prevent background scroll when modal open */
