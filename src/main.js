@@ -140,6 +140,8 @@ function createWindow() {
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    // Show window controls by default (sidebar is visible)
+    mainWindow.setWindowButtonVisibility(true);
   });
 
   // Handle window closed
@@ -578,5 +580,12 @@ ipcMain.on('cancel-quit', () => {
   // Reset flags when user cancels quit confirmation
   isQuitConfirmed = false;
   isUserQuitting = false;
+});
+
+// Toggle window button visibility (macOS traffic lights)
+ipcMain.handle('set-window-button-visibility', (event, visible) => {
+  if (mainWindow) {
+    mainWindow.setWindowButtonVisibility(visible);
+  }
 });
 
