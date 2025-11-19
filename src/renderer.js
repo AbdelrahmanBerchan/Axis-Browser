@@ -46,8 +46,6 @@ class AxisBrowser {
             downloadsBtnFooter: document.getElementById('downloads-btn-footer'),
             closeDownloads: document.getElementById('close-downloads'),
             refreshDownloads: document.getElementById('refresh-downloads'),
-            bookmarksBtnFooter: document.getElementById('bookmarks-btn-footer'),
-            closeBookmarks: document.getElementById('close-bookmarks'),
             closeSecurity: document.getElementById('close-security'),
             viewCertificate: document.getElementById('view-certificate'),
             securitySettings: document.getElementById('security-settings'),
@@ -63,7 +61,6 @@ class AxisBrowser {
             splitView: document.getElementById('split-view'),
             settingsPanel: document.getElementById('settings-panel'),
             downloadsPanel: document.getElementById('downloads-panel'),
-            bookmarksPanel: document.getElementById('bookmarks-panel'),
             notesPanel: document.getElementById('notes-panel'),
             modalBackdrop: document.getElementById('modal-backdrop')
         };
@@ -71,13 +68,13 @@ class AxisBrowser {
 
     async init() {
         await this.loadSettings();
+        this.applySidebarPosition(); // Apply saved sidebar position
         this.resetToBlackTheme(); // Start with black theme
         this.setupEventListeners();
         this.setupWebview();
         this.setupTabSearch();
         this.setupLoadingScreen();
         this.setupSidebarResize();
-        this.setupAddTabMenu();
         
         // Load pinned tabs from saved state
         await this.loadPinnedTabs();
@@ -319,9 +316,6 @@ class AxisBrowser {
             }
         });
 
-        // Bookmarks - use cached elements
-        el.bookmarksBtnFooter?.addEventListener('click', () => this.toggleBookmarks());
-        el.closeBookmarks?.addEventListener('click', () => this.toggleBookmarks());
 
         // Keyboard shortcuts - now handled through settings panel
 
@@ -330,7 +324,6 @@ class AxisBrowser {
         el.modalBackdrop.addEventListener('click', () => {
             const settingsPanel = el.settingsPanel;
             const downloadsPanel = el.downloadsPanel;
-            const bookmarksPanel = el.bookmarksPanel;
             const notesPanel = el.notesPanel;
             
             // Close settings with animation
@@ -348,15 +341,6 @@ class AxisBrowser {
                 setTimeout(() => {
                     downloadsPanel.classList.add('hidden');
                     downloadsPanel.classList.remove('downloads-closing');
-                }, 150);
-            }
-            
-            // Close bookmarks with animation
-            if (bookmarksPanel && !bookmarksPanel.classList.contains('hidden')) {
-                bookmarksPanel.classList.add('bookmarks-closing');
-                setTimeout(() => {
-                    bookmarksPanel.classList.add('hidden');
-                    bookmarksPanel.classList.remove('bookmarks-closing');
                 }, 150);
             }
             
@@ -411,14 +395,20 @@ class AxisBrowser {
             this.hideSidebarContextMenu();
         });
 
-        document.getElementById('sidebar-new-note-option').addEventListener('click', () => {
-            this.toggleNotes();
-            this.hideSidebarContextMenu();
-        });
-
         document.getElementById('sidebar-new-folder-option').addEventListener('click', () => {
             this.createNewFolder();
             this.hideSidebarContextMenu();
+        });
+
+        document.getElementById('sidebar-position-option').addEventListener('click', () => {
+            this.toggleSidebarPosition();
+            this.hideSidebarContextMenu();
+        });
+
+        // Nav menu sidebar position button
+        document.getElementById('sidebar-position-btn').addEventListener('click', () => {
+            this.toggleSidebarPosition();
+            this.closeNavMenu();
         });
 
         // Folder context menu event listeners
@@ -454,13 +444,10 @@ class AxisBrowser {
             // Escape key to close panels
             if (e.key === 'Escape') {
                 const downloadsPanel = document.getElementById('downloads-panel');
-                const bookmarksPanel = document.getElementById('bookmarks-panel');
                 const settingsPanel = document.getElementById('settings-panel');
                 
                 if (!downloadsPanel.classList.contains('hidden')) {
                     this.toggleDownloads();
-                } else if (!bookmarksPanel.classList.contains('hidden')) {
-                    this.toggleBookmarks();
                 } else if (!settingsPanel.classList.contains('hidden')) {
                     this.toggleSettings();
                 }
@@ -563,11 +550,12 @@ class AxisBrowser {
             this.hideWebpageContextMenu();
         });
 
-        // Bookmark and security buttons
-        document.getElementById('bookmark-btn').addEventListener('click', () => {
-            this.toggleBookmark();
+        // Copy link button
+        document.getElementById('copy-link-btn').addEventListener('click', () => {
+            this.copyCurrentUrl();
         });
 
+        // Security button
         document.getElementById('security-btn').addEventListener('click', () => {
             this.toggleSecurity();
         });
@@ -743,309 +731,247 @@ class AxisBrowser {
         });
     }
 
-    setupWebview() {
-        const webview = this.elements?.webview;
+    setupWebviewEventListeners(webview, tabId) {
         if (!webview) return;
+
+        webview.dataset.tabId = String(tabId);
         
         // Optimize webview for performance
         webview.style.willChange = 'transform';
         webview.style.transform = 'translateZ(0)';
         webview.style.backfaceVisibility = 'hidden';
         
-        // Enable webview functionality
-        // Direct updates for maximum speed
-        const debouncedUpdateNav = () => this.updateNavigationButtons();
-        const debouncedUpdateUrl = () => this.updateUrlBar();
-        const debouncedUpdateTitle = () => this.updateTabTitle();
-        const debouncedUpdateSecurity = () => this.updateSecurityIndicator();
+        const isActiveTab = () => this.currentTab === tabId && !this.isSplitView;
+        const getTab = () => this.tabs.get(tabId);
+        const clearLoadingTimeout = () => {
+            if (webview.__loadingTimeout) {
+                clearTimeout(webview.__loadingTimeout);
+                webview.__loadingTimeout = null;
+            }
+        };
 
         webview.addEventListener('did-start-loading', () => {
-            // Check if we're benchmarking early
+            if (!isActiveTab()) return;
+
             const currentUrl = webview.getURL() || '';
             this.isBenchmarking = /browserbench\.org\/speedometer/i.test(currentUrl);
-            
-            // Skip ALL UI updates during benchmarks
             if (this.isBenchmarking) return;
             
-            // Clear any existing timeout
-            if (this.loadingTimeout) {
-                clearTimeout(this.loadingTimeout);
-                this.loadingTimeout = null;
-            }
-            
-            // Show loading indicator
+            clearLoadingTimeout();
             this.showLoadingIndicator();
             this.updateNavigationButtons();
             
-            // Set timeout to handle stuck loading (30 seconds)
-            this.loadingTimeout = setTimeout(() => {
-                // Check if webview is still loading
+            webview.__loadingTimeout = setTimeout(() => {
+                if (!isActiveTab()) return;
                 if (webview && webview.isLoading) {
                     console.log('Page taking too long to load, forcing stop');
-                    // Force stop loading if it's been too long
                     try {
                         webview.stop();
                     } catch (e) {
                         console.error('Error stopping webview:', e);
                     }
-                    // Hide loading indicator
                     this.hideLoadingIndicator();
-                    // Show error or allow user to continue
                     this.showNotification('Page is taking too long to load. You can try refreshing.', 'warning');
                 }
-                this.loadingTimeout = null;
-            }, 30000); // 30 second timeout
+                clearLoadingTimeout();
+            }, 30000);
         });
 
         webview.addEventListener('did-finish-load', () => {
-            // Clear loading timeout
-            if (this.loadingTimeout) {
-                clearTimeout(this.loadingTimeout);
-                this.loadingTimeout = null;
+            clearLoadingTimeout();
+
+            const tab = getTab();
+            if (tab) {
+                const currentUrl = webview.getURL();
+                const currentTitle = webview.getTitle();
+                if (currentUrl && currentUrl !== 'about:blank') {
+                    tab.url = currentUrl;
             }
-            
-            // Skip ALL UI updates during benchmarks - they slow down Speedometer
+                if (currentTitle) {
+                    tab.title = currentTitle;
+                }
+            }
+
+            if (!isActiveTab()) return;
             if (this.isBenchmarking) {
-                // Only reset counters, no UI work
                 this.errorRetryCount = 0;
                 this.dnsRetryCount = 0;
                 return;
             }
             
-            // Hide loading indicator
             this.hideLoadingIndicator();
-            
-            // Reset retry counters on successful load
             this.errorRetryCount = 0;
             this.dnsRetryCount = 0;
             
-            // Batch all updates for maximum speed using requestAnimationFrame
             this.batchDOMUpdates([
                 () => this.updateNavigationButtons(),
                 () => this.updateUrlBar(),
                 () => this.updateTabTitle(),
                 () => this.updateSecurityIndicator(),
-                () => this.updateBookmarkButton()
             ]);
             
-            // Update current tab state
-            if (this.currentTab && this.tabs.has(this.currentTab)) {
-                const currentTab = this.tabs.get(this.currentTab);
-                const currentUrl = webview.getURL();
-                const currentTitle = webview.getTitle();
-                
-                // Update URL if changed
-                if (currentUrl && currentUrl !== 'about:blank') {
-                    currentTab.url = currentUrl;
-                }
-                
-                // Update title if changed
-                if (currentTitle) {
-                    currentTab.title = currentTitle;
-                }
-            }
-            
-            // Track page in history immediately
-            if (!this.isBenchmarking) {
                 this.trackPageInHistory();
+
+            const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+            if (tabElement) {
+                this.updateTabFavicon(tabId, tabElement);
             }
             
-            // Update favicon after page loads (as backup)
-            const tabElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
-            if (tabElement && !this.isBenchmarking) {
-                this.updateTabFavicon(this.currentTab, tabElement);
-            }
-            
-            // Extract and apply webpage colors immediately (no delays)
             this.extractAndApplyWebpageColors(webview);
         });
 
-        // Add did-stop-loading event as backup
         webview.addEventListener('did-stop-loading', () => {
-            // Clear loading timeout
-            if (this.loadingTimeout) {
-                clearTimeout(this.loadingTimeout);
-                this.loadingTimeout = null;
-            }
-            
-            // Skip ALL UI updates during benchmarks
-            if (!this.isBenchmarking) {
+            clearLoadingTimeout();
+            if (!isActiveTab() || this.isBenchmarking) return;
+
                 this.hideLoadingIndicator();
-                // Batch DOM updates
                 this.batchDOMUpdates([
                     () => this.updateUrlBar(),
                     () => this.updateNavigationButtons(),
                     () => this.updateTabTitle()
                 ]);
-                // Also extract theme when loading stops immediately (no delays)
                 this.extractAndApplyWebpageColors(webview);
-            }
         });
         
-        // Suppress WebGPU deprecation warnings from webview console
         webview.addEventListener('console-message', (e) => {
-            // Filter out the DawnExperimentalSubgroupLimits deprecation warning
             if (e.message && e.message.includes('DawnExperimentalSubgroupLimits') && e.message.includes('deprecated')) {
-                // Suppress this specific warning
                 return;
             }
-            // Allow other console messages through (optional - you can remove this if you want to suppress all)
         });
 
         webview.addEventListener('did-fail-load', (event) => {
-            // Clear loading timeout
-            if (this.loadingTimeout) {
-                clearTimeout(this.loadingTimeout);
-                this.loadingTimeout = null;
+            clearLoadingTimeout();
+            const tab = getTab();
+
+            if (isActiveTab()) {
+            this.hideLoadingIndicator();
             }
             
-            console.error('Failed to load:', event.errorDescription, 'Error code:', event.errorCode);
-            // Hide loading indicator even on failure
-            this.hideLoadingIndicator();
-            
-            // Prevent infinite retry loops
             if (this.errorRetryCount >= 5) {
-                console.log('Max error retries reached, showing error page');
-                this.showErrorPage('Unable to load page. Please check your internet connection.');
+                if (isActiveTab()) {
+                    this.showErrorPage('Unable to load page. Please check your internet connection.', webview);
+                }
                 return;
             }
             
             this.errorRetryCount = (this.errorRetryCount || 0) + 1;
             
-            // Handle different types of errors
             if (event.errorCode === -2) {
-                // Network error - reload immediately
-                console.log('Network error, attempting to reload...');
                     webview.reload();
             } else if (event.errorCode === -3) {
-                // Aborted - usually means navigation was cancelled
                 console.log('Navigation aborted');
             } else if (event.errorCode === -105) {
-                // ERR_NAME_NOT_RESOLVED - DNS issue
                 console.log('DNS resolution failed, trying alternative approach...');
                 const currentUrl = event.url || webview.getURL() || 'https://www.google.com';
-                this.handleDNSFailure(currentUrl);
-            } else {
-                // Other errors - show error page
-                this.showErrorPage(event.errorDescription);
+                this.handleDNSFailure(currentUrl, webview);
+            } else if (isActiveTab()) {
+                this.showErrorPage(event.errorDescription, webview);
+            }
+
+            if (tab && event.validatedURL) {
+                tab.url = event.validatedURL;
             }
         });
 
         webview.addEventListener('new-window', (event) => {
-            // Handle new window requests
             event.preventDefault();
             this.navigate(event.url);
         });
 
-        // Handle navigation events - optimized for performance
         webview.addEventListener('will-navigate', (event) => {
+            if (!isActiveTab()) return;
             const nextUrl = event.url || '';
             this.isBenchmarking = /browserbench\.org\/speedometer/i.test(nextUrl);
-            // Skip ALL UI updates during benchmarks - they slow down Speedometer
             if (!this.isBenchmarking) {
                 this.updateUrlBar();
             }
         });
 
-        // Handle navigation completion (fires for all navigation types)
-        webview.addEventListener('did-navigate', (event) => {
-            // Skip ALL UI updates during benchmarks - they slow down Speedometer
-            if (!this.isBenchmarking) {
+        webview.addEventListener('did-navigate', () => {
+            if (!isActiveTab() || this.isBenchmarking) return;
                 this.batchDOMUpdates([
                     () => this.updateUrlBar(),
                     () => this.updateNavigationButtons()
                 ]);
-            }
         });
 
-        // Handle same-page navigation (SPAs, anchor links, etc.)
-        webview.addEventListener('did-navigate-in-page', (event) => {
-            // Skip ALL UI updates during benchmarks
-            if (!this.isBenchmarking) {
+        webview.addEventListener('did-navigate-in-page', () => {
+            if (!isActiveTab() || this.isBenchmarking) return;
                 this.batchDOMUpdates([
                     () => this.updateUrlBar(),
                     () => this.updateNavigationButtons(),
                     () => this.updateTabTitle()
                 ]);
-            }
         });
 
-        // Handle page title updates (may fire independently of navigation)
-        webview.addEventListener('page-title-updated', async (event) => {
-            if (!this.isBenchmarking) {
+        webview.addEventListener('page-title-updated', async () => {
+            const tab = getTab();
+            if (tab) {
+                tab.title = webview.getTitle() || tab.title;
+            }
+
+            if (!isActiveTab() || this.isBenchmarking) return;
                 this.updateTabTitle();
                 
-                // If this is a note tab with 'new' URL, try to update it after first save
-                const tab = this.tabs.get(this.currentTab);
                 if (tab && tab.url === 'axis:note://new') {
-                    // Check if note was saved by getting the latest note with this title
                     const title = webview.getTitle();
                     if (title && title !== 'New Note') {
                         try {
                             const notes = await window.electronAPI.getNotes();
                             const savedNote = notes.find(n => n.title === title);
                             if (savedNote) {
-                                // Update tab URL to use the saved note ID
                                 tab.url = `axis:note://${savedNote.id}`;
                                 tab.noteId = savedNote.id;
-                                this.tabs.set(this.currentTab, tab);
                             }
                         } catch (err) {
                             console.error('Error updating note tab URL:', err);
-                        }
                     }
                 }
             }
         });
 
-        // Handle favicon updates
         webview.addEventListener('page-favicon-updated', (event) => {
-            const tabElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
-            if (tabElement && event.favicons && event.favicons.length > 0) {
+            if (!event.favicons || event.favicons.length === 0) return;
                 const faviconUrl = event.favicons[0];
+            const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+            if (tabElement) {
                 const img = tabElement.querySelector('.tab-favicon');
                 if (img) {
                     img.style.visibility = 'visible';
-                    img.src = faviconUrl; // Use first favicon
-                    // Cache favicon in tab data
-                    const tab = this.tabs.get(this.currentTab);
+                    img.src = faviconUrl;
+                }
+            }
+            const tab = getTab();
                     if (tab) {
                         tab.favicon = faviconUrl;
                     }
-                }
-            }
         });
-        
-        // Set initial page with error handling and network check
-        this.checkNetworkAndLoad();
-        
-        // Set up event listeners for the initial tab
-        const initialTab = document.querySelector('.tab[data-tab-id="1"]');
-        if (initialTab) {
-            this.setupTabEventListeners(initialTab, 1);
-        }
 
-        // Set up webview context menu
         webview.addEventListener('contextmenu', (e) => {
+            if (!isActiveTab()) return;
             e.preventDefault();
             e.stopPropagation();
-            // Get mouse position relative to the document
             const rect = webview.getBoundingClientRect();
             const x = e.clientX + rect.left;
             const y = e.clientY + rect.top;
             this.showWebpageContextMenu({ pageX: x, pageY: y });
         });
+    }
         
-        // Removed sidebar resizing functionality
+    setupWebview() {
+        // This function is kept for backward compatibility but is no longer used
+        // Webviews are now created per-tab in createTabWebview
     }
 
-    handleDNSFailure(url) {
+    handleDNSFailure(url, targetWebview = null) {
         console.log('Handling DNS failure for:', url);
+        
+        const webview = targetWebview || this.getActiveWebview();
+        if (!webview) return;
         
         // Prevent infinite retry loops
         if (this.dnsRetryCount >= 3) {
             console.log('Max DNS retries reached, falling back to Google');
-            const webview = document.getElementById('webview');
             webview.src = 'https://www.google.com';
             return;
         }
@@ -1058,27 +984,85 @@ class AxisBrowser {
         
         console.log(`DNS retry ${this.dnsRetryCount}/3, trying:`, fallbackUrl);
         
-        const webview = document.getElementById('webview');
         const sanitizedFallbackUrl = this.sanitizeUrl(fallbackUrl);
         webview.src = sanitizedFallbackUrl || 'https://www.google.com';
     }
 
-    checkNetworkAndLoad() {
-        const webview = document.getElementById('webview');
-        
-        // Simple approach - just load Google directly
-        try {
-            console.log('Loading initial page...');
-            webview.src = 'https://www.google.com';
-        } catch (error) {
-            console.error('Failed to load initial page:', error);
-            // Fallback to a simple HTML page
-            webview.src = 'data:text/html,<html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;"><h1>Axis Browser</h1><p>Loading...</p></body></html>';
-        }
+    showErrorPage(message, targetWebview = null) {
+        const webview = targetWebview || this.getActiveWebview();
+        if (!webview) return;
+        const errorHtml = `
+            <html>
+                <head>
+                    <title>Error - Axis Browser</title>
+                    <style>
+                        body { 
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                            background: #1a1a1a;
+                            color: #ffffff;
+                            margin: 0;
+                            padding: 50px;
+                            text-align: center;
+                        }
+                        .error-container {
+                            max-width: 600px;
+                            margin: 0 auto;
+                            padding: 40px;
+                            background: #2a2a2a;
+                            border-radius: 12px;
+                            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                        }
+                        .error-icon {
+                            font-size: 48px;
+                            color: #ff6b6b;
+                            margin-bottom: 20px;
+                        }
+                        .error-title {
+                            font-size: 24px;
+                            margin-bottom: 16px;
+                            color: #ffffff;
+                        }
+                        .error-message {
+                            font-size: 16px;
+                            color: #cccccc;
+                            margin-bottom: 30px;
+                            line-height: 1.5;
+                        }
+                        .retry-button {
+                            background: #007AFF;
+                            color: white;
+                            border: none;
+                            padding: 12px 24px;
+                            border-radius: 8px;
+                            font-size: 16px;
+                            cursor: pointer;
+                            transition: background 0.2s;
+                        }
+                        .retry-button:hover {
+                            background: #0056CC;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="error-container">
+                        <div class="error-icon">⚠️</div>
+                        <h1 class="error-title">Unable to Load Page</h1>
+                        <p class="error-message">${message}</p>
+                        <button class="retry-button" onclick="window.location.href='https://www.google.com'">Go to Google</button>
+                    </div>
+                </body>
+            </html>
+        `;
+        webview.src = `data:text/html,${encodeURIComponent(errorHtml)}`;
     }
 
-    showErrorPage(message) {
-        const webview = document.getElementById('webview');
+    checkNetworkAndLoad() {
+        // This function is no longer needed - webviews are created per tab
+    }
+
+    showErrorPage(message, targetWebview = null) {
+        const webview = targetWebview || this.getActiveWebview();
+        if (!webview) return;
         const errorHtml = `
             <html>
                 <head>
@@ -2027,162 +2011,95 @@ class AxisBrowser {
     }
 
     applyCustomTheme(colors) {
-        // Use solid color - a bit darker than website colors
-        // Keep primary as is (already darkened in applyWebpageTheme)
+        // Pre-calculate all color values once to avoid repeated calculations
         const darkerPrimary = colors.primary;
-        
-        // Apply theme to body with darker background (fastest - direct access)
-        document.body.style.background = darkerPrimary;
-        document.body.style.color = colors.text;
-        
-        // Apply theme to cached elements first (fastest)
-        const el = this.elements;
-        if (el?.sidebar) {
-            el.sidebar.style.background = darkerPrimary;
-        }
-        
-        // Apply theme to nav bar - use darker color
-        const navBar = document.getElementById('nav-bar');
-        if (navBar) {
-            navBar.style.background = darkerPrimary;
-        }
-        
-        // Batch DOM queries for better performance
-        requestAnimationFrame(() => {
-            // Apply theme to tabs - transparent for less contrast
-            const tabs = document.querySelectorAll('.tab');
-            for (let i = 0; i < tabs.length; i++) {
-                tabs[i].style.background = 'transparent';
-            }
-            
-            // Apply theme to webview container - transparent so webview stands out
-            const webviewContainer = document.querySelector('.webview-container');
-            if (webviewContainer) {
-                webviewContainer.style.background = 'transparent';
-            }
-            
-            // Apply theme to popups - use darker colors
-            const popups = document.querySelectorAll('.downloads-panel, .bookmarks-panel, .settings-panel, .nav-menu, .add-tab-menu, .context-menu');
-            for (let i = 0; i < popups.length; i++) {
-                popups[i].style.background = darkerPrimary;
-            }
-            
-            // Apply theme to popup headers - use darker variation
-            const popupHeaders = document.querySelectorAll('.downloads-header, .bookmarks-header, .settings-header');
             const headerBg = this.darkenColor(colors.primary, 0.03);
-            for (let i = 0; i < popupHeaders.length; i++) {
-                popupHeaders[i].style.background = headerBg;
-            }
-            
-            // Apply theme to popup content areas - use darker color
-            const popupContents = document.querySelectorAll('.downloads-content, .bookmarks-content, .settings-content');
-            for (let i = 0; i < popupContents.length; i++) {
-                popupContents[i].style.background = darkerPrimary;
-            }
-            
-            // Apply theme to popup items
-            const popupItems = document.querySelectorAll('.download-item, .bookmark-item, .setting-item, .nav-menu-item, .add-tab-menu-item, .context-menu-item');
-            for (let i = 0; i < popupItems.length; i++) {
-                popupItems[i].style.color = colors.text;
-            }
-            
-            // Apply theme to popup text elements
-            const popupTextElements = document.querySelectorAll('.bookmark-title, .bookmark-url, .history-url, .history-time, .download-url, .shortcut-desc, .setting-item label');
-            for (let i = 0; i < popupTextElements.length; i++) {
-                popupTextElements[i].style.color = colors.text;
-            }
-            
-            // Apply theme to buttons - use transparent for less contrast
-            const buttons = document.querySelectorAll('.nav-btn, .tab-close, .url-icon, .add-tab-btn, .settings-btn, .bookmark-btn, .security-btn, .nav-menu-btn, .download-btn, .bookmark-delete, .close-settings, .refresh-btn, .clear-btn, .save-btn');
-            for (let i = 0; i < buttons.length; i++) {
-                buttons[i].style.background = 'transparent';
-                buttons[i].style.color = colors.text;
-            }
-            
-            // Apply theme to settings tabs - use darker colors
-            const settingsTabs = document.querySelectorAll('.settings-tab');
-            const tabBg = this.darkenColor(colors.primary, 0.03);
-            for (let i = 0; i < settingsTabs.length; i++) {
-                settingsTabs[i].style.background = tabBg;
-                settingsTabs[i].style.color = colors.text;
-            }
-            
-            // Apply theme to setting groups - use darker color
-            const settingGroups = document.querySelectorAll('.setting-group');
-            for (let i = 0; i < settingGroups.length; i++) {
-                settingGroups[i].style.background = darkerPrimary;
-            }
-        });
-        
-        // Update CSS variables for comprehensive theming - use darker colors
-        document.documentElement.style.setProperty('--background-color', darkerPrimary);
-        document.documentElement.style.setProperty('--text-color', colors.text);
-        document.documentElement.style.setProperty('--text-color-secondary', colors.textSecondary || colors.text);
-        document.documentElement.style.setProperty('--text-color-muted', colors.textMuted || colors.text);
-        document.documentElement.style.setProperty('--popup-background', darkerPrimary);
-        document.documentElement.style.setProperty('--popup-header', this.darkenColor(colors.primary, 0.03));
-        document.documentElement.style.setProperty('--button-background', 'transparent');
-        document.documentElement.style.setProperty('--button-hover', this.darkenColor(colors.primary, 0.05));
-        document.documentElement.style.setProperty('--button-text', colors.text);
-        document.documentElement.style.setProperty('--button-text-hover', colors.text);
-        document.documentElement.style.setProperty('--sidebar-background', darkerPrimary);
-        // URL bar should be slightly darker than sidebar to create depth, but neutral (no color cast)
         const urlBarBg = this.darkenColor(colors.primary, 0.08);
         const urlBarFocusBg = this.darkenColor(colors.primary, 0.03);
-        document.documentElement.style.setProperty('--url-bar-background', urlBarBg);
-        document.documentElement.style.setProperty('--url-bar-focus-background', urlBarFocusBg);
-        document.documentElement.style.setProperty('--url-bar-text', colors.text);
-        document.documentElement.style.setProperty('--url-bar-text-muted', colors.textSecondary || colors.text);
-        document.documentElement.style.setProperty('--tab-background', 'transparent');
-        document.documentElement.style.setProperty('--tab-background-hover', this.darkenColor(colors.primary, 0.03));
-        document.documentElement.style.setProperty('--tab-background-active', this.darkenColor(colors.primary, 0.02));
-        document.documentElement.style.setProperty('--tab-text', colors.text);
-        document.documentElement.style.setProperty('--tab-text-active', colors.text);
-        document.documentElement.style.setProperty('--tab-close-color', colors.textSecondary || colors.text);
-        document.documentElement.style.setProperty('--tab-close-hover', colors.text);
-        document.documentElement.style.setProperty('--icon-color', colors.textSecondary || colors.text);
-        document.documentElement.style.setProperty('--icon-hover', colors.text);
-        document.documentElement.style.setProperty('--border-color', colors.border || 'rgba(255, 255, 255, 0.08)');
-        document.documentElement.style.setProperty('--border-color-light', colors.borderLight || 'rgba(255, 255, 255, 0.12)');
-        document.documentElement.style.setProperty('--accent-color', colors.accent);
-        document.documentElement.style.setProperty('--primary-color', darkerPrimary);
-        document.documentElement.style.setProperty('--secondary-color', this.darkenColor(colors.primary, 0.02));
-        
-        // Set theme-aware animation colors
+        const tabHoverBg = this.darkenColor(colors.primary, 0.03);
+        const tabActiveBg = this.darkenColor(colors.primary, 0.02);
+        const buttonHoverBg = this.darkenColor(colors.primary, 0.05);
+        const secondaryColor = this.darkenColor(colors.primary, 0.02);
         const isDark = this.isDarkColor(colors.primary);
+        const textSecondary = colors.textSecondary || colors.text;
+        const borderColor = colors.border || 'rgba(255, 255, 255, 0.08)';
+        const borderColorLight = colors.borderLight || 'rgba(255, 255, 255, 0.12)';
         
-        // Animation colors adapt to theme brightness
+        // Batch all CSS variable updates using setProperty for maximum performance
+        // Using setProperty is faster than individual style updates and doesn't overwrite other styles
+        const root = document.documentElement;
+        const style = root.style;
+        
+        // Core theme colors - batch update
+        style.setProperty('--background-color', darkerPrimary);
+        style.setProperty('--text-color', colors.text);
+        style.setProperty('--text-color-secondary', textSecondary);
+        style.setProperty('--text-color-muted', colors.textMuted || colors.text);
+        style.setProperty('--popup-background', darkerPrimary);
+        style.setProperty('--popup-header', headerBg);
+        style.setProperty('--button-background', 'transparent');
+        style.setProperty('--button-hover', buttonHoverBg);
+        style.setProperty('--button-text', colors.text);
+        style.setProperty('--button-text-hover', colors.text);
+        style.setProperty('--sidebar-background', darkerPrimary);
+        style.setProperty('--url-bar-background', urlBarBg);
+        style.setProperty('--url-bar-focus-background', urlBarFocusBg);
+        style.setProperty('--url-bar-text', colors.text);
+        style.setProperty('--url-bar-text-muted', textSecondary);
+        style.setProperty('--tab-background', 'transparent');
+        style.setProperty('--tab-background-hover', tabHoverBg);
+        style.setProperty('--tab-background-active', tabActiveBg);
+        style.setProperty('--tab-text', colors.text);
+        style.setProperty('--tab-text-active', colors.text);
+        style.setProperty('--tab-close-color', textSecondary);
+        style.setProperty('--tab-close-hover', colors.text);
+        style.setProperty('--icon-color', textSecondary);
+        style.setProperty('--icon-hover', colors.text);
+        style.setProperty('--border-color', borderColor);
+        style.setProperty('--border-color-light', borderColorLight);
+        style.setProperty('--accent-color', colors.accent);
+        style.setProperty('--primary-color', darkerPrimary);
+        style.setProperty('--secondary-color', secondaryColor);
+        
+        // Animation colors - batch update based on theme brightness
         if (isDark) {
-            // Dark theme: use white/light overlays and glows
-            document.documentElement.style.setProperty('--animation-glow', `rgba(255, 255, 255, 0.3)`);
-            document.documentElement.style.setProperty('--animation-overlay', `rgba(255, 255, 255, 0.05)`);
-            document.documentElement.style.setProperty('--animation-overlay-hover', `rgba(255, 255, 255, 0.1)`);
-            document.documentElement.style.setProperty('--animation-shimmer', `rgba(255, 255, 255, 0.8)`);
-            document.documentElement.style.setProperty('--animation-shimmer-light', `rgba(255, 255, 255, 0.9)`);
-            document.documentElement.style.setProperty('--animation-border', `rgba(255, 255, 255, 0.1)`);
-            document.documentElement.style.setProperty('--animation-border-hover', `rgba(255, 255, 255, 0.2)`);
-            document.documentElement.style.setProperty('--animation-focus-ring', `rgba(255, 255, 255, 0.15)`);
-            document.documentElement.style.setProperty('--animation-focus-ring-light', `rgba(255, 255, 255, 0.1)`);
+            style.setProperty('--animation-glow', 'rgba(255, 255, 255, 0.3)');
+            style.setProperty('--animation-overlay', 'rgba(255, 255, 255, 0.05)');
+            style.setProperty('--animation-overlay-hover', 'rgba(255, 255, 255, 0.1)');
+            style.setProperty('--animation-shimmer', 'rgba(255, 255, 255, 0.8)');
+            style.setProperty('--animation-shimmer-light', 'rgba(255, 255, 255, 0.9)');
+            style.setProperty('--animation-border', 'rgba(255, 255, 255, 0.1)');
+            style.setProperty('--animation-border-hover', 'rgba(255, 255, 255, 0.2)');
+            style.setProperty('--animation-focus-ring', 'rgba(255, 255, 255, 0.15)');
+            style.setProperty('--animation-focus-ring-light', 'rgba(255, 255, 255, 0.1)');
         } else {
-            // Light theme: use darker overlays and glows
-            document.documentElement.style.setProperty('--animation-glow', `rgba(0, 0, 0, 0.2)`);
-            document.documentElement.style.setProperty('--animation-overlay', `rgba(0, 0, 0, 0.03)`);
-            document.documentElement.style.setProperty('--animation-overlay-hover', `rgba(0, 0, 0, 0.08)`);
-            document.documentElement.style.setProperty('--animation-shimmer', `rgba(255, 255, 255, 0.6)`);
-            document.documentElement.style.setProperty('--animation-shimmer-light', `rgba(255, 255, 255, 0.7)`);
-            document.documentElement.style.setProperty('--animation-border', `rgba(0, 0, 0, 0.1)`);
-            document.documentElement.style.setProperty('--animation-border-hover', `rgba(0, 0, 0, 0.15)`);
-            document.documentElement.style.setProperty('--animation-focus-ring', `rgba(0, 0, 0, 0.15)`);
-            document.documentElement.style.setProperty('--animation-focus-ring-light', `rgba(0, 0, 0, 0.1)`);
+            style.setProperty('--animation-glow', 'rgba(0, 0, 0, 0.2)');
+            style.setProperty('--animation-overlay', 'rgba(0, 0, 0, 0.03)');
+            style.setProperty('--animation-overlay-hover', 'rgba(0, 0, 0, 0.08)');
+            style.setProperty('--animation-shimmer', 'rgba(255, 255, 255, 0.6)');
+            style.setProperty('--animation-shimmer-light', 'rgba(255, 255, 255, 0.7)');
+            style.setProperty('--animation-border', 'rgba(0, 0, 0, 0.1)');
+            style.setProperty('--animation-border-hover', 'rgba(0, 0, 0, 0.15)');
+            style.setProperty('--animation-focus-ring', 'rgba(0, 0, 0, 0.15)');
+            style.setProperty('--animation-focus-ring-light', 'rgba(0, 0, 0, 0.1)');
         }
         
-        // Shadow colors adapt to theme brightness (darker shadows for light themes)
+        // Shadow colors
         const shadowOpacity = isDark ? 0.2 : 0.15;
         const shadowOpacityLight = isDark ? 0.1 : 0.08;
         const shadowOpacityMedium = isDark ? 0.3 : 0.25;
-        document.documentElement.style.setProperty('--animation-shadow', `rgba(0, 0, 0, ${shadowOpacity})`);
-        document.documentElement.style.setProperty('--animation-shadow-light', `rgba(0, 0, 0, ${shadowOpacityLight})`);
-        document.documentElement.style.setProperty('--animation-shadow-medium', `rgba(0, 0, 0, ${shadowOpacityMedium})`);
+        style.setProperty('--animation-shadow', `rgba(0, 0, 0, ${shadowOpacity})`);
+        style.setProperty('--animation-shadow-light', `rgba(0, 0, 0, ${shadowOpacityLight})`);
+        style.setProperty('--animation-shadow-medium', `rgba(0, 0, 0, ${shadowOpacityMedium})`);
+        
+        // Only update critical elements directly - CSS variables handle everything else
+        document.body.style.background = darkerPrimary;
+        document.body.style.color = colors.text;
+        
+        // Update cached sidebar if available
+        if (this.elements?.sidebar) {
+            this.elements.sidebar.style.background = darkerPrimary;
+        }
     }
 
     // Helper function to darken colors
@@ -2198,11 +2115,11 @@ class AxisBrowser {
     // Refresh popup themes when they're opened
     refreshPopupThemes() {
         // Reapply theme to all popup elements
-        const popupElements = document.querySelectorAll('.downloads-panel, .bookmarks-panel, .settings-panel, .nav-menu, .add-tab-menu, .context-menu');
+        const popupElements = document.querySelectorAll('.downloads-panel, .settings-panel, .nav-menu, .context-menu, .quit-modal-card');
         popupElements.forEach(popup => {
             if (!popup.classList.contains('hidden')) {
                 // Force re-theme visible popups
-                const textElements = popup.querySelectorAll('.bookmark-title, .bookmark-url, .history-url, .history-time, .download-url, .shortcut-desc, .setting-item label, .nav-menu-item, .add-tab-menu-item, .context-menu-item');
+                const textElements = popup.querySelectorAll('.history-url, .history-time, .download-url, .shortcut-desc, .setting-item label, .nav-menu-item, .context-menu-item, .quit-modal-title, .quit-modal-subtitle, .quit-modal-icon');
                 textElements.forEach(element => {
                     element.style.color = '';
                     // Trigger reflow to ensure CSS variables are applied
@@ -2210,6 +2127,48 @@ class AxisBrowser {
                 });
             }
         });
+    }
+
+    createTabWebview(tabId) {
+        const container = document.getElementById('webviews-container');
+        if (!container) return null;
+
+        const webview = document.createElement('webview');
+        webview.dataset.tabId = String(tabId);
+        webview.setAttribute('allowpopups', '');
+        webview.setAttribute('webpreferences', 'contextIsolation=false,nodeIntegration=false,webSecurity=false,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true');
+        webview.setAttribute('partition', 'persist:main');
+        webview.setAttribute('useragent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        webview.setAttribute('autosize', 'true');
+        webview.setAttribute('disablewebsecurity', 'true');
+        webview.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            height: 100%;
+            will-change: transform;
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            z-index: 0;
+        `;
+
+        container.appendChild(webview);
+        this.setupWebviewEventListeners(webview, tabId);
+        return webview;
+    }
+
+    getActiveWebview() {
+        if (!this.currentTab || !this.tabs.has(this.currentTab)) {
+            return null;
+        }
+        const tab = this.tabs.get(this.currentTab);
+        return tab?.webview || null;
     }
 
     createNewTab(url = null) {
@@ -2242,8 +2201,15 @@ class AxisBrowser {
             canGoForward: false,
             history: url ? [url] : [],
             historyIndex: url ? 0 : -1,
-            pinned: false // New tabs are unpinned by default
+            pinned: false, // New tabs are unpinned by default
+            webview: null
         };
+        
+        // Create webview for this tab
+        const webview = this.createTabWebview(tabId);
+        if (webview) {
+            tabData.webview = webview;
+        }
         
         // Store tab data first
         this.tabs.set(tabId, tabData);
@@ -2257,19 +2223,6 @@ class AxisBrowser {
 
         // Set up tab event listeners
         this.setupTabEventListeners(tabElement, tabId);
-
-        // Save current tab state before switching (if there is a current tab)
-        if (this.currentTab && this.tabs.has(this.currentTab)) {
-            const currentTab = this.tabs.get(this.currentTab);
-            const webview = document.getElementById('webview');
-            if (webview) {
-                const currentUrl = webview.getURL();
-                if (currentUrl && currentUrl !== 'about:blank') {
-                    currentTab.url = currentUrl;
-                    currentTab.title = webview.getTitle() || currentTab.title;
-                }
-            }
-        }
 
         // Switch to new tab
         this.switchToTab(tabId);
@@ -2320,40 +2273,39 @@ class AxisBrowser {
 
     switchToTab(tabId) {
         if (!tabId || !this.tabs.has(tabId)) {
-            // If trying to switch to invalid tab and we have no current tab, try to find any valid tab
-            if (!this.currentTab && this.tabs.size > 0) {
-                const firstTab = Array.from(this.tabs.keys())[0];
-                if (firstTab && this.tabs.has(firstTab) && firstTab !== tabId) {
-                    // Recursively call with valid tab (but only if different to avoid infinite loop)
-                    return this.switchToTab(firstTab);
-                } else if (this.tabs.size === 0) {
+            // If trying to switch to invalid tab and we have no current tab
+            if (this.tabs.size === 0) {
                     // No tabs left, show empty state and reset to black theme
                     this.currentTab = null;
                     this.resetToBlackTheme();
-                    const webview = this.elements?.webview;
-                    if (webview) {
-                        webview.src = 'about:blank';
-                    }
                     this.updateEmptyState();
                     this.updateUrlBar();
                     this.updateNavigationButtons();
                 }
-            }
+            // Don't automatically switch to first tab - user must click a tab
             return;
         }
 
         // Fast tab switching: use cached elements and batch DOM updates
-        const el = this.elements;
         const activeTab = document.querySelector(`[data-tab-id="${tabId}"]`);
         
-        // Only update active state if tab changed
-        if (this.currentTab !== tabId) {
-            // Remove active from previous tab (if exists)
-            if (this.currentTab) {
-                const prevTab = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
-                if (prevTab) prevTab.classList.remove('active');
+        // Hide previous tab's webview
+        if (this.currentTab && this.currentTab !== tabId) {
+            const prevTab = this.tabs.get(this.currentTab);
+            if (prevTab && prevTab.webview) {
+                prevTab.webview.style.opacity = '0';
+                prevTab.webview.style.visibility = 'hidden';
+                prevTab.webview.style.pointerEvents = 'none';
+                prevTab.webview.style.zIndex = '0';
             }
             
+            // Remove active from previous tab (if exists)
+            const prevTabElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
+            if (prevTabElement) prevTabElement.classList.remove('active');
+            }
+            
+        // Only update active state if tab changed
+        if (this.currentTab !== tabId) {
             // Add active to new tab
             if (activeTab) {
                 activeTab.classList.add('active');
@@ -2362,37 +2314,70 @@ class AxisBrowser {
 
         this.currentTab = tabId;
         
-        // Update webview content for the active tab
+        // Show and activate new tab's webview
         const tab = this.tabs.get(tabId);
         if (tab) {
-            const webview = el?.webview;
+            // Ensure webview exists - create if missing
+            if (!tab.webview) {
+                const webview = this.createTabWebview(tabId);
             if (webview) {
-                // Check if this is a note tab
+                    tab.webview = webview;
+                    this.tabs.set(tabId, tab);
+                }
+            }
+            
+            if (tab.webview) {
+                const webview = tab.webview;
+                
+                // Make webview visible and active
+                webview.style.opacity = '1';
+                webview.style.visibility = 'visible';
+                webview.style.pointerEvents = 'auto';
+                webview.style.zIndex = '2';
+                
+                // Update cached webview reference
+                this.elements.webview = webview;
+                
+                // Get current URL from webview
+                let currentSrc = null;
+                try {
+                    currentSrc = webview.getURL();
+                } catch (e) {
+                    // Webview might not be ready yet
+                    currentSrc = 'about:blank';
+                }
+                
+                // Load content if needed
                 if (tab.url && tab.url.startsWith('axis:note://')) {
-                    // This is a note tab - inject note HTML
                     const noteId = tab.url.replace('axis:note://', '');
+                    if (!currentSrc || currentSrc === 'about:blank' || !currentSrc.includes('axis:note://')) {
                     this.loadNoteInWebview(noteId);
-                    // Reset to black theme for notes
+                    }
+                    this.resetToBlackTheme();
+                } else if (tab.url && tab.url === 'axis://settings') {
+                    if (!currentSrc || currentSrc === 'about:blank' || currentSrc !== 'axis://settings') {
+                        this.loadSettingsInWebview();
+                    }
                     this.resetToBlackTheme();
                 } else if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
                     const sanitizedTabUrl = this.sanitizeUrl(tab.url);
-                    const currentSrc = webview.getURL();
                     // Only change src if it's different
-                    if (currentSrc !== sanitizedTabUrl) {
+                    if (!currentSrc || currentSrc === 'about:blank' || currentSrc !== sanitizedTabUrl) {
                         webview.src = sanitizedTabUrl || 'https://www.google.com';
-                        // Theme will be extracted in did-finish-load event
                     } else {
-                        // Page is already loaded, extract theme immediately (no delays)
+                        // Page is already loaded, extract theme immediately
                         this.extractAndApplyWebpageColors(webview);
                     }
                 } else {
-                    // If tab has no valid URL, set to Google and update tab data
+                    // If tab has no valid URL, set to Google
+                    if (!currentSrc || currentSrc === 'about:blank') {
                     webview.src = 'https://www.google.com';
                     tab.url = 'https://www.google.com';
-                    // Update history if it's empty
                     if (!tab.history || tab.history.length === 0) {
                         tab.history = ['https://www.google.com'];
                         tab.historyIndex = 0;
+                        }
+                        this.tabs.set(tabId, tab);
                     }
                 }
             }
@@ -2418,9 +2403,9 @@ class AxisBrowser {
         const emptyContent = document.getElementById('empty-state-empty');
         
         if (this.tabs.size === 0 || this.currentTab === null) {
-            // Show empty state and reset to black theme
+            // Show empty state but keep content hidden (blank screen)
             emptyState.classList.remove('hidden');
-            if (emptyContent) emptyContent.classList.remove('hidden');
+            if (emptyContent) emptyContent.classList.add('hidden');
             this.resetToBlackTheme();
         } else {
             // Hide empty state
@@ -2459,7 +2444,16 @@ class AxisBrowser {
             }
         }
         
-        // Tab cleanup (no individual webviews to remove)
+        // Remove the tab's webview
+        if (tab && tab.webview) {
+            try {
+                if (tab.webview.parentNode) {
+                    tab.webview.parentNode.removeChild(tab.webview);
+                }
+            } catch (e) {
+                console.error('Error removing webview:', e);
+            }
+        }
         
         if (tabElement) {
             const height = tabElement.getBoundingClientRect().height;
@@ -2563,7 +2557,7 @@ class AxisBrowser {
             }
             
             // Navigate the webview
-            const webview = document.getElementById('webview');
+            const webview = this.getActiveWebview();
             if (webview) {
                 const sanitizedClosedTabUrl = this.sanitizeUrl(closedTab.url);
                 webview.src = sanitizedClosedTabUrl || 'https://www.google.com';
@@ -2601,8 +2595,10 @@ class AxisBrowser {
             }
         } else {
             // Navigate in single view
-            const webview = document.getElementById('webview');
+            const webview = this.getActiveWebview();
+            if (webview) {
             this.navigateInPane(webview, sanitizedUrl);
+            }
         }
 
         // Update tab data and add to history
@@ -2643,7 +2639,7 @@ class AxisBrowser {
                 document.getElementById('webview-left') : 
                 document.getElementById('webview-right');
         } else {
-            webview = document.getElementById('webview');
+            webview = this.getActiveWebview();
         }
         
         if (!webview) return;
@@ -2678,7 +2674,7 @@ class AxisBrowser {
                 document.getElementById('webview-left') : 
                 document.getElementById('webview-right');
         } else {
-            webview = document.getElementById('webview');
+            webview = this.getActiveWebview();
         }
         
         if (!webview) return;
@@ -2800,6 +2796,13 @@ class AxisBrowser {
         }
 
         const tab = this.tabs.get(this.currentTab);
+        
+        // Handle settings tabs
+        if (tab && tab.url === 'axis://settings') {
+            urlBar.value = 'axis://settings';
+            urlBar.classList.remove('summarized');
+            return;
+        }
         
         // Handle note tabs
         if (tab && tab.url && tab.url.startsWith('axis:note://')) {
@@ -2944,56 +2947,614 @@ class AxisBrowser {
     }
 
     toggleSettings() {
-        const settingsPanel = document.getElementById('settings-panel');
-        const bookmarksPanel = document.getElementById('bookmarks-panel');
-        const downloadsPanel = document.getElementById('downloads-panel');
-        const securityPanel = document.getElementById('security-panel');
-        const backdrop = document.getElementById('modal-backdrop');
-        
-        // Close other panels with animation
-        if (!bookmarksPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(bookmarksPanel);
-        }
-        if (!downloadsPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(downloadsPanel);
-        }
-        if (!securityPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(securityPanel);
-        }
-        
-        if (settingsPanel.classList.contains('hidden')) {
-            // Enhanced opening animation
-            settingsPanel.classList.remove('hidden');
-            if (backdrop) {
-                backdrop.classList.remove('hidden');
-                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+        // Open settings as a tab instead of a panel
+        this.openSettingsAsTab();
+    }
+
+    async openSettingsAsTab() {
+        // Check if settings tab already exists
+        let settingsTabId = null;
+        for (const [tabId, tab] of this.tabs.entries()) {
+            if (tab.url === 'axis://settings') {
+                settingsTabId = tabId;
+                break;
             }
-            
-            // Add entrance animation class
-            settingsPanel.classList.add('settings-entering');
-            
-            // Populate settings immediately
-                this.populateSettings();
-                // Default to general tab when opening
-                this.switchSettingsTab('general');
-            
-            // Remove animation class after animation completes (200ms)
-            setTimeout(() => {
-                settingsPanel.classList.remove('settings-entering');
-            }, 200);
-            // Refresh popup themes
-            this.refreshPopupThemes();
-            
-        } else {
-            // Smooth fade-out animation
-            settingsPanel.classList.add('settings-closing');
-            
-            setTimeout(() => {
-                settingsPanel.classList.add('hidden');
-                settingsPanel.classList.remove('settings-closing');
-                if (backdrop) backdrop.classList.add('hidden');
-            }, 150);
         }
+
+        if (settingsTabId) {
+            // Switch to existing settings tab
+            this.switchToTab(settingsTabId);
+            return;
+        }
+
+        // Create a new tab for settings
+        const tabId = Date.now();
+        const settingsUrl = 'axis://settings';
+        
+        // Create tab element
+        const tabElement = document.createElement('div');
+        tabElement.className = 'tab';
+        tabElement.dataset.tabId = tabId;
+        
+        tabElement.innerHTML = `
+            <div class="tab-content">
+                <div class="tab-left">
+                    <i class="fas fa-cog tab-settings-icon" style="color: #4a90e2; margin-right: 8px; font-size: 14px;"></i>
+                    <span class="tab-title">Settings</span>
+                </div>
+                <div class="tab-right">
+                    <button class="tab-close"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+        `;
+
+        // Add tab to container
+        const tabsContainer = document.querySelector('.tabs-container');
+        const separator = document.getElementById('tabs-separator');
+        
+        const tabData = {
+            id: tabId,
+            url: settingsUrl,
+            title: 'Settings',
+            canGoBack: false,
+            canGoForward: false,
+            history: [settingsUrl],
+            historyIndex: 0,
+            pinned: false,
+            isSettings: true
+        };
+        
+        this.tabs.set(tabId, tabData);
+        
+        // Insert tab below separator
+        if (separator && separator.parentNode === tabsContainer) {
+            tabsContainer.insertBefore(tabElement, separator.nextSibling);
+        } else {
+            tabsContainer.appendChild(tabElement);
+        }
+
+        // Set up tab event listeners
+        this.setupTabEventListeners(tabElement, tabId);
+
+        // Switch to new tab
+        this.switchToTab(tabId);
+        this.updateEmptyState();
+        
+        // Load settings content
+        this.loadSettingsInWebview();
+    }
+
+    async loadSettingsInWebview() {
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+
+        // Get current settings
+        const blockTrackers = this.settings.blockTrackers || false;
+        const blockAds = this.settings.blockAds || false;
+        const privateMode = this.settings.privateMode || false;
+
+        // Get history for history tab
+        const history = await this.getHistory();
+        const historyHtml = history.length === 0 
+            ? '<div class="empty-state"><i class="fas fa-history"></i><p>No history found</p></div>'
+            : history.map(item => `
+                <div class="history-item" data-url="${this.escapeHtml(item.url)}">
+                    <img class="history-favicon" src="${this.escapeHtml(item.favicon)}" alt="" onerror="this.style.display='none'">
+                    <div class="history-info">
+                        <div class="history-title">${this.escapeHtml(item.title)}</div>
+                        <div class="history-url">${this.escapeHtml(item.url)}</div>
+                    </div>
+                    <div class="history-time">${this.escapeHtml(item.time)}</div>
+                    <div class="history-actions">
+                        <button class="history-delete" data-id="${item.id}" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        
+        // Create settings HTML
+        const settingsHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Axis Browser</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #0a0a0a;
+            color: #fff;
+            min-height: 100vh;
+            padding: 0;
+            line-height: 1.6;
+        }
+        .settings-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 60px 40px;
+        }
+        .settings-header {
+            margin-bottom: 48px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .settings-header h1 {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: -0.8px;
+            background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.8) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .settings-header p {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 15px;
+            font-weight: 400;
+        }
+        .settings-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 40px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 12px 12px 0 0;
+            padding: 4px;
+        }
+        .settings-tab {
+            padding: 14px 28px;
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 8px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+        .settings-tab:hover {
+            color: rgba(255, 255, 255, 0.8);
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .settings-tab.active {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .settings-tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+        .settings-tab-content.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .setting-group {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 24px;
+            backdrop-filter: blur(20px);
+            transition: all 0.2s ease;
+        }
+        .setting-group:hover {
+            border-color: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .setting-group h4 {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 24px;
+            color: rgba(255, 255, 255, 0.95);
+            letter-spacing: 0.2px;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.8px;
+        }
+        .setting-item {
+            margin-bottom: 20px;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            transition: all 0.2s ease;
+        }
+        .setting-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.08);
+        }
+        .setting-item:last-child {
+            margin-bottom: 0;
+        }
+        .setting-item label {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            cursor: pointer;
+            font-size: 15px;
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 400;
+        }
+        .setting-item input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            accent-color: #4a90e2;
+            border-radius: 4px;
+        }
+        .history-controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 28px;
+        }
+        .history-search {
+            flex: 1;
+            padding: 14px 18px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+        .history-search:focus {
+            border-color: #4a90e2;
+            background: rgba(255, 255, 255, 0.06);
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+        }
+        .history-search::placeholder {
+            color: rgba(255, 255, 255, 0.3);
+        }
+        .clear-btn {
+            padding: 14px 24px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            color: rgba(255, 255, 255, 0.8);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .clear-btn:hover {
+            background: rgba(255, 59, 48, 0.15);
+            border-color: rgba(255, 59, 48, 0.3);
+            color: #ff3b30;
+            transform: translateY(-1px);
+        }
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .history-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 16px 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .history-item:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.12);
+            transform: translateX(4px);
+        }
+        .history-favicon {
+            width: 18px;
+            height: 18px;
+            border-radius: 3px;
+            flex-shrink: 0;
+        }
+        .history-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .history-title {
+            font-size: 15px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.95);
+            margin-bottom: 6px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .history-url {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.45);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .history-time {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.35);
+            white-space: nowrap;
+            font-weight: 400;
+        }
+        .history-actions {
+            display: flex;
+            gap: 8px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .history-item:hover .history-actions {
+            opacity: 1;
+        }
+        .history-delete {
+            padding: 8px 12px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .history-delete:hover {
+            background: rgba(255, 59, 48, 0.15);
+            border-color: rgba(255, 59, 48, 0.3);
+            color: #ff3b30;
+            transform: scale(1.05);
+        }
+        .shortcut-group {
+            margin-bottom: 40px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 16px;
+            padding: 24px;
+        }
+        .shortcut-group:last-child {
+            margin-bottom: 0;
+        }
+        .shortcut-group h4 {
+            font-size: 12px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .shortcut-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            transition: all 0.2s ease;
+        }
+        .shortcut-item:hover {
+            padding-left: 8px;
+            padding-right: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+        }
+        .shortcut-item:last-child {
+            border-bottom: none;
+        }
+        .shortcut-key {
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            padding: 6px 10px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 500;
+            letter-spacing: 0.3px;
+            min-width: 80px;
+            text-align: center;
+        }
+        .shortcut-desc {
+            font-size: 15px;
+            color: rgba(255, 255, 255, 0.85);
+            font-weight: 400;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+        .empty-state i {
+            font-size: 48px;
+            color: rgba(255, 255, 255, 0.15);
+            margin-bottom: 16px;
+            }
+    </style>
+</head>
+<body>
+    <div class="settings-container">
+        <div class="settings-header">
+            <h1>Settings</h1>
+            <p>Manage your browser preferences</p>
+        </div>
+        
+        <div class="settings-tabs">
+            <button class="settings-tab active" data-tab="general">General</button>
+            <button class="settings-tab" data-tab="history">History</button>
+            <button class="settings-tab" data-tab="shortcuts">Shortcuts</button>
+        </div>
+        
+        <div class="settings-tab-content active" id="general-tab">
+            <div class="setting-group">
+                <h4>Privacy & Security</h4>
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="block-trackers" ${blockTrackers ? 'checked' : ''}>
+                        Block trackers
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="block-ads" ${blockAds ? 'checked' : ''}>
+                        Block ads
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="private-mode" ${privateMode ? 'checked' : ''}>
+                        Enhanced private mode
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-tab-content" id="history-tab">
+            <div class="history-controls">
+                <input type="text" id="history-search" placeholder="Search history..." class="history-search">
+                <button id="clear-history" class="clear-btn" title="Clear All History">
+                    <i class="fas fa-trash"></i> Clear All
+                </button>
+            </div>
+            <div class="history-list" id="history-list">
+                ${historyHtml}
+            </div>
+        </div>
+        
+        <div class="settings-tab-content" id="shortcuts-tab">
+            <div class="shortcut-group">
+                <h4>Navigation</h4>
+                <div class="shortcut-item">
+                    <span class="shortcut-key">⌘ + T</span>
+                    <span class="shortcut-desc">New Tab</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-key">⌘ + W</span>
+                    <span class="shortcut-desc">Close Tab</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-key">⌘ + Z</span>
+                    <span class="shortcut-desc">Recover Closed Tab</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-key">⌘ + R</span>
+                    <span class="shortcut-desc">Refresh Page</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-key">⌘ + L</span>
+                    <span class="shortcut-desc">Focus URL Bar</span>
+                </div>
+            </div>
+            
+            <div class="shortcut-group">
+                <h4>Tab Management</h4>
+                <div class="shortcut-item">
+                    <span class="shortcut-key">⌘ + 1-9</span>
+                    <span class="shortcut-desc">Switch to tab 1-9</span>
+                </div>
+            </div>
+            
+            <div class="shortcut-group">
+                <h4>Panels & Menus</h4>
+                <div class="shortcut-item">
+                    <span class="shortcut-key">⌘ + B</span>
+                    <span class="shortcut-desc">Toggle Sidebar</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-key">⌘ + Y</span>
+                    <span class="shortcut-desc">Open History</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-key">⌘ + J</span>
+                    <span class="shortcut-desc">Open Downloads</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-key">⌘ + ,</span>
+                    <span class="shortcut-desc">Open Settings</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Tab switching
+        document.querySelectorAll('.settings-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.tab;
+                document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tabName + '-tab').classList.add('active');
+            });
+        });
+        
+        // Settings checkboxes
+        document.getElementById('block-trackers').addEventListener('change', (e) => {
+            window.postMessage({ type: 'updateSetting', key: 'blockTrackers', value: e.target.checked }, '*');
+        });
+        document.getElementById('block-ads').addEventListener('change', (e) => {
+            window.postMessage({ type: 'updateSetting', key: 'blockAds', value: e.target.checked }, '*');
+        });
+        document.getElementById('private-mode').addEventListener('change', (e) => {
+            window.postMessage({ type: 'updateSetting', key: 'privateMode', value: e.target.checked }, '*');
+        });
+        
+        // History search
+        document.getElementById('history-search').addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            document.querySelectorAll('.history-item').forEach(item => {
+                const title = item.querySelector('.history-title').textContent.toLowerCase();
+                const url = item.querySelector('.history-url').textContent.toLowerCase();
+                if (title.includes(searchTerm) || url.includes(searchTerm)) {
+                    item.style.display = 'flex';
+        } else {
+                    item.style.display = 'none';
+                }
+            });
+        });
+        
+        // Clear history
+        document.getElementById('clear-history').addEventListener('click', () => {
+            if (confirm('Are you sure you want to clear all history?')) {
+                window.postMessage({ type: 'clearHistory' }, '*');
+            }
+        });
+        
+        // Delete history item
+        document.querySelectorAll('.history-delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = btn.dataset.id;
+                window.postMessage({ type: 'deleteHistoryItem', id: id }, '*');
+            });
+        });
+        
+        // Navigate to history item
+        document.querySelectorAll('.history-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                if (!e.target.closest('.history-delete')) {
+                    const url = item.dataset.url;
+                    window.postMessage({ type: 'navigate', url: url }, '*');
+                }
+            });
+        });
+    </script>
+</body>
+</html>`;
+
+        const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(settingsHtml);
+        webview.src = dataUrl;
+        
+        // Reset to black theme for settings
+        this.resetToBlackTheme();
     }
 
     switchSettingsTab(tabName) {
@@ -3042,121 +3603,9 @@ class AxisBrowser {
     }
 
 
-    toggleBookmarks() {
-        const bookmarksPanel = document.getElementById('bookmarks-panel');
-        const settingsPanel = document.getElementById('settings-panel');
-        const downloadsPanel = document.getElementById('downloads-panel');
-        const securityPanel = document.getElementById('security-panel');
-        const backdrop = document.getElementById('modal-backdrop');
-        
-        // Close other panels with animation
-        if (!settingsPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(settingsPanel);
-        }
-        if (!downloadsPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(downloadsPanel);
-        }
-        if (!securityPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(securityPanel);
-        }
-        
-        if (bookmarksPanel.classList.contains('hidden')) {
-            // Enhanced opening animation
-            bookmarksPanel.classList.remove('hidden');
-            if (backdrop) {
-                backdrop.classList.remove('hidden');
-                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-            }
-            
-            // Add entrance animation class
-            bookmarksPanel.classList.add('bookmarks-entering');
-            
-            // Populate bookmarks immediately
-                this.populateBookmarks();
-            
-            // Remove animation class after animation completes (200ms)
-            setTimeout(() => {
-                bookmarksPanel.classList.remove('bookmarks-entering');
-            }, 200);
-            // Refresh popup themes
-            this.refreshPopupThemes();
-            
-        } else {
-            // Smooth fade-out animation
-            bookmarksPanel.classList.add('bookmarks-closing');
-            
-            setTimeout(() => {
-                bookmarksPanel.classList.add('hidden');
-                bookmarksPanel.classList.remove('bookmarks-closing');
-                if (backdrop) backdrop.classList.add('hidden');
-            }, 150);
-        }
-    }
-
     populateSettings() {
         document.getElementById('block-trackers').checked = this.settings.blockTrackers || false;
         document.getElementById('block-ads').checked = this.settings.blockAds || false;
-    }
-
-    populateBookmarks() {
-        const bookmarksList = document.getElementById('bookmarks-list');
-        const noBookmarks = document.getElementById('no-bookmarks');
-        const bookmarks = this.settings.bookmarks || [];
-        
-        // Clear immediately
-            bookmarksList.innerHTML = '';
-            
-            if (bookmarks.length === 0) {
-                noBookmarks.classList.remove('hidden');
-                return;
-            }
-            
-            noBookmarks.classList.add('hidden');
-            
-        // Add items immediately
-            bookmarks.forEach((bookmark, index) => {
-                const bookmarkElement = document.createElement('div');
-                bookmarkElement.className = 'bookmark-item';
-                bookmarkElement.innerHTML = `
-                    <i class="fas fa-globe bookmark-icon"></i>
-                    <div class="bookmark-content">
-                        <div class="bookmark-title">${bookmark.title}</div>
-                        <div class="bookmark-url">${bookmark.url}</div>
-                    </div>
-                    <div class="bookmark-actions">
-                        <button class="bookmark-delete" data-index="${index}">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                `;
-                
-                // Click to navigate
-                bookmarkElement.addEventListener('click', (e) => {
-                    if (!e.target.closest('.bookmark-delete')) {
-                        this.navigate(bookmark.url);
-                        this.toggleBookmarks();
-                    }
-                });
-                
-                // Delete bookmark
-                const deleteBtn = bookmarkElement.querySelector('.bookmark-delete');
-                deleteBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.deleteBookmark(index);
-                });
-                
-                bookmarksList.appendChild(bookmarkElement);
-        });
-    }
-
-    deleteBookmark(index) {
-        const bookmarks = this.settings.bookmarks || [];
-        const bookmark = bookmarks[index];
-        
-            bookmarks.splice(index, 1);
-            this.saveSetting('bookmarks', bookmarks);
-            this.populateBookmarks();
-            this.showNotification(`Bookmark "${bookmark.title}" deleted`, 'success');
     }
 
     // Notes functionality - now works as tabs
@@ -3230,7 +3679,45 @@ class AxisBrowser {
     }
 
     async onEmbeddedMessage(event) {
-        if (!event.data || event.data.type !== 'saveNote') return;
+        if (!event.data) return;
+        
+        // Handle settings page messages
+        if (event.data.type === 'updateSetting') {
+            const { key, value } = event.data;
+            await window.electronAPI.setSetting(key, value);
+            this.settings[key] = value;
+            return;
+        }
+        
+        if (event.data.type === 'clearHistory') {
+            await this.clearAllHistory();
+            // Reload settings page to refresh history
+            const tab = this.tabs.get(this.currentTab);
+            if (tab && tab.url === 'axis://settings') {
+                this.loadSettingsInWebview();
+            }
+            return;
+        }
+        
+        if (event.data.type === 'deleteHistoryItem') {
+            const { id } = event.data;
+            await this.deleteHistoryItem(id);
+            // Reload settings page to refresh history
+            const tab = this.tabs.get(this.currentTab);
+            if (tab && tab.url === 'axis://settings') {
+                this.loadSettingsInWebview();
+            }
+            return;
+        }
+        
+        if (event.data.type === 'navigate') {
+            const { url } = event.data;
+            this.navigate(url);
+            return;
+        }
+        
+        // Handle note messages
+        if (event.data.type !== 'saveNote') return;
         
         const { note } = event.data;
         try {
@@ -3293,7 +3780,7 @@ class AxisBrowser {
     }
 
     async loadNoteInWebview(noteId) {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
         if (!webview) return;
 
         let note = null;
@@ -3689,7 +4176,6 @@ class AxisBrowser {
         const notesPanel = document.getElementById('notes-panel');
         const settingsPanel = document.getElementById('settings-panel');
         const downloadsPanel = document.getElementById('downloads-panel');
-        const bookmarksPanel = document.getElementById('bookmarks-panel');
         const securityPanel = document.getElementById('security-panel');
         const backdrop = document.getElementById('modal-backdrop');
         
@@ -3699,9 +4185,6 @@ class AxisBrowser {
         }
         if (!downloadsPanel.classList.contains('hidden')) {
             this.closePanelWithAnimation(downloadsPanel);
-        }
-        if (!bookmarksPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(bookmarksPanel);
         }
         if (!securityPanel.classList.contains('hidden')) {
             this.closePanelWithAnimation(securityPanel);
@@ -4039,8 +4522,9 @@ class AxisBrowser {
     }
 
     // custom color application removed
-    showErrorPage(error) {
-        const webview = document.getElementById('webview');
+    showErrorPage(error, targetWebview = null) {
+        const webview = targetWebview || this.getActiveWebview();
+        if (!webview) return;
         const errorHtml = `
             <html>
                 <head>
@@ -4142,63 +4626,10 @@ class AxisBrowser {
         });
     }
 
-    toggleBookmark() {
-        const webview = document.getElementById('webview');
-        const currentUrl = webview.getURL();
-        const currentTitle = webview.getTitle() || 'Untitled';
-        
-        if (currentUrl && currentUrl !== 'about:blank') {
-            // Get existing bookmarks
-            let bookmarks = this.settings.bookmarks || [];
-            
-            // Check if already bookmarked
-            const existingIndex = bookmarks.findIndex(bookmark => bookmark.url === currentUrl);
-            
-            if (existingIndex !== -1) {
-                // Remove bookmark
-                bookmarks.splice(existingIndex, 1);
-                this.showNotification('Bookmark removed', 'success');
-            } else {
-                // Add bookmark
-                bookmarks.push({
-                    url: currentUrl,
-                    title: currentTitle,
-                    date: new Date().toISOString()
-                });
-                this.showNotification('Bookmark added', 'success');
-            }
-            
-            // Save bookmarks
-            this.saveSetting('bookmarks', bookmarks);
-            
-            // Update bookmark button appearance
-            this.updateBookmarkButton(bookmarks.some(bookmark => bookmark.url === currentUrl));
-        }
-    }
-
-    updateBookmarkButton(isBookmarked = null) {
-        const bookmarkBtn = document.getElementById('bookmark-btn');
-        const icon = bookmarkBtn.querySelector('i');
-        const webview = document.getElementById('webview');
-        const currentUrl = webview.getURL();
-        
-        // If isBookmarked is not provided, check if current URL is bookmarked
-        if (isBookmarked === null) {
-            const bookmarks = this.settings.bookmarks || [];
-            isBookmarked = bookmarks.some(bookmark => bookmark.url === currentUrl);
-        }
-        
-        if (isBookmarked) {
-            icon.className = 'fas fa-bookmark';
-            bookmarkBtn.style.color = '#ffd700';
-        } else {
-            icon.className = 'far fa-bookmark';
-            bookmarkBtn.style.color = '#666';
-        }
-    }
 
     updateSecurityIndicator() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         const securityBtn = document.getElementById('security-btn');
         const icon = securityBtn.querySelector('i');
         
@@ -4258,7 +4689,7 @@ class AxisBrowser {
     // Premium button interactions
     addButtonInteractions() {
         // Add premium interactions to main buttons
-        const mainButtons = document.querySelectorAll('.nav-btn, .tab-close, .url-icon, .add-tab-btn, .settings-btn, .bookmark-btn, .security-btn, .nav-menu-btn, .download-btn, .bookmark-delete, .close-settings, .refresh-btn, .clear-btn');
+        const mainButtons = document.querySelectorAll('.nav-btn, .tab-close, .url-icon, .settings-btn, .security-btn, .nav-menu-btn, .download-btn, .close-settings, .refresh-btn, .clear-btn');
         
         mainButtons.forEach(button => {
             // Add premium click animation
@@ -4292,7 +4723,7 @@ class AxisBrowser {
         });
 
         // Add premium popup menu interactions
-        const popupItems = document.querySelectorAll('.nav-menu-item, .add-tab-menu-item, .context-menu-item');
+        const popupItems = document.querySelectorAll('.nav-menu-item, .context-menu-item');
         
         popupItems.forEach(item => {
             // Add premium popup click animation
@@ -4620,18 +5051,8 @@ class AxisBrowser {
                 this.updateTabFavicon(tabId, tabElement);
             }
             
-            // If pinned tabs were loaded, navigate to first one if no current tab
-            if (pinnedTabsData.length > 0 && !this.currentTab) {
-                const firstPinnedId = pinnedTabsData[0].id;
-                if (this.tabs.has(firstPinnedId)) {
-                    this.switchToTab(firstPinnedId);
-                    // Navigate to the saved URL
-                    const firstTab = this.tabs.get(firstPinnedId);
-                    if (firstTab && firstTab.url && firstTab.url !== 'about:blank') {
-                        this.navigate(firstTab.url);
-                    }
-                }
-            }
+            // Don't automatically switch to pinned tabs on startup
+            // User must click a tab to activate it
         } catch (error) {
             console.error('Failed to load pinned tabs:', error);
         }
@@ -4668,13 +5089,71 @@ class AxisBrowser {
         
         sidebar.classList.toggle('hidden');
         
+        // Toggle window button visibility (macOS traffic lights)
+        const isHidden = sidebar.classList.contains('hidden');
+        if (window.electronAPI && window.electronAPI.setWindowButtonVisibility) {
+            window.electronAPI.setWindowButtonVisibility(!isHidden);
+        }
+        
         // Close nav menu when sidebar is hidden
-        if (sidebar.classList.contains('hidden')) {
+        if (isHidden) {
             this.closeNavMenu();
         }
         
         // Keep the icon as sidebar bars, don't change it
         icon.className = 'fas fa-bars';
+    }
+
+    toggleSidebarPosition() {
+        const mainArea = document.getElementById('main-area');
+        const sidebar = document.getElementById('sidebar');
+        const positionText = document.getElementById('sidebar-position-text');
+        const contextText = document.getElementById('sidebar-position-context-text');
+        
+        // Toggle sidebar position
+        const isRight = mainArea.classList.contains('sidebar-right');
+        
+        if (isRight) {
+            // Move to left
+            mainArea.classList.remove('sidebar-right');
+            sidebar.classList.remove('sidebar-right');
+            this.saveSetting('sidebarPosition', 'left');
+            if (positionText) positionText.textContent = 'Move Sidebar Right';
+            if (contextText) contextText.textContent = 'Move Sidebar Right';
+        } else {
+            // Move to right
+            mainArea.classList.add('sidebar-right');
+            sidebar.classList.add('sidebar-right');
+            this.saveSetting('sidebarPosition', 'right');
+            if (positionText) positionText.textContent = 'Move Sidebar Left';
+            if (contextText) contextText.textContent = 'Move Sidebar Left';
+        }
+    }
+
+    applySidebarPosition() {
+        const mainArea = document.getElementById('main-area');
+        const sidebar = document.getElementById('sidebar');
+        const positionText = document.getElementById('sidebar-position-text');
+        const contextText = document.getElementById('sidebar-position-context-text');
+        
+        const position = this.settings?.sidebarPosition || 'left';
+        
+        if (position === 'right') {
+            mainArea.classList.add('sidebar-right');
+            sidebar.classList.add('sidebar-right');
+            if (positionText) positionText.textContent = 'Move Sidebar Left';
+            if (contextText) contextText.textContent = 'Move Sidebar Left';
+        } else {
+            mainArea.classList.remove('sidebar-right');
+            sidebar.classList.remove('sidebar-right');
+            if (positionText) positionText.textContent = 'Move Sidebar Right';
+            if (contextText) contextText.textContent = 'Move Sidebar Right';
+        }
+    }
+
+    isSidebarRight() {
+        const mainArea = document.getElementById('main-area');
+        return mainArea && mainArea.classList.contains('sidebar-right');
     }
 
     toggleNavMenu() {
@@ -4684,8 +5163,19 @@ class AxisBrowser {
         if (navMenu.classList.contains('hidden')) {
             // Calculate position relative to the button
             const btnRect = navMenuBtn.getBoundingClientRect();
+            const isRight = this.isSidebarRight();
+            
             navMenu.style.top = (btnRect.bottom + 5) + 'px';
+            
+            // When sidebar is on right, position menu to the left of button
+            if (isRight) {
+                navMenu.style.left = 'auto';
+                navMenu.style.right = (window.innerWidth - btnRect.right) + 'px';
+            } else {
             navMenu.style.left = btnRect.left + 'px';
+                navMenu.style.right = 'auto';
+            }
+            
             navMenu.style.visibility = 'visible';
             navMenu.classList.remove('hidden');
         } else {
@@ -5635,8 +6125,39 @@ class AxisBrowser {
             // Remove closing state and reset opacity before showing
             contextMenu.classList.remove('closing', 'hidden');
             contextMenu.style.opacity = '';
-            contextMenu.style.left = e.pageX + 'px';
-            contextMenu.style.top = e.pageY + 'px';
+            
+            // Position menu and ensure it stays visible
+            const menuWidth = 200;
+            const menuHeight = 100;
+            const isRight = this.isSidebarRight();
+            
+            let left = e.pageX;
+            let top = e.pageY;
+            
+            // Adjust if menu would go off-screen
+            if (isRight) {
+                if (left + menuWidth > window.innerWidth) {
+                    left = window.innerWidth - menuWidth - 10;
+                }
+                if (left < 10) {
+                    left = 10;
+                }
+            } else {
+                if (left + menuWidth > window.innerWidth) {
+                    left = window.innerWidth - menuWidth - 10;
+                }
+            }
+            
+            if (top + menuHeight > window.innerHeight) {
+                top = window.innerHeight - menuHeight - 10;
+            }
+            if (top < 10) {
+                top = 10;
+            }
+            
+            contextMenu.style.left = left + 'px';
+            contextMenu.style.top = top + 'px';
+            contextMenu.style.right = 'auto';
             contextMenu.style.display = 'block';
             this.contextMenuFolderId = folderId;
             
@@ -5805,8 +6326,46 @@ class AxisBrowser {
             // Remove closing state and reset opacity before showing
             contextMenu.classList.remove('closing', 'hidden');
             contextMenu.style.opacity = '';
-            contextMenu.style.left = e.pageX + 'px';
-            contextMenu.style.top = e.pageY + 'px';
+            
+            // Position menu and ensure it stays visible
+            const menuWidth = 200; // Approximate menu width
+            const menuHeight = 200; // Approximate menu height
+            const isRight = this.isSidebarRight();
+            
+            // Calculate position
+            let left = e.pageX;
+            let top = e.pageY;
+            
+            // Adjust if menu would go off-screen
+            if (isRight) {
+                // When sidebar is on right, ensure menu doesn't go off right edge
+                if (left + menuWidth > window.innerWidth) {
+                    left = window.innerWidth - menuWidth - 10;
+                }
+                // Also ensure it doesn't go off left edge
+                if (left < 10) {
+                    left = 10;
+                }
+            } else {
+                // When sidebar is on left, ensure menu doesn't go off right edge
+                if (left + menuWidth > window.innerWidth) {
+                    left = window.innerWidth - menuWidth - 10;
+                }
+            }
+            
+            // Ensure menu doesn't go off bottom edge
+            if (top + menuHeight > window.innerHeight) {
+                top = window.innerHeight - menuHeight - 10;
+            }
+            
+            // Ensure menu doesn't go off top edge
+            if (top < 10) {
+                top = 10;
+            }
+            
+            contextMenu.style.left = left + 'px';
+            contextMenu.style.top = top + 'px';
+            contextMenu.style.right = 'auto';
             contextMenu.style.display = 'block';
             this.contextMenuTabId = tabId;
             
@@ -5953,8 +6512,46 @@ class AxisBrowser {
         
         // Remove closing state and hidden class - CSS will handle display
         contextMenu.classList.remove('closing', 'hidden');
-        contextMenu.style.left = e.pageX + 'px';
-        contextMenu.style.top = e.pageY + 'px';
+        
+        // Position menu and ensure it stays visible
+        const menuWidth = 200; // Approximate menu width
+        const menuHeight = 150; // Approximate menu height
+        const isRight = this.isSidebarRight();
+        
+        // Calculate position
+        let left = e.pageX;
+        let top = e.pageY;
+        
+        // Adjust if menu would go off-screen
+        if (isRight) {
+            // When sidebar is on right, ensure menu doesn't go off right edge
+            if (left + menuWidth > window.innerWidth) {
+                left = window.innerWidth - menuWidth - 10;
+            }
+            // Also ensure it doesn't go off left edge
+            if (left < 10) {
+                left = 10;
+            }
+        } else {
+            // When sidebar is on left, ensure menu doesn't go off right edge
+            if (left + menuWidth > window.innerWidth) {
+                left = window.innerWidth - menuWidth - 10;
+            }
+        }
+        
+        // Ensure menu doesn't go off bottom edge
+        if (top + menuHeight > window.innerHeight) {
+            top = window.innerHeight - menuHeight - 10;
+        }
+        
+        // Ensure menu doesn't go off top edge
+        if (top < 10) {
+            top = 10;
+        }
+        
+        contextMenu.style.left = left + 'px';
+        contextMenu.style.top = top + 'px';
+        contextMenu.style.right = 'auto';
         contextMenu.style.opacity = '';
         contextMenu.style.display = '';
         contextMenu.style.visibility = '';
@@ -6058,7 +6655,8 @@ class AxisBrowser {
     }
 
     clearSearch() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         webview.stopFindInPage('clearSelection');
     }
 
@@ -6068,8 +6666,38 @@ class AxisBrowser {
             // Hide tab context menu if open
             this.hideTabContextMenu();
             
-            contextMenu.style.left = e.pageX + 'px';
-            contextMenu.style.top = e.pageY + 'px';
+            // Position menu and ensure it stays visible
+            const menuWidth = 200;
+            const menuHeight = 300;
+            const isRight = this.isSidebarRight();
+            
+            let left = e.pageX;
+            let top = e.pageY;
+            
+            // Adjust if menu would go off-screen
+            if (isRight) {
+                if (left + menuWidth > window.innerWidth) {
+                    left = window.innerWidth - menuWidth - 10;
+                }
+                if (left < 10) {
+                    left = 10;
+                }
+            } else {
+                if (left + menuWidth > window.innerWidth) {
+                    left = window.innerWidth - menuWidth - 10;
+                }
+            }
+            
+            if (top + menuHeight > window.innerHeight) {
+                top = window.innerHeight - menuHeight - 10;
+            }
+            if (top < 10) {
+                top = 10;
+            }
+            
+            contextMenu.style.left = left + 'px';
+            contextMenu.style.top = top + 'px';
+            contextMenu.style.right = 'auto';
             contextMenu.style.display = 'block';
             contextMenu.classList.remove('hidden');
         }
@@ -6084,7 +6712,8 @@ class AxisBrowser {
     }
 
     selectAll() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         webview.executeJavaScript(`
             try {
                 if (document.activeElement && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
@@ -6103,17 +6732,69 @@ class AxisBrowser {
     }
 
     cut() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         webview.executeJavaScript('document.execCommand("cut")');
     }
 
     copy() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         webview.executeJavaScript('document.execCommand("copy")');
     }
 
+    async copyCurrentUrl() {
+        const el = this.elements;
+        if (!el?.webview) return;
+        
+        // Get the appropriate webview based on view mode
+        let webview;
+        if (this.isSplitView) {
+            if (!this.cachedWebviews) {
+                this.cachedWebviews = {
+                    left: document.getElementById('webview-left'),
+                    right: document.getElementById('webview-right')
+                };
+            }
+            webview = this.activePane === 'left' ? 
+                this.cachedWebviews.left : 
+                this.cachedWebviews.right;
+        } else {
+            webview = el.webview;
+        }
+        
+        if (!webview) return;
+        
+        const url = webview.getURL();
+        if (!url || url === 'about:blank') {
+            this.showNotification('No URL to copy', 'error');
+            return;
+        }
+        
+        try {
+            await navigator.clipboard.writeText(url);
+            this.showNotification('URL copied to clipboard', 'success');
+        } catch (err) {
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = url;
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                this.showNotification('URL copied to clipboard', 'success');
+            } catch (fallbackErr) {
+                this.showNotification('Failed to copy URL', 'error');
+            }
+            document.body.removeChild(textArea);
+        }
+    }
+
     paste() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         webview.executeJavaScript('document.execCommand("paste")');
     }
 
@@ -6284,16 +6965,12 @@ class AxisBrowser {
     toggleDownloads() {
         const downloadsPanel = document.getElementById('downloads-panel');
         const settingsPanel = document.getElementById('settings-panel');
-        const bookmarksPanel = document.getElementById('bookmarks-panel');
         const securityPanel = document.getElementById('security-panel');
         const backdrop = document.getElementById('modal-backdrop');
         
         // Close other panels with animation
         if (!settingsPanel.classList.contains('hidden')) {
             this.closePanelWithAnimation(settingsPanel);
-        }
-        if (!bookmarksPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(bookmarksPanel);
         }
         if (!securityPanel.classList.contains('hidden')) {
             this.closePanelWithAnimation(securityPanel);
@@ -6543,21 +7220,10 @@ class AxisBrowser {
         }
     }
 
-    bookmarkCurrentPage() {
-        const webview = document.getElementById('webview');
-        const url = webview.getURL();
-        const title = webview.getTitle();
-        
-        if (url && url !== 'about:blank') {
-            this.showNotification(`Bookmarked: ${title}`, 'success');
-            // TODO: Implement actual bookmarking
-        } else {
-            this.showNotification('No page to bookmark', 'error');
-        }
-    }
 
     zoomIn() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         const currentZoom = webview.getZoomFactor();
         const newZoom = Math.min(currentZoom + 0.1, 3.0);
         webview.setZoomFactor(newZoom);
@@ -6565,7 +7231,8 @@ class AxisBrowser {
     }
 
     zoomOut() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         const currentZoom = webview.getZoomFactor();
         const newZoom = Math.max(currentZoom - 0.1, 0.25);
         webview.setZoomFactor(newZoom);
@@ -6573,7 +7240,8 @@ class AxisBrowser {
     }
 
     resetZoom() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         webview.setZoomFactor(1.0);
         this.showZoomIndicator('zoom-in', 100);
     }
@@ -6630,108 +7298,6 @@ class AxisBrowser {
         }
     }
 
-    setupAddTabMenu() {
-        const addTabBtn = document.getElementById('add-tab-btn');
-        const addTabMenu = document.getElementById('add-tab-menu');
-        const newTabBtn = document.getElementById('new-tab-btn');
-        const newIncognitoBtn = document.getElementById('new-incognito-btn');
-
-        // Prevent clicks inside the menu from closing it
-        if (addTabMenu) {
-            addTabMenu.addEventListener('click', (e) => {
-                e.stopPropagation();
-            });
-        }
-
-        // Prevent clicks inside the menu from closing it
-        if (addTabMenu) {
-            addTabMenu.addEventListener('click', (e) => {
-                e.stopPropagation();
-            });
-        }
-
-        // Toggle add tab menu
-        addTabBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.toggleAddTabMenu();
-        });
-
-        // New tab option
-        newTabBtn.addEventListener('click', () => {
-            this.closeAddTabMenu();
-            // Open spotlight instead of creating a tab
-            this.showSpotlightSearch();
-            const inputEl = document.getElementById('spotlight-input');
-            if (inputEl) inputEl.focus();
-        });
-
-        // New incognito tab option
-        newIncognitoBtn.addEventListener('click', () => {
-            this.closeAddTabMenu();
-            this.createIncognitoTab();
-        });
-
-        // Notes option
-        const newNoteMenuBtn = document.getElementById('new-note-menu-btn');
-        if (newNoteMenuBtn) {
-            newNoteMenuBtn.addEventListener('click', () => {
-                this.toggleNotes();
-                this.closeAddTabMenu();
-            });
-        }
-
-        // Close menu when clicking outside
-        document.addEventListener('click', (e) => {
-            if (!addTabBtn.contains(e.target) && !addTabMenu.contains(e.target)) {
-                this.closeAddTabMenu();
-            }
-        });
-        // Also close on mousedown for immediate response
-        document.addEventListener('mousedown', (e) => {
-            if (!addTabBtn.contains(e.target) && !addTabMenu.contains(e.target)) {
-                this.closeAddTabMenu();
-            }
-        });
-        // Close on Escape key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                this.closeAddTabMenu();
-            }
-        });
-    }
-
-    toggleAddTabMenu() {
-        const addTabMenu = document.getElementById('add-tab-menu');
-        if (addTabMenu.classList.contains('hidden')) {
-            this.showAddTabMenu();
-        } else {
-            this.closeAddTabMenu();
-        }
-    }
-
-    showAddTabMenu() {
-        const addTabMenu = document.getElementById('add-tab-menu');
-        addTabMenu.classList.remove('hidden');
-        addTabMenu.classList.remove('closing');
-        
-        // Reset animations on all menu items to ensure they play
-        const menuItems = addTabMenu.querySelectorAll('.add-tab-menu-item');
-        menuItems.forEach(item => {
-            // Force animation restart
-            item.style.animation = 'none';
-            item.offsetHeight; // Trigger reflow
-            item.style.animation = '';
-        });
-    }
-
-    closeAddTabMenu() {
-        const addTabMenu = document.getElementById('add-tab-menu');
-        addTabMenu.classList.add('closing');
-        setTimeout(() => {
-            addTabMenu.classList.add('hidden');
-            addTabMenu.classList.remove('closing');
-        }, 200);
-    }
 
     createIncognitoTab() {
         // Open incognito window
@@ -7577,7 +8143,8 @@ class AxisBrowser {
 
     async trackPageInHistory() {
         try {
-            const webview = document.getElementById('webview');
+            const webview = this.getActiveWebview();
+            if (!webview) return;
             const url = webview.getURL();
             const title = webview.getTitle();
             
@@ -7609,7 +8176,6 @@ class AxisBrowser {
         const securityPanel = document.getElementById('security-panel');
         const settingsPanel = document.getElementById('settings-panel');
         const downloadsPanel = document.getElementById('downloads-panel');
-        const bookmarksPanel = document.getElementById('bookmarks-panel');
         
         // Close other panels with animation
         if (!settingsPanel.classList.contains('hidden')) {
@@ -7617,9 +8183,6 @@ class AxisBrowser {
         }
         if (!downloadsPanel.classList.contains('hidden')) {
             this.closePanelWithAnimation(downloadsPanel);
-        }
-        if (!bookmarksPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(bookmarksPanel);
         }
         
         if (securityPanel.classList.contains('hidden')) {
@@ -7657,7 +8220,8 @@ class AxisBrowser {
     }
 
     updateSecurityInfo() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         const url = webview.getURL();
         const title = webview.getTitle();
         
@@ -7717,7 +8281,8 @@ class AxisBrowser {
     }
 
     viewCertificate() {
-        const webview = document.getElementById('webview');
+        const webview = this.getActiveWebview();
+        if (!webview) return;
         const url = webview.getURL();
         
         if (url && url.startsWith('https:')) {
@@ -7743,8 +8308,6 @@ class AxisBrowser {
             closingClass = 'settings-closing';
         } else if (panel.id === 'downloads-panel') {
             closingClass = 'downloads-closing';
-        } else if (panel.id === 'bookmarks-panel') {
-            closingClass = 'bookmarks-closing';
         } else if (panel.id === 'notes-panel') {
             closingClass = 'notes-closing';
         } else if (panel.id === 'security-panel') {
@@ -7776,6 +8339,9 @@ class AxisBrowser {
     showSpotlightSearch() {
         const spotlightSearch = document.getElementById('spotlight-search');
         spotlightSearch.classList.remove('hidden');
+        
+        // Immediately show default suggestions (2 tabs + 3 search/history)
+        this.updateSpotlightSuggestions('');
         
         // Focus the input after animation
         setTimeout(() => {
@@ -7848,9 +8414,6 @@ class AxisBrowser {
                 this.saveSetting('recentSearches', this.settings.recentSearches);
             }
             
-            // Create a new tab for the search
-            this.createNewTab();
-            
             // Determine if it's a URL or search query
             let searchUrl;
             if (this.isValidUrl(query)) {
@@ -7859,10 +8422,8 @@ class AxisBrowser {
                 searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
             }
             
-            // Navigate to the search URL in the new tab
-            const webview = document.getElementById('webview');
-            const sanitizedSearchUrl = this.sanitizeUrl(searchUrl);
-            webview.src = sanitizedSearchUrl || 'https://www.google.com';
+            // Create a new tab and navigate to the search URL
+            this.createNewTab(searchUrl);
         }
     }
 
@@ -7906,8 +8467,9 @@ class AxisBrowser {
         // Reset selection when suggestions update
         this.spotlightSelectedIndex = -1;
         
-        // Limit to 5 visible suggestions
-        const visibleSuggestions = suggestions.slice(0, 5);
+        // Always show exactly 5 suggestions (2 tabs + 3 search/history)
+        // If we have fewer than 5, getDefaultSuggestions will fill with placeholders
+        const visibleSuggestions = suggestions.length >= 5 ? suggestions.slice(0, 5) : suggestions;
         
         // Add new suggestions without resetting animations
         visibleSuggestions.forEach((suggestion, index) => {
@@ -7920,14 +8482,20 @@ class AxisBrowser {
                     <i class="${this.escapeHtml(suggestion.icon)}"></i>
                 </div>
                 <div class="spotlight-suggestion-text">${this.escapeHtml(suggestion.text)}</div>
-                ${suggestion.tabId ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
+                ${(suggestion.isTab && suggestion.tabId) ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
             `;
             
             suggestionEl.addEventListener('click', () => {
                 // Do not close spotlight preemptively; only close when navigating
-                if (suggestion.isTab && suggestion.tabId) {
-                    this.closeSpotlightSearch();
-                    this.switchToTab(suggestion.tabId);
+                if (suggestion.isTab) {
+                    if (suggestion.tabId) {
+                        this.closeSpotlightSearch();
+                        this.switchToTab(suggestion.tabId);
+                    } else if (suggestion.isPlaceholder) {
+                        // Placeholder tab - create a new tab
+                        this.closeSpotlightSearch();
+                        this.createNewTab();
+                    }
                 } else if (suggestion.isAction) {
                     if (suggestion.text === 'New Tab') {
                         // Open spotlight, do not create a tab
@@ -7948,32 +8516,20 @@ class AxisBrowser {
                 } else if (suggestion.isNote && suggestion.noteId) {
                     this.closeSpotlightSearch();
                     this.openNoteAsTab(suggestion.noteId);
-                } else                 if (suggestion.isSearch) {
+                } else if (suggestion.isSearch) {
                     this.closeSpotlightSearch();
-                    this.createNewTab();
                     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(suggestion.searchQuery)}`;
-                    const webview = document.getElementById('webview');
-                    const sanitizedSearchUrl = this.sanitizeUrl(searchUrl);
-                    webview.src = sanitizedSearchUrl || 'https://www.google.com';
+                    this.createNewTab(searchUrl);
                 } else if (suggestion.isHistory) {
                     this.closeSpotlightSearch();
-                    this.createNewTab();
-                    const webview = document.getElementById('webview');
-                    const sanitizedHistoryUrl = this.sanitizeUrl(suggestion.url);
-                    webview.src = sanitizedHistoryUrl || 'https://www.google.com';
+                    this.createNewTab(suggestion.url);
                 } else if (suggestion.isCompletion) {
                     this.closeSpotlightSearch();
-                    this.createNewTab();
                     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(suggestion.searchQuery)}`;
-                    const webview = document.getElementById('webview');
-                    const sanitizedCompletionUrl = this.sanitizeUrl(searchUrl);
-                    webview.src = sanitizedCompletionUrl || 'https://www.google.com';
+                    this.createNewTab(searchUrl);
                 } else if (suggestion.isUrl) {
                     this.closeSpotlightSearch();
-                    this.createNewTab();
-                    const webview = document.getElementById('webview');
-                    const sanitizedSuggestionUrl = this.sanitizeUrl(suggestion.url);
-                    webview.src = sanitizedSuggestionUrl || 'https://www.google.com';
+                    this.createNewTab(suggestion.url);
                 } else {
                     // Default search behavior requires Enter; keep spotlight open
                     const input = document.getElementById('spotlight-input');
@@ -7995,89 +8551,106 @@ class AxisBrowser {
         const suggestions = [];
         const lowerQuery = query.toLowerCase();
         
-        // Show existing tabs first
+        // Always show 2 open tab suggestions first (with "Switch to Tab" buttons)
+        let tabCount = 0;
         this.tabs.forEach((tab, tabId) => {
+            if (tabCount >= 2) return; // Only show first 2 tabs
+            
             const title = tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
             const url = tab.url || 'about:blank';
             
-            if (title.toLowerCase().includes(lowerQuery) || 
-                url.toLowerCase().includes(lowerQuery) || 
-                lowerQuery.length === 0) {
-                
-                let icon = 'fas fa-globe';
-                if (tab.incognito) {
-                    icon = 'fas fa-mask';
-                } else if (url.includes('gmail.com')) {
-                    icon = 'fas fa-envelope';
-                } else if (url.includes('youtube.com')) {
-                    icon = 'fab fa-youtube';
-                } else if (url.includes('github.com')) {
-                    icon = 'fab fa-github';
-                } else if (url.includes('facebook.com')) {
-                    icon = 'fab fa-facebook';
-                } else if (url.includes('twitter.com')) {
-                    icon = 'fab fa-twitter';
-                } else if (url.includes('instagram.com')) {
-                    icon = 'fab fa-instagram';
-                } else if (url.includes('reddit.com')) {
-                    icon = 'fab fa-reddit';
-                } else if (url.includes('stackoverflow.com')) {
-                    icon = 'fab fa-stack-overflow';
-                } else if (url.includes('wikipedia.org')) {
-                    icon = 'fab fa-wikipedia-w';
-                } else if (url.includes('amazon.com')) {
-                    icon = 'fab fa-amazon';
-                }
-                
-                suggestions.push({
-                    text: title,
-                    icon: icon,
-                    tabId: tabId,
-                    url: url,
-                    isTab: true
-                });
+            // Filter tabs by query if provided
+            if (query.length > 0 && 
+                !title.toLowerCase().includes(lowerQuery) && 
+                !url.toLowerCase().includes(lowerQuery)) {
+                return; // Skip this tab if it doesn't match query
             }
-        });
-        
-        // Add notes search
-        if (lowerQuery.includes('note')) {
-            // Always show "New Note" when searching for notes
+            
+            let icon = 'fas fa-globe';
+            if (tab.incognito) {
+                icon = 'fas fa-mask';
+            } else if (url.includes('gmail.com')) {
+                icon = 'fas fa-envelope';
+            } else if (url.includes('youtube.com')) {
+                icon = 'fab fa-youtube';
+            } else if (url.includes('github.com')) {
+                icon = 'fab fa-github';
+            } else if (url.includes('facebook.com')) {
+                icon = 'fab fa-facebook';
+            } else if (url.includes('twitter.com')) {
+                icon = 'fab fa-twitter';
+            } else if (url.includes('instagram.com')) {
+                icon = 'fab fa-instagram';
+            } else if (url.includes('reddit.com')) {
+                icon = 'fab fa-reddit';
+            } else if (url.includes('stackoverflow.com')) {
+                icon = 'fab fa-stack-overflow';
+            } else if (url.includes('wikipedia.org')) {
+                icon = 'fab fa-wikipedia-w';
+            } else if (url.includes('amazon.com')) {
+                icon = 'fab fa-amazon';
+            }
+            
             suggestions.push({
-                text: 'New Note',
-                icon: 'fas fa-sticky-note',
-                isAction: true
+                text: title,
+                icon: icon,
+                tabId: tabId,
+                url: url,
+                isTab: true
             });
             
-            try {
-                const notes = await window.electronAPI.getNotes();
-                notes.slice(0, 3).forEach(note => {
-                    const titleMatch = note.title && note.title.toLowerCase().includes(lowerQuery);
-                    const contentMatch = note.content && note.content.toLowerCase().includes(lowerQuery);
-                    if (titleMatch || contentMatch || lowerQuery === 'note') {
-                        suggestions.push({
-                            text: note.title || 'Untitled Note',
-                            icon: 'fas fa-sticky-note',
-                            noteId: note.id,
-                            isNote: true
-                        });
-                    }
-                });
-            } catch (err) {
-                // Ignore errors
-            }
+            tabCount++;
+        });
+        
+        // Fill remaining tab slots with placeholder tabs if needed
+        while (tabCount < 2) {
+            suggestions.push({
+                text: 'New Tab',
+                icon: 'fas fa-globe',
+                tabId: null,
+                url: 'about:blank',
+                isTab: true,
+                isPlaceholder: true
+            });
+            tabCount++;
         }
         
-        // Add recent history items
-        if (this.settings.history && this.settings.history.length > 0) {
+        // Always show 3 search/history suggestions (after the 2 tabs)
+        let searchCount = 0;
+        
+        // Add recent searches first
+        if (this.settings.recentSearches && this.settings.recentSearches.length > 0 && searchCount < 3) {
+            const recentSearches = this.settings.recentSearches
+                .filter(search => 
+                    query.length === 0 || search.toLowerCase().includes(lowerQuery)
+                )
+                .slice(0, 3 - searchCount)
+                .map(search => ({
+                    text: `Search "${search}"`,
+                    icon: 'fas fa-search',
+                    searchQuery: search,
+                    isSearch: true
+                }));
+            
+            recentSearches.forEach(search => {
+                if (searchCount < 3) {
+                    suggestions.push(search);
+                    searchCount++;
+                }
+            });
+        }
+        
+        // Add recent history if we need more suggestions
+        if (searchCount < 3 && this.settings.history && this.settings.history.length > 0) {
             const recentHistory = this.settings.history
                 .filter(item => 
+                    query.length === 0 ||
                     item.title.toLowerCase().includes(lowerQuery) || 
-                    item.url.toLowerCase().includes(lowerQuery) ||
-                    lowerQuery.length === 0
+                    item.url.toLowerCase().includes(lowerQuery)
                 )
-                .slice(0, 3)
+                .slice(0, 3 - searchCount)
                 .map(item => {
-                    let icon = 'fas fa-globe';
+                    let icon = 'fas fa-lightbulb';
                     if (item.url.includes('gmail.com')) {
                         icon = 'fas fa-envelope';
                     } else if (item.url.includes('youtube.com')) {
@@ -8109,206 +8682,50 @@ class AxisBrowser {
                     };
                 });
             
-            suggestions.push(...recentHistory);
+            recentHistory.forEach(item => {
+                if (searchCount < 3) {
+                    suggestions.push(item);
+                    searchCount++;
+                }
+            });
         }
         
-        // Add recent searches with sentence completion
-        if (this.settings.recentSearches && this.settings.recentSearches.length > 0) {
-            const recentSearches = this.settings.recentSearches
-                .filter(search => 
-                    search.toLowerCase().includes(lowerQuery) || 
-                    lowerQuery.length === 0
-                )
-                .slice(0, 2)
-                .map(search => ({
-                    text: `Search "${search}"`,
-                    icon: 'fas fa-search',
-                    searchQuery: search,
-                    isSearch: true
-                }));
-            
-            suggestions.push(...recentSearches);
-        }
-        
-        // Add intelligent sentence completions
-        if (lowerQuery.length > 0) {
+        // Add intelligent sentence completions if we need more
+        if (searchCount < 3 && query.length > 0) {
             const completions = this.generateSentenceCompletions(lowerQuery);
-            suggestions.push(...completions);
-        }
-        
-        // Add quick actions if no matches or query is empty
-        if (suggestions.length === 0 || lowerQuery.length === 0) {
-            suggestions.push({
-                text: 'New Tab',
-                icon: 'fas fa-plus',
-                isAction: true
-            });
-            
-            suggestions.push({
-                text: 'New Incognito Tab',
-                icon: 'fas fa-mask',
-                isAction: true
-            });
-            
-            suggestions.push({
-                text: 'Open Settings',
-                icon: 'fas fa-cog',
-                isAction: true
+            completions.forEach(completion => {
+                if (searchCount < 3) {
+                    suggestions.push(completion);
+                    searchCount++;
+                }
             });
         }
         
-        // Quick actions
-        if (lowerQuery.includes('new') || lowerQuery.includes('tab')) {
-            suggestions.push({
-                text: 'New Tab',
-                icon: 'fas fa-plus',
-                shortcut: '⌘T'
-            });
-        }
-        
-        if (lowerQuery.includes('incognito') || lowerQuery.includes('private')) {
-            suggestions.push({
-                text: 'New Incognito Tab',
-                icon: 'fas fa-mask',
-                shortcut: '⌘⇧N'
-            });
-        }
-        
-        // Navigation
-        if (lowerQuery.includes('back') || lowerQuery.includes('previous')) {
-            suggestions.push({
-                text: 'Go Back',
-                icon: 'fas fa-arrow-left',
-                shortcut: '←'
-            });
-        }
-        
-        if (lowerQuery.includes('forward') || lowerQuery.includes('next')) {
-            suggestions.push({
-                text: 'Go Forward',
-                icon: 'fas fa-arrow-right',
-                shortcut: '→'
-            });
-        }
-        
-        if (lowerQuery.includes('reload') || lowerQuery.includes('refresh')) {
-            suggestions.push({
-                text: 'Reload Page',
-                icon: 'fas fa-redo',
-                shortcut: '⌘R'
-            });
-        }
-        
-        // Settings and panels
-        if (lowerQuery.includes('settings') || lowerQuery.includes('preferences')) {
-            suggestions.push({
-                text: 'Open Settings',
-                icon: 'fas fa-cog',
-                shortcut: '⌘,'
-            });
-        }
-        
-        if (lowerQuery.includes('bookmark') || lowerQuery.includes('save')) {
-            suggestions.push({
-                text: 'Bookmark This Page',
-                icon: 'fas fa-bookmark',
-                shortcut: '⌘D'
-            });
-        }
-        
-        if (lowerQuery.includes('download') || lowerQuery.includes('downloads')) {
-            suggestions.push({
-                text: 'Open Downloads',
-                icon: 'fas fa-download',
-                shortcut: '⌘J'
-            });
-        }
-        
-        if (lowerQuery.includes('history')) {
-            suggestions.push({
-                text: 'Open History',
-                icon: 'fas fa-history',
-                shortcut: '⌘Y'
-            });
-        }
-        
-        // Search engines
-        if (lowerQuery.includes('google') || lowerQuery.includes('search')) {
-            suggestions.push({
-                text: 'Search on Google',
-                icon: 'fab fa-google',
-                shortcut: 'google.com'
-            });
-        }
-        
-        if (lowerQuery.includes('youtube') || lowerQuery.includes('video')) {
-            suggestions.push({
-                text: 'Search on YouTube',
-                icon: 'fab fa-youtube',
-                shortcut: 'youtube.com'
-            });
-        }
-        
-        if (lowerQuery.includes('github') || lowerQuery.includes('code')) {
-            suggestions.push({
-                text: 'Search on GitHub',
-                icon: 'fab fa-github',
-                shortcut: 'github.com'
-            });
-        }
-        
-        // Word suggestions for search queries
-        const wordSuggestions = [
-            'weather', 'news', 'maps', 'translate', 'calculator', 'time', 'date',
-            'stock market', 'crypto', 'sports', 'music', 'movies', 'games',
-            'programming', 'design', 'photography', 'travel', 'food', 'health',
-            'education', 'technology', 'science', 'history', 'art', 'books'
-        ];
-        
-        wordSuggestions.forEach(word => {
-            if (word.toLowerCase().includes(lowerQuery) || lowerQuery.includes(word.toLowerCase())) {
+        // Fill remaining slots with placeholder search suggestions if needed
+        const placeholderSearches = ['how to code', 'how to learn programming', 'weather'];
+        while (searchCount < 3) {
+            const placeholderIndex = searchCount - (3 - placeholderSearches.length);
+            if (placeholderIndex >= 0 && placeholderIndex < placeholderSearches.length) {
                 suggestions.push({
-                    text: `Search for "${word}"`,
+                    text: placeholderSearches[placeholderIndex],
+                    icon: 'fas fa-lightbulb',
+                    searchQuery: placeholderSearches[placeholderIndex],
+                    isSearch: true,
+                    isPlaceholder: true
+                });
+            } else {
+                suggestions.push({
+                    text: 'Search...',
                     icon: 'fas fa-search',
-                    shortcut: `Search ${word}`
+                    searchQuery: '',
+                    isSearch: true,
+                    isPlaceholder: true
                 });
             }
-        });
-        
-        // Popular websites
-        const popularSites = [
-            { name: 'Gmail', icon: 'fab fa-google', url: 'gmail.com' },
-            { name: 'YouTube', icon: 'fab fa-youtube', url: 'youtube.com' },
-            { name: 'GitHub', icon: 'fab fa-github', url: 'github.com' },
-            { name: 'Twitter', icon: 'fab fa-twitter', url: 'twitter.com' },
-            { name: 'Reddit', icon: 'fab fa-reddit', url: 'reddit.com' },
-            { name: 'Stack Overflow', icon: 'fab fa-stack-overflow', url: 'stackoverflow.com' },
-            { name: 'Wikipedia', icon: 'fab fa-wikipedia-w', url: 'wikipedia.org' },
-            { name: 'Netflix', icon: 'fab fa-netflix', url: 'netflix.com' }
-        ];
-        
-        popularSites.forEach(site => {
-            if (site.name.toLowerCase().includes(lowerQuery) || 
-                site.url.toLowerCase().includes(lowerQuery)) {
-                suggestions.push({
-                    text: `Go to ${site.name}`,
-                    icon: site.icon,
-                    shortcut: site.url
-                });
-            }
-        });
-        
-        // If it looks like a URL, suggest direct navigation
-        if (this.isValidUrl(query) || lowerQuery.includes('.com') || lowerQuery.includes('.org')) {
-            const url = query.startsWith('http') ? query : `https://${query}`;
-            suggestions.unshift({
-                text: `Navigate to ${query}`,
-                icon: 'fas fa-external-link-alt',
-                shortcut: url
-            });
+            searchCount++;
         }
         
-        return suggestions.slice(0, 8); // Limit to 8 suggestions
+        return suggestions; // Always returns exactly 5 suggestions (2 tabs + 3 search/history)
     }
 
     generateSentenceCompletions(query) {
@@ -8841,84 +9258,10 @@ class AxisBrowser {
     getDefaultSuggestions() {
         const suggestions = [];
         
-        // Add quick actions
-        suggestions.push({
-            text: 'New Tab',
-            icon: 'fas fa-plus',
-            isAction: true
-        });
-        
-        suggestions.push({
-            text: 'New Incognito Tab',
-            icon: 'fas fa-mask',
-            isAction: true
-        });
-        
-        suggestions.push({
-            text: 'Open Settings',
-            icon: 'fas fa-cog',
-            isAction: true
-        });
-        
-        suggestions.push({
-            text: 'New Note',
-            icon: 'fas fa-sticky-note',
-            isAction: true
-        });
-        
-        // Add recent searches if available
-        if (this.settings.recentSearches && this.settings.recentSearches.length > 0) {
-            const recentSearches = this.settings.recentSearches.slice(0, 2);
-            recentSearches.forEach(search => {
-                suggestions.push({
-                    text: `Search "${search}"`,
-                    icon: 'fas fa-search',
-                    searchQuery: search,
-                    isSearch: true
-                });
-            });
-        }
-        
-        // Add recent history if available
-        if (this.settings.history && this.settings.history.length > 0) {
-            const recentHistory = this.settings.history.slice(0, 2);
-            recentHistory.forEach(item => {
-                let icon = 'fas fa-globe';
-                if (item.url.includes('gmail.com')) {
-                    icon = 'fas fa-envelope';
-                } else if (item.url.includes('youtube.com')) {
-                    icon = 'fab fa-youtube';
-                } else if (item.url.includes('github.com')) {
-                    icon = 'fab fa-github';
-                } else if (item.url.includes('facebook.com')) {
-                    icon = 'fab fa-facebook';
-                } else if (item.url.includes('twitter.com')) {
-                    icon = 'fab fa-twitter';
-                } else if (item.url.includes('instagram.com')) {
-                    icon = 'fab fa-instagram';
-                } else if (item.url.includes('reddit.com')) {
-                    icon = 'fab fa-reddit';
-                } else if (item.url.includes('stackoverflow.com')) {
-                    icon = 'fab fa-stack-overflow';
-                } else if (item.url.includes('wikipedia.org')) {
-                    icon = 'fab fa-wikipedia-w';
-                } else if (item.url.includes('amazon.com')) {
-                    icon = 'fab fa-amazon';
-                }
-                
-                suggestions.push({
-                    text: item.title,
-                    icon: icon,
-                    url: item.url,
-                    isHistory: true,
-                    timestamp: item.timestamp
-                });
-            });
-        }
-        
-        // Add existing tabs
+        // Always show 2 open tab suggestions first (with "Switch to Tab" buttons)
+        let tabCount = 0;
         this.tabs.forEach((tab, tabId) => {
-            if (suggestions.length >= 5) return; // Limit to 5 total
+            if (tabCount >= 2) return; // Only show first 2 tabs
             
             const title = tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
             const url = tab.url || 'about:blank';
@@ -8955,9 +9298,107 @@ class AxisBrowser {
                 url: url,
                 isTab: true
             });
+            
+            tabCount++;
         });
         
-        return suggestions.slice(0, 5); // Ensure exactly 5 suggestions
+        // Fill remaining tab slots with placeholder tabs if needed
+        while (tabCount < 2) {
+            suggestions.push({
+                text: 'New Tab',
+                icon: 'fas fa-globe',
+                tabId: null,
+                url: 'about:blank',
+                isTab: true,
+                isPlaceholder: true
+            });
+            tabCount++;
+        }
+        
+        // Always show 3 search/history suggestions
+        let searchCount = 0;
+        
+        // Add recent searches first
+        if (this.settings.recentSearches && this.settings.recentSearches.length > 0 && searchCount < 3) {
+            const recentSearches = this.settings.recentSearches.slice(0, 3 - searchCount);
+            recentSearches.forEach(search => {
+                if (searchCount < 3) {
+                    suggestions.push({
+                        text: `Search "${search}"`,
+                        icon: 'fas fa-search',
+                        searchQuery: search,
+                        isSearch: true
+                    });
+                    searchCount++;
+                }
+            });
+        }
+        
+        // Add recent history if we need more suggestions
+        if (searchCount < 3 && this.settings.history && this.settings.history.length > 0) {
+            const recentHistory = this.settings.history.slice(0, 3 - searchCount);
+            recentHistory.forEach(item => {
+                if (searchCount < 3) {
+                    let icon = 'fas fa-lightbulb';
+                    if (item.url.includes('gmail.com')) {
+                        icon = 'fas fa-envelope';
+                    } else if (item.url.includes('youtube.com')) {
+                        icon = 'fab fa-youtube';
+                    } else if (item.url.includes('github.com')) {
+                        icon = 'fab fa-github';
+                    } else if (item.url.includes('facebook.com')) {
+                        icon = 'fab fa-facebook';
+                    } else if (item.url.includes('twitter.com')) {
+                        icon = 'fab fa-twitter';
+                    } else if (item.url.includes('instagram.com')) {
+                        icon = 'fab fa-instagram';
+                    } else if (item.url.includes('reddit.com')) {
+                        icon = 'fab fa-reddit';
+                    } else if (item.url.includes('stackoverflow.com')) {
+                        icon = 'fab fa-stack-overflow';
+                    } else if (item.url.includes('wikipedia.org')) {
+                        icon = 'fab fa-wikipedia-w';
+                    } else if (item.url.includes('amazon.com')) {
+                        icon = 'fab fa-amazon';
+                    }
+                    
+                    suggestions.push({
+                        text: item.title,
+                        icon: icon,
+                        url: item.url,
+                        isHistory: true,
+                        timestamp: item.timestamp
+                    });
+                    searchCount++;
+                }
+            });
+        }
+        
+        // Fill remaining slots with placeholder search suggestions if needed
+        const placeholderSearches = ['how to code', 'how to learn programming', 'weather'];
+        while (searchCount < 3) {
+            const placeholderIndex = searchCount - (3 - placeholderSearches.length);
+            if (placeholderIndex >= 0 && placeholderIndex < placeholderSearches.length) {
+                suggestions.push({
+                    text: placeholderSearches[placeholderIndex],
+                    icon: 'fas fa-lightbulb',
+                    searchQuery: placeholderSearches[placeholderIndex],
+                    isSearch: true,
+                    isPlaceholder: true
+                });
+            } else {
+                suggestions.push({
+                    text: 'Search...',
+                    icon: 'fas fa-search',
+                    searchQuery: '',
+                    isSearch: true,
+                    isPlaceholder: true
+                });
+            }
+            searchCount++;
+        }
+        
+        return suggestions; // Always returns exactly 5 suggestions (2 tabs + 3 search/history)
     }
 
     sanitizeUrl(input) {
