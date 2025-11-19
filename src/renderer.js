@@ -2890,6 +2890,38 @@ class AxisBrowser {
         }
     }
 
+    /**
+     * Safely determine whether a URL belongs to a given registrable domain.
+     *
+     * This parses the URL and inspects the hostname instead of using substring
+     * checks on the full URL, which could be bypassed by hosts like
+     * "evil-amazon.com".
+     */
+    isUrlOnDomain(rawUrl, domain) {
+        if (!rawUrl || typeof rawUrl !== 'string') {
+            return false;
+        }
+
+        let urlObj;
+        try {
+            // Try absolute URL first
+            urlObj = new URL(rawUrl);
+        } catch (e) {
+            try {
+                // Fallback: treat as relative URL using a safe dummy base
+                urlObj = new URL(rawUrl, 'http://dummy');
+            } catch (e2) {
+                return false;
+            }
+        }
+
+        const hostname = urlObj.hostname;
+        if (!hostname) return false;
+
+        if (hostname === domain) return true;
+        return hostname.endsWith(`.${domain}`);
+    }
+
     toggleUrlBarExpansion() {
         const urlBar = document.getElementById('url-bar');
         
@@ -8489,8 +8521,8 @@ class AxisBrowser {
                 // Do not close spotlight preemptively; only close when navigating
                 if (suggestion.isTab) {
                     if (suggestion.tabId) {
-                        this.closeSpotlightSearch();
-                        this.switchToTab(suggestion.tabId);
+                    this.closeSpotlightSearch();
+                    this.switchToTab(suggestion.tabId);
                     } else if (suggestion.isPlaceholder) {
                         // Placeholder tab - create a new tab
                         this.closeSpotlightSearch();
@@ -8565,38 +8597,38 @@ class AxisBrowser {
                 !url.toLowerCase().includes(lowerQuery)) {
                 return; // Skip this tab if it doesn't match query
             }
-            
-            let icon = 'fas fa-globe';
-            if (tab.incognito) {
-                icon = 'fas fa-mask';
-            } else if (url.includes('gmail.com')) {
-                icon = 'fas fa-envelope';
-            } else if (url.includes('youtube.com')) {
-                icon = 'fab fa-youtube';
-            } else if (url.includes('github.com')) {
-                icon = 'fab fa-github';
-            } else if (url.includes('facebook.com')) {
-                icon = 'fab fa-facebook';
-            } else if (url.includes('twitter.com')) {
-                icon = 'fab fa-twitter';
-            } else if (url.includes('instagram.com')) {
-                icon = 'fab fa-instagram';
-            } else if (url.includes('reddit.com')) {
-                icon = 'fab fa-reddit';
-            } else if (url.includes('stackoverflow.com')) {
-                icon = 'fab fa-stack-overflow';
-            } else if (url.includes('wikipedia.org')) {
-                icon = 'fab fa-wikipedia-w';
-            } else if (url.includes('amazon.com')) {
-                icon = 'fab fa-amazon';
-            }
-            
-            suggestions.push({
-                text: title,
-                icon: icon,
-                tabId: tabId,
-                url: url,
-                isTab: true
+                
+                let icon = 'fas fa-globe';
+                if (tab.incognito) {
+                    icon = 'fas fa-mask';
+                } else if (this.isUrlOnDomain(url, 'gmail.com')) {
+                    icon = 'fas fa-envelope';
+                } else if (this.isUrlOnDomain(url, 'youtube.com')) {
+                    icon = 'fab fa-youtube';
+                } else if (this.isUrlOnDomain(url, 'github.com')) {
+                    icon = 'fab fa-github';
+                } else if (this.isUrlOnDomain(url, 'facebook.com')) {
+                    icon = 'fab fa-facebook';
+                } else if (this.isUrlOnDomain(url, 'twitter.com')) {
+                    icon = 'fab fa-twitter';
+                } else if (this.isUrlOnDomain(url, 'instagram.com')) {
+                    icon = 'fab fa-instagram';
+                } else if (this.isUrlOnDomain(url, 'reddit.com')) {
+                    icon = 'fab fa-reddit';
+                } else if (this.isUrlOnDomain(url, 'stackoverflow.com')) {
+                    icon = 'fab fa-stack-overflow';
+                } else if (this.isUrlOnDomain(url, 'wikipedia.org')) {
+                    icon = 'fab fa-wikipedia-w';
+                } else if (this.isUrlOnDomain(url, 'amazon.com')) {
+                    icon = 'fab fa-amazon';
+                }
+                
+                suggestions.push({
+                    text: title,
+                    icon: icon,
+                    tabId: tabId,
+                    url: url,
+                    isTab: true
             });
             
             tabCount++;
@@ -8604,7 +8636,7 @@ class AxisBrowser {
         
         // Fill remaining tab slots with placeholder tabs if needed
         while (tabCount < 2) {
-            suggestions.push({
+                        suggestions.push({
                 text: 'New Tab',
                 icon: 'fas fa-globe',
                 tabId: null,
@@ -8651,25 +8683,25 @@ class AxisBrowser {
                 .slice(0, 3 - searchCount)
                 .map(item => {
                     let icon = 'fas fa-lightbulb';
-                    if (item.url.includes('gmail.com')) {
+                    if (this.isUrlOnDomain(item.url, 'gmail.com')) {
                         icon = 'fas fa-envelope';
-                    } else if (item.url.includes('youtube.com')) {
+                    } else if (this.isUrlOnDomain(item.url, 'youtube.com')) {
                         icon = 'fab fa-youtube';
-                    } else if (item.url.includes('github.com')) {
+                    } else if (this.isUrlOnDomain(item.url, 'github.com')) {
                         icon = 'fab fa-github';
-                    } else if (item.url.includes('facebook.com')) {
+                    } else if (this.isUrlOnDomain(item.url, 'facebook.com')) {
                         icon = 'fab fa-facebook';
-                    } else if (item.url.includes('twitter.com')) {
+                    } else if (this.isUrlOnDomain(item.url, 'twitter.com')) {
                         icon = 'fab fa-twitter';
-                    } else if (item.url.includes('instagram.com')) {
+                    } else if (this.isUrlOnDomain(item.url, 'instagram.com')) {
                         icon = 'fab fa-instagram';
-                    } else if (item.url.includes('reddit.com')) {
+                    } else if (this.isUrlOnDomain(item.url, 'reddit.com')) {
                         icon = 'fab fa-reddit';
-                    } else if (item.url.includes('stackoverflow.com')) {
+                    } else if (this.isUrlOnDomain(item.url, 'stackoverflow.com')) {
                         icon = 'fab fa-stack-overflow';
-                    } else if (item.url.includes('wikipedia.org')) {
+                    } else if (this.isUrlOnDomain(item.url, 'wikipedia.org')) {
                         icon = 'fab fa-wikipedia-w';
-                    } else if (item.url.includes('amazon.com')) {
+                    } else if (this.isUrlOnDomain(item.url, 'amazon.com')) {
                         icon = 'fab fa-amazon';
                     }
                     
@@ -8706,7 +8738,7 @@ class AxisBrowser {
         while (searchCount < 3) {
             const placeholderIndex = searchCount - (3 - placeholderSearches.length);
             if (placeholderIndex >= 0 && placeholderIndex < placeholderSearches.length) {
-                suggestions.push({
+            suggestions.push({
                     text: placeholderSearches[placeholderIndex],
                     icon: 'fas fa-lightbulb',
                     searchQuery: placeholderSearches[placeholderIndex],
@@ -8714,7 +8746,7 @@ class AxisBrowser {
                     isPlaceholder: true
                 });
             } else {
-                suggestions.push({
+            suggestions.push({
                     text: 'Search...',
                     icon: 'fas fa-search',
                     searchQuery: '',
@@ -9269,29 +9301,29 @@ class AxisBrowser {
             let icon = 'fas fa-globe';
             if (tab.incognito) {
                 icon = 'fas fa-mask';
-            } else if (url.includes('gmail.com')) {
+            } else if (this.isUrlOnDomain(url, 'gmail.com')) {
                 icon = 'fas fa-envelope';
-            } else if (url.includes('youtube.com')) {
+            } else if (this.isUrlOnDomain(url, 'youtube.com')) {
                 icon = 'fab fa-youtube';
-            } else if (url.includes('github.com')) {
+            } else if (this.isUrlOnDomain(url, 'github.com')) {
                 icon = 'fab fa-github';
-            } else if (url.includes('facebook.com')) {
+            } else if (this.isUrlOnDomain(url, 'facebook.com')) {
                 icon = 'fab fa-facebook';
-            } else if (url.includes('twitter.com')) {
+            } else if (this.isUrlOnDomain(url, 'twitter.com')) {
                 icon = 'fab fa-twitter';
-            } else if (url.includes('instagram.com')) {
+            } else if (this.isUrlOnDomain(url, 'instagram.com')) {
                 icon = 'fab fa-instagram';
-            } else if (url.includes('reddit.com')) {
+            } else if (this.isUrlOnDomain(url, 'reddit.com')) {
                 icon = 'fab fa-reddit';
-            } else if (url.includes('stackoverflow.com')) {
+            } else if (this.isUrlOnDomain(url, 'stackoverflow.com')) {
                 icon = 'fab fa-stack-overflow';
-            } else if (url.includes('wikipedia.org')) {
+            } else if (this.isUrlOnDomain(url, 'wikipedia.org')) {
                 icon = 'fab fa-wikipedia-w';
-            } else if (url.includes('amazon.com')) {
+            } else if (this.isUrlOnDomain(url, 'amazon.com')) {
                 icon = 'fab fa-amazon';
             }
-            
-            suggestions.push({
+        
+        suggestions.push({
                 text: title,
                 icon: icon,
                 tabId: tabId,
@@ -9304,7 +9336,7 @@ class AxisBrowser {
         
         // Fill remaining tab slots with placeholder tabs if needed
         while (tabCount < 2) {
-            suggestions.push({
+        suggestions.push({
                 text: 'New Tab',
                 icon: 'fas fa-globe',
                 tabId: null,
@@ -9323,12 +9355,12 @@ class AxisBrowser {
             const recentSearches = this.settings.recentSearches.slice(0, 3 - searchCount);
             recentSearches.forEach(search => {
                 if (searchCount < 3) {
-                    suggestions.push({
-                        text: `Search "${search}"`,
-                        icon: 'fas fa-search',
-                        searchQuery: search,
-                        isSearch: true
-                    });
+                suggestions.push({
+                    text: `Search "${search}"`,
+                    icon: 'fas fa-search',
+                    searchQuery: search,
+                    isSearch: true
+                });
                     searchCount++;
                 }
             });
@@ -9340,35 +9372,35 @@ class AxisBrowser {
             recentHistory.forEach(item => {
                 if (searchCount < 3) {
                     let icon = 'fas fa-lightbulb';
-                    if (item.url.includes('gmail.com')) {
-                        icon = 'fas fa-envelope';
-                    } else if (item.url.includes('youtube.com')) {
-                        icon = 'fab fa-youtube';
-                    } else if (item.url.includes('github.com')) {
-                        icon = 'fab fa-github';
-                    } else if (item.url.includes('facebook.com')) {
-                        icon = 'fab fa-facebook';
-                    } else if (item.url.includes('twitter.com')) {
-                        icon = 'fab fa-twitter';
-                    } else if (item.url.includes('instagram.com')) {
-                        icon = 'fab fa-instagram';
-                    } else if (item.url.includes('reddit.com')) {
-                        icon = 'fab fa-reddit';
-                    } else if (item.url.includes('stackoverflow.com')) {
-                        icon = 'fab fa-stack-overflow';
-                    } else if (item.url.includes('wikipedia.org')) {
-                        icon = 'fab fa-wikipedia-w';
-                    } else if (item.url.includes('amazon.com')) {
-                        icon = 'fab fa-amazon';
-                    }
-                    
-                    suggestions.push({
-                        text: item.title,
-                        icon: icon,
-                        url: item.url,
-                        isHistory: true,
-                        timestamp: item.timestamp
-                    });
+                if (this.isUrlOnDomain(item.url, 'gmail.com')) {
+                    icon = 'fas fa-envelope';
+                } else if (this.isUrlOnDomain(item.url, 'youtube.com')) {
+                    icon = 'fab fa-youtube';
+                } else if (this.isUrlOnDomain(item.url, 'github.com')) {
+                    icon = 'fab fa-github';
+                } else if (this.isUrlOnDomain(item.url, 'facebook.com')) {
+                    icon = 'fab fa-facebook';
+                } else if (this.isUrlOnDomain(item.url, 'twitter.com')) {
+                    icon = 'fab fa-twitter';
+                } else if (this.isUrlOnDomain(item.url, 'instagram.com')) {
+                    icon = 'fab fa-instagram';
+                } else if (this.isUrlOnDomain(item.url, 'reddit.com')) {
+                    icon = 'fab fa-reddit';
+                } else if (this.isUrlOnDomain(item.url, 'stackoverflow.com')) {
+                    icon = 'fab fa-stack-overflow';
+                } else if (this.isUrlOnDomain(item.url, 'wikipedia.org')) {
+                    icon = 'fab fa-wikipedia-w';
+                } else if (this.isUrlOnDomain(item.url, 'amazon.com')) {
+                    icon = 'fab fa-amazon';
+                }
+                
+                suggestions.push({
+                    text: item.title,
+                    icon: icon,
+                    url: item.url,
+                    isHistory: true,
+                    timestamp: item.timestamp
+                });
                     searchCount++;
                 }
             });
@@ -9379,7 +9411,7 @@ class AxisBrowser {
         while (searchCount < 3) {
             const placeholderIndex = searchCount - (3 - placeholderSearches.length);
             if (placeholderIndex >= 0 && placeholderIndex < placeholderSearches.length) {
-                suggestions.push({
+            suggestions.push({
                     text: placeholderSearches[placeholderIndex],
                     icon: 'fas fa-lightbulb',
                     searchQuery: placeholderSearches[placeholderIndex],
