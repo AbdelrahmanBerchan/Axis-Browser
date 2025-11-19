@@ -28,23 +28,25 @@
                 <div id="sidebar-resize-handle" class="resize-handle"></div>
                 <div class="sidebar-section sidebar-controls">
                     <div class="nav-controls">
-                        <button id="back-btn" class="nav-btn" disabled>
-                            <i class="fas fa-arrow-left"></i>
-                        </button>
-                        <button id="forward-btn" class="nav-btn" disabled>
-                            <i class="fas fa-arrow-right"></i>
-                        </button>
-                        <div class="nav-menu-container">
-                            <button id="nav-menu-btn" class="nav-btn nav-menu-btn">
-                                <i class="fas fa-ellipsis-h"></i>
+                        <div class="nav-controls-right">
+                            <button id="back-btn" class="nav-btn" disabled>
+                                <i class="fas fa-arrow-left"></i>
                             </button>
+                            <button id="forward-btn" class="nav-btn" disabled>
+                                <i class="fas fa-arrow-right"></i>
+                            </button>
+                            <div class="nav-menu-container">
+                                <button id="nav-menu-btn" class="nav-btn nav-menu-btn">
+                                    <i class="fas fa-ellipsis-h"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="url-bar-container vertical">
                         <input type="text" id="url-bar" placeholder="Search or enter URL" autocomplete="off">
                         <div class="url-bar-icons">
-                            <button id="bookmark-btn" class="url-icon" title="Bookmark">
-                                <i class="fas fa-bookmark"></i>
+                            <button id="copy-link-btn" class="url-icon" title="Copy Link">
+                                <i class="fas fa-link"></i>
                             </button>
                             <button id="security-btn" class="url-icon" title="Security">
                                 <i class="fas fa-lock"></i>
@@ -70,38 +72,11 @@
                             <i class="fas fa-cog"></i>
                         </button>
                     </div>
-                    
-                    <!-- Center: Downloads, Bookmarks, and Split View buttons -->
-                    <div class="center-buttons">
+                    <!-- Top-right corner: Downloads button -->
+                    <div class="corner-button top-right">
                         <button id="downloads-btn-footer" class="nav-btn" title="Downloads">
                             <i class="fas fa-download"></i>
                         </button>
-                        <button id="bookmarks-btn-footer" class="nav-btn" title="Bookmarks">
-                            <i class="fas fa-bookmark"></i>
-                        </button>
-                    </div>
-                    
-                    <!-- Top-right corner: + button -->
-                    <div class="corner-button top-right">
-                        <div class="add-tab-container">
-                            <button id="add-tab-btn" class="nav-btn" title="Add Tab">
-                                <i class="fas fa-plus"></i>
-                            </button>
-                            <div id="add-tab-menu" class="add-tab-menu hidden">
-                                <button id="new-tab-btn" class="add-tab-menu-item">
-                                    <i class="fas fa-plus"></i>
-                                    <span>New Tab</span>
-                                </button>
-                                <button id="new-incognito-btn" class="add-tab-menu-item">
-                                    <i class="fas fa-mask"></i>
-                                    <span>New Incognito Tab</span>
-                                </button>
-                                <button id="new-note-menu-btn" class="add-tab-menu-item">
-                                    <i class="fas fa-sticky-note"></i>
-                                    <span>Notes</span>
-                                </button>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -119,6 +94,9 @@
                                 <span class="zoom-percentage">100%</span>
                             </div>
                         </div>
+                        <!-- Webviews will be created dynamically for each tab -->
+                        <div id="webviews-container"></div>
+                        <!-- Keep the main webview for backward compatibility during transition -->
                         <webview id="webview" 
                                  src="about:blank" 
                                  allowpopups 
@@ -211,6 +189,10 @@
                 <i class="fas fa-bars"></i>
                 <span>Toggle Sidebar</span>
             </button>
+            <button id="sidebar-position-btn" class="nav-menu-item">
+                <i class="fas fa-arrows-alt-h"></i>
+                <span id="sidebar-position-text">Move Sidebar Right</span>
+            </button>
             <button id="split-view-btn" class="nav-menu-item">
                 <i class="fas fa-columns"></i>
                 <span>Split View</span>
@@ -270,9 +252,10 @@
             <i class="fas fa-folder"></i>
             <span>New Folder</span>
         </div>
-        <div class="context-menu-item" id="sidebar-new-note-option">
-            <i class="fas fa-sticky-note"></i>
-            <span>Notes</span>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="sidebar-position-option">
+            <i class="fas fa-arrows-alt-h"></i>
+            <span id="sidebar-position-context-text">Move Sidebar Right</span>
         </div>
     </div>
     
@@ -518,31 +501,6 @@
             <div class="downloads-content">
                 <div id="downloads-list" class="downloads-list">
                     <!-- Download items will be populated here -->
-                </div>
-            </div>
-        </div>
-
-        <!-- Bookmarks Panel -->
-        <div id="bookmarks-panel" class="bookmarks-panel hidden">
-            <div class="bookmarks-header">
-                <h3>Bookmarks</h3>
-                <div class="bookmarks-header-actions">
-                    <button id="close-bookmarks" class="close-settings">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="bookmarks-search">
-                <input type="text" id="bookmarks-search-input" placeholder="Search bookmarks...">
-            </div>
-            <div class="bookmarks-content">
-                <div id="bookmarks-list">
-                    <!-- Bookmarks will be populated here -->
-                </div>
-                <div id="no-bookmarks" class="no-bookmarks hidden">
-                    <i class="fas fa-bookmark" style="font-size: 48px; color: #666; margin-bottom: 16px;"></i>
-                    <p>No bookmarks yet</p>
-                    <p style="color: #999; font-size: 12px;">Click the bookmark button to save pages</p>
                 </div>
             </div>
         </div>
