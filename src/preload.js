@@ -34,5 +34,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Notes management
   getNotes: () => ipcRenderer.invoke('get-notes'),
   saveNote: (note) => ipcRenderer.invoke('save-note', note),
-  deleteNote: (id) => ipcRenderer.invoke('delete-note', id)
+  deleteNote: (id) => ipcRenderer.invoke('delete-note', id),
+  
+  // Window controls
+  setWindowButtonVisibility: (visible) => ipcRenderer.invoke('set-window-button-visibility', visible)
 });
