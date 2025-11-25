@@ -7,11 +7,7 @@ class AxisBrowser {
         this.settings = {};
         this.closedTabs = []; // Store recently closed tabs for recovery
         this.loadingTimeout = null; // Timeout for stuck loading pages (main view)
-        this.splitViewLoadingTimeouts = new Map(); // Timeouts for split view panes
-        this.isSplitView = false; // Split view state
         this.isBenchmarking = false; // suppress non-critical work on Speedometer
-        this.activePane = 'left'; // 'left' or 'right' (not used when split view disabled)
-        this.splitRatio = 0.5; // 50/50 split (not used when split view disabled)
         this.spotlightSelectedIndex = -1; // Track selected suggestion index
         this.contextMenuFolderId = null; // Track which folder context menu is open
         
@@ -39,7 +35,6 @@ class AxisBrowser {
             forwardBtn: document.getElementById('forward-btn'),
             refreshBtn: document.getElementById('refresh-btn'),
             toggleSidebarBtn: document.getElementById('toggle-sidebar-btn'),
-            splitViewBtn: document.getElementById('split-view-btn'),
             navMenuBtn: document.getElementById('nav-menu-btn'),
             settingsBtnFooter: document.getElementById('settings-btn-footer'),
             closeSettings: document.getElementById('close-settings'),
@@ -58,7 +53,6 @@ class AxisBrowser {
             emptyStateBtnEmpty: document.getElementById('empty-state-new-tab-empty'),
             contentArea: document.getElementById('content-area'),
             singleView: document.getElementById('single-view'),
-            splitView: document.getElementById('split-view'),
             settingsPanel: document.getElementById('settings-panel'),
             downloadsPanel: document.getElementById('downloads-panel'),
             notesPanel: document.getElementById('notes-panel'),
@@ -182,7 +176,6 @@ class AxisBrowser {
         el.forwardBtn?.addEventListener('click', () => this.goForward());
         el.refreshBtn?.addEventListener('click', () => this.refresh());
         el.toggleSidebarBtn?.addEventListener('click', () => this.toggleSidebar());
-        el.splitViewBtn?.addEventListener('click', () => this.toggleSplitView());
         el.navMenuBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.toggleNavMenu();
@@ -373,14 +366,15 @@ class AxisBrowser {
             this.duplicateCurrentTab();
         });
 
-        // Split view option
-        document.getElementById('split-view-option').addEventListener('click', () => {
-            this.toggleSplitView();
+        document.getElementById('pin-tab-option').addEventListener('click', () => {
+            this.togglePinCurrentTab();
             this.hideTabContextMenu();
         });
 
-        document.getElementById('pin-tab-option').addEventListener('click', () => {
-            this.togglePinCurrentTab();
+        document.getElementById('mute-tab-option').addEventListener('click', () => {
+            if (this.contextMenuTabId) {
+                this.toggleTabMute(this.contextMenuTabId);
+            }
             this.hideTabContextMenu();
         });
 
@@ -642,24 +636,6 @@ class AxisBrowser {
                 }
             }
             
-            // Split view shortcuts
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'S') {
-                e.preventDefault();
-                this.toggleSplitView();
-            }
-            if ((e.metaKey || e.ctrlKey) && e.key === '[' && this.isSplitView) {
-                e.preventDefault();
-                this.setActivePane('left');
-            }
-            if ((e.metaKey || e.ctrlKey) && e.key === ']' && this.isSplitView) {
-                e.preventDefault();
-                this.setActivePane('right');
-            }
-            if (e.key === 'Escape' && this.isSplitView) {
-                e.preventDefault();
-                this.toggleSplitView();
-            }
-            
             // Cmd/Ctrl + N - New window
             if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
                 e.preventDefault();
@@ -741,7 +717,7 @@ class AxisBrowser {
         webview.style.transform = 'translateZ(0)';
         webview.style.backfaceVisibility = 'hidden';
         
-        const isActiveTab = () => this.currentTab === tabId && !this.isSplitView;
+        const isActiveTab = () => this.currentTab === tabId;
         const getTab = () => this.tabs.get(tabId);
         const clearLoadingTimeout = () => {
             if (webview.__loadingTimeout) {
@@ -2136,11 +2112,10 @@ class AxisBrowser {
         const webview = document.createElement('webview');
         webview.dataset.tabId = String(tabId);
         webview.setAttribute('allowpopups', '');
-        webview.setAttribute('webpreferences', 'contextIsolation=false,nodeIntegration=false,webSecurity=false,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true');
+        webview.setAttribute('webpreferences', 'contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true');
         webview.setAttribute('partition', 'persist:main');
         webview.setAttribute('useragent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         webview.setAttribute('autosize', 'true');
-        webview.setAttribute('disablewebsecurity', 'true');
         webview.style.cssText = `
             position: absolute;
             top: 0;
@@ -2202,7 +2177,8 @@ class AxisBrowser {
             history: url ? [url] : [],
             historyIndex: url ? 0 : -1,
             pinned: false, // New tabs are unpinned by default
-            webview: null
+            webview: null,
+            isMuted: false
         };
         
         // Create webview for this tab
@@ -2583,22 +2559,10 @@ class AxisBrowser {
             return;
         }
 
-        // Navigate based on view mode
-        if (this.isSplitView) {
-            // Navigate in the active pane
-            const activeWebview = this.activePane === 'left' ? 
-                document.getElementById('webview-left') : 
-                document.getElementById('webview-right');
-            
-            if (activeWebview) {
-                this.navigateInPane(activeWebview, sanitizedUrl);
-            }
-        } else {
-            // Navigate in single view
-            const webview = this.getActiveWebview();
-            if (webview) {
+        // Navigate in single view
+        const webview = this.getActiveWebview();
+        if (webview) {
             this.navigateInPane(webview, sanitizedUrl);
-            }
         }
 
         // Update tab data and add to history
@@ -2632,16 +2596,7 @@ class AxisBrowser {
     goBack() {
         if (!this.currentTab || !this.tabs.has(this.currentTab)) return;
         
-        // Get the appropriate webview based on view mode
-        let webview;
-        if (this.isSplitView) {
-            webview = this.activePane === 'left' ? 
-                document.getElementById('webview-left') : 
-                document.getElementById('webview-right');
-        } else {
-            webview = this.getActiveWebview();
-        }
-        
+        const webview = this.getActiveWebview();
         if (!webview) return;
         
         const currentTab = this.tabs.get(this.currentTab);
@@ -2667,16 +2622,7 @@ class AxisBrowser {
     goForward() {
         if (!this.currentTab || !this.tabs.has(this.currentTab)) return;
         
-        // Get the appropriate webview based on view mode
-        let webview;
-        if (this.isSplitView) {
-            webview = this.activePane === 'left' ? 
-                document.getElementById('webview-left') : 
-                document.getElementById('webview-right');
-        } else {
-            webview = this.getActiveWebview();
-        }
-        
+        const webview = this.getActiveWebview();
         if (!webview) return;
         
         const currentTab = this.tabs.get(this.currentTab);
@@ -2700,15 +2646,7 @@ class AxisBrowser {
     }
 
     navigateToUrlInCurrentTab(url) {
-        // Get the appropriate webview based on view mode
-        let webview;
-        if (this.isSplitView) {
-            webview = this.activePane === 'left' ? 
-                document.getElementById('webview-left') : 
-                document.getElementById('webview-right');
-        } else {
-            webview = document.getElementById('webview');
-        }
+        const webview = document.getElementById('webview');
         
         if (webview) {
             const sanitizedUrl = this.sanitizeUrl(url);
@@ -2728,15 +2666,7 @@ class AxisBrowser {
     refresh() {
         if (!this.currentTab || !this.tabs.has(this.currentTab)) return;
         
-        // Get the appropriate webview based on view mode
-        let webview;
-        if (this.isSplitView) {
-            webview = this.activePane === 'left' ? 
-                document.getElementById('webview-left') : 
-                document.getElementById('webview-right');
-        } else {
-            webview = document.getElementById('webview');
-        }
+        const webview = document.getElementById('webview');
         
         if (webview) {
             webview.reload();
@@ -2756,21 +2686,7 @@ class AxisBrowser {
             return;
         }
 
-        // Get the appropriate webview based on view mode - cache webviews
-        let webview;
-        if (this.isSplitView) {
-            if (!this.cachedWebviews) {
-                this.cachedWebviews = {
-                    left: document.getElementById('webview-left'),
-                    right: document.getElementById('webview-right')
-                };
-            }
-            webview = this.activePane === 'left' ? 
-                this.cachedWebviews.left : 
-                this.cachedWebviews.right;
-        } else {
-            webview = el?.webview;
-        }
+        const webview = el?.webview;
 
         const currentTab = this.tabs.get(this.currentTab);
         if (currentTab && currentTab.history && currentTab.history.length > 1) {
@@ -2811,22 +2727,7 @@ class AxisBrowser {
             return;
         }
 
-        // Get the appropriate webview based on view mode - use cached webviews
-        let webview;
-        if (this.isSplitView) {
-            if (!this.cachedWebviews) {
-                this.cachedWebviews = {
-                    left: document.getElementById('webview-left'),
-                    right: document.getElementById('webview-right')
-                };
-            }
-            webview = this.activePane === 'left' ? 
-                this.cachedWebviews.left : 
-                this.cachedWebviews.right;
-        } else {
-            webview = el?.webview;
-        }
-        
+        const webview = el?.webview;
         if (!webview) return;
         
         const newUrl = webview.getURL();
@@ -2938,22 +2839,7 @@ class AxisBrowser {
     }
 
     updateTabTitle() {
-        // Get the appropriate webview based on view mode - use cached webviews
-        let webview;
-        if (this.isSplitView) {
-            if (!this.cachedWebviews) {
-                this.cachedWebviews = {
-                    left: document.getElementById('webview-left'),
-                    right: document.getElementById('webview-right')
-                };
-            }
-            webview = this.activePane === 'left' ? 
-                this.cachedWebviews.left : 
-                this.cachedWebviews.right;
-        } else {
-            webview = this.elements?.webview;
-        }
-        
+        const webview = this.elements?.webview;
         if (!webview) return;
         
         const title = webview.getTitle() || 'New Tab';
@@ -3098,160 +2984,203 @@ class AxisBrowser {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #0a0a0a;
+            background: #1e1e1e;
             color: #fff;
             min-height: 100vh;
             padding: 0;
             line-height: 1.6;
+            overflow: hidden;
         }
-        .settings-container {
-            max-width: 1000px;
-            margin: 0 auto;
-            padding: 60px 40px;
+        .settings-wrapper {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: #1e1e1e;
         }
         .settings-header {
-            margin-bottom: 48px;
-            padding-bottom: 24px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        }
-        .settings-header h1 {
-            font-size: 36px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            letter-spacing: -0.8px;
-            background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.8) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .settings-header p {
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 15px;
-            font-weight: 400;
-        }
-        .settings-tabs {
             display: flex;
-            gap: 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            margin-bottom: 40px;
-            background: rgba(255, 255, 255, 0.02);
-            border-radius: 12px 12px 0 0;
-            padding: 4px;
+            align-items: center;
+            padding: 20px 24px;
+            background: #252526;
+            border-bottom: 1px solid #333;
+            gap: 16px;
         }
-        .settings-tab {
-            padding: 14px 28px;
-            background: transparent;
-            border: none;
-            color: rgba(255, 255, 255, 0.5);
+        .header-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #fff;
+            margin: 0;
+        }
+        .header-separator {
+            width: 1px;
+            height: 20px;
+            background: #444;
+        }
+        .header-subtitle {
+            font-size: 14px;
+            color: #999;
+            margin: 0;
+        }
+        .settings-content-wrapper {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            padding: 24px;
+            gap: 24px;
+        }
+        .settings-sidebar {
+            width: 240px;
+            background: #252526;
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex-shrink: 0;
+            border: 1px solid #333;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            color: #ccc;
             cursor: pointer;
+            transition: all 0.2s ease;
             font-size: 14px;
             font-weight: 500;
-            border-radius: 8px;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
         }
-        .settings-tab:hover {
-            color: rgba(255, 255, 255, 0.8);
-            background: rgba(255, 255, 255, 0.04);
+        .nav-item i {
+            width: 20px;
+            text-align: center;
+            font-size: 16px;
         }
-        .settings-tab.active {
+        .nav-item:hover {
+            background: #2d2d2d;
             color: #fff;
-            background: rgba(255, 255, 255, 0.08);
+        }
+        .nav-item.active {
+            background: #2d2d2d;
+            color: #60A5FA;
+            font-weight: 600;
+        }
+        .nav-item.active i {
+            color: #60A5FA;
+        }
+        .settings-main {
+            flex: 1;
+            background: #252526;
+            border-radius: 12px;
+            padding: 32px;
+            overflow-y: auto;
+            border: 1px solid #333;
+        }
+        .settings-main::-webkit-scrollbar {
+            width: 8px;
+        }
+        .settings-main::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .settings-main::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+        .settings-main::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        .section {
+            margin-bottom: 32px;
+        }
+        .section:last-child {
+            margin-bottom: 0;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+            margin: 0; /* Removed margin-bottom to fix alignment */
+            line-height: 1; /* Ensure line height doesn't offset vertical centering */
+        }
+        .option-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 16px; /* Increased gap for better spacing */
+            padding: 16px 20px;
+            background: #2d2d2d;
+            border: 1px solid #383838;
+            border-radius: 12px; /* Match setting-row radius */
+            cursor: pointer;
+            transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                        border 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                        transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-bottom: 12px;
+            width: 100%;
+        }
+        .option-button:last-child {
+            margin-bottom: 0;
+        }
+        .option-button:hover {
+            background: #333;
+            border-color: #444;
+            transform: translateY(-1px);
+        }
+        .option-button:active {
+            transform: translateY(0);
+        }
+        .option-button i {
+            font-size: 18px;
+            color: #ccc;
+            width: 20px;
+            text-align: center;
+        }
+        .option-content {
+            flex: 1;
+        }
+        .option-title {
+            font-size: 15px;
+            font-weight: 500;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+        .option-subtitle {
+            font-size: 13px;
+            color: #999;
         }
         .settings-tab-content {
             display: none;
-            animation: fadeIn 0.3s ease;
         }
         .settings-tab-content.active {
             display: block;
         }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .setting-group {
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 16px;
-            padding: 32px;
-            margin-bottom: 24px;
-            backdrop-filter: blur(20px);
-            transition: all 0.2s ease;
-        }
-        .setting-group:hover {
-            border-color: rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.05);
-        }
-        .setting-group h4 {
-            font-size: 15px;
-            font-weight: 600;
-            margin-bottom: 24px;
-            color: rgba(255, 255, 255, 0.95);
-            letter-spacing: 0.2px;
-            text-transform: uppercase;
-            font-size: 12px;
-            letter-spacing: 0.8px;
-        }
-        .setting-item {
-            margin-bottom: 20px;
-            padding: 16px;
-            background: rgba(255, 255, 255, 0.02);
-            border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.04);
-            transition: all 0.2s ease;
-        }
-        .setting-item:hover {
-            background: rgba(255, 255, 255, 0.04);
-            border-color: rgba(255, 255, 255, 0.08);
-        }
-        .setting-item:last-child {
-            margin-bottom: 0;
-        }
-        .setting-item label {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            cursor: pointer;
-            font-size: 15px;
-            color: rgba(255, 255, 255, 0.9);
-            font-weight: 400;
-        }
-        .setting-item input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-            accent-color: #4a90e2;
-            border-radius: 4px;
-        }
         .history-controls {
             display: flex;
             gap: 12px;
-            margin-bottom: 28px;
+            margin-bottom: 24px;
         }
         .history-search {
             flex: 1;
-            padding: 14px 18px;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
             color: #fff;
             font-size: 14px;
             outline: none;
             transition: all 0.2s ease;
         }
         .history-search:focus {
-            border-color: #4a90e2;
-            background: rgba(255, 255, 255, 0.06);
-            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+            border-color: #3B82F6;
+            background: rgba(255, 255, 255, 0.08);
         }
         .history-search::placeholder {
-            color: rgba(255, 255, 255, 0.3);
+            color: rgba(255, 255, 255, 0.4);
         }
         .clear-btn {
-            padding: 14px 24px;
+            padding: 12px 20px;
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
+            border-radius: 8px;
             color: rgba(255, 255, 255, 0.8);
             cursor: pointer;
             font-size: 14px;
@@ -3265,32 +3194,30 @@ class AxisBrowser {
             background: rgba(255, 59, 48, 0.15);
             border-color: rgba(255, 59, 48, 0.3);
             color: #ff3b30;
-            transform: translateY(-1px);
         }
         .history-list {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
         }
         .history-item {
             display: flex;
             align-items: center;
-            gap: 14px;
-            padding: 16px 20px;
+            gap: 12px;
+            padding: 12px 16px;
             background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
             cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all 0.2s ease;
         }
         .history-item:hover {
             background: rgba(255, 255, 255, 0.06);
             border-color: rgba(255, 255, 255, 0.12);
-            transform: translateX(4px);
         }
         .history-favicon {
-            width: 18px;
-            height: 18px;
+            width: 16px;
+            height: 16px;
             border-radius: 3px;
             flex-shrink: 0;
         }
@@ -3299,26 +3226,25 @@ class AxisBrowser {
             min-width: 0;
         }
         .history-title {
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 500;
-            color: rgba(255, 255, 255, 0.95);
-            margin-bottom: 6px;
+            color: #fff;
+            margin-bottom: 4px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
         .history-url {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.45);
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
         .history-time {
             font-size: 12px;
-            color: rgba(255, 255, 255, 0.35);
+            color: rgba(255, 255, 255, 0.4);
             white-space: nowrap;
-            font-weight: 400;
         }
         .history-actions {
             display: flex;
@@ -3330,10 +3256,10 @@ class AxisBrowser {
             opacity: 1;
         }
         .history-delete {
-            padding: 8px 12px;
+            padding: 6px 10px;
             background: transparent;
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
+            border-radius: 6px;
             color: rgba(255, 255, 255, 0.5);
             cursor: pointer;
             transition: all 0.2s ease;
@@ -3345,14 +3271,9 @@ class AxisBrowser {
             background: rgba(255, 59, 48, 0.15);
             border-color: rgba(255, 59, 48, 0.3);
             color: #ff3b30;
-            transform: scale(1.05);
         }
         .shortcut-group {
-            margin-bottom: 40px;
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 16px;
-            padding: 24px;
+            margin-bottom: 24px;
         }
         .shortcut-group:last-child {
             margin-bottom: 0;
@@ -3361,7 +3282,7 @@ class AxisBrowser {
             font-size: 12px;
             font-weight: 600;
             color: rgba(255, 255, 255, 0.6);
-            margin-bottom: 20px;
+            margin-bottom: 12px;
             text-transform: uppercase;
             letter-spacing: 1px;
         }
@@ -3369,15 +3290,8 @@ class AxisBrowser {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 14px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-            transition: all 0.2s ease;
-        }
-        .shortcut-item:hover {
-            padding-left: 8px;
-            padding-right: 8px;
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 8px;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
         }
         .shortcut-item:last-child {
             border-bottom: none;
@@ -3389,176 +3303,349 @@ class AxisBrowser {
             background: rgba(255, 255, 255, 0.08);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 6px;
-            color: rgba(255, 255, 255, 0.9);
+            color: #fff;
             font-weight: 500;
-            letter-spacing: 0.3px;
             min-width: 80px;
             text-align: center;
         }
         .shortcut-desc {
-            font-size: 15px;
-            color: rgba(255, 255, 255, 0.85);
-            font-weight: 400;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
         }
         .empty-state {
             text-align: center;
-            padding: 80px 20px;
+            padding: 60px 20px;
             color: rgba(255, 255, 255, 0.4);
         }
         .empty-state i {
             font-size: 48px;
             color: rgba(255, 255, 255, 0.15);
             margin-bottom: 16px;
-            }
+        }
+        .toggle-switch {
+            position: relative;
+            width: 42px;
+            height: 24px;
+            flex-shrink: 0;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: .2s;
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 2px;
+            bottom: 2px;
+            background-color: rgba(255, 255, 255, 0.5);
+            transition: .2s;
+            border-radius: 50%;
+        }
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #3B82F6;
+            border-color: #3B82F6;
+        }
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(18px);
+            background-color: #fff;
+        }
+        .toggle-switch input:focus + .toggle-slider {
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            background: #2d2d2d;
+            border: 1px solid #383838;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            transition: all 0.2s ease;
+        }
+        .setting-row:last-child {
+            margin-bottom: 0;
+        }
+        .setting-row:hover {
+            background: #333;
+            border-color: #444;
+        }
+        .setting-row-content {
+            flex: 1;
+            margin-right: 24px;
+        }
+        .setting-row-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+        .setting-row-desc {
+            font-size: 13px;
+            color: #999;
+        }
+        .section-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            background: #333;
+            border-radius: 10px;
+            margin-right: 16px;
+            font-size: 18px;
+            color: #eee;
+        }
+        .section-title-with-icon {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body>
-    <div class="settings-container">
+    <div class="settings-wrapper">
         <div class="settings-header">
-            <h1>Settings</h1>
-            <p>Manage your browser preferences</p>
+            <h1 class="header-title">Settings</h1>
         </div>
         
-        <div class="settings-tabs">
-            <button class="settings-tab active" data-tab="general">General</button>
-            <button class="settings-tab" data-tab="history">History</button>
-            <button class="settings-tab" data-tab="shortcuts">Shortcuts</button>
-        </div>
-        
-        <div class="settings-tab-content active" id="general-tab">
-            <div class="setting-group">
-                <h4>Privacy & Security</h4>
-                <div class="setting-item">
-                    <label>
-                        <input type="checkbox" id="block-trackers" ${blockTrackers ? 'checked' : ''}>
-                        Block trackers
-                    </label>
+        <div class="settings-content-wrapper">
+            <div class="settings-sidebar">
+                <div class="nav-item active" data-section="privacy">
+                    <i class="fas fa-hand-paper"></i>
+                    <span>Privacy and Security</span>
                 </div>
-                <div class="setting-item">
-                    <label>
-                        <input type="checkbox" id="block-ads" ${blockAds ? 'checked' : ''}>
-                        Block ads
-                    </label>
+                <div class="nav-item" data-section="history">
+                    <i class="fas fa-history"></i>
+                    <span>History</span>
                 </div>
-                <div class="setting-item">
-                    <label>
-                        <input type="checkbox" id="private-mode" ${privateMode ? 'checked' : ''}>
-                        Enhanced private mode
-                    </label>
-                </div>
-            </div>
-        </div>
-        
-        <div class="settings-tab-content" id="history-tab">
-            <div class="history-controls">
-                <input type="text" id="history-search" placeholder="Search history..." class="history-search">
-                <button id="clear-history" class="clear-btn" title="Clear All History">
-                    <i class="fas fa-trash"></i> Clear All
-                </button>
-            </div>
-            <div class="history-list" id="history-list">
-                ${historyHtml}
-            </div>
-        </div>
-        
-        <div class="settings-tab-content" id="shortcuts-tab">
-            <div class="shortcut-group">
-                <h4>Navigation</h4>
-                <div class="shortcut-item">
-                    <span class="shortcut-key">⌘ + T</span>
-                    <span class="shortcut-desc">New Tab</span>
-                </div>
-                <div class="shortcut-item">
-                    <span class="shortcut-key">⌘ + W</span>
-                    <span class="shortcut-desc">Close Tab</span>
-                </div>
-                <div class="shortcut-item">
-                    <span class="shortcut-key">⌘ + Z</span>
-                    <span class="shortcut-desc">Recover Closed Tab</span>
-                </div>
-                <div class="shortcut-item">
-                    <span class="shortcut-key">⌘ + R</span>
-                    <span class="shortcut-desc">Refresh Page</span>
-                </div>
-                <div class="shortcut-item">
-                    <span class="shortcut-key">⌘ + L</span>
-                    <span class="shortcut-desc">Focus URL Bar</span>
+                <div class="nav-item" data-section="shortcuts">
+                    <i class="fas fa-keyboard"></i>
+                    <span>Shortcuts</span>
                 </div>
             </div>
             
-            <div class="shortcut-group">
-                <h4>Tab Management</h4>
-                <div class="shortcut-item">
-                    <span class="shortcut-key">⌘ + 1-9</span>
-                    <span class="shortcut-desc">Switch to tab 1-9</span>
+            <div class="settings-main">
+                <div class="settings-tab-content active" id="privacy-tab">
+                    <div class="section fade-in">
+                        <div class="section-title-with-icon">
+                            <div class="section-icon"><i class="fas fa-shield-alt"></i></div>
+                            <h2 class="section-title">Privacy</h2>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-row-content">
+                                <div class="setting-row-title">Block trackers</div>
+                                <div class="setting-row-desc">Prevent websites from tracking your activity</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="block-trackers" ${blockTrackers ? 'checked' : ''}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-row-content">
+                                <div class="setting-row-title">Block ads</div>
+                                <div class="setting-row-desc">Stop intrusive advertisements</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="block-ads" ${blockAds ? 'checked' : ''}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-row-content">
+                                <div class="setting-row-title">Enhanced private mode</div>
+                                <div class="setting-row-desc">Additional privacy protections</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="private-mode" ${privateMode ? 'checked' : ''}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="section fade-in">
+                        <div class="section-title-with-icon">
+                            <div class="section-icon"><i class="fas fa-lock"></i></div>
+                            <h2 class="section-title">Security</h2>
+                        </div>
+                        <div class="option-button" onclick="window.postMessage({ type: 'openSiteSettings' }, '*')">
+                            <i class="fas fa-cog"></i>
+                            <div class="option-content">
+                                <div class="option-title">Site settings</div>
+                                <div class="option-subtitle">Choose what sites can access, such as your microphone</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            
-            <div class="shortcut-group">
-                <h4>Panels & Menus</h4>
-                <div class="shortcut-item">
-                    <span class="shortcut-key">⌘ + B</span>
-                    <span class="shortcut-desc">Toggle Sidebar</span>
+                
+                <div class="settings-tab-content" id="history-tab">
+                    <div class="section fade-in">
+                        <div class="section-title-with-icon">
+                            <div class="section-icon"><i class="fas fa-history"></i></div>
+                            <h2 class="section-title">Browsing History</h2>
+                        </div>
+                        <div class="history-controls">
+                            <input type="text" id="history-search" placeholder="Search history..." class="history-search">
+                            <button id="clear-history" class="clear-btn">
+                                <i class="fas fa-trash"></i> Clear All
+                            </button>
+                        </div>
+                        <div class="history-list" id="history-list">
+                            ${historyHtml}
+                        </div>
+                    </div>
                 </div>
-                <div class="shortcut-item">
-                    <span class="shortcut-key">⌘ + Y</span>
-                    <span class="shortcut-desc">Open History</span>
-                </div>
-                <div class="shortcut-item">
-                    <span class="shortcut-key">⌘ + J</span>
-                    <span class="shortcut-desc">Open Downloads</span>
-                </div>
-                <div class="shortcut-item">
-                    <span class="shortcut-key">⌘ + ,</span>
-                    <span class="shortcut-desc">Open Settings</span>
+                
+                <div class="settings-tab-content" id="shortcuts-tab">
+                    <div class="section fade-in">
+                        <div class="section-title-with-icon">
+                            <div class="section-icon"><i class="fas fa-keyboard"></i></div>
+                            <h2 class="section-title">Keyboard Shortcuts</h2>
+                        </div>
+                        <div class="shortcut-group">
+                            <h4>Navigation</h4>
+                            <div class="shortcut-item">
+                                <span class="shortcut-desc">New Tab</span>
+                                <span class="shortcut-key">⌘ + T</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <span class="shortcut-desc">Close Tab</span>
+                                <span class="shortcut-key">⌘ + W</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <span class="shortcut-desc">Recover Closed Tab</span>
+                                <span class="shortcut-key">⌘ + Z</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <span class="shortcut-desc">Refresh Page</span>
+                                <span class="shortcut-key">⌘ + R</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <span class="shortcut-desc">Focus URL Bar</span>
+                                <span class="shortcut-key">⌘ + L</span>
+                            </div>
+                        </div>
+                        
+                        <div class="shortcut-group">
+                            <h4>Tab Management</h4>
+                            <div class="shortcut-item">
+                                <span class="shortcut-desc">Switch to tab 1-9</span>
+                                <span class="shortcut-key">⌘ + 1-9</span>
+                            </div>
+                        </div>
+                        
+                        <div class="shortcut-group">
+                            <h4>Panels & Menus</h4>
+                            <div class="shortcut-item">
+                                <span class="shortcut-desc">Toggle Sidebar</span>
+                                <span class="shortcut-key">⌘ + B</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <span class="shortcut-desc">Open History</span>
+                                <span class="shortcut-key">⌘ + Y</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <span class="shortcut-desc">Open Downloads</span>
+                                <span class="shortcut-key">⌘ + J</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <span class="shortcut-desc">Open Settings</span>
+                                <span class="shortcut-key">⌘ + ,</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
     
     <script>
-        // Tab switching
-        document.querySelectorAll('.settings-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                const tabName = tab.dataset.tab;
-                document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+        // Navigation switching
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const section = item.dataset.section;
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                 document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
-                tab.classList.add('active');
-                document.getElementById(tabName + '-tab').classList.add('active');
-            });
-        });
-        
-        // Settings checkboxes
-        document.getElementById('block-trackers').addEventListener('change', (e) => {
-            window.postMessage({ type: 'updateSetting', key: 'blockTrackers', value: e.target.checked }, '*');
-        });
-        document.getElementById('block-ads').addEventListener('change', (e) => {
-            window.postMessage({ type: 'updateSetting', key: 'blockAds', value: e.target.checked }, '*');
-        });
-        document.getElementById('private-mode').addEventListener('change', (e) => {
-            window.postMessage({ type: 'updateSetting', key: 'privateMode', value: e.target.checked }, '*');
-        });
-        
-        // History search
-        document.getElementById('history-search').addEventListener('input', (e) => {
-            const searchTerm = e.target.value.toLowerCase();
-            document.querySelectorAll('.history-item').forEach(item => {
-                const title = item.querySelector('.history-title').textContent.toLowerCase();
-                const url = item.querySelector('.history-url').textContent.toLowerCase();
-                if (title.includes(searchTerm) || url.includes(searchTerm)) {
-                    item.style.display = 'flex';
-        } else {
-                    item.style.display = 'none';
+                item.classList.add('active');
+                const contentId = section + '-tab';
+                const contentEl = document.getElementById(contentId);
+                if (contentEl) {
+                    contentEl.classList.add('active', 'fade-in');
                 }
             });
         });
         
+        // Toggle switches
+        const blockTrackersToggle = document.getElementById('block-trackers');
+        if (blockTrackersToggle) {
+            blockTrackersToggle.addEventListener('change', (e) => {
+                window.postMessage({ type: 'updateSetting', key: 'blockTrackers', value: e.target.checked }, '*');
+            });
+        }
+        
+        const blockAdsToggle = document.getElementById('block-ads');
+        if (blockAdsToggle) {
+            blockAdsToggle.addEventListener('change', (e) => {
+                window.postMessage({ type: 'updateSetting', key: 'blockAds', value: e.target.checked }, '*');
+            });
+        }
+        
+        const privateModeToggle = document.getElementById('private-mode');
+        if (privateModeToggle) {
+            privateModeToggle.addEventListener('change', (e) => {
+                window.postMessage({ type: 'updateSetting', key: 'privateMode', value: e.target.checked }, '*');
+            });
+        }
+        
+        // History search
+        const historySearch = document.getElementById('history-search');
+        if (historySearch) {
+            historySearch.addEventListener('input', (e) => {
+                const searchTerm = e.target.value.toLowerCase();
+                document.querySelectorAll('.history-item').forEach(item => {
+                    const title = item.querySelector('.history-title')?.textContent.toLowerCase() || '';
+                    const url = item.querySelector('.history-url')?.textContent.toLowerCase() || '';
+                    if (title.includes(searchTerm) || url.includes(searchTerm)) {
+                        item.style.display = 'flex';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+            });
+        }
+        
         // Clear history
-        document.getElementById('clear-history').addEventListener('click', () => {
-            if (confirm('Are you sure you want to clear all history?')) {
-                window.postMessage({ type: 'clearHistory' }, '*');
-            }
-        });
+        const clearHistoryBtn = document.getElementById('clear-history');
+        if (clearHistoryBtn) {
+            clearHistoryBtn.addEventListener('click', () => {
+                if (confirm('Are you sure you want to clear all history?')) {
+                    window.postMessage({ type: 'clearHistory' }, '*');
+                }
+            });
+        }
         
         // Delete history item
         document.querySelectorAll('.history-delete').forEach(btn => {
@@ -3748,6 +3835,27 @@ class AxisBrowser {
             return;
         }
         
+        if (event.data.type === 'clearBrowsingData') {
+            // Clear browsing data (history, cookies, etc.)
+            if (confirm('Are you sure you want to delete all browsing data? This will clear your history and cookies.')) {
+                await this.clearAllHistory();
+                // Could also clear cookies here if needed
+                // Reload settings page to refresh
+                const tab = this.tabs.get(this.currentTab);
+                if (tab && tab.url === 'axis://settings') {
+                    this.loadSettingsInWebview();
+                }
+            }
+            return;
+        }
+        
+        if (event.data.type === 'openSiteSettings') {
+            // Open a site permissions guide in a new tab
+            this.createNewTab('https://myaccount.google.com/security');
+            this.showNotification('Opening site permissions in a new tab', 'info');
+            return;
+        }
+        
         // Handle note messages
         if (event.data.type !== 'saveNote') return;
         
@@ -3836,7 +3944,7 @@ class AxisBrowser {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #0a0a0a 0%, #0f0f0f 100%);
+            background: #0a0a0a;
             color: #fff;
             height: 100vh;
             display: flex;
@@ -6428,6 +6536,20 @@ class AxisBrowser {
                 }
             }
             
+            // Update mute/unmute option text and icon based on current state
+            const muteOption = document.getElementById('mute-tab-option');
+            const muteText = document.getElementById('mute-tab-text');
+            const muteIcon = document.getElementById('mute-tab-icon');
+            if (tab && muteOption && muteText && muteIcon) {
+                if (tab.isMuted) {
+                    muteText.textContent = 'Unmute Tab';
+                    muteIcon.className = 'fas fa-volume-up';
+                } else {
+                    muteText.textContent = 'Mute Tab';
+                    muteIcon.className = 'fas fa-volume-mute';
+                }
+            }
+            
             // Add slide-in animation like nav menu
             contextMenu.style.animation = 'contextMenuSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
         }
@@ -6472,50 +6594,49 @@ class AxisBrowser {
 
     duplicateCurrentTab() {
         try {
-            // Get the current URL from the webview directly
-            const webview = document.getElementById('webview');
-            if (!webview) {
-                console.error('Webview not found');
-                this.showToast('Error: Webview not found');
+            // Get the tab to duplicate (from context menu or current tab)
+            const tabId = this.contextMenuTabId || this.currentTab;
+            if (!tabId) {
+                console.error('No tab to duplicate');
+                this.showToast('Error: No tab to duplicate');
                 return;
             }
             
-            const currentUrl = webview.getURL();
-            console.log('Current URL from webview:', currentUrl);
-            
-            // Use a fallback URL if current URL is invalid
-            const urlToDuplicate = currentUrl && currentUrl !== 'about:blank' && currentUrl.startsWith('http') 
-                ? currentUrl 
-                : 'https://www.google.com';
-            
-            console.log('URL to duplicate:', urlToDuplicate);
-            
-            // Create a new tab
-            const newTabId = this.createNewTab(urlToDuplicate);
-            console.log('createNewTab returned:', newTabId);
-            
-            // Update URL bar to reflect the new tab's URL
-            // Ensure URL bar is collapsed and summarized
-            const urlBar = this.elements?.urlBar;
-            if (urlBar && urlBar.classList.contains('expanded')) {
-                urlBar.classList.remove('expanded');
+            const tab = this.tabs.get(tabId);
+            if (!tab) {
+                console.error('Tab not found:', tabId);
+                this.showToast('Error: Tab not found');
+                return;
             }
             
-            // Use multiple attempts to ensure URL bar is updated and summarized
-            setTimeout(() => {
-                this.updateUrlBar();
-                // Explicitly summarize to ensure it's not showing full URL
-                this.summarizeUrlBar();
-            }, 100);
+            // Get URL from tab data first, then try webview
+            let urlToDuplicate = tab.url;
             
-            // Also update after page loads (backup)
-            setTimeout(() => {
-                this.updateUrlBar();
-                this.summarizeUrlBar();
-            }, 500);
+            // If no URL in tab data, try getting it from the tab's webview
+            if (!urlToDuplicate || urlToDuplicate === 'about:blank') {
+                const webview = tab.webview;
+                if (webview) {
+                    try {
+                        urlToDuplicate = webview.getURL();
+                    } catch (e) {
+                        console.error('Error getting URL from webview:', e);
+                    }
+                }
+            }
+            
+            // Validate the URL
+            if (!urlToDuplicate || urlToDuplicate === 'about:blank' || !urlToDuplicate.startsWith('http')) {
+                this.showToast('Cannot duplicate: No valid URL');
+                return;
+            }
+            
+            console.log('Duplicating tab with URL:', urlToDuplicate);
+            
+            // Create a new tab with the URL
+            const newTabId = this.createNewTab(urlToDuplicate);
             
             // Show success message
-            this.showToast('Tab duplicated successfully');
+            this.showNotification('Tab duplicated', 'success');
             
         } catch (error) {
             console.error('Error in duplicateCurrentTab:', error);
@@ -6526,6 +6647,25 @@ class AxisBrowser {
     closeCurrentTab() {
         if (this.contextMenuTabId) {
             this.closeTab(this.contextMenuTabId);
+        }
+    }
+
+    toggleTabMute(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab || !tab.webview) return;
+        
+        try {
+            if (tab.isMuted) {
+                tab.webview.setAudioMuted(false);
+                tab.isMuted = false;
+                this.showNotification('Tab unmuted', 'info');
+            } else {
+                tab.webview.setAudioMuted(true);
+                tab.isMuted = true;
+                this.showNotification('Tab muted', 'info');
+            }
+        } catch (error) {
+            console.error('Failed to toggle tab mute:', error);
         }
     }
 
@@ -6779,22 +6919,7 @@ class AxisBrowser {
         const el = this.elements;
         if (!el?.webview) return;
         
-        // Get the appropriate webview based on view mode
-        let webview;
-        if (this.isSplitView) {
-            if (!this.cachedWebviews) {
-                this.cachedWebviews = {
-                    left: document.getElementById('webview-left'),
-                    right: document.getElementById('webview-right')
-                };
-            }
-            webview = this.activePane === 'left' ? 
-                this.cachedWebviews.left : 
-                this.cachedWebviews.right;
-        } else {
-            webview = el.webview;
-        }
-        
+        const webview = el.webview;
         if (!webview) return;
         
         const url = webview.getURL();
@@ -7415,7 +7540,16 @@ class AxisBrowser {
             // Use requestAnimationFrame for smooth resizing
             animationFrame = requestAnimationFrame(() => {
                 const deltaX = e.clientX - startX;
-                const newWidth = startWidth + deltaX;
+                
+                // Check if sidebar is on the right side
+                const mainArea = document.getElementById('main-area');
+                const isRightSide = mainArea && mainArea.classList.contains('sidebar-right');
+                
+                // When sidebar is on the right, dragging left (negative deltaX) should increase width
+                // So we need to invert the deltaX
+                const adjustedDeltaX = isRightSide ? -deltaX : deltaX;
+                
+                const newWidth = startWidth + adjustedDeltaX;
                 const minWidth = 200;
                 const maxWidth = 500;
                 
@@ -8208,6 +8342,7 @@ class AxisBrowser {
         const securityPanel = document.getElementById('security-panel');
         const settingsPanel = document.getElementById('settings-panel');
         const downloadsPanel = document.getElementById('downloads-panel');
+        const backdrop = document.getElementById('modal-backdrop');
         
         // Close other panels with animation
         if (!settingsPanel.classList.contains('hidden')) {
@@ -8218,35 +8353,51 @@ class AxisBrowser {
         }
         
         if (securityPanel.classList.contains('hidden')) {
-            // Smooth fade-in animation
-            securityPanel.classList.remove('hidden');
-            if (backdrop) {
-                backdrop.classList.remove('hidden');
-                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-            }
-            
-            // Add entrance animation class
-            securityPanel.classList.add('security-entering');
-            
-            // Update security info immediately
+            // Update security info first
             this.updateSecurityInfo();
             
-            // Remove animation class after animation completes (200ms)
-            setTimeout(() => {
-                securityPanel.classList.remove('security-entering');
-            }, 200);
+            // Show backdrop
+            if (backdrop) {
+                backdrop.classList.remove('hidden');
+                backdrop.style.opacity = '0';
+                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1)';
+                requestAnimationFrame(() => {
+                    backdrop.style.opacity = '1';
+                });
+            }
             
-            // Refresh popup themes
-            this.refreshPopupThemes();
+            // Show panel with animation
+            securityPanel.classList.remove('hidden');
+            securityPanel.style.opacity = '0';
+            securityPanel.style.transform = 'translate(-50%, -48%) scale(0.95)';
+            
+            requestAnimationFrame(() => {
+                securityPanel.style.transition = 'opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)';
+                securityPanel.style.opacity = '1';
+                securityPanel.style.transform = 'translate(-50%, -50%) scale(1)';
+            });
             
         } else {
-            // Smooth fade-out animation
-            securityPanel.classList.add('security-closing');
+            // Hide with animation
+            securityPanel.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
+            securityPanel.style.opacity = '0';
+            securityPanel.style.transform = 'translate(-50%, -48%) scale(0.95)';
+            
+            if (backdrop) {
+                backdrop.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
+                backdrop.style.opacity = '0';
+            }
             
             setTimeout(() => {
                 securityPanel.classList.add('hidden');
-                securityPanel.classList.remove('security-closing');
-                if (backdrop) backdrop.classList.add('hidden');
+                securityPanel.style.opacity = '';
+                securityPanel.style.transform = '';
+                securityPanel.style.transition = '';
+                if (backdrop) {
+                    backdrop.classList.add('hidden');
+                    backdrop.style.opacity = '';
+                    backdrop.style.transition = '';
+                }
             }, 150);
         }
     }
@@ -8509,9 +8660,31 @@ class AxisBrowser {
             suggestionEl.className = 'spotlight-suggestion-item';
             suggestionEl.setAttribute('data-index', index);
             
+            // Determine if we should show a favicon or icon
+            let faviconUrl = null;
+            if (suggestion.isTab && suggestion.tabId) {
+                // For tabs, use the cached favicon if available
+                const tab = this.tabs.get(suggestion.tabId);
+                if (tab && tab.favicon) {
+                    faviconUrl = tab.favicon;
+                } else if (tab && tab.url) {
+                    faviconUrl = this.getFaviconUrl(tab.url);
+                }
+            } else if (suggestion.url || suggestion.isHistory || suggestion.isUrl) {
+                faviconUrl = this.getFaviconUrl(suggestion.url);
+            }
+            
+            const iconHtml = faviconUrl 
+                ? `<img src="${this.escapeHtml(faviconUrl)}" alt="" class="spotlight-favicon" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';" />`
+                : '';
+            const fallbackIconHtml = faviconUrl 
+                ? `<i class="${this.escapeHtml(suggestion.icon)}" style="display: none;"></i>`
+                : `<i class="${this.escapeHtml(suggestion.icon)}"></i>`;
+            
             suggestionEl.innerHTML = `
                 <div class="spotlight-suggestion-icon">
-                    <i class="${this.escapeHtml(suggestion.icon)}"></i>
+                    ${iconHtml}
+                    ${fallbackIconHtml}
                 </div>
                 <div class="spotlight-suggestion-text">${this.escapeHtml(suggestion.text)}</div>
                 ${(suggestion.isTab && suggestion.tabId) ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
@@ -8579,6 +8752,190 @@ class AxisBrowser {
         }, 50);
     }
 
+    getSuggestionId(suggestion) {
+        // Create a unique identifier for each suggestion type
+        if (suggestion.isTab && suggestion.tabId) {
+            return `tab-${suggestion.tabId}`;
+        } else if (suggestion.isHistory) {
+            return `history-${suggestion.url}`;
+        } else if (suggestion.isSearch) {
+            return `search-${suggestion.searchQuery}`;
+        } else if (suggestion.isNote && suggestion.noteId) {
+            return `note-${suggestion.noteId}`;
+        } else if (suggestion.url) {
+            return `url-${suggestion.url}`;
+        }
+        return `text-${suggestion.text}`;
+    }
+
+    dismissSuggestion(suggestion) {
+        // Initialize dismissed suggestions array if it doesn't exist
+        if (!this.settings.dismissedSuggestions) {
+            this.settings.dismissedSuggestions = [];
+        }
+        
+        const suggestionId = this.getSuggestionId(suggestion);
+        
+        // Add to dismissed list if not already there
+        if (!this.settings.dismissedSuggestions.includes(suggestionId)) {
+            this.settings.dismissedSuggestions.push(suggestionId);
+            this.saveSetting('dismissedSuggestions', this.settings.dismissedSuggestions);
+        }
+    }
+
+    isSuggestionDismissed(suggestion) {
+        if (!this.settings.dismissedSuggestions) {
+            return false;
+        }
+        const suggestionId = this.getSuggestionId(suggestion);
+        return this.settings.dismissedSuggestions.includes(suggestionId);
+    }
+
+    getFaviconUrl(url) {
+        if (!url || url === 'about:blank' || url.startsWith('axis:')) {
+            return null;
+        }
+        
+        try {
+            const urlObj = new URL(url);
+            // Use Google's favicon service for reliable favicon fetching
+            return `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    isValidDomain(str) {
+        // Check if string looks like a domain (e.g., "github.com", "youtube.com")
+        const domainPattern = /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+        return domainPattern.test(str) && !str.includes(' ');
+    }
+
+    async fetchGoogleSuggestions(query) {
+        if (!query || query.length < 2) {
+            return [];
+        }
+
+        const results = {
+            searches: [],
+            websites: []
+        };
+
+        try {
+            // Use Google's autocomplete API endpoint
+            const url = `https://suggestqueries.google.com/complete/search?client=chrome&q=${encodeURIComponent(query)}`;
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Accept': '*/*',
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch suggestions');
+            }
+
+            // Google returns JSONP format: callback([query, [suggestions], ...])
+            const text = await response.text();
+            
+            // Parse JSONP response - Google returns: window.google.ac.h(["query",["suggestion1","suggestion2",...],...])
+            const jsonMatch = text.match(/\["([^"]+)",\[(.*?)\]/);
+            if (jsonMatch && jsonMatch[2]) {
+                const suggestionsText = jsonMatch[2];
+                const suggestions = suggestionsText.match(/"([^"]+)"/g);
+                if (suggestions) {
+                    const parsed = suggestions
+                        .map(s => s.replace(/"/g, ''))
+                        .filter(s => {
+                            const lowerS = s.toLowerCase();
+                            const lowerQ = query.toLowerCase();
+                            return lowerS.includes(lowerQ) && lowerS !== lowerQ;
+                        });
+
+                    // Separate into search queries and potential websites
+                    parsed.forEach(suggestion => {
+                        // Check if it looks like a domain/website
+                        if (this.isValidDomain(suggestion)) {
+                            results.websites.push({
+                                text: suggestion,
+                                url: `https://${suggestion}`,
+                                isUrl: true
+                            });
+                        } else {
+                            // Check if it contains a domain pattern
+                            const domainInText = suggestion.match(/([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}/);
+                            if (domainInText) {
+                                const domain = domainInText[0];
+                                results.websites.push({
+                                    text: suggestion,
+                                    url: `https://${domain}`,
+                                    isUrl: true
+                                });
+                            } else {
+                                results.searches.push(suggestion);
+                            }
+                        }
+                    });
+                }
+            }
+
+            // Alternative parsing: try to find array pattern directly
+            if (results.searches.length === 0 && results.websites.length === 0) {
+                const arrayMatch = text.match(/\["([^"]+)",\s*\[(.*?)\]/s);
+                if (arrayMatch && arrayMatch[2]) {
+                    const suggestionsText = arrayMatch[2];
+                    const suggestions = suggestionsText.match(/"([^"]+)"/g);
+                    if (suggestions) {
+                        const parsed = suggestions
+                            .map(s => s.replace(/"/g, ''))
+                            .filter(s => {
+                                const lowerS = s.toLowerCase();
+                                const lowerQ = query.toLowerCase();
+                                return lowerS.includes(lowerQ) && lowerS !== lowerQ;
+                            });
+
+                        parsed.forEach(suggestion => {
+                            if (this.isValidDomain(suggestion)) {
+                                results.websites.push({
+                                    text: suggestion,
+                                    url: `https://${suggestion}`,
+                                    isUrl: true
+                                });
+                            } else {
+                                const domainInText = suggestion.match(/([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}/);
+                                if (domainInText) {
+                                    const domain = domainInText[0];
+                                    results.websites.push({
+                                        text: suggestion,
+                                        url: `https://${domain}`,
+                                        isUrl: true
+                                    });
+                                } else {
+                                    results.searches.push(suggestion);
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+
+            // Also try to detect if the query itself is a domain
+            if (this.isValidDomain(query)) {
+                results.websites.unshift({
+                    text: query,
+                    url: `https://${query}`,
+                    isUrl: true
+                });
+            }
+
+            return results;
+        } catch (error) {
+            console.error('Error fetching Google suggestions:', error);
+            return { searches: [], websites: [] };
+        }
+    }
+
     async generateAdvancedSuggestions(query) {
         const suggestions = [];
         const lowerQuery = query.toLowerCase();
@@ -8623,40 +8980,74 @@ class AxisBrowser {
                     icon = 'fab fa-amazon';
                 }
                 
-                suggestions.push({
+                const tabSuggestion = {
                     text: title,
                     icon: icon,
                     tabId: tabId,
                     url: url,
                     isTab: true
-            });
-            
-            tabCount++;
+                };
+                
+                // Only add if not dismissed
+                if (!this.isSuggestionDismissed(tabSuggestion)) {
+                    suggestions.push(tabSuggestion);
+                    tabCount++;
+                }
         });
         
-        // Fill remaining tab slots with placeholder tabs if needed
-        while (tabCount < 2) {
-                        suggestions.push({
-                text: 'New Tab',
-                icon: 'fas fa-globe',
-                tabId: null,
-                url: 'about:blank',
-                isTab: true,
-                isPlaceholder: true
-            });
-            tabCount++;
+        // Show up to 5 suggestions total (tabs + Google suggestions + history)
+        let searchCount = 0;
+        const maxSuggestions = 5;
+        
+        // Prioritize Google suggestions when there's a query
+        if (query.length > 0) {
+            try {
+                const googleResults = await this.fetchGoogleSuggestions(query);
+                
+                // Add website recommendations first (they're more actionable)
+                if (googleResults.websites && googleResults.websites.length > 0) {
+                    googleResults.websites.forEach(website => {
+                        if (suggestions.length < maxSuggestions) {
+                            const websiteObj = {
+                                text: website.text,
+                                icon: 'fas fa-globe',
+                                url: website.url,
+                                isUrl: true
+                            };
+                            suggestions.push(websiteObj);
+                            searchCount++;
+                        }
+                    });
+                }
+                
+                // Then add search query suggestions
+                if (googleResults.searches && googleResults.searches.length > 0) {
+                    googleResults.searches.forEach(suggestion => {
+                        if (suggestions.length < maxSuggestions) {
+                            const suggestionObj = {
+                                text: suggestion,
+                                icon: 'fas fa-search',
+                                searchQuery: suggestion,
+                                isSearch: true
+                            };
+                            suggestions.push(suggestionObj);
+                            searchCount++;
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching Google suggestions:', error);
+            }
         }
         
-        // Always show 3 search/history suggestions (after the 2 tabs)
-        let searchCount = 0;
-        
-        // Add recent searches first
-        if (this.settings.recentSearches && this.settings.recentSearches.length > 0 && searchCount < 3) {
+        // Add recent searches if we have space
+        if (this.settings.recentSearches && this.settings.recentSearches.length > 0 && suggestions.length < maxSuggestions) {
+            const remainingSlots = maxSuggestions - suggestions.length;
             const recentSearches = this.settings.recentSearches
                 .filter(search => 
                     query.length === 0 || search.toLowerCase().includes(lowerQuery)
                 )
-                .slice(0, 3 - searchCount)
+                .slice(0, remainingSlots)
                 .map(search => ({
                     text: `Search "${search}"`,
                     icon: 'fas fa-search',
@@ -8665,7 +9056,7 @@ class AxisBrowser {
                 }));
             
             recentSearches.forEach(search => {
-                if (searchCount < 3) {
+                if (suggestions.length < maxSuggestions && !this.isSuggestionDismissed(search)) {
                     suggestions.push(search);
                     searchCount++;
                 }
@@ -8673,14 +9064,15 @@ class AxisBrowser {
         }
         
         // Add recent history if we need more suggestions
-        if (searchCount < 3 && this.settings.history && this.settings.history.length > 0) {
+        if (suggestions.length < maxSuggestions && this.settings.history && this.settings.history.length > 0) {
+            const remainingSlots = maxSuggestions - suggestions.length;
             const recentHistory = this.settings.history
                 .filter(item => 
                     query.length === 0 ||
                     item.title.toLowerCase().includes(lowerQuery) || 
                     item.url.toLowerCase().includes(lowerQuery)
                 )
-                .slice(0, 3 - searchCount)
+                .slice(0, remainingSlots)
                 .map(item => {
                     let icon = 'fas fa-lightbulb';
                     if (this.isUrlOnDomain(item.url, 'gmail.com')) {
@@ -8715,49 +9107,14 @@ class AxisBrowser {
                 });
             
             recentHistory.forEach(item => {
-                if (searchCount < 3) {
+                if (suggestions.length < maxSuggestions && !this.isSuggestionDismissed(item)) {
                     suggestions.push(item);
                     searchCount++;
                 }
             });
         }
         
-        // Add intelligent sentence completions if we need more
-        if (searchCount < 3 && query.length > 0) {
-            const completions = this.generateSentenceCompletions(lowerQuery);
-            completions.forEach(completion => {
-                if (searchCount < 3) {
-                    suggestions.push(completion);
-                    searchCount++;
-                }
-            });
-        }
-        
-        // Fill remaining slots with placeholder search suggestions if needed
-        const placeholderSearches = ['how to code', 'how to learn programming', 'weather'];
-        while (searchCount < 3) {
-            const placeholderIndex = searchCount - (3 - placeholderSearches.length);
-            if (placeholderIndex >= 0 && placeholderIndex < placeholderSearches.length) {
-            suggestions.push({
-                    text: placeholderSearches[placeholderIndex],
-                    icon: 'fas fa-lightbulb',
-                    searchQuery: placeholderSearches[placeholderIndex],
-                    isSearch: true,
-                    isPlaceholder: true
-                });
-            } else {
-            suggestions.push({
-                    text: 'Search...',
-                    icon: 'fas fa-search',
-                    searchQuery: '',
-                    isSearch: true,
-                    isPlaceholder: true
-                });
-            }
-            searchCount++;
-        }
-        
-        return suggestions; // Always returns exactly 5 suggestions (2 tabs + 3 search/history)
+        return suggestions;
     }
 
     generateSentenceCompletions(query) {
@@ -9323,55 +9680,49 @@ class AxisBrowser {
                 icon = 'fab fa-amazon';
             }
         
-        suggestions.push({
+        const tabSuggestion = {
                 text: title,
                 icon: icon,
                 tabId: tabId,
                 url: url,
                 isTab: true
-            });
+            };
             
-            tabCount++;
+            // Only add if not dismissed
+            if (!this.isSuggestionDismissed(tabSuggestion)) {
+                suggestions.push(tabSuggestion);
+                tabCount++;
+            }
         });
         
-        // Fill remaining tab slots with placeholder tabs if needed
-        while (tabCount < 2) {
-        suggestions.push({
-                text: 'New Tab',
-                icon: 'fas fa-globe',
-                tabId: null,
-                url: 'about:blank',
-                isTab: true,
-                isPlaceholder: true
-            });
-            tabCount++;
-        }
-        
-        // Always show 3 search/history suggestions
+        // Show up to 5 suggestions total (tabs + history)
+        const maxSuggestions = 5;
         let searchCount = 0;
         
-        // Add recent searches first
-        if (this.settings.recentSearches && this.settings.recentSearches.length > 0 && searchCount < 3) {
-            const recentSearches = this.settings.recentSearches.slice(0, 3 - searchCount);
+        // Add recent searches if we have space
+        if (this.settings.recentSearches && this.settings.recentSearches.length > 0 && suggestions.length < maxSuggestions) {
+            const remainingSlots = maxSuggestions - suggestions.length;
+            const recentSearches = this.settings.recentSearches.slice(0, remainingSlots);
             recentSearches.forEach(search => {
-                if (searchCount < 3) {
-                suggestions.push({
+                const searchSuggestion = {
                     text: `Search "${search}"`,
                     icon: 'fas fa-search',
                     searchQuery: search,
                     isSearch: true
-                });
+                };
+                if (suggestions.length < maxSuggestions && !this.isSuggestionDismissed(searchSuggestion)) {
+                    suggestions.push(searchSuggestion);
                     searchCount++;
                 }
             });
         }
         
         // Add recent history if we need more suggestions
-        if (searchCount < 3 && this.settings.history && this.settings.history.length > 0) {
-            const recentHistory = this.settings.history.slice(0, 3 - searchCount);
+        if (suggestions.length < maxSuggestions && this.settings.history && this.settings.history.length > 0) {
+            const remainingSlots = maxSuggestions - suggestions.length;
+            const recentHistory = this.settings.history.slice(0, remainingSlots);
             recentHistory.forEach(item => {
-                if (searchCount < 3) {
-                    let icon = 'fas fa-lightbulb';
+                let icon = 'fas fa-lightbulb';
                 if (this.isUrlOnDomain(item.url, 'gmail.com')) {
                     icon = 'fas fa-envelope';
                 } else if (this.isUrlOnDomain(item.url, 'youtube.com')) {
@@ -9394,43 +9745,22 @@ class AxisBrowser {
                     icon = 'fab fa-amazon';
                 }
                 
-                suggestions.push({
+                const historySuggestion = {
                     text: item.title,
                     icon: icon,
                     url: item.url,
                     isHistory: true,
                     timestamp: item.timestamp
-                });
+                };
+                
+                if (suggestions.length < maxSuggestions && !this.isSuggestionDismissed(historySuggestion)) {
+                    suggestions.push(historySuggestion);
                     searchCount++;
                 }
             });
         }
         
-        // Fill remaining slots with placeholder search suggestions if needed
-        const placeholderSearches = ['how to code', 'how to learn programming', 'weather'];
-        while (searchCount < 3) {
-            const placeholderIndex = searchCount - (3 - placeholderSearches.length);
-            if (placeholderIndex >= 0 && placeholderIndex < placeholderSearches.length) {
-            suggestions.push({
-                    text: placeholderSearches[placeholderIndex],
-                    icon: 'fas fa-lightbulb',
-                    searchQuery: placeholderSearches[placeholderIndex],
-                    isSearch: true,
-                    isPlaceholder: true
-                });
-            } else {
-                suggestions.push({
-                    text: 'Search...',
-                    icon: 'fas fa-search',
-                    searchQuery: '',
-                    isSearch: true,
-                    isPlaceholder: true
-                });
-            }
-            searchCount++;
-        }
-        
-        return suggestions; // Always returns exactly 5 suggestions (2 tabs + 3 search/history)
+        return suggestions;
     }
 
     sanitizeUrl(input) {
@@ -9444,12 +9774,13 @@ class AxisBrowser {
         // Remove dangerous characters and scripts
         url = url.replace(/[<>'"\x00-\x1f\x7f-\x9f]/g, '');
         
-        // Remove javascript: and data: protocols
-        if (url.toLowerCase().startsWith('javascript:') || 
-            url.toLowerCase().startsWith('data:') ||
-            url.toLowerCase().startsWith('vbscript:') ||
-            url.toLowerCase().startsWith('file:') ||
-            url.toLowerCase().startsWith('ftp:')) {
+        // Remove dangerous URL schemes that could execute code or access local files
+        const lowerUrl = url.toLowerCase();
+        if (lowerUrl.startsWith('javascript:') || 
+            lowerUrl.startsWith('data:') ||
+            lowerUrl.startsWith('vbscript:') ||
+            lowerUrl.startsWith('file:') ||
+            lowerUrl.startsWith('ftp:')) {
             return null;
         }
 
@@ -9543,465 +9874,17 @@ class AxisBrowser {
         return div.innerHTML;
     }
 
-    // Split View Functionality
-    toggleSplitView() {
-        this.isSplitView = !this.isSplitView;
-        
-        const singleView = document.getElementById('single-view');
-        const splitView = document.getElementById('split-view');
-        const splitViewBtn = document.getElementById('split-view-btn');
-        
-        if (this.isSplitView) {
-            // Enter split view
-            singleView.classList.add('hidden');
-            singleView.classList.remove('active');
-            splitView.classList.remove('hidden');
-            splitView.classList.add('entering');
-            
-            // Update button states
-            splitViewBtn.innerHTML = '<i class="fas fa-columns"></i><span>Exit Split</span>';
-            
-            // Update context menu text
-            const splitViewContextOption = document.getElementById('split-view-option');
-            if (splitViewContextOption) {
-                splitViewContextOption.innerHTML = '<i class="fas fa-columns"></i><span>Exit Split</span>';
-            }
-            
-            // Initialize split view
-            this.initializeSplitView();
-            
-            // Remove animation class after animation completes
-            setTimeout(() => {
-                splitView.classList.remove('entering');
-            }, 500);
-            
-        } else {
-            // Exit split view
-            splitView.classList.add('exiting');
-            
-            // Update button states
-            splitViewBtn.innerHTML = '<i class="fas fa-columns"></i><span>Split View</span>';
-            
-            // Update context menu text
-            const splitViewContextOption = document.getElementById('split-view-option');
-            if (splitViewContextOption) {
-                splitViewContextOption.innerHTML = '<i class="fas fa-columns"></i><span>Split View</span>';
-            }
-            
-            // Switch back to single view after animation
-            setTimeout(() => {
-                splitView.classList.add('hidden');
-                splitView.classList.remove('exiting');
-                singleView.classList.remove('hidden');
-                singleView.classList.add('active');
-                this.cleanupSplitView();
-            }, 300);
-        }
-    }
-
-    // Split view functions
-    initializeSplitView() {
-        const leftPane = document.querySelector('.left-pane');
-        const rightPane = document.querySelector('.right-pane');
-        
-        // Set initial split ratio
-        this.updateSplitRatio();
-        
-        // Setup divider drag functionality
-        this.setupSplitDivider();
-        
-        // Setup webview event listeners for split view
-        this.setupSplitWebviews();
-        
-        // Copy current tab content to left pane
-        const currentWebview = document.getElementById('webview');
-        const leftWebview = document.getElementById('webview-left');
-        const rightWebview = document.getElementById('webview-right');
-        
-        // Wait a bit for the DOM to settle before setting URLs
-        setTimeout(() => {
-            if (currentWebview && leftWebview) {
-                const currentUrl = currentWebview.getURL();
-                if (currentUrl && currentUrl !== 'about:blank') {
-                    leftWebview.src = currentUrl;
-                } else {
-                    leftWebview.src = 'https://www.google.com';
-                }
-            }
-            
-            // Set right pane to a default page
-            if (rightWebview) {
-                rightWebview.src = 'https://www.google.com';
-            }
-        }, 100);
-        
-        // Set active pane
-        this.setActivePane('left');
-        
-        // Setup pane click handlers for switching active pane
-        if (leftPane) {
-            leftPane.addEventListener('click', () => {
-                if (this.isSplitView) {
-                    this.setActivePane('left');
-                }
-            });
-        }
-        
-        if (rightPane) {
-            rightPane.addEventListener('click', () => {
-                if (this.isSplitView) {
-                    this.setActivePane('right');
-                }
-            });
-        }
-    }
-
-    setupSplitDivider() {
-        const divider = document.querySelector('.split-divider');
-        let isDragging = false;
-        let frameRequested = false;
-        let pendingRatio = null;
-        
-        if (!divider) {
-            console.error('Split divider not found');
-            return;
-        }
-        
-        const applyPendingRatio = () => {
-            if (pendingRatio !== null) {
-                this.splitRatio = pendingRatio;
-                this.updateSplitRatio();
-                pendingRatio = null;
-            }
-            frameRequested = false;
-        };
-        
-        const onMouseMove = (e) => {
-            if (!isDragging) return;
-            const splitContainer = document.querySelector('.split-container');
-            if (!splitContainer) return;
-            const rect = splitContainer.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const ratio = x / rect.width;
-            // Constrain between 0.2 and 0.8
-            const constrained = Math.max(0.2, Math.min(0.8, ratio));
-            pendingRatio = constrained;
-            if (!frameRequested) {
-                frameRequested = true;
-                requestAnimationFrame(applyPendingRatio);
-            }
-        };
-        
-        const onMouseUp = () => {
-            if (!isDragging) return;
-            isDragging = false;
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-            divider.style.cursor = 'col-resize';
-            document.body.style.cursor = 'default';
-            document.body.style.userSelect = '';
-            document.body.classList.remove('resizing');
-        };
-        
-        divider.addEventListener('mousedown', (e) => {
-            isDragging = true;
-            divider.style.cursor = 'col-resize';
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
-            document.body.classList.add('resizing');
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-            e.preventDefault();
-            e.stopPropagation();
-        });
-    }
-
-    updateSplitRatio() {
-        const leftPane = document.querySelector('.left-pane');
-        const rightPane = document.querySelector('.right-pane');
-        
-        if (leftPane && rightPane) {
-            leftPane.style.flex = this.splitRatio;
-            rightPane.style.flex = 1 - this.splitRatio;
-        }
-    }
-
-    setupSplitWebviews() {
-        const leftWebview = document.getElementById('webview-left');
-        const rightWebview = document.getElementById('webview-right');
-        
-        // Setup left webview
-        if (leftWebview) {
-            this.setupWebviewEvents(leftWebview, 'left');
-        }
-        
-        // Setup right webview
-        if (rightWebview) {
-            this.setupWebviewEvents(rightWebview, 'right');
-        }
-    }
-
-    setupWebviewEvents(webview, pane) {
-        // Setup webview event listeners for split view panes
-        if (!webview) return;
-        
-        // Copy all the webview event listeners from the main setupWebview method
-        webview.addEventListener('did-start-loading', () => {
-            // Clear any existing timeout for this pane
-            const existingTimeout = this.splitViewLoadingTimeouts.get(pane);
-            if (existingTimeout) {
-                clearTimeout(existingTimeout);
-            }
-            
-            this.showLoadingIndicator(pane);
-            
-            // Set timeout to handle stuck loading (30 seconds)
-            const timeout = setTimeout(() => {
-                // Check if webview is still loading
-                if (webview && webview.isLoading) {
-                    console.log(`Page in ${pane} pane taking too long to load, forcing stop`);
-                    // Force stop loading if it's been too long
-                    try {
-                        webview.stop();
-                    } catch (e) {
-                        console.error('Error stopping webview:', e);
-                    }
-                    // Hide loading indicator
-                    this.hideLoadingIndicator(pane);
-                    // Show error or allow user to continue
-                    this.showNotification(`Page in ${pane} pane is taking too long to load. You can try refreshing.`, 'warning');
-                }
-                this.splitViewLoadingTimeouts.delete(pane);
-            }, 30000); // 30 second timeout
-            
-            this.splitViewLoadingTimeouts.set(pane, timeout);
-        });
-
-        webview.addEventListener('did-finish-load', () => {
-            // Clear loading timeout for this pane
-            const timeout = this.splitViewLoadingTimeouts.get(pane);
-            if (timeout) {
-                clearTimeout(timeout);
-                this.splitViewLoadingTimeouts.delete(pane);
-            }
-            
-            this.hideLoadingIndicator(pane);
-            // Only update tab title if this is the active pane
-            if ((pane === 'left' && this.activePane === 'left') || 
-                (pane === 'right' && this.activePane === 'right')) {
-                this.updateTabTitle();
-                // Extract theme for active pane immediately
-                this.extractAndApplyWebpageColors(webview);
-                // Quick retry using requestAnimationFrame
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        this.extractAndApplyWebpageColors(webview);
-                    });
-                });
-            }
-        });
-
-        webview.addEventListener('did-fail-load', (event) => {
-            // Clear loading timeout for this pane
-            const timeout = this.splitViewLoadingTimeouts.get(pane);
-            if (timeout) {
-                clearTimeout(timeout);
-                this.splitViewLoadingTimeouts.delete(pane);
-            }
-            
-            this.hideLoadingIndicator(pane);
-            this.handleNavigationError(event, pane);
-        });
-        
-        // Add did-stop-loading event as backup for split view
-        webview.addEventListener('did-stop-loading', () => {
-            // Clear loading timeout for this pane
-            const timeout = this.splitViewLoadingTimeouts.get(pane);
-            if (timeout) {
-                clearTimeout(timeout);
-                this.splitViewLoadingTimeouts.delete(pane);
-            }
-            
-            this.hideLoadingIndicator(pane);
-        });
-        
-        // Suppress WebGPU deprecation warnings from webview console
-        webview.addEventListener('console-message', (e) => {
-            // Filter out the DawnExperimentalSubgroupLimits deprecation warning
-            if (e.message && e.message.includes('DawnExperimentalSubgroupLimits') && e.message.includes('deprecated')) {
-                // Suppress this specific warning
-                return;
-            }
-        });
-
-        webview.addEventListener('new-window', (event) => {
-            event.preventDefault();
-            // Navigate in the active pane
-            if (this.isSplitView) {
-                const activeWebview = this.activePane === 'left' ? 
-                    document.getElementById('webview-left') : 
-                    document.getElementById('webview-right');
-                if (activeWebview) {
-                    this.navigateInPane(activeWebview, event.url);
-                }
-            } else {
-                this.navigate(event.url);
-            }
-        });
-
-        webview.addEventListener('will-navigate', (event) => {
-            // Only update URL bar if this is the active pane
-            if ((pane === 'left' && this.activePane === 'left') || 
-                (pane === 'right' && this.activePane === 'right')) {
-                this.updateUrlBar(event.url);
-            }
-        });
-
-        // Handle navigation completion (fires for all navigation types)
-        webview.addEventListener('did-navigate', (event) => {
-            // Only update URL bar if this is the active pane
-            if ((pane === 'left' && this.activePane === 'left') || 
-                (pane === 'right' && this.activePane === 'right')) {
-                this.updateUrlBar();
-                this.updateNavigationButtons();
-            }
-        });
-
-        // Handle same-page navigation (SPAs, anchor links, etc.)
-        webview.addEventListener('did-navigate-in-page', (event) => {
-            // Only update URL bar if this is the active pane
-            if ((pane === 'left' && this.activePane === 'left') || 
-                (pane === 'right' && this.activePane === 'right')) {
-                this.updateUrlBar();
-                this.updateNavigationButtons();
-                this.updateTabTitle();
-            }
-        });
-
-        webview.addEventListener('page-title-updated', (event) => {
-            // Only update tab title if this is the active pane
-            if ((pane === 'left' && this.activePane === 'left') || 
-                (pane === 'right' && this.activePane === 'right')) {
-                this.updateTabTitle();
-            }
-        });
-
-        // Handle favicon updates
-        webview.addEventListener('page-favicon-updated', (event) => {
-            // Only update favicon if this is the active pane
-            if ((pane === 'left' && this.activePane === 'left') || 
-                (pane === 'right' && this.activePane === 'right')) {
-                if (event.favicons && event.favicons.length > 0) {
-                    const faviconUrl = event.favicons[0];
-                    const tabElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
-                    if (tabElement) {
-                        const img = tabElement.querySelector('.tab-favicon');
-                        if (img) {
-                            img.style.visibility = 'visible';
-                            img.src = faviconUrl; // Use first favicon
-                            // Cache favicon in tab data
-                            const tab = this.tabs.get(this.currentTab);
-                            if (tab) {
-                                tab.favicon = faviconUrl;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    setActivePane(pane) {
-        if (!this.isSplitView) return;
-        
-        this.activePane = pane;
-        
-        const leftPane = document.querySelector('.left-pane');
-        const rightPane = document.querySelector('.right-pane');
-        
-        // Update active class
-        if (leftPane && rightPane) {
-            if (pane === 'left') {
-                leftPane.classList.add('active');
-                rightPane.classList.remove('active');
-            } else {
-                rightPane.classList.add('active');
-                leftPane.classList.remove('active');
-            }
-        }
-        
-        // Update URL bar and navigation buttons based on active pane
-        const activeWebview = pane === 'left' ? 
-            document.getElementById('webview-left') : 
-            document.getElementById('webview-right');
-        
-        if (activeWebview) {
-            this.updateUrlBar();
-            this.updateNavigationButtons();
-            this.updateTabTitle();
-        }
-    }
-
-    navigateInPane(webview, url) {
-        // Ultra-fast navigation with instant loading
-        try {
-            // Clear any existing timeouts
-            if (this.navigationTimeout) {
-                clearTimeout(this.navigationTimeout);
-            }
-            
-            // Ultra-aggressive speed optimizations
-            webview.style.willChange = 'transform';
-            webview.style.transform = 'translateZ(0)';
-            webview.style.backfaceVisibility = 'hidden';
-            webview.style.perspective = '1000px';
-            
-            // Navigate immediately
-            webview.src = url;
-            
-        } catch (error) {
-            console.error('Navigation error:', error);
-            // Ultra-fast fallback
-            webview.src = 'https://www.google.com';
-        }
-    }
-
-    showLoadingIndicator(pane = 'main') {
-        const indicator = pane === 'main' ? 
-            document.getElementById('loading-bar') :
-            document.getElementById(`loading-bar-${pane}`);
-        
+    showLoadingIndicator() {
+        const indicator = document.getElementById('loading-bar');
         if (indicator) {
             indicator.classList.add('loading');
         }
     }
 
-    hideLoadingIndicator(pane = 'main') {
-        const indicator = pane === 'main' ? 
-            document.getElementById('loading-bar') :
-            document.getElementById(`loading-bar-${pane}`);
-        
+    hideLoadingIndicator() {
+        const indicator = document.getElementById('loading-bar');
         if (indicator) {
             indicator.classList.remove('loading');
-        }
-    }
-
-    handleNavigationError(event, pane) {
-        // Handle navigation errors for split view panes
-        console.error(`Navigation error in ${pane} pane:`, event);
-        this.hideLoadingIndicator(pane);
-    }
-
-    cleanupSplitView() {
-        // Clean up split view resources
-        const leftWebview = document.getElementById('webview-left');
-        const rightWebview = document.getElementById('webview-right');
-        
-        if (leftWebview) {
-            leftWebview.src = 'about:blank';
-        }
-        if (rightWebview) {
-            rightWebview.src = 'about:blank';
         }
     }
 
@@ -10055,5 +9938,6 @@ class AxisBrowser {
 document.addEventListener('DOMContentLoaded', () => {
     new AxisBrowser();
 });
+
 
 
