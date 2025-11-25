@@ -11,7 +11,7 @@
     --button-hover: #333;
     --button-text: #ccc;
     --button-text-hover: #fff;
-    --sidebar-background: #111;
+    --sidebar-background: rgba(17, 17, 17, 0.3);
     --url-bar-background: #111;
     --url-bar-focus-background: #1a1a1a;
     --url-bar-text: #fff;
@@ -97,7 +97,7 @@ button::-moz-focus-inner {
 body {
     font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-weight: 400;
-    background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 50%, #0f0f0f 100%);
+    background: transparent;
     color: var(--text-color);
     overflow: hidden;
     user-select: none;
@@ -120,7 +120,7 @@ body {
     height: 100vh;
     display: flex;
     flex-direction: column;
-    background: transparent;
+    background: rgba(20, 20, 20, 0.4); /* Subtle tint over vibrancy */
     overflow: hidden;
     opacity: 0;
     filter: blur(8px);
@@ -1259,9 +1259,9 @@ body.resizing .resize-handle {
     border-radius: 10px;
     margin: 0;
     box-shadow: 
-        0 8px 24px rgba(0, 0, 0, 0.15),
-        0 4px 8px rgba(0, 0, 0, 0.1),
-        0 2px 4px rgba(0, 0, 0, 0.08);
+        0 4px 12px rgba(0, 0, 0, 0.08),
+        0 2px 4px rgba(0, 0, 0, 0.05),
+        0 1px 2px rgba(0, 0, 0, 0.03);
     backdrop-filter: blur(8px);
     min-width: 0;
     flex-shrink: 1;
@@ -1326,7 +1326,7 @@ body.resizing .resize-handle {
     align-items: center;
     justify-content: center;
     z-index: 2;
-    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+    background: #1a1a1a;
     border-radius: 10px;
     animation: emptyStateFadeIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
     pointer-events: auto;
@@ -1601,9 +1601,7 @@ body.resizing .resize-handle {
     left: 0;
     right: 0;
     bottom: 0;
-    background-image: 
-        radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.02) 0%, transparent 50%),
-        radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.02) 0%, transparent 50%);
+    background: transparent;
     pointer-events: none;
 }
 
@@ -3535,64 +3533,27 @@ body.light-theme .shortcut-desc {
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate3d(-50%, -50%, 0);
-    backface-visibility: hidden;
-    perspective: 1000px;
-    width: 450px;
+    transform: translate(-50%, -50%);
+    width: 420px;
     max-width: 90vw;
-    max-height: 85vh;
-    background: rgba(15, 15, 15, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 24px;
+    background: #252526;
+    border: 1px solid #383838;
+    border-radius: 12px;
     z-index: 1001;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), visibility 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     display: flex;
     flex-direction: column;
-    box-shadow: 
-        0 40px 80px rgba(0, 0, 0, 0.8),
-        0 0 0 1px rgba(255, 255, 255, 0.06),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(40px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     overflow: hidden;
-}
-
-.security-panel-content {
-    position: relative;
-    width: 100%;
-    max-width: 100%;
-    max-height: 100%;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    backdrop-filter: none;
-    box-shadow: none;
-    transform: none;
-    transition: none;
-    overflow: hidden;
-}
-
-.security-panel:not(.hidden):not(.security-closing) {
-    opacity: 1;
-    visibility: visible;
-}
-
-.security-panel.security-entering {
-    animation: notesPanelFadeIn 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    will-change: transform, opacity;
-}
-
-.security-panel.security-closing {
-    animation: notesPanelFadeOut 0.15s cubic-bezier(0.55, 0.06, 0.68, 0.19) forwards !important;
-    transition: none !important;
-    visibility: visible !important;
-    will-change: transform, opacity;
 }
 
 .security-panel.hidden {
-    opacity: 0;
-    visibility: hidden;
+    display: none;
+}
+
+.security-panel-content {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
 }
 
 /* Settings panel slide-out animation */
@@ -3624,79 +3585,85 @@ body.light-theme .shortcut-desc {
     align-items: center;
     justify-content: space-between;
     padding: 20px 24px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(42, 42, 42, 0.8);
-    border-radius: 10px 10px 0 0;
+    border-bottom: 1px solid #383838;
 }
 
 .security-status {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
 }
 
 .security-status i {
-    font-size: 24px;
+    font-size: 28px;
+    width: 32px;
+    text-align: center;
+}
+
+.security-status i.fa-lock {
     color: #4CAF50;
+}
+
+.security-status i.fa-unlock {
+    color: #ff9800;
+}
+
+.security-status i.fa-info-circle {
+    color: #999;
 }
 
 .security-info h3 {
     font-size: 18px;
     font-weight: 600;
-    color: var(--text-color);
+    color: #fff;
     margin: 0 0 4px 0;
 }
 
 .security-info p {
-    font-size: 14px;
-    color: var(--text-color-secondary);
+    font-size: 13px;
+    color: #999;
     margin: 0;
 }
 
 .security-content {
-    padding: 24px;
+    padding: 20px 24px 24px;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
 }
 
 .security-details {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
 }
 
 .security-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 16px;
-    background: rgba(26, 26, 26, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-    transition: all 0.2s ease;
-}
-
-.security-item:hover {
-    background: rgba(26, 26, 26, 0.8);
-    border-color: rgba(255, 255, 255, 0.1);
+    padding: 14px 16px;
+    background: #2d2d2d;
+    border: 1px solid #383838;
+    border-radius: 8px;
 }
 
 .security-item label {
     font-size: 14px;
-    color: var(--text-color-muted);
+    color: #999;
     font-weight: 500;
 }
 
 .security-item span {
     font-size: 14px;
-    color: var(--text-color);
+    color: #fff;
     font-weight: 500;
 }
 
 .security-actions {
     display: flex;
-    gap: 12px;
+    gap: 10px;
+    margin-top: 4px;
 }
 
 .security-btn {
@@ -3706,10 +3673,10 @@ body.light-theme .shortcut-desc {
     justify-content: center;
     gap: 8px;
     padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: rgba(255, 255, 255, 0.6);
-    border-radius: 10px;
+    background: #2d2d2d;
+    border: 1px solid #383838;
+    color: #ccc;
+    border-radius: 8px;
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
@@ -3717,14 +3684,13 @@ body.light-theme .shortcut-desc {
 }
 
 .security-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.25);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
+    background: #333;
+    border-color: #444;
+    color: #fff;
 }
 
 .security-btn i {
-    font-size: 16px;
+    font-size: 14px;
 }
 
 /* Spotlight Search */
@@ -3873,7 +3839,9 @@ body.light-theme .shortcut-desc {
     background: transparent;
     border-radius: 8px;
     cursor: pointer;
-    transition: transform 0.15s cubic-bezier(0.23, 1, 0.32, 1);
+    transition: transform 0.15s cubic-bezier(0.23, 1, 0.32, 1),
+                background 0.15s cubic-bezier(0.23, 1, 0.32, 1),
+                opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     border-bottom: none;
     transform: translateX(0);
@@ -3907,6 +3875,18 @@ body.light-theme .shortcut-desc {
     color: rgba(255, 255, 255, 0.7);
     font-size: 16px;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.spotlight-favicon {
+    width: 20px;
+    height: 20px;
+    border-radius: 3px;
+    object-fit: contain;
+    display: block;
 }
 
 .spotlight-suggestion-item:hover .spotlight-suggestion-icon {
@@ -3937,6 +3917,59 @@ body.light-theme .shortcut-desc {
 .spotlight-suggestion-item:hover .spotlight-suggestion-action {
     background: rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.9);
+}
+
+.spotlight-dismiss-btn {
+    opacity: 0;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin-left: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                background 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    flex-shrink: 0;
+    transform: scale(0.9);
+}
+
+.spotlight-suggestion-item:hover .spotlight-dismiss-btn {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.spotlight-dismiss-btn:hover {
+    background: rgba(255, 59, 48, 0.25);
+    color: #ff3b30;
+    transform: scale(1.05);
+}
+
+.spotlight-dismiss-btn:active {
+    transform: scale(0.95);
+    transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.spotlight-suggestion-item.dismissing {
+    opacity: 0 !important;
+    transform: translateX(-20px) !important;
+    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    pointer-events: none;
+    background: transparent !important;
+}
+
+.spotlight-suggestion-item.dismissing .spotlight-dismiss-btn {
+    opacity: 0 !important;
+    pointer-events: none;
 }
 
 /* Loading indicator for suggestions */
@@ -4705,7 +4738,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     left: 50%;
     width: 0;
     height: 0;
-    background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.1) 50%, transparent 70%);
+    background: transparent;
     border-radius: 50%;
     transform: translate(-50%, -50%);
     transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -4887,7 +4920,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     left: 50%;
     width: 0;
     height: 0;
-    background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.1) 50%, transparent 70%);
+    background: transparent;
     border-radius: 50%;
     transform: translate(-50%, -50%);
     transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -5194,308 +5227,12 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     display: block;
 }
 
-#split-view {
-    display: none;
-}
-
-#split-view:not(.hidden) {
-    display: block;
-}
-
-.split-container {
-    display: flex;
-    width: 100%;
-    height: 100%;
-    position: relative;
-    overflow: visible;
-    padding: 8px;
-    box-sizing: border-box;
-}
-
-.left-pane, .right-pane {
-    flex: 1;
-    height: 100%;
-    position: relative;
-    transition: all 0.3s ease;
-    overflow: visible;
-    display: flex;
-    flex-direction: column;
-    padding: 0 4px;
-    box-sizing: border-box;
-}
-
-/* Split view webview containers */
-.left-pane .webview-container,
-.right-pane .webview-container {
-    width: 100%;
-    height: 100%;
-    flex: 1;
-    overflow: hidden;
-    position: relative;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    margin: 0;
-    box-shadow: 
-        0 8px 24px rgba(0, 0, 0, 0.15),
-        0 4px 8px rgba(0, 0, 0, 0.1),
-        0 2px 4px rgba(0, 0, 0, 0.08);
-}
-
-.left-pane webview,
-.right-pane webview {
-    width: 100%;
-    height: 100%;
-    border: none;
-    background: #1a1a1a;
-    overflow: hidden;
-    min-width: 0;
-    flex-shrink: 1;
-    position: relative;
-    border-radius: 0;
-    max-width: 100%;
-    max-height: 100%;
-}
-
-.left-pane.active::before, .right-pane.active::before {
-    /* No active indicator */
-    display: none;
-}
-
-.split-divider {
-    width: 4px;
-    background: rgba(255, 255, 255, 0.1);
-    cursor: col-resize;
-    position: relative;
-    transition: background 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1001;
-    pointer-events: auto;
-}
-
-.split-divider:hover {
-    background: rgba(255, 255, 255, 0.2);
-}
-
-.split-handle {
-    width: 2px;
-    height: 40px;
-    background: rgba(255, 255, 255, 0.3);
-    border-radius: 1px;
-    transition: all 0.2s ease;
-    pointer-events: none;
-}
-
-.split-divider:hover .split-handle {
-    background: rgba(255, 255, 255, 0.6);
-    height: 60px;
-}
-
-/* Split view animations */
-#split-view.entering {
-    animation: splitViewEnter 0.5s cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-#split-view.exiting {
-    animation: splitViewExit 0.3s cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-@keyframes splitViewEnter {
-    0% {
-        opacity: 0;
-        transform: scale(0.95) translateY(20px);
-    }
-    100% {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
-}
-
-@keyframes splitViewExit {
-    0% {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
-    100% {
-        opacity: 0;
-        transform: scale(0.95) translateY(20px);
-    }
-}
-
-/* Loading indicators for split view */
-#loading-bar-left, #loading-bar-right {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: transparent;
-    z-index: 1000;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                visibility 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    pointer-events: none;
-    overflow: hidden;
-}
-
-#loading-bar-left::before,
-#loading-bar-right::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, 
-        transparent 0%, 
-        rgba(255, 255, 255, 0.8) 30%,
-        rgba(255, 255, 255, 1) 50%,
-        rgba(255, 255, 255, 0.8) 70%,
-        transparent 100%);
-    transform: translateX(-100%);
-    will-change: transform;
-}
-
-#loading-bar-left::after,
-#loading-bar-right::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, 
-        transparent 0%, 
-        rgba(255, 255, 255, 0.4) 50%,
-        transparent 100%);
-    transform: translateX(-100%);
-    will-change: transform;
-}
-
-#loading-bar-left.loading,
-#loading-bar-right.loading {
-    opacity: 1;
-    visibility: visible;
-}
-
-#loading-bar-left.loading::before,
-#loading-bar-right.loading::before {
-    animation: loading-sweep 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-#loading-bar-left.loading::after,
-#loading-bar-right.loading::after {
-    animation: loading-glow 2s ease-in-out infinite;
-}
-
-#loading-bar-left:not(.loading)::before,
-#loading-bar-left:not(.loading)::after,
-#loading-bar-right:not(.loading)::before,
-#loading-bar-right:not(.loading)::after {
-    animation: none;
-    transform: translateX(-100%);
-}
-
-#zoom-indicator-left, #zoom-indicator-right {
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    background: rgba(0, 0, 0, 0.8);
-    color: white;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 12px;
-    z-index: 1000;
-    display: none;
-}
-
 /* Enhanced focus states */
 button:focus,
 input:focus,
 select:focus {
     outline: 2px solid #555;
     outline-offset: 2px;
-}
-
-/* No theme transitions - instant switching */
-
-/* Preserve rounded outer corners for split panes */
-.left-pane .webview-container,
-.left-pane webview,
-.left-pane .webview-container::after {
-    border-top-left-radius: 10px;
-    border-bottom-left-radius: 10px;
-}
-
-.right-pane .webview-container,
-.right-pane webview,
-.right-pane .webview-container::after {
-    border-top-right-radius: 10px;
-    border-bottom-right-radius: 10px;
-}
-
-/* Ensure clipping respects the radii */
-.left-pane .webview-container,
-.right-pane .webview-container {
-    overflow: hidden;
-}
-
-/* Enforce macOS 10px corners in split view (higher specificity) */
-#split-view .left-pane,
-#split-view .right-pane {
-    overflow: hidden;
-}
-
-#split-view .left-pane,
-#split-view .left-pane .webview-container,
-#split-view .left-pane webview,
-#split-view .left-pane .webview-container::after {
-    border-top-left-radius: 10px !important;
-    border-bottom-left-radius: 10px !important;
-}
-
-#split-view .right-pane,
-#split-view .right-pane .webview-container,
-#split-view .right-pane webview,
-#split-view .right-pane .webview-container::after {
-    border-top-right-radius: 10px !important;
-    border-bottom-right-radius: 10px !important;
-}
-
-/* Larger, invisible hit area for split divider to improve grab-ability */
-.split-divider {
-    position: relative;
-}
-
-.split-divider::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: -6px;
-    right: -6px;
-    /* Expands hit area to ~16px total without visual change */
-    background: transparent;
-    cursor: col-resize;
-}
-
-/* Reduce accidental interactions while resizing */
-body.resizing #split-view webview {
-    pointer-events: none;
-}
-
-/* Improve drag UX: disable transitions during resize and show proper cursor */
-body.resizing {
-    cursor: col-resize !important;
-    user-select: none !important;
-}
-
-body.resizing .left-pane,
-body.resizing .right-pane {
-    transition: none !important;
 }
 
 /* Quit confirmation modal */
@@ -5542,7 +5279,7 @@ body.resizing .right-pane {
     width: 64px;
     height: 64px;
     border-radius: 16px;
-    background: radial-gradient(120px 120px at 30% 20%, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    background: transparent;
     display: flex;
     align-items: center;
     justify-content: center;
