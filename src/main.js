@@ -106,8 +106,7 @@ function createWindow() {
         spellcheck: false,
       // Speed optimizations
       hardwareAcceleration: true,
-      webSecurity: false,
-      allowRunningInsecureContent: true,
+      webSecurity: true,
       experimentalCanvasFeatures: true,
       enableWebGL: true,
       enableWebGL2: true,
@@ -172,8 +171,12 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     // Validate URL before allowing new windows
     if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-      // Additional security checks
-      if (url.includes('javascript:') || url.includes('data:') || url.includes('file:')) {
+      // Additional security checks - reject dangerous URL schemes
+      const lowerUrl = url.toLowerCase();
+      if (lowerUrl.startsWith('javascript:') || 
+          lowerUrl.startsWith('data:') || 
+          lowerUrl.startsWith('vbscript:') ||
+          lowerUrl.startsWith('file:')) {
         return { action: 'deny' };
       }
       return { action: 'allow' };
