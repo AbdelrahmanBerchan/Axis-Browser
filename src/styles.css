@@ -115,22 +115,31 @@ body {
     /* No transitions for theme switching - instant */
 }
 
+/* Disable transitions on theme-related properties during theme switching */
+body.theme-switching *,
+body.theme-switching *::before,
+body.theme-switching *::after {
+    transition: none !important;
+    animation: none !important;
+}
+
 /* Main app container - no rounded corners to avoid conflict with macOS */
 #app {
     height: 100vh;
     display: flex;
     flex-direction: column;
-    background: rgba(20, 20, 20, 0.4); /* Subtle tint over vibrancy */
+    background: transparent;
     overflow: hidden;
     opacity: 0;
-    filter: blur(8px);
-    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    will-change: opacity, filter;
+    filter: blur(0);
+    backdrop-filter: blur(80px) saturate(200%);
+    -webkit-backdrop-filter: blur(80px) saturate(200%);
+    transition: opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    will-change: opacity;
 }
 
 #app.loaded {
     opacity: 1;
-    filter: blur(0px);
 }
 
 /* Loading Indicator - Top of Webview */
@@ -372,9 +381,9 @@ body {
 }
 
 .sidebar-controls .nav-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
     background: transparent;
     border: none;
     color: var(--text-color-secondary);
@@ -382,15 +391,24 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
     font-size: 12px;
+    position: relative;
+    overflow: hidden;
+    transition: background-color 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.12s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar-controls .nav-btn:hover:not(:disabled) {
-    background: var(--button-hover);
+    background: rgba(255, 255, 255, 0.08) !important;
     color: var(--text-color);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    transform: scale(1.03);
+    border-radius: 7px;
+}
+
+.sidebar-controls .nav-btn:active:not(:disabled) {
+    transform: scale(0.97);
+    transition: transform 0.06s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar-controls .nav-btn:disabled {
@@ -401,7 +419,9 @@ body {
 /* Sidebar */
 #sidebar {
     width: 300px;
-    background: var(--sidebar-background);
+    background: var(--sidebar-background) !important;
+    backdrop-filter: blur(80px) saturate(200%);
+    -webkit-backdrop-filter: blur(80px) saturate(200%);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -409,7 +429,7 @@ body {
     position: relative;
     min-width: 200px;
     max-width: 500px;
-    border-radius: 0 0 0 24px;
+    border-radius: 0;
     -webkit-app-region: drag;
     z-index: 1000;
 }
@@ -458,7 +478,7 @@ body {
 
 /* Sidebar on right side */
 #sidebar.sidebar-right {
-    border-radius: 0 0 24px 0;
+    border-radius: 0;
 }
 
 #sidebar.sidebar-right.hidden {
@@ -469,7 +489,7 @@ body {
     left: auto !important;
     right: 0 !important;
     box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3) !important;
-    border-radius: 0 0 24px 0 !important;
+    border-radius: 0 !important;
 }
 
 #sidebar.sidebar-right .resize-handle {
@@ -505,7 +525,9 @@ body {
     flex-direction: column !important;
     gap: 8px !important;
     background: var(--sidebar-background) !important;
-    border-radius: 0 0 0 24px !important;
+    backdrop-filter: blur(80px) saturate(200%) !important;
+    -webkit-backdrop-filter: blur(80px) saturate(200%) !important;
+    border-radius: 0 !important;
     min-width: 200px !important;
     max-width: 500px !important;
 }
@@ -723,19 +745,19 @@ body.resizing .resize-handle {
     outline: none !important;
 }
 
-.nav-btn:hover {
+/* General nav-btn styles - sidebar-specific styles override these */
+.nav-btn:hover:not(.sidebar-controls .nav-btn):not(.sidebar-footer .nav-btn) {
     background: var(--button-hover);
     color: var(--text-color);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px var(--animation-shadow-medium);
+    transform: scale(1.05);
+    transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Removed duplicate nav-btn hover animation */
-
-.nav-btn:active:not(:disabled) {
-    transform: translateY(0);
-    box-shadow: 0 1px 4px var(--animation-shadow);
-    transition: all 0.1s ease;
+.nav-btn:active:not(:disabled):not(.sidebar-controls .nav-btn):not(.sidebar-footer .nav-btn) {
+    transform: scale(0.95);
+    transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .nav-btn:disabled {
@@ -875,8 +897,8 @@ body.resizing .resize-handle {
 }
 
 .url-icon {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     border: none;
     background: transparent;
     color: var(--text-color-secondary);
@@ -886,13 +908,23 @@ body.resizing .resize-handle {
     align-items: center;
     justify-content: center;
     font-size: 11px;
-    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+    transition: background-color 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.12s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .url-icon:hover {
-    background: var(--button-hover);
+    background: rgba(255, 255, 255, 0.08) !important;
     color: var(--text-color);
-    transform: translateY(-1px);
+    transform: scale(1.03);
+    border-radius: 9px;
+}
+
+.url-icon:active {
+    transform: scale(0.97);
+    transition: transform 0.06s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Ensure security button in URL bar is themed */
@@ -1149,6 +1181,72 @@ body.resizing .resize-handle {
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.tab-settings-icon {
+    width: 14px;
+    height: 14px;
+    font-size: 14px;
+    color: #4a90e2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+/* Audio indicator for tabs playing sound */
+.tab-audio-indicator {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: var(--text-color-secondary);
+    background: transparent;
+    margin: 0 3px;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+    cursor: pointer;
+}
+
+.tab-audio-indicator:not(.muted) {
+    animation: audio-pulse 2s ease-in-out infinite;
+}
+
+.tab-audio-indicator i {
+    font-size: 11px;
+    line-height: 1;
+}
+
+.tab-audio-indicator:hover {
+    color: var(--text-color);
+    transform: scale(1.15);
+}
+
+.tab-audio-indicator:active {
+    transform: scale(0.9);
+}
+
+.tab.active .tab-audio-indicator {
+    color: var(--text-color);
+}
+
+/* Muted state - red color */
+.tab-audio-indicator.muted {
+    color: #ff6b6b;
+    animation: none;
+}
+
+.tab-audio-indicator.muted:hover {
+    color: #ff5252;
+}
+
+@keyframes audio-pulse {
+    0%, 100% {
+        opacity: 0.7;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
 .tab-title {
     font-size: 12px;
     color: var(--text-color-secondary);
@@ -1228,10 +1326,12 @@ body.resizing .resize-handle {
 /* Content Area */
 #content-area {
     flex: 1;
-    background: var(--sidebar-background);
+    background: var(--sidebar-background) !important;
+    backdrop-filter: blur(80px) saturate(200%);
+    -webkit-backdrop-filter: blur(80px) saturate(200%);
     position: relative;
     overflow: visible;
-    border-radius: 0 0 24px 0;
+    border-radius: 0;
     -webkit-app-region: drag;
     padding: 8px;
     min-width: 0;
@@ -1258,11 +1358,9 @@ body.resizing .resize-handle {
     background: transparent;
     border-radius: 10px;
     margin: 0;
-    box-shadow: 
-        0 4px 12px rgba(0, 0, 0, 0.08),
-        0 2px 4px rgba(0, 0, 0, 0.05),
-        0 1px 2px rgba(0, 0, 0, 0.03);
-    backdrop-filter: blur(8px);
+    box-shadow: none;
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
     min-width: 0;
     flex-shrink: 1;
     isolation: isolate;
@@ -4213,7 +4311,7 @@ body.light-theme .shortcut-desc {
     background: transparent;
     border: none;
     animation: pinAnimation 0.3s ease;
-    margin: 2px 0;
+    margin: 0;
     z-index: 10;
 }
 
@@ -4548,25 +4646,6 @@ body.light-theme .shortcut-desc {
     }
 }
 
-/* Professional Button Interactions */
-.url-icon, .tab-close, .settings-btn {
-    transition: all 0.2s ease;
-    position: relative;
-}
-
-/* Removed conflicting hover animations */
-
-.url-icon:active, .tab-close:active, .settings-btn:active {
-    transform: translateY(0);
-    transition: all 0.1s ease;
-}
-
-.url-icon {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Removed duplicate url-icon hover animation */
-
 /* Smooth scrolling */
 .history-content,
 .downloads-content,
@@ -4685,16 +4764,16 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Consistent hover effects for all buttons - excluding tab buttons */
-.nav-btn:hover:not(:disabled),
-.url-icon:hover,
+/* Consistent hover effects for buttons - sidebar buttons have their own styles */
 .add-tab-btn:hover,
 .settings-btn:hover,
 .security-btn:hover {
-    transform: translateY(-2px) scale(1.05);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transform: scale(1.05);
     background: var(--button-hover);
     color: var(--text-color);
+    transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Removed duplicate enhanced button hover effects */
@@ -4703,55 +4782,42 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 .sidebar-footer .nav-btn {
     position: relative;
     overflow: hidden;
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
     background: transparent;
     border: none;
-    transition: all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    color: var(--text-color-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.12s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Ensure sidebar footer buttons get the same animations as nav-menu-btn */
 .sidebar-footer .nav-btn:hover {
-    transform: translateY(-1px) scale(1.02);
-    box-shadow: 0 4px 12px var(--animation-shadow-light);
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: var(--text-color);
+    transform: scale(1.03);
+    border-radius: 7px;
 }
 
 .sidebar-footer .nav-btn:active {
-    transform: scale(0.96) translateY(1px);
-    box-shadow: 
-        0 2px 8px rgba(0, 0, 0, 0.3),
-        inset 0 1px 2px rgba(255, 255, 255, 0.1);
-    transition: all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transform: scale(0.97);
+    transition: transform 0.06s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.sidebar-footer .nav-btn:hover i {
-    transform: rotate(2deg);
-    transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+/* Remove global ripple/overflow effects from sidebar buttons for cleaner click animation */
+.sidebar-controls .nav-btn,
+.sidebar-footer .nav-btn {
+    overflow: visible;
 }
 
-/* Remove sidebar footer shimmer to match nav menu button */
+.sidebar-controls .nav-btn::before,
 .sidebar-footer .nav-btn::before {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 0;
-    height: 0;
-    background: transparent;
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    pointer-events: none;
-    opacity: 0;
-    z-index: 1;
-}
-
-.sidebar-footer .nav-btn:active::before {
-    width: 80px;
-    height: 80px;
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1.1);
+    content: none !important;
 }
 
 /* Removed duplicate url-icon hover animation */
@@ -4907,9 +4973,10 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     overflow: hidden;
 }
 
-.nav-btn:active, .tab-close:active, .url-icon:active, .add-tab-btn:active, .settings-btn:active, .security-btn:active, .nav-menu-btn:active, .download-btn:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
-    transform: scale(0.98) translateY(1px);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+/* Active styles - sidebar buttons have their own specific styles */
+.tab-close:active, .add-tab-btn:active, .settings-btn:active:not(.sidebar-footer .nav-btn), .security-btn:active, .nav-menu-btn:active, .download-btn:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
+    transform: scale(0.95);
+    transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Premium Ripple Effect for Buttons */
@@ -4929,7 +4996,8 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     z-index: 1;
 }
 
-.nav-btn:active::before, .tab-close:active::before, .url-icon:active::before, .settings-btn:active::before, .security-btn:active::before, .nav-menu-btn:active::before, .download-btn:active::before, .close-settings:active::before, .refresh-btn:active::before, .clear-btn:active::before {
+/* Ripple effect - removed for sidebar buttons to keep animations clean */
+.tab-close:active::before, .add-tab-btn:active::before, .settings-btn:active::before:not(.sidebar-footer .nav-btn::before), .security-btn:active::before, .nav-menu-btn:active::before, .download-btn:active::before, .close-settings:active::before, .refresh-btn:active::before, .clear-btn:active::before {
     width: 80px;
     height: 80px;
     opacity: 1;
@@ -4959,13 +5027,10 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     opacity: 1;
 }
 
-/* Premium Click Animation */
-.nav-btn:active, .tab-close:active, .url-icon:active, .settings-btn:active, .security-btn:active, .nav-menu-btn:active, .download-btn:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
-    transform: scale(0.96) translateY(1px);
-    box-shadow: 
-        0 2px 8px rgba(0, 0, 0, 0.3),
-        inset 0 1px 2px rgba(255, 255, 255, 0.1);
-    transition: all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+/* Premium Click Animation - sidebar buttons have their own specific styles */
+.tab-close:active, .add-tab-btn:active, .settings-btn:active:not(.sidebar-footer .nav-btn), .security-btn:active, .nav-menu-btn:active, .download-btn:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
+    transform: scale(0.95);
+    transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Premium Popup Menu Click Animation */
@@ -4977,10 +5042,21 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     transition: all 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-/* Refined Hover Effects - excluding tab buttons */
-.nav-btn:hover, .url-icon:hover, .settings-btn:hover, .security-btn:hover, .nav-menu-btn:hover, .download-btn:hover, .close-settings:hover, .refresh-btn:hover, .clear-btn:hover {
-    transform: translateY(-1px) scale(1.02);
-    box-shadow: 0 4px 12px var(--animation-shadow-light);
+/* Refined Hover Effects - sidebar buttons have their own specific styles above */
+/* This rule only applies to non-sidebar buttons */
+.settings-btn:hover:not(.sidebar-footer .nav-btn), 
+.security-btn:hover, 
+.nav-menu-btn:hover, 
+.download-btn:hover, 
+.close-settings:hover, 
+.refresh-btn:hover, 
+.clear-btn:hover {
+    transform: scale(1.05);
+    background: var(--button-hover);
+    color: var(--text-color);
+    transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Premium Popup Menu Hover Effects */
@@ -4991,11 +5067,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-/* Subtle Icon Rotation on Hover */
-.nav-btn:hover i, .url-icon:hover i, .settings-btn:hover i, .security-btn:hover i, .nav-menu-btn:hover i, .download-btn:hover i, .close-settings:hover i, .refresh-btn:hover i, .clear-btn:hover i, .nav-menu-item:hover i, .context-menu-item:hover i, .tab-close:hover i, .tab-pin:hover i {
-    transform: rotate(2deg);
-    transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
+/* Removed icon rotation - keeping icons static for cleaner look */
 
 
 /* Refined Tab Interactions */
@@ -5024,10 +5096,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-.url-icon:hover {
-    transform: scale(1.05) rotate(5deg);
-    color: #4CAF50;
-}
+/* url-icon hover styles are defined above - this duplicate removed */
 
 /* Loading States */
 .loading-spinner {
