@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, session } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const fs = require('fs');
@@ -130,7 +130,9 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     frame: false,
     show: false,
-    backgroundColor: '#1a1a1a'
+    transparent: true,
+    backgroundColor: '#00000000',
+    vibrancy: 'ultra-dark'
   });
 
   // Load the app
@@ -142,6 +144,69 @@ function createWindow() {
     // Show window controls by default (sidebar is visible)
     mainWindow.setWindowButtonVisibility(true);
   });
+  
+  // Register global shortcuts when window is focused (works even in webviews)
+  const registerShortcuts = () => {
+    const cmdOrCtrl = process.platform === 'darwin' ? 'Cmd' : 'Ctrl';
+    
+    const shortcuts = [
+      { key: `${cmdOrCtrl}+W`, action: 'close-tab' },
+      { key: `${cmdOrCtrl}+T`, action: 'spotlight-search' },
+      { key: `${cmdOrCtrl}+B`, action: 'toggle-sidebar' },
+      { key: `${cmdOrCtrl}+R`, action: 'refresh' },
+      { key: `${cmdOrCtrl}+L`, action: 'focus-url' },
+      { key: `${cmdOrCtrl}+P`, action: 'pin-tab' },
+      { key: `${cmdOrCtrl}+N`, action: 'new-tab' },
+      { key: `${cmdOrCtrl}+,`, action: 'settings' },
+      { key: `${cmdOrCtrl}+Z`, action: 'recover-tab' },
+      { key: `${cmdOrCtrl}+Y`, action: 'history' },
+      { key: `${cmdOrCtrl}+J`, action: 'downloads' },
+      { key: `${cmdOrCtrl}+F`, action: 'find' },
+      { key: `${cmdOrCtrl}+Shift+C`, action: 'copy-url' },
+      { key: `${cmdOrCtrl}+Shift+H`, action: 'clear-history' },
+      { key: `${cmdOrCtrl}+Shift+J`, action: 'clear-downloads' },
+      { key: `${cmdOrCtrl}+=`, action: 'zoom-in' },
+      { key: `${cmdOrCtrl}+Plus`, action: 'zoom-in' },
+      { key: `${cmdOrCtrl}+-`, action: 'zoom-out' },
+      { key: `${cmdOrCtrl}+0`, action: 'reset-zoom' },
+      { key: `${cmdOrCtrl}+1`, action: 'switch-tab-1' },
+      { key: `${cmdOrCtrl}+2`, action: 'switch-tab-2' },
+      { key: `${cmdOrCtrl}+3`, action: 'switch-tab-3' },
+      { key: `${cmdOrCtrl}+4`, action: 'switch-tab-4' },
+      { key: `${cmdOrCtrl}+5`, action: 'switch-tab-5' },
+      { key: `${cmdOrCtrl}+6`, action: 'switch-tab-6' },
+      { key: `${cmdOrCtrl}+7`, action: 'switch-tab-7' },
+      { key: `${cmdOrCtrl}+8`, action: 'switch-tab-8' },
+      { key: `${cmdOrCtrl}+9`, action: 'switch-tab-9' }
+    ];
+    
+    shortcuts.forEach(({ key, action }) => {
+      globalShortcut.register(key, () => {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
+          mainWindow.webContents.send('browser-shortcut', action);
+        }
+      });
+    });
+  };
+  
+  const unregisterShortcuts = () => {
+    globalShortcut.unregisterAll();
+  };
+  
+  // Register shortcuts when window gains focus
+  mainWindow.on('focus', () => {
+    registerShortcuts();
+  });
+  
+  // Unregister when window loses focus (so shortcuts don't affect other apps)
+  mainWindow.on('blur', () => {
+    unregisterShortcuts();
+  });
+  
+  // Initial registration if window starts focused
+  if (mainWindow.isFocused()) {
+    registerShortcuts();
+  }
 
   // Handle window closed
   mainWindow.on('closed', () => {
@@ -343,6 +408,11 @@ function createMenu() {
 // App event handlers
 app.whenReady().then(createWindow);
 
+// Clean up global shortcuts on quit
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
+
 app.on('window-all-closed', () => {
   // Don't quit on macOS, keep the app running even when all windows are closed
   // This prevents the app from closing when the last tab is closed
@@ -426,7 +496,7 @@ ipcMain.handle('delete-history-item', (event, id) => {
   return true;
 });
 
-// Downloads management
+// Downloads management (history of browser downloads)
 ipcMain.handle('get-downloads', () => {
   return downloadsStore.get('items', []);
 });
@@ -472,6 +542,95 @@ ipcMain.handle('delete-download', (event, id) => {
   return true;
 });
 
+// Library management - show files from common user folders (Downloads, Desktop, Documents, Pictures)
+ipcMain.handle('get-library-items', async (event, locationKey = 'all') => {
+  try {
+    const home = os.homedir();
+    const locations = {
+      downloads: path.join(home, 'Downloads'),
+      desktop: path.join(home, 'Desktop'),
+      documents: path.join(home, 'Documents'),
+      pictures: path.join(home, 'Pictures')
+    };
+
+    const keys = locationKey === 'all' ? Object.keys(locations) : [locationKey];
+    const items = [];
+    let defaultBaseDir = null;
+
+    for (const key of keys) {
+      const baseDir = locations[key];
+      if (!baseDir) continue;
+
+      try {
+        await fs.promises.access(baseDir, fs.constants.R_OK);
+      } catch {
+        continue;
+      }
+
+      if (!defaultBaseDir) defaultBaseDir = baseDir;
+
+      const dirEntries = await fs.promises.readdir(baseDir, { withFileTypes: true });
+
+      const folderItems = await Promise.all(
+        dirEntries
+          .filter(entry => !entry.name.startsWith('.')) // hide hidden files
+          .map(async (entry) => {
+            const fullPath = path.join(baseDir, entry.name);
+            const stat = await fs.promises.stat(fullPath);
+            const isDirectory = entry.isDirectory();
+            const ext = path.extname(entry.name).toLowerCase();
+
+            let kind = 'file';
+            if (isDirectory) {
+              kind = 'folder';
+            } else if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic'].includes(ext)) {
+              kind = 'image';
+            } else if (['.mp4', '.mov', '.mkv', '.avi', '.webm'].includes(ext)) {
+              kind = 'video';
+            } else if (['.mp3', '.wav', '.flac', '.aac', '.ogg'].includes(ext)) {
+              kind = 'audio';
+            } else if (ext === '.pdf') {
+              kind = 'pdf';
+            } else if (['.doc', '.docx', '.pages', '.txt', '.md'].includes(ext)) {
+              kind = 'document';
+            }
+
+            return {
+              name: entry.name,
+              path: fullPath,
+              isDirectory,
+              kind,
+              size: stat.size,
+              mtime: stat.mtimeMs,
+              source: key
+            };
+          })
+      );
+
+      items.push(...folderItems);
+    }
+
+    // Sort by most recently modified first
+    items.sort((a, b) => b.mtime - a.mtime);
+
+    return { baseDir: defaultBaseDir, items };
+  } catch (error) {
+    console.error('get-library-items failed:', error);
+    return { baseDir: null, items: [] };
+  }
+});
+
+ipcMain.handle('open-library-item', async (event, fullPath) => {
+  try {
+    if (!fullPath) return false;
+    await shell.openPath(fullPath);
+    return true;
+  } catch (error) {
+    console.error('open-library-item failed:', error);
+    return false;
+  }
+});
+
 // Incognito window
 ipcMain.handle('open-incognito-window', () => {
   // Create a new session for incognito mode
@@ -502,7 +661,9 @@ ipcMain.handle('open-incognito-window', () => {
     titleBarStyle: 'hiddenInset',
     frame: false,
     show: false,
-    backgroundColor: '#1a1a1a'
+    transparent: true,
+    backgroundColor: '#00000000',
+    vibrancy: 'ultra-dark'
   });
 
   // Load the app
