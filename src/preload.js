@@ -20,10 +20,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearDownloads: () => ipcRenderer.invoke('clear-downloads'),
   deleteDownload: (id) => ipcRenderer.invoke('delete-download', id),
   
+  // Library (local files) management
+  getLibraryItems: (locationKey) => ipcRenderer.invoke('get-library-items', locationKey),
+  openLibraryItem: (fullPath) => ipcRenderer.invoke('open-library-item', fullPath),
+  
   // Event listeners
   onNewTab: (callback) => ipcRenderer.on('new-tab', callback),
   onCloseTab: (callback) => ipcRenderer.on('close-tab', callback),
   onRequestQuit: (callback) => ipcRenderer.on('request-quit', callback),
+  onBrowserShortcut: (callback) => ipcRenderer.on('browser-shortcut', (event, action) => callback(action)),
   confirmQuit: () => ipcRenderer.send('confirm-quit'),
   cancelQuit: () => ipcRenderer.send('cancel-quit'),
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
