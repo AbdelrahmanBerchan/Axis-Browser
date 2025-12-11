@@ -3,13 +3,14 @@ class AxisBrowser {
     constructor() {
         this.currentTab = null; // Start with no tabs
         this.tabs = new Map(); // Start with empty tabs
-        this.folders = new Map(); // Store folders: { id, name, tabIds: [], open: true }
+        this.tabGroups = new Map(); // Store tab groups: { id, name, tabIds: [], open: true, color: '#FF6B6B' }
+        this.pendingTabGroupColor = null; // Color selected for new tab group
         this.settings = {};
         this.closedTabs = []; // Store recently closed tabs for recovery
         this.loadingTimeout = null; // Timeout for stuck loading pages (main view)
         this.isBenchmarking = false; // suppress non-critical work on Speedometer
         this.spotlightSelectedIndex = -1; // Track selected suggestion index
-        this.contextMenuFolderId = null; // Track which folder context menu is open
+        this.contextMenuTabGroupId = null; // Track which tab group context menu is open
         this.themeCache = new Map(); // Cache theme colors per domain for instant theme switching
         
         // Cache frequently accessed DOM elements for performance
@@ -74,8 +75,8 @@ class AxisBrowser {
         // Load pinned tabs from saved state
         await this.loadPinnedTabs();
         
-        // Load folders from saved state
-        await this.loadFolders();
+        // Load tab groups from saved state
+        await this.loadTabGroups();
 
         // Defer non-critical work to idle time to improve first interaction latency
         this.runWhenIdle(() => {
@@ -239,6 +240,63 @@ class AxisBrowser {
         el.downloadsBtnFooter?.addEventListener('click', () => this.toggleDownloads());
         el.closeDownloads?.addEventListener('click', () => this.toggleDownloads());
         
+        // Library button hover - show media popup
+        let libraryHoverTimeout = null;
+        let libraryHoverCloseTimeout = null;
+        const libraryMediaPopup = document.getElementById('library-media-popup');
+        
+        el.downloadsBtnFooter?.addEventListener('mouseenter', () => {
+            // Clear any pending close timeout
+            if (libraryHoverCloseTimeout) {
+                clearTimeout(libraryHoverCloseTimeout);
+                libraryHoverCloseTimeout = null;
+            }
+            // Show popup with media items on hover
+            if (libraryHoverTimeout) clearTimeout(libraryHoverTimeout);
+            libraryHoverTimeout = setTimeout(() => {
+                this.showLibraryMediaPopup();
+            }, 300); // 300ms delay before showing
+        });
+        
+        el.downloadsBtnFooter?.addEventListener('mouseleave', () => {
+            if (libraryHoverTimeout) {
+                clearTimeout(libraryHoverTimeout);
+                libraryHoverTimeout = null;
+            }
+            // Hide popup with delay to allow moving to popup
+            if (libraryMediaPopup && !libraryMediaPopup.classList.contains('hidden')) {
+                // Use requestAnimationFrame to prevent blocking
+                requestAnimationFrame(() => {
+                    libraryHoverCloseTimeout = setTimeout(() => {
+                        if (!libraryMediaPopup.matches(':hover') && !el.downloadsBtnFooter?.matches(':hover')) {
+                            this.hideLibraryMediaPopup();
+                        }
+                    }, 200);
+                });
+            }
+        });
+        
+        // Also handle mouse enter/leave from the popup itself
+        if (libraryMediaPopup) {
+            libraryMediaPopup.addEventListener('mouseenter', () => {
+                if (libraryHoverCloseTimeout) {
+                    clearTimeout(libraryHoverCloseTimeout);
+                    libraryHoverCloseTimeout = null;
+                }
+            });
+            
+            libraryMediaPopup.addEventListener('mouseleave', () => {
+                // Use requestAnimationFrame to prevent blocking
+                requestAnimationFrame(() => {
+                    libraryHoverCloseTimeout = setTimeout(() => {
+                        if (!libraryMediaPopup.matches(':hover') && !el.downloadsBtnFooter?.matches(':hover')) {
+                            this.hideLibraryMediaPopup();
+                        }
+                    }, 200);
+                });
+            });
+        }
+        
         // Clear history button
         const clearHistoryBtn = document.getElementById('clear-history');
         clearHistoryBtn?.addEventListener('click', () => this.clearAllHistory());
@@ -380,9 +438,13 @@ class AxisBrowser {
             this.hideSidebarContextMenu();
         });
 
-        document.getElementById('sidebar-new-folder-option').addEventListener('click', () => {
-            this.createNewFolder();
-            this.hideSidebarContextMenu();
+        document.getElementById('sidebar-new-tab-group-option').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.showTabGroupColorPicker((color) => {
+                this.createNewTabGroup(color);
+                this.hideTabGroupColorPicker();
+                this.hideSidebarContextMenu();
+            });
         });
 
         document.getElementById('sidebar-position-option').addEventListener('click', () => {
@@ -392,16 +454,35 @@ class AxisBrowser {
 
         // Nav menu sidebar position button - REMOVED
 
-        // Folder context menu event listeners
-        document.getElementById('rename-folder-option').addEventListener('click', () => {
-            this.renameCurrentFolder();
-            this.hideFolderContextMenu();
+        // Tab group context menu event listeners
+        document.getElementById('rename-tab-group-option').addEventListener('click', () => {
+            this.renameCurrentTabGroup();
+            this.hideTabGroupContextMenu();
         });
 
-        document.getElementById('delete-folder-option').addEventListener('click', () => {
-            this.deleteCurrentFolder();
-            this.hideFolderContextMenu();
+        document.getElementById('change-tab-group-color-option').addEventListener('click', () => {
+            this.showTabGroupColorPicker((color) => {
+                if (this.contextMenuTabGroupId) {
+                    const tabGroup = this.tabGroups.get(this.contextMenuTabGroupId);
+                    if (tabGroup) {
+                        tabGroup.color = color;
+                        this.tabGroups.set(this.contextMenuTabGroupId, tabGroup);
+                        this.saveTabGroups();
+                        this.renderTabGroups();
+                    }
+                }
+                this.hideTabGroupColorPicker();
+                this.hideTabGroupContextMenu();
+            });
         });
+
+        document.getElementById('delete-tab-group-option').addEventListener('click', () => {
+            this.deleteCurrentTabGroup();
+            this.hideTabGroupContextMenu();
+        });
+        
+        // Setup tab group color picker
+        this.setupTabGroupColorPicker();
 
         // Search functionality
         document.addEventListener('keydown', (e) => {
@@ -462,11 +543,11 @@ class AxisBrowser {
 
         // Click outside to close context menu and nav menu
         document.addEventListener('click', (e) => {
-            if (!e.target.closest('.context-menu') && !e.target.closest('.tab') && !e.target.closest('.folder')) {
+            if (!e.target.closest('.context-menu') && !e.target.closest('.tab') && !e.target.closest('.tab-group')) {
                 this.hideTabContextMenu();
                 this.hideWebpageContextMenu();
                 this.hideSidebarContextMenu();
-                this.hideFolderContextMenu();
+                this.hideTabGroupContextMenu();
             }
             if (!e.target.closest('.nav-menu') && !e.target.closest('#nav-menu-btn')) {
                 this.hideNavMenu();
@@ -482,11 +563,11 @@ class AxisBrowser {
 
         // Right-click outside to close context menu
         document.addEventListener('contextmenu', (e) => {
-            if (!e.target.closest('.tab') && !e.target.closest('#webview') && !e.target.closest('#sidebar') && !e.target.closest('.folder')) {
+            if (!e.target.closest('.tab') && !e.target.closest('#webview') && !e.target.closest('#sidebar') && !e.target.closest('.tab-group')) {
                 this.hideTabContextMenu();
                 this.hideWebpageContextMenu();
                 this.hideSidebarContextMenu();
-                this.hideFolderContextMenu();
+                this.hideTabGroupContextMenu();
             }
         });
 
@@ -2512,8 +2593,97 @@ class AxisBrowser {
         // Save pinned tabs state
         this.savePinnedTabs();
         
-        // Re-render folders in case tab organization changed
-        this.renderFolders();
+        // Re-render tab groups in case tab organization changed
+        this.renderTabGroups();
+    }
+
+    updatePinnedTabClosedState(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab || !tab.pinned) return;
+        
+        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+        if (!tabElement) return;
+        
+        // Tab is closed if it has no webview
+        const isClosed = !tab.webview;
+        
+        if (isClosed) {
+            tabElement.classList.add('closed');
+            tab.closed = true;
+        } else {
+            tabElement.classList.remove('closed');
+            tab.closed = false;
+        }
+        
+        this.tabs.set(tabId, tab);
+    }
+    
+    setupPinnedTabCloseButton(tabElement, tabId) {
+        const closeBtn = tabElement.querySelector('.tab-close');
+        if (!closeBtn) return;
+        
+        const icon = closeBtn.querySelector('i');
+        if (!icon) return;
+        
+        // Remove any existing handlers to avoid duplicates
+        const existingHandlers = tabElement._pinnedCloseHandlers;
+        if (existingHandlers) {
+            if (existingHandlers.observer) {
+                existingHandlers.observer.disconnect();
+            }
+        }
+        
+        // Function to update icon based on active state
+        const updateIcon = () => {
+            if (tabElement.classList.contains('active')) {
+                // Active pinned tabs always show minus
+                icon.classList.remove('fa-times');
+                icon.classList.add('fa-minus');
+            } else {
+                // Inactive pinned tabs show times
+                icon.classList.remove('fa-minus');
+                icon.classList.add('fa-times');
+            }
+        };
+        
+        // Update icon immediately based on current state
+        updateIcon();
+        
+        // Watch for changes to active state
+        const observer = new MutationObserver(() => {
+            updateIcon();
+        });
+        
+        observer.observe(tabElement, {
+            attributes: true,
+            attributeFilter: ['class']
+        });
+        
+        // Store handlers for cleanup
+        tabElement._pinnedCloseHandlers = {
+            observer: observer,
+            updateIcon: updateIcon
+        };
+    }
+    
+    removePinnedTabCloseButton(tabElement) {
+        const existingHandlers = tabElement._pinnedCloseHandlers;
+        if (existingHandlers) {
+            if (existingHandlers.observer) {
+                existingHandlers.observer.disconnect();
+            }
+            delete tabElement._pinnedCloseHandlers;
+        }
+        
+        // Reset icon to times (unpinned tabs always show X)
+        const closeBtn = tabElement.querySelector('.tab-close');
+        if (closeBtn) {
+            const icon = closeBtn.querySelector('i');
+            if (icon) {
+                icon.classList.remove('fa-minus');
+                icon.classList.add('fa-times');
+            }
+        }
     }
 
     setupTabEventListeners(tabElement, tabId) {
@@ -2531,6 +2701,12 @@ class AxisBrowser {
                 e.stopPropagation();
                 this.closeTab(tabId);
             });
+            
+            // For pinned tabs, setup close button hover behavior
+            const tab = this.tabs.get(tabId);
+            if (tab && tab.pinned) {
+                this.setupPinnedTabCloseButton(tabElement, tabId);
+            }
         }
         
         // Audio indicator click - toggle mute
@@ -2592,6 +2768,14 @@ class AxisBrowser {
         // CRITICAL: Add active to new tab instantly
         if (activeTab) {
             activeTab.classList.add('active');
+            // Remove closed indicator if reopening a closed pinned tab
+            if (activeTab.classList.contains('closed')) {
+                activeTab.classList.remove('closed');
+                if (tab) {
+                    tab.closed = false;
+                    this.tabs.set(tabId, tab);
+                }
+            }
         }
         
         if (tab) {
@@ -2601,6 +2785,10 @@ class AxisBrowser {
                 if (webview) {
                     tab.webview = webview;
                     this.tabs.set(tabId, tab);
+                    // Update closed state for pinned tabs
+                    if (tab.pinned) {
+                        this.updatePinnedTabClosedState(tabId);
+                    }
                 }
             }
             
@@ -2714,6 +2902,149 @@ class AxisBrowser {
         const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
         const tab = this.tabs.get(tabId);
         
+        // Check if this is a pinned tab
+        const isPinned = tab && tab.pinned;
+        
+        // For pinned tabs, check if it's inactive (no webview or already closed)
+        // If inactive, completely remove it. If active, just close the webview.
+        if (isPinned) {
+            const isInactive = !tab.webview || tabElement?.classList.contains('closed');
+            
+            if (isInactive) {
+                // Completely remove inactive pinned tabs
+                // Remove from tab groups if it's in one
+                this.tabGroups.forEach((tabGroup, tabGroupId) => {
+                    if (tabGroup.tabIds.includes(tabId)) {
+                        this.removeTabFromTabGroup(tabId, tabGroupId);
+                    }
+                });
+                
+                // Remove tab element from DOM
+                if (tabElement) {
+                    tabElement.remove();
+                }
+                
+                // Remove from tabs Map
+                this.tabs.delete(tabId);
+                
+                // If this was the current tab, switch to another
+                if (this.currentTab === tabId) {
+                    this.currentTab = null;
+                    const remainingTabs = Array.from(this.tabs.keys()).filter(id => {
+                        const t = this.tabs.get(id);
+                        return t && t.webview;
+                    });
+                    
+                    if (remainingTabs.length > 0) {
+                        this.switchToTab(remainingTabs[remainingTabs.length - 1]);
+                    } else {
+                        // No tabs left, show empty state
+                        const webview = document.getElementById('webview');
+                        if (webview) {
+                            webview.src = 'about:blank';
+                        }
+                        this.resetToBlackTheme();
+                        this.updateEmptyState();
+                        this.updateUrlBar();
+                        this.updateNavigationButtons();
+                    }
+                }
+                
+                // Save pinned tabs after removal
+                this.savePinnedTabs();
+                this.updateEmptyState();
+                return;
+            }
+            
+            // Active pinned tab - just close the webview but keep the tab
+            // Remove the tab's webview
+            if (tab && tab.webview) {
+                try {
+                    // Stop audio detection polling
+                    this.stopAudioDetection(tab.webview);
+                    
+                    if (tab.webview.parentNode) {
+                        tab.webview.parentNode.removeChild(tab.webview);
+                    }
+                    // Clear webview reference
+                    tab.webview = null;
+                    this.tabs.set(tabId, tab);
+                } catch (e) {
+                    console.error('Error removing webview:', e);
+                }
+            }
+            
+            // Remove active state from tab element
+            if (tabElement) {
+                tabElement.classList.remove('active');
+            }
+            
+            // Update closed state (will add closed class since webview is null)
+            this.updatePinnedTabClosedState(tabId);
+            
+            // If we closed the active tab, switch to another tab
+            if (this.currentTab === tabId) {
+                // Get remaining tabs (excluding closed pinned tabs)
+                const remainingTabs = Array.from(this.tabs.keys()).filter(id => {
+                    const t = this.tabs.get(id);
+                    return t && t.webview; // Only tabs with active webviews
+                });
+                
+                if (remainingTabs.length > 0) {
+                    // Switch to the last remaining tab (or first if that's all that's left)
+                    const tabToSwitchTo = remainingTabs[remainingTabs.length - 1];
+                    // Verify the tab still exists before switching
+                    if (this.tabs.has(tabToSwitchTo)) {
+                        this.switchToTab(tabToSwitchTo);
+                    } else if (remainingTabs.length > 1) {
+                        // Fallback to first tab if last one doesn't exist
+                        const fallbackTab = remainingTabs[0];
+                        if (this.tabs.has(fallbackTab)) {
+                            this.switchToTab(fallbackTab);
+                        } else {
+                            // No valid tabs found, show empty state and reset to black theme
+                            this.currentTab = null;
+                            const webview = document.getElementById('webview');
+                            if (webview) {
+                                webview.src = 'about:blank';
+                            }
+                            this.resetToBlackTheme();
+                            this.updateEmptyState();
+                            this.updateUrlBar();
+                            this.updateNavigationButtons();
+                        }
+                    } else {
+                        // Only one tab left but it doesn't exist, show empty state and reset to black theme
+                        this.currentTab = null;
+                        this.resetToBlackTheme();
+                        const webview = document.getElementById('webview');
+                        if (webview) {
+                            webview.src = 'about:blank';
+                        }
+                        this.updateEmptyState();
+                        this.updateUrlBar();
+                        this.updateNavigationButtons();
+                    }
+                } else {
+                    // No more active tabs - show empty state and reset to black theme
+                    this.currentTab = null;
+                    this.resetToBlackTheme();
+                    const webview = document.getElementById('webview');
+                    if (webview) {
+                        webview.src = 'about:blank';
+                    }
+                    this.updateEmptyState();
+                    this.updateUrlBar();
+                    this.updateNavigationButtons();
+                }
+            }
+            
+            // Save pinned tabs state
+            this.savePinnedTabs();
+            return; // Don't remove pinned tab from DOM or tabs Map
+        }
+        
+        // For non-pinned tabs, proceed with normal close behavior
         // Store closed tab for recovery (only if it's not a new tab)
         if (tab && tab.url && tab.url !== 'about:blank') {
             this.closedTabs.unshift({
@@ -3318,100 +3649,63 @@ class AxisBrowser {
         .settings-header {
             display: flex;
             align-items: center;
-            padding: 16px 24px;
+            padding: 20px 24px;
             background: #000000;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-            gap: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }
         .header-title {
-            font-size: 20px;
+            font-size: 22px;
             font-weight: 600;
-            color: #f9fafb;
-            margin: 0;
-        }
-        .header-separator {
-            width: 1px;
-            height: 20px;
-            background: #444;
-        }
-        .header-subtitle {
-            font-size: 14px;
-            color: #999;
+            color: #fff;
             margin: 0;
         }
         .settings-content-wrapper {
             display: flex;
             flex: 1;
             overflow: hidden;
-            padding: 20px 24px 24px;
-            gap: 24px;
+            padding: 24px;
+            gap: 20px;
         }
         .settings-sidebar {
-            width: 260px;
-            background: #000000;
-            border-radius: 16px;
-            padding: 14px 12px 16px;
+            width: 200px;
+            background: transparent;
+            padding: 0;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 4px;
             flex-shrink: 0;
-            border: 1px solid rgba(255, 255, 255, 0.04);
-        }
-        .settings-sidebar-label {
-            font-size: 11px;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            color: #6b7280;
-            padding: 4px 10px 6px;
         }
         .nav-item {
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 8px 14px;
-            border-radius: 10px;
-            color: #e5e7eb;
+            padding: 10px 12px;
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.7);
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             font-size: 14px;
             font-weight: 500;
-            position: relative;
         }
         .nav-item i {
-            width: 20px;
+            width: 18px;
             text-align: center;
-            font-size: 16px;
+            font-size: 14px;
         }
         .nav-item:hover {
-            background: #0a0a0a;
-            color: #f9fafb;
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
         }
         .nav-item.active {
-            background: #0a0a0a;
-            color: #f9fafb;
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
             font-weight: 600;
-        }
-        .nav-item.active i {
-            color: #f9fafb;
-        }
-        .nav-item.active::before {
-            content: '';
-            position: absolute;
-            left: 4px;
-            top: 6px;
-            bottom: 6px;
-            width: 3px;
-            border-radius: 999px;
-            background: #f9fafb;
         }
         .settings-main {
             flex: 1;
-            background: #000000;
-            border-radius: 18px;
-            padding: 28px 28px 32px;
+            background: transparent;
+            padding: 0;
             overflow-y: auto;
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            box-shadow: 0 24px 40px rgba(0, 0, 0, 0.65);
         }
         .settings-main::-webkit-scrollbar {
             width: 8px;
@@ -3427,62 +3721,55 @@ class AxisBrowser {
             background: #555;
         }
         .section {
-            margin-bottom: 32px;
+            margin-bottom: 24px;
         }
         .section:last-child {
             margin-bottom: 0;
         }
         .section-title {
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 600;
-            color: #f9fafb;
-            margin: 0;
-            line-height: 1.1;
+            color: #fff;
+            margin: 0 0 16px 0;
         }
         .option-button {
-            display: inline-flex;
+            display: flex;
             align-items: center;
-            gap: 16px; /* Increased gap for better spacing */
-            padding: 16px 20px;
-            background: #0a0a0a;
+            gap: 12px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px; /* Match setting-row radius */
+            border-radius: 8px;
             cursor: pointer;
-            transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-                        border 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-                        transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            margin-bottom: 12px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-bottom: 8px;
             width: 100%;
         }
         .option-button:last-child {
             margin-bottom: 0;
         }
         .option-button:hover {
-            background: #111111;
+            background: rgba(255, 255, 255, 0.08);
             border-color: rgba(255, 255, 255, 0.12);
-            transform: translateY(-1px);
-        }
-        .option-button:active {
-            transform: translateY(0);
         }
         .option-button i {
-            font-size: 18px;
-            color: #ccc;
-            width: 20px;
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.7);
+            width: 18px;
             text-align: center;
         }
         .option-content {
             flex: 1;
         }
         .option-title {
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 500;
             color: #fff;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
         }
         .option-subtitle {
-            font-size: 13px;
-            color: #999;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
         }
         .settings-tab-content {
             display: none;
@@ -3708,75 +3995,57 @@ class AxisBrowser {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 16px 18px;
-            background: #0a0a0a;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 10px;
-            margin-bottom: 16px;
-            transition: all 0.2s ease;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .setting-row:last-child {
             margin-bottom: 0;
         }
         .setting-row:hover {
-            background: #111111;
+            background: rgba(255, 255, 255, 0.08);
             border-color: rgba(255, 255, 255, 0.12);
-            box-shadow: 0 10px 26px rgba(0, 0, 0, 0.7);
         }
         .setting-row-content {
             flex: 1;
             margin-right: 24px;
         }
         .setting-row-title {
-            font-size: 15px;
-            font-weight: 600;
+            font-size: 14px;
+            font-weight: 500;
             color: #fff;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
         }
         .setting-row-desc {
-            font-size: 13px;
-            color: #999;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
         }
         .setting-select {
             padding: 8px 12px;
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
+            border-radius: 6px;
             color: #fff;
             font-size: 14px;
             cursor: pointer;
             outline: none;
-            transition: all 0.2s ease;
-            min-width: 150px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            min-width: 140px;
         }
         .setting-select:hover {
             background: rgba(255, 255, 255, 0.08);
             border-color: rgba(255, 255, 255, 0.15);
         }
         .setting-select:focus {
-            border-color: #3B82F6;
+            border-color: rgba(255, 255, 255, 0.2);
             background: rgba(255, 255, 255, 0.08);
         }
         .setting-select option {
-            background: #0a0a0a;
+            background: #1a1a1a;
             color: #fff;
-        }
-        .section-icon {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 36px;
-            height: 36px;
-            background: #0a0a0a;
-            border-radius: 10px;
-            margin-right: 16px;
-            font-size: 18px;
-            color: #eee;
-        }
-        .section-title-with-icon {
-            display: flex;
-            align-items: center;
-            margin-bottom: 20px;
         }
         .fade-in {
             animation: fadeIn 0.3s ease;
@@ -3795,7 +4064,6 @@ class AxisBrowser {
         
         <div class="settings-content-wrapper">
             <div class="settings-sidebar">
-                <div class="settings-sidebar-label">Basics</div>
                 <div class="nav-item active" data-section="customization">
                     <i class="fas fa-palette"></i>
                     <span>Looks &amp; Feel</span>
@@ -5492,10 +5760,17 @@ class AxisBrowser {
             tabElement.classList.add('pinned');
             tabElement.classList.add('just-pinned');
             setTimeout(() => tabElement.classList.remove('just-pinned'), 400);
+            // Setup close button hover behavior for pinned tab
+            this.setupPinnedTabCloseButton(tabElement, tabId);
+            // Update closed state based on webview presence
+            this.updatePinnedTabClosedState(tabId);
         } else {
             tabElement.classList.remove('pinned');
+            tabElement.classList.remove('closed'); // Remove closed class when unpinned
             tabElement.classList.add('just-unpinned');
             setTimeout(() => tabElement.classList.remove('just-unpinned'), 400);
+            // Remove close button hover behavior when unpinned
+            this.removePinnedTabCloseButton(tabElement);
         }
         
         
@@ -5509,12 +5784,12 @@ class AxisBrowser {
         const separator = document.getElementById('tabs-separator');
         if (!tabsContainer || !separator) return;
         
-        // Get all tabs that are NOT in folders (preserve order)
+        // Get all tabs that are NOT in tab groups (preserve order)
         const allChildren = Array.from(tabsContainer.children);
         const tabs = allChildren.filter(el => 
             el.classList.contains('tab') && 
             el.id !== 'tabs-separator' &&
-            !el.closest('.folder') // Exclude tabs inside folders
+            !el.closest('.tab-group') // Exclude tabs inside tab groups
         );
 
         // FLIP: First - record current positions
@@ -5534,8 +5809,8 @@ class AxisBrowser {
             const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
             if (!tabElement) continue;
             
-            // Skip tabs that are in folders
-            if (tabElement.closest('.folder')) continue;
+            // Skip tabs that are in tab groups
+            if (tabElement.closest('.tab-group')) continue;
             
             const tab = this.tabs.get(tabId);
             if (tab && tab.pinned) {
@@ -5545,7 +5820,7 @@ class AxisBrowser {
             }
         }
         
-        // Remove all tabs temporarily (only those not in folders)
+        // Remove all tabs temporarily (only those not in tab groups)
         tabs.forEach(tab => {
             if (tab.parentNode === tabsContainer) {
                 tab.remove();
@@ -5557,10 +5832,10 @@ class AxisBrowser {
             tabsContainer.insertBefore(tab, separator);
         });
         
-        // Show/hide separator based on pinned tabs or folders
+        // Show/hide separator based on pinned tabs or tab groups
         const hasPinnedTabs = pinnedTabs.length > 0;
-        const hasFolders = this.folders.size > 0;
-        if (hasPinnedTabs || hasFolders) {
+        const hasTabGroups = this.tabGroups.size > 0;
+        if (hasPinnedTabs || hasTabGroups) {
             separator.style.display = 'block';
         } else {
             separator.style.display = 'none';
@@ -5572,6 +5847,14 @@ class AxisBrowser {
                 tabsContainer.insertBefore(tab, separator.nextSibling);
             } else {
                 tabsContainer.appendChild(tab);
+            }
+        });
+        
+        // Update closed state for all pinned tabs based on webview presence
+        pinnedTabs.forEach(tabElement => {
+            const tabId = parseInt(tabElement.dataset.tabId, 10);
+            if (tabId) {
+                this.updatePinnedTabClosedState(tabId);
             }
         });
 
@@ -5674,7 +5957,7 @@ class AxisBrowser {
                     </div>
                 `;
                 
-                // Store tab data
+                // Store tab data (no webview initially - will be created when opened)
                 this.tabs.set(tabId, {
                     id: tabId,
                     url: pinnedData.url || null,
@@ -5684,8 +5967,12 @@ class AxisBrowser {
                     canGoForward: false,
                     history: pinnedData.url ? [pinnedData.url] : [],
                     historyIndex: pinnedData.url ? 0 : -1,
-                    pinned: true
+                    pinned: true,
+                    webview: null // No webview initially - tab is closed
                 });
+                
+                // Mark as closed since it has no webview
+                tabElement.classList.add('closed');
                 
                 // Insert above separator
                 tabsContainer.insertBefore(tabElement, separator);
@@ -5695,6 +5982,9 @@ class AxisBrowser {
                 
                 // Update favicon
                 this.updateTabFavicon(tabId, tabElement);
+                
+                // Update closed state (tabs loaded from saved state have no webview initially)
+                this.updatePinnedTabClosedState(tabId);
             }
             
             // Don't automatically switch to pinned tabs on startup
@@ -5938,27 +6228,126 @@ class AxisBrowser {
 
     // Removed setupSidebarResizing method
 
-    createNewFolder() {
-        const folderId = Date.now();
-        const folderName = `Folder ${this.folders.size + 1}`;
+    showTabGroupColorPicker(callback) {
+        const colorPicker = document.getElementById('tab-group-color-picker');
+        if (!colorPicker) {
+            console.error('Color picker element not found');
+            return;
+        }
         
-        const folder = {
-            id: folderId,
-            name: folderName,
+        // Store callback for later use
+        this._colorPickerCallback = callback;
+        
+        // Position picker centered on screen for better UX
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const pickerWidth = 240;
+        const pickerHeight = 200;
+        
+        colorPicker.style.left = ((viewportWidth - pickerWidth) / 2) + 'px';
+        colorPicker.style.top = ((viewportHeight - pickerHeight) / 2) + 'px';
+        colorPicker.style.transform = 'none';
+        
+        // Show picker
+        colorPicker.classList.remove('hidden');
+        colorPicker.style.display = 'block';
+        colorPicker.style.zIndex = '10000';
+        
+        // Setup color selection
+        const colorOptions = colorPicker.querySelectorAll('.color-option');
+        if (colorOptions.length === 0) {
+            console.error('No color options found in color picker');
+            return;
+        }
+        
+        colorOptions.forEach(option => {
+            option.classList.remove('selected');
+            // Remove any existing onclick handlers
+            option.onclick = null;
+            // Add new onclick handler
+            option.onclick = (e) => {
+                e.stopPropagation();
+                colorOptions.forEach(opt => opt.classList.remove('selected'));
+                option.classList.add('selected');
+                const color = option.dataset.color;
+                if (this._colorPickerCallback) {
+                    this._colorPickerCallback(color);
+                    this._colorPickerCallback = null;
+                }
+            };
+        });
+        
+        // Close button
+        const closeBtn = colorPicker.querySelector('.color-picker-close');
+        if (closeBtn) {
+            closeBtn.onclick = (e) => {
+                e.stopPropagation();
+                this.hideTabGroupColorPicker();
+            };
+        }
+    }
+    
+    hideTabGroupColorPicker() {
+        const colorPicker = document.getElementById('tab-group-color-picker');
+        if (colorPicker) {
+            colorPicker.classList.add('hidden');
+            colorPicker.style.display = 'none';
+            this._colorPickerCallback = null;
+        }
+    }
+    
+    setupTabGroupColorPicker() {
+        const colorPicker = document.getElementById('tab-group-color-picker');
+        if (!colorPicker) return;
+        
+        // Close on outside click (use capture phase to catch early)
+        document.addEventListener('click', (e) => {
+            if (colorPicker.classList.contains('hidden') || colorPicker.style.display === 'none') {
+                return;
+            }
+            
+            // Don't close if clicking on the color picker itself or its children
+            if (colorPicker.contains(e.target)) {
+                return;
+            }
+            
+            // Don't close if clicking on the button that opens it
+            if (e.target.closest('#sidebar-new-tab-group-option')) {
+                return;
+            }
+            
+            // Don't close if clicking on context menu items
+            if (e.target.closest('#tab-group-context-menu')) {
+                return;
+            }
+            
+            // Close the picker
+            this.hideTabGroupColorPicker();
+        }, true);
+    }
+
+    createNewTabGroup(color = '#FF6B6B') {
+        const tabGroupId = Date.now();
+        const tabGroupName = `Tab Group ${this.tabGroups.size + 1}`;
+        
+        const tabGroup = {
+            id: tabGroupId,
+            name: tabGroupName,
             tabIds: [],
             open: true,
-            order: this.folders.size
+            order: this.tabGroups.size,
+            color: color
         };
         
-        this.folders.set(folderId, folder);
-        this.renderFolders();
-        this.saveFolders();
+        this.tabGroups.set(tabGroupId, tabGroup);
+        this.renderTabGroups();
+        this.saveTabGroups();
         
-        // Focus the folder name for editing when newly created
+        // Focus the tab group name for editing when newly created
         setTimeout(() => {
-            const folderElement = document.querySelector(`[data-folder-id="${folderId}"]`);
-            if (folderElement) {
-                const nameInput = folderElement.querySelector('.folder-name-input');
+            const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
+            if (tabGroupElement) {
+                const nameInput = tabGroupElement.querySelector('.tab-group-name-input');
                 if (nameInput) {
                     nameInput.readOnly = false;
                     nameInput.removeAttribute('tabindex');
@@ -5970,35 +6359,44 @@ class AxisBrowser {
         }, 100);
     }
 
-    renderFolders() {
+    renderTabGroups() {
         const tabsContainer = document.querySelector('.tabs-container');
         const separator = document.getElementById('tabs-separator');
         if (!tabsContainer || !separator) return;
 
-        // Remove existing folder elements
-        const existingFolders = tabsContainer.querySelectorAll('.folder');
-        existingFolders.forEach(folder => folder.remove());
+        // Remove existing tab group elements
+        const existingTabGroups = tabsContainer.querySelectorAll('.tab-group');
+        existingTabGroups.forEach(tabGroup => tabGroup.remove());
 
-        // Get all folders sorted by order
-        const foldersArray = Array.from(this.folders.values()).sort((a, b) => (a.order || 0) - (b.order || 0));
+        // Get all tab groups sorted by order
+        const tabGroupsArray = Array.from(this.tabGroups.values()).sort((a, b) => (a.order || 0) - (b.order || 0));
 
-        // Insert folders before separator (in pinned section)
-        foldersArray.forEach(folder => {
-            const folderElement = this.createFolderElement(folder);
-            tabsContainer.insertBefore(folderElement, separator);
+        // Insert tab groups before separator (in pinned section)
+        tabGroupsArray.forEach(tabGroup => {
+            const tabGroupElement = this.createTabGroupElement(tabGroup);
+            tabsContainer.insertBefore(tabGroupElement, separator);
         });
     }
 
-    createFolderElement(folder) {
-        const folderElement = document.createElement('div');
-        folderElement.className = 'folder';
-        folderElement.dataset.folderId = folder.id;
-        folderElement.classList.add('pinned'); // Folders are always in pinned section
+    createTabGroupElement(tabGroup) {
+        const tabGroupElement = document.createElement('div');
+        tabGroupElement.className = 'tab-group';
+        tabGroupElement.dataset.tabGroupId = tabGroup.id;
+        tabGroupElement.classList.add('pinned'); // Tab groups are always in pinned section
         
-        const isOpen = folder.open !== false; // Default to open
+        // Apply color - convert hex to RGB for CSS variables
+        const color = tabGroup.color || '#FF6B6B';
+        const rgb = this.hexToRgb(color);
+        if (rgb) {
+            tabGroupElement.style.setProperty('--tab-group-color-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+        }
+        tabGroupElement.style.setProperty('--tab-group-color', color);
+        tabGroupElement.dataset.color = color;
         
-        // Get folder tabs
-        const folderTabs = folder.tabIds
+        const isOpen = tabGroup.open !== false; // Default to open
+        
+        // Get tab group tabs
+        const tabGroupTabs = tabGroup.tabIds
             .map(tabId => {
                 const tab = this.tabs.get(tabId);
                 const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
@@ -6006,37 +6404,71 @@ class AxisBrowser {
             })
             .filter(item => item.tab && item.tab.pinned); // Only show pinned tabs
 
-        folderElement.innerHTML = `
+        tabGroupElement.innerHTML = `
             <div class="tab-content">
                 <div class="tab-left">
-                    <i class="fas ${isOpen ? 'fa-folder-open' : 'fa-folder'} tab-favicon folder-icon"></i>
-                    <input type="text" class="folder-name-input tab-title" value="${this.escapeHtml(folder.name)}" placeholder="Folder name" readonly>
+                    <i class="fas fa-layer-group tab-favicon tab-group-icon"></i>
+                    <input type="text" class="tab-group-name-input tab-title" value="${this.escapeHtml(tabGroup.name)}" placeholder="Tab Group name" readonly>
                 </div>
                 <div class="tab-right">
-                    <button class="folder-delete tab-close" title="Delete folder">
+                    <button class="tab-group-delete tab-close" title="Delete Tab Group">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
             </div>
-            <div class="folder-content ${isOpen && folderTabs.length > 0 ? 'open' : ''}">
+            <div class="tab-group-content ${isOpen && tabGroupTabs.length > 0 ? 'open' : ''}">
             </div>
         `;
 
-        // Set up folder event listeners
-        this.setupFolderEventListeners(folderElement, folder);
+        // Set up tab group event listeners
+        this.setupTabGroupEventListeners(tabGroupElement, tabGroup);
 
-        // Add tab elements to folder content
-        const folderContent = folderElement.querySelector('.folder-content');
+        // Add tab elements to tab group content
+        const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
         
-        folderTabs.forEach(({ tabElement, tabId }) => {
-            if (tabElement && folderContent) {
-                // Only add if not already in a folder
-                if (!tabElement.closest('.folder')) {
-                    folderContent.appendChild(tabElement);
+        tabGroupTabs.forEach(({ tabElement, tabId }) => {
+            if (tabElement && tabGroupContent) {
+                // Only add if not already in a tab group
+                if (!tabElement.closest('.tab-group')) {
+                    // Reset any inline styles that might cause rendering issues
+                    tabElement.style.transform = '';
+                    tabElement.style.position = '';
+                    tabElement.style.top = '';
+                    tabElement.style.left = '';
+                    tabElement.style.width = '';
+                    tabElement.style.height = '';
+                    tabElement.style.margin = '';
+                    tabElement.style.padding = '';
+                    tabElement.style.opacity = '';
+                    tabElement.style.visibility = '';
+                    tabElement.style.display = '';
+                    
+                    // Reset tab-content styles
+                    const tabContent = tabElement.querySelector('.tab-content');
+                    if (tabContent) {
+                        tabContent.style.transform = '';
+                        tabContent.style.position = '';
+                        tabContent.style.top = '';
+                        tabContent.style.left = '';
+                        tabContent.style.width = '';
+                        tabContent.style.height = '';
+                        tabContent.style.margin = '';
+                        tabContent.style.padding = '';
+                        tabContent.style.opacity = '';
+                        tabContent.style.visibility = '';
+                        tabContent.style.display = '';
+                    }
+                    
+                    // Ensure tab has correct classes
+                    tabElement.classList.add('pinned');
+                    
+                    tabGroupContent.appendChild(tabElement);
+                    // Force a reflow to ensure styles are applied
+                    void tabElement.offsetHeight;
                     // Ensure event listeners are set up
                     this.setupTabEventListeners(tabElement, tabId);
                 }
-            } else if (folderContent && !tabElement) {
+            } else if (tabGroupContent && !tabElement) {
                 // Tab element doesn't exist, create it
                 const tab = this.tabs.get(tabId);
                 if (tab) {
@@ -6055,50 +6487,52 @@ class AxisBrowser {
                             </div>
                         </div>
                     `;
-                    folderContent.appendChild(newTabElement);
+                    tabGroupContent.appendChild(newTabElement);
                     this.setupTabEventListeners(newTabElement, tabId);
                     this.updateTabFavicon(tabId, newTabElement);
                 }
             }
         });
         
-        // Set initial state if folder is open AND has tabs (after tabs are added)
-        if (isOpen && folderTabs.length > 0) {
-            // Use setTimeout to ensure DOM is ready and tabs are added
-            setTimeout(() => {
-                folderContent.style.display = 'flex';
-                folderContent.style.visibility = 'visible';
-                folderContent.style.maxHeight = 'none';
-                const height = folderContent.scrollHeight;
-                folderContent.style.maxHeight = height + 'px';
-                folderContent.style.opacity = '1';
-                folderContent.classList.add('open');
-            }, 50);
+        // Set initial state if tab group is open AND has tabs (after tabs are added)
+        if (isOpen && tabGroupTabs.length > 0) {
+            // Use requestAnimationFrame for proper DOM synchronization
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    tabGroupContent.style.display = 'flex';
+                    tabGroupContent.style.visibility = 'visible';
+                    tabGroupContent.style.maxHeight = 'none';
+                    const height = tabGroupContent.scrollHeight;
+                    tabGroupContent.style.maxHeight = height + 'px';
+                    tabGroupContent.style.opacity = '1';
+                    tabGroupContent.classList.add('open');
+                });
+            });
         } else {
-            // Ensure empty folders have no expansion
-            folderContent.style.display = 'none';
-            folderContent.style.visibility = 'hidden';
-            folderContent.style.maxHeight = '0px';
-            folderContent.style.padding = '0';
-            folderContent.style.opacity = '0';
-            folderContent.classList.remove('open');
+            // Ensure empty tab groups have no expansion
+            tabGroupContent.style.display = 'none';
+            tabGroupContent.style.visibility = 'hidden';
+            tabGroupContent.style.maxHeight = '0px';
+            tabGroupContent.style.padding = '0';
+            tabGroupContent.style.opacity = '0';
+            tabGroupContent.classList.remove('open');
         }
 
-        return folderElement;
+        return tabGroupElement;
     }
 
-    setupFolderEventListeners(folderElement, folder) {
-        const nameInput = folderElement.querySelector('.folder-name-input');
-        const deleteBtn = folderElement.querySelector('.folder-delete');
-        const folderContent = folderElement.querySelector('.folder-content');
-        const tabContent = folderElement.querySelector('.tab-content');
+    setupTabGroupEventListeners(tabGroupElement, tabGroup) {
+        const nameInput = tabGroupElement.querySelector('.tab-group-name-input');
+        const deleteBtn = tabGroupElement.querySelector('.tab-group-delete');
+        const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
+        const tabContent = tabGroupElement.querySelector('.tab-content');
         const tabsContainer = document.querySelector('.tabs-container');
         
-        // Get reference to draggedFolder from setupTabDragDrop scope
+        // Get reference to draggedTabGroup from setupTabDragDrop scope
         // We'll use a closure or access it via the class
-        const getDraggedFolder = () => {
+        const getDraggedTabGroup = () => {
             // Try to find it via the dragging class as fallback
-            return document.querySelector('.folder.dragging');
+            return document.querySelector('.tab-group.dragging');
         };
         
         // Use the shared insertion line from setupTabDragDrop (don't create a new one)
@@ -6121,15 +6555,15 @@ class AxisBrowser {
             }
         };
 
-        // Make folder draggable - make sure child elements don't prevent dragging
-        folderElement.draggable = true;
+        // Make tab group draggable - make sure child elements don't prevent dragging
+        tabGroupElement.draggable = true;
         
         // Prevent child elements from being draggable (they should trigger parent drag)
         nameInput.draggable = false;
         deleteBtn.draggable = false;
-        const folderIcon = folderElement.querySelector('.folder-icon');
-        if (folderIcon) {
-            folderIcon.draggable = false;
+        const tabGroupIcon = tabGroupElement.querySelector('.tab-group-icon');
+        if (tabGroupIcon) {
+            tabGroupIcon.draggable = false;
         }
         
         // Make input non-interactive when readonly to prevent focus
@@ -6144,16 +6578,16 @@ class AxisBrowser {
         // Track mouse down to distinguish click from drag
         tabContent.addEventListener('mousedown', (e) => {
             // Don't track if clicking on delete button or if input is being edited
-            if (e.target.closest('.folder-delete') || (!nameInput.readOnly && e.target.closest('.folder-name-input'))) {
+            if (e.target.closest('.tab-group-delete') || (!nameInput.readOnly && e.target.closest('.tab-group-name-input'))) {
                 return;
             }
             mouseDownPos = { x: e.clientX, y: e.clientY };
             mouseDownTime = Date.now();
         });
         
-        folderElement.addEventListener('dragstart', (e) => {
+        tabGroupElement.addEventListener('dragstart', (e) => {
             // Don't start drag if clicking on delete button or if input is being edited
-            if (e.target.closest('.folder-delete') || (!nameInput.readOnly && e.target.closest('.folder-name-input'))) {
+            if (e.target.closest('.tab-group-delete') || (!nameInput.readOnly && e.target.closest('.tab-group-name-input'))) {
                 e.preventDefault();
                 return;
             }
@@ -6170,113 +6604,141 @@ class AxisBrowser {
             }
             
             isDragging = true;
-            folderElement.classList.add('dragging');
+            tabGroupElement.classList.add('dragging');
             
             // Set drag data
             e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/html', folderElement.outerHTML);
-            e.dataTransfer.setData('application/folder-id', folder.id.toString());
+            e.dataTransfer.setData('text/html', tabGroupElement.outerHTML);
+            e.dataTransfer.setData('application/tab-group-id', tabGroup.id.toString());
         });
         
-        // Cache folder content element to avoid repeated queries
-        const cachedFolderContent = folderElement.querySelector('.folder-content');
+        // Cache tab group content element to avoid repeated queries
+        const cachedTabGroupContent = tabGroupElement.querySelector('.tab-group-content');
         
-        // Handle folder-to-folder dragging
-        folderElement.addEventListener('dragover', (e) => {
+        // Handle tab group-to-tab group dragging
+        tabGroupElement.addEventListener('dragover', (e) => {
             e.preventDefault();
             e.stopPropagation();
             e.dataTransfer.dropEffect = 'move';
             
-            const draggedFolder = getDraggedFolder();
+            const draggedTabGroup = getDraggedTabGroup();
             const draggedTab = document.querySelector('.tab.dragging');
             
-            // Handle folder-to-folder dragging
-            if (draggedFolder && draggedFolder !== folderElement) {
-                const rect = folderElement.getBoundingClientRect();
+            // Handle tab group-to-tab group dragging
+            if (draggedTabGroup && draggedTabGroup !== tabGroupElement) {
+                const rect = tabGroupElement.getBoundingClientRect();
                 const containerRect = tabsContainer.getBoundingClientRect();
                 const isAbove = e.clientY < rect.top + rect.height / 2;
                 
                 // Center in gap: gap is 8px, center is 4px from edge
                 const lineY = isAbove ? rect.top - containerRect.top - 4 : rect.bottom - containerRect.top + 4;
                 showInsertionLine(lineY);
-                folderElement.dataset.dropSide = isAbove ? 'top' : 'bottom';
+                tabGroupElement.dataset.dropSide = isAbove ? 'top' : 'bottom';
                 return;
             }
             
-            // Handle tab-to-folder dragging
+            // Handle tab-to-tab group dragging
             if (draggedTab) {
-                const folderRect = folderElement.getBoundingClientRect();
+                const tabGroupRect = tabGroupElement.getBoundingClientRect();
                 const containerRect = tabsContainer.getBoundingClientRect();
                 const mouseY = e.clientY;
                 
-                // Check if over content (only if folder is open)
-                const isOverContent = cachedFolderContent && 
-                                     cachedFolderContent.classList.contains('open') && 
-                                     cachedFolderContent.contains(e.target);
+                // If tab group is closed, open it immediately when dragging over
+                if (!tabGroup.open && cachedTabGroupContent) {
+                    tabGroup.open = true;
+                    this.tabGroups.set(tabGroup.id, tabGroup);
+                    // Force content to be visible for drag detection
+                    cachedTabGroupContent.style.display = 'flex';
+                    cachedTabGroupContent.style.visibility = 'visible';
+                    cachedTabGroupContent.style.opacity = '1';
+                    cachedTabGroupContent.style.maxHeight = 'none';
+                    cachedTabGroupContent.style.transition = 'none';
+                    cachedTabGroupContent.style.padding = '8px 16px 12px 16px';
+                    cachedTabGroupContent.classList.add('open');
+                    void cachedTabGroupContent.offsetHeight;
+                }
                 
-                // Check if in gap (4px threshold above/below folder)
+                // Check if in gap (4px threshold above/below tab group)
                 const gapThreshold = 4;
-                const isInGapAbove = mouseY < folderRect.top && mouseY >= folderRect.top - gapThreshold;
-                const isInGapBelow = mouseY > folderRect.bottom && mouseY <= folderRect.bottom + gapThreshold;
+                const isInGapAbove = mouseY < tabGroupRect.top && mouseY >= tabGroupRect.top - gapThreshold;
+                const isInGapBelow = mouseY > tabGroupRect.bottom && mouseY <= tabGroupRect.bottom + gapThreshold;
                 
-                if (isOverContent) {
-                    // Over folder content - show folder animation, NO insertion line
-                    if (!folderElement.classList.contains('drag-over-folder')) {
-                        folderElement.classList.add('drag-over-folder');
-                    }
-                    hideInsertionLine();
-                    folderElement.dataset.dropSide = 'inside';
-                } else if (isInGapAbove || isInGapBelow) {
-                    // In gap - show insertion line ONLY, no folder animation
-                    if (folderElement.classList.contains('drag-over-folder')) {
-                        folderElement.classList.remove('drag-over-folder');
+                // Check if over header area (first 34px of tab group)
+                const headerHeight = 34;
+                const isOverHeader = mouseY >= tabGroupRect.top && mouseY <= tabGroupRect.top + headerHeight;
+                
+                // Check if over content area (below header)
+                const isOverContent = cachedTabGroupContent && 
+                                     cachedTabGroupContent.classList.contains('open') && 
+                                     (cachedTabGroupContent.contains(e.target) || 
+                                      (mouseY > tabGroupRect.top + headerHeight && mouseY <= tabGroupRect.bottom));
+                
+                if (isInGapAbove || isInGapBelow) {
+                    // In gap - show insertion line ONLY, no tab group animation
+                    if (tabGroupElement.classList.contains('drag-over-tab-group')) {
+                        tabGroupElement.classList.remove('drag-over-tab-group');
                     }
                     const isAbove = isInGapAbove;
                     // Center in gap: gap is 8px, center is 4px from edge
-                    const lineY = isAbove ? folderRect.top - containerRect.top - 4 : folderRect.bottom - containerRect.top + 4;
+                    const lineY = isAbove ? tabGroupRect.top - containerRect.top - 4 : tabGroupRect.bottom - containerRect.top + 4;
                     showInsertionLine(lineY);
-                    folderElement.dataset.dropSide = isAbove ? 'top' : 'bottom';
-                } else {
-                    // Over folder header - show folder animation, NO insertion line
-                    if (!folderElement.classList.contains('drag-over-folder')) {
-                        folderElement.classList.add('drag-over-folder');
+                    tabGroupElement.dataset.dropSide = isAbove ? 'top' : 'bottom';
+                } else if (isOverContent || isOverHeader) {
+                    // Over tab group (header or content) - show tab group animation, NO insertion line
+                    if (!tabGroupElement.classList.contains('drag-over-tab-group')) {
+                        tabGroupElement.classList.add('drag-over-tab-group');
                     }
                     hideInsertionLine();
-                    folderElement.dataset.dropSide = 'inside';
+                    tabGroupElement.dataset.dropSide = 'inside';
+                } else if (mouseY >= tabGroupRect.top && mouseY <= tabGroupRect.bottom) {
+                    // Fallback: if mouse is anywhere within tab group bounds, treat as inside
+                    if (!tabGroupElement.classList.contains('drag-over-tab-group')) {
+                        tabGroupElement.classList.add('drag-over-tab-group');
+                    }
+                    hideInsertionLine();
+                    tabGroupElement.dataset.dropSide = 'inside';
+                } else {
+                    // Not over tab group - clear any drag states
+                    if (tabGroupElement.classList.contains('drag-over-tab-group')) {
+                        tabGroupElement.classList.remove('drag-over-tab-group');
+                    }
+                    hideInsertionLine();
+                    // Don't delete dropSide here - keep it if it was set
                 }
             }
         });
         
-        folderElement.addEventListener('dragleave', (e) => {
-            if (!folderElement.contains(e.relatedTarget)) {
-                folderElement.classList.remove('drag-over-folder');
-                delete folderElement.dataset.dropSide;
+        tabGroupElement.addEventListener('dragleave', (e) => {
+            // Only clear if we're actually leaving the tab group (not just moving between children)
+            if (!tabGroupElement.contains(e.relatedTarget)) {
+                tabGroupElement.classList.remove('drag-over-tab-group');
+                // Don't delete dropSide here - let it persist until drop or dragend
                 hideInsertionLine();
             }
         });
         
-        folderElement.addEventListener('drop', (e) => {
+        tabGroupElement.addEventListener('drop', (e) => {
             e.preventDefault();
             e.stopPropagation();
             hideInsertionLine();
             
             // Cache dropSide before cleanup
-            const dropSide = folderElement.dataset.dropSide;
-            folderElement.classList.remove('drag-over-folder');
-            delete folderElement.dataset.dropSide;
+            const dropSide = tabGroupElement.dataset.dropSide;
+            tabGroupElement.classList.remove('drag-over-tab-group');
+            delete tabGroupElement.dataset.dropSide;
             
-            const draggedFolderId = e.dataTransfer.getData('application/folder-id');
-            const draggedFolder = draggedFolderId ? document.querySelector(`[data-folder-id="${draggedFolderId}"]`) : getDraggedFolder();
+            const draggedTabGroupId = e.dataTransfer.getData('application/tab-group-id');
+            const draggedTabGroup = draggedTabGroupId ? document.querySelector(`[data-tab-group-id="${draggedTabGroupId}"]`) : getDraggedTabGroup();
             const draggedTab = document.querySelector('.tab.dragging');
             
-            // Handle folder drop
-            if (draggedFolder && draggedFolder !== folderElement) {
+            // Handle tab group drop
+            if (draggedTabGroup && draggedTabGroup !== tabGroupElement) {
                 const isAbove = dropSide === 'top';
-                draggedFolder.remove();
+                draggedTabGroup.remove();
                 if (isAbove) {
-                    tabsContainer.insertBefore(draggedFolder, folderElement);
+                    tabsContainer.insertBefore(draggedTabGroup, tabGroupElement);
                 } else {
-                    folderElement.insertAdjacentElement('afterend', draggedFolder);
+                    tabGroupElement.insertAdjacentElement('afterend', draggedTabGroup);
                 }
                 return;
             }
@@ -6287,33 +6749,35 @@ class AxisBrowser {
             const tabId = parseInt(draggedTab.dataset.tabId, 10);
             if (!tabId || !this.tabs.has(tabId)) return;
             
-            if (dropSide === 'inside') {
-                this.addTabToFolder(tabId, folder.id);
+            // If dropSide is inside or not set, add to tab group
+            // Default to inside if dropSide is undefined (means we're over the tab group)
+            if (dropSide === 'inside' || !dropSide || dropSide === 'undefined') {
+                this.addTabToTabGroup(tabId, tabGroup.id);
             } else if (dropSide === 'top' || dropSide === 'bottom') {
                 const isAbove = dropSide === 'top';
                 const tab = this.tabs.get(tabId);
                 if (!tab) return;
                 
-                // Check parent folder before removing
-                const draggedTabParentFolder = draggedTab.closest('.folder');
-                if (draggedTabParentFolder) {
-                        const parentFolderId = parseInt(draggedTabParentFolder.dataset.folderId, 10);
-                    if (parentFolderId) {
-                        this.removeTabFromFolder(tabId, parentFolderId);
+                // Check parent tab group before removing
+                const draggedTabParentTabGroup = draggedTab.closest('.tab-group');
+                if (draggedTabParentTabGroup) {
+                        const parentTabGroupId = parseInt(draggedTabParentTabGroup.dataset.tabGroupId, 10);
+                    if (parentTabGroupId) {
+                        this.removeTabFromTabGroup(tabId, parentTabGroupId);
                     }
                 }
                 
                 const wasPinned = tab.pinned;
-                const folderIsPinned = folderElement.classList.contains('pinned');
+                const tabGroupIsPinned = tabGroupElement.classList.contains('pinned');
                 
                 draggedTab.remove();
                 if (isAbove) {
-                    tabsContainer.insertBefore(draggedTab, folderElement);
+                    tabsContainer.insertBefore(draggedTab, tabGroupElement);
                 } else {
-                    folderElement.insertAdjacentElement('afterend', draggedTab);
+                    tabGroupElement.insertAdjacentElement('afterend', draggedTab);
                 }
                 
-                if (folderIsPinned && !wasPinned) {
+                if (tabGroupIsPinned && !wasPinned) {
                     tab.pinned = true;
                     this.tabs.set(tabId, tab);
                     draggedTab.classList.add('pinned');
@@ -6326,23 +6790,23 @@ class AxisBrowser {
             }
         });
         
-        folderElement.addEventListener('dragend', (e) => {
+        tabGroupElement.addEventListener('dragend', (e) => {
             isDragging = false;
-            folderElement.classList.remove('dragging');
-            folderElement.classList.remove('drag-over-folder');
+            tabGroupElement.classList.remove('dragging');
+            tabGroupElement.classList.remove('drag-over-tab-group');
             hideInsertionLine();
-            delete folderElement.dataset.dropSide;
+            delete tabGroupElement.dataset.dropSide;
         });
         
-        // Toggle folder - click anywhere on the folder tab (including the name)
+        // Toggle tab group - click anywhere on the tab group tab (including the name)
         // Only toggle if it wasn't a drag operation
         tabContent.addEventListener('click', (e) => {
             // Don't toggle if clicking on delete button
-            if (e.target.closest('.folder-delete')) {
+            if (e.target.closest('.tab-group-delete')) {
                 return;
             }
             // If clicking on the input and it's readonly, just toggle (don't rename)
-            if (e.target.closest('.folder-name-input') && nameInput.readOnly) {
+            if (e.target.closest('.tab-group-name-input') && nameInput.readOnly) {
                 e.preventDefault();
                 e.stopPropagation();
                 // Blur the input to prevent focus box
@@ -6351,12 +6815,12 @@ class AxisBrowser {
                 const mouseMoved = Math.abs(e.clientX - mouseDownPos.x) > 5 || Math.abs(e.clientY - mouseDownPos.y) > 5;
                 const timeSinceMouseDown = Date.now() - mouseDownTime;
                 if (!isDragging && (!mouseMoved || timeSinceMouseDown < 300)) {
-                    this.toggleFolder(folder.id);
+                    this.toggleTabGroup(tabGroup.id);
                 }
                 return;
             }
             // If input is not readonly (being edited), don't toggle
-            if (e.target.closest('.folder-name-input') && !nameInput.readOnly) {
+            if (e.target.closest('.tab-group-name-input') && !nameInput.readOnly) {
                 return;
             }
             e.stopPropagation();
@@ -6368,7 +6832,7 @@ class AxisBrowser {
             const mouseMoved = Math.abs(e.clientX - mouseDownPos.x) > 5 || Math.abs(e.clientY - mouseDownPos.y) > 5;
             const timeSinceMouseDown = Date.now() - mouseDownTime;
             if (!isDragging && (!mouseMoved || timeSinceMouseDown < 300)) {
-                this.toggleFolder(folder.id);
+                this.toggleTabGroup(tabGroup.id);
             }
         });
         
@@ -6403,18 +6867,18 @@ class AxisBrowser {
         }, true);
 
         // Right-click for context menu
-        folderElement.addEventListener('contextmenu', (e) => {
+        tabGroupElement.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            this.showFolderContextMenu(e, folder.id);
+            this.showTabGroupContextMenu(e, tabGroup.id);
         });
 
-        // Rename folder - only when input is made editable
+        // Rename tab group - only when input is made editable
         nameInput.addEventListener('blur', () => {
-            const newName = nameInput.value.trim() || `Folder ${folder.id}`;
-            folder.name = newName;
-            this.folders.set(folder.id, folder);
-            this.saveFolders();
+            const newName = nameInput.value.trim() || `Tab Group ${tabGroup.id}`;
+            tabGroup.name = newName;
+            this.tabGroups.set(tabGroup.id, tabGroup);
+            this.saveTabGroups();
             // Make it readonly again
             nameInput.readOnly = true;
             nameInput.setAttribute('tabindex', '-1');
@@ -6427,152 +6891,119 @@ class AxisBrowser {
                 nameInput.blur();
             }
             if (e.key === 'Escape') {
-                nameInput.value = folder.name;
+                nameInput.value = tabGroup.name;
                 nameInput.blur();
             }
         });
 
-        // Delete folder - make it always visible but styled
+        // Delete tab group - make it always visible but styled
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             e.preventDefault();
-            if (confirm(`Delete folder "${folder.name}"? Tabs will be moved back to the sidebar.`)) {
-                this.deleteFolder(folder.id);
+            if (confirm(`Delete tab group "${tabGroup.name}"? Tabs will be moved back to the sidebar.`)) {
+                this.deleteTabGroup(tabGroup.id);
             }
         });
 
     }
 
-    toggleFolder(folderId) {
-        const folder = this.folders.get(folderId);
-        if (!folder) return;
+    toggleTabGroup(tabGroupId) {
+        const tabGroup = this.tabGroups.get(tabGroupId);
+        if (!tabGroup) return;
 
-        const folderElement = document.querySelector(`[data-folder-id="${folderId}"]`);
-        if (!folderElement) return;
+        const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
+        if (!tabGroupElement) return;
         
-        const folderContent = folderElement.querySelector('.folder-content');
-        const folderIcon = folderElement.querySelector('.folder-icon');
+        const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
         
-        if (!folderContent) return;
+        if (!tabGroupContent) return;
         
         // Prevent multiple toggles
-        if (folderElement.classList.contains('toggling')) return;
-        folderElement.classList.add('toggling');
+        if (tabGroupElement.classList.contains('toggling')) return;
+        tabGroupElement.classList.add('toggling');
         
-        const isOpening = !folder.open;
-        folder.open = isOpening;
-        this.folders.set(folderId, folder);
+        const isOpening = !tabGroup.open;
+        tabGroup.open = isOpening;
+        this.tabGroups.set(tabGroupId, tabGroup);
         
-        // Update icon immediately
-        if (folderIcon) {
-            folderIcon.classList.remove('fa-folder', 'fa-folder-open');
-            folderIcon.classList.add(isOpening ? 'fa-folder-open' : 'fa-folder');
-            folderIcon.classList.add('folder-icon-animate');
-            setTimeout(() => {
-                folderIcon.classList.remove('folder-icon-animate');
-            }, 300);
-        }
-        
-        // Check if folder has tabs - only open if it has content
-        const hasTabs = folder.tabIds.length > 0;
+        // Check if tab group has tabs - only open if it has content
+        const hasTabs = tabGroup.tabIds.length > 0;
         
         if (isOpening) {
-            // Don't open if folder is empty - just update icon and ensure no expansion
+            // Don't open if tab group is empty
             if (!hasTabs) {
-                // Explicitly set styles to prevent any expansion
-                folderContent.style.maxHeight = '0px';
-                folderContent.style.padding = '0';
-                folderContent.style.display = 'none';
-                folderContent.style.visibility = 'hidden';
-                folderContent.style.opacity = '0';
-                folderContent.classList.remove('open');
-                folderElement.classList.remove('toggling');
-                this.saveFolders();
+                tabGroupContent.style.maxHeight = '0px';
+                tabGroupContent.style.display = 'none';
+                tabGroupContent.style.visibility = 'hidden';
+                tabGroupContent.style.opacity = '0';
+                tabGroupContent.classList.remove('open');
+                tabGroupElement.classList.remove('toggling');
+                this.saveTabGroups();
                 return;
             }
             
-            // Opening: measure height first, then animate
-            folderContent.style.display = 'flex';
-            folderContent.style.visibility = 'visible';
-            folderContent.style.maxHeight = 'none';
-            folderContent.style.opacity = '0';
-            folderContent.style.transition = 'none';
+            // Opening: measure height, then animate
+            tabGroupContent.style.display = 'flex';
+            tabGroupContent.style.visibility = 'visible';
+            tabGroupContent.style.maxHeight = 'none';
+            tabGroupContent.style.transition = 'none';
             
-            // Force multiple reflows to ensure content is fully laid out
-            folderContent.offsetHeight;
+            // Force reflow to get accurate height
+            const height = tabGroupContent.offsetHeight;
+            
+            // Reset and animate
+            tabGroupContent.style.maxHeight = '0px';
+            tabGroupContent.style.opacity = '0';
+            tabGroupContent.style.transition = 'max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            
             requestAnimationFrame(() => {
-                folderContent.offsetHeight; // Force another reflow
+                tabGroupContent.classList.add('open');
+                tabGroupContent.style.maxHeight = height + 'px';
+                tabGroupContent.style.opacity = '1';
                 
-                const targetHeight = folderContent.scrollHeight;
-                
-                // Add some buffer to ensure full expansion
-                const bufferedHeight = targetHeight + 10;
-                
-                // Reset to closed state
-                folderContent.style.maxHeight = '0px';
-                folderContent.style.opacity = '0';
-                folderContent.style.transition = 'max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-                
-                // Animate to open
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        folderContent.classList.add('open');
-                        folderContent.style.maxHeight = bufferedHeight + 'px';
-                        folderContent.style.opacity = '1';
-                        
-                        // After animation completes, set to a very large value to allow full expansion
-                        setTimeout(() => {
-                            folderElement.classList.remove('toggling');
-                            // Set to a very large value to allow full expansion without jump
-                            folderContent.style.transition = 'none';
-                            folderContent.style.maxHeight = '9999px';
-                            // Re-enable transition for future animations
-                            setTimeout(() => {
-                                folderContent.style.transition = '';
-                            }, 50);
-                        }, 400);
-                    });
-                });
+                // After animation, allow full expansion
+                setTimeout(() => {
+                    tabGroupContent.style.transition = 'none';
+                    tabGroupContent.style.maxHeight = '9999px';
+                    tabGroupElement.classList.remove('toggling');
+                    setTimeout(() => {
+                        tabGroupContent.style.transition = '';
+                    }, 50);
+                }, 400);
             });
         } else {
             // Closing: get current height, then animate to 0
-            const currentHeight = folderContent.scrollHeight;
-            folderContent.style.maxHeight = currentHeight + 'px';
-            folderContent.style.opacity = '1';
-            folderContent.style.transition = 'max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            const currentHeight = tabGroupContent.scrollHeight;
+            tabGroupContent.style.maxHeight = currentHeight + 'px';
+            tabGroupContent.style.opacity = '1';
+            tabGroupContent.style.transition = 'max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
             
-            // Force reflow
-            folderContent.offsetHeight;
-            
-            // Animate to closed
             requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    folderContent.classList.remove('open');
-                    folderContent.style.maxHeight = '0px';
-                    folderContent.style.opacity = '0';
-                    
-                    // Clean up after animation completes (350ms + small buffer)
-                    setTimeout(() => {
-                        folderContent.style.visibility = 'hidden';
-                        folderContent.style.display = 'none';
-                        folderContent.style.maxHeight = '';
-                        folderContent.style.transition = '';
-                        folderElement.classList.remove('toggling');
-                    }, 380);
-                });
+                tabGroupContent.classList.remove('open');
+                tabGroupContent.style.maxHeight = '0px';
+                tabGroupContent.style.opacity = '0';
+                
+                // Clean up after animation
+                setTimeout(() => {
+                    tabGroupContent.style.display = 'none';
+                    tabGroupContent.style.visibility = 'hidden';
+                    tabGroupContent.style.maxHeight = '';
+                    tabGroupContent.style.transition = '';
+                    tabGroupElement.classList.remove('toggling');
+                }, 380);
             });
         }
         
-        this.saveFolders();
+        this.saveTabGroups();
     }
 
-    addTabToFolder(tabId, folderId) {
+    addTabToTabGroup(tabId, tabGroupId) {
         const tab = this.tabs.get(tabId);
-        const folder = this.folders.get(folderId);
+        const tabGroup = this.tabGroups.get(tabGroupId);
         
-        if (!tab || !folder) return;
+        if (!tab || !tabGroup) return;
         
-        // Only add pinned tabs to folders
+        // Only add pinned tabs to tab groups
         if (!tab.pinned) {
             // Auto-pin the tab
             const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
@@ -6581,158 +7012,268 @@ class AxisBrowser {
             }
         }
         
-        // Remove tab from any other folder (optimized - only check if needed)
-        for (const [id, f] of this.folders) {
-            if (id !== folderId && f.tabIds.includes(tabId)) {
-                f.tabIds = f.tabIds.filter(fid => fid !== tabId);
-                this.folders.set(id, f);
-                break; // Tab can only be in one folder at a time
+        // Remove tab from any other tab group (optimized - only check if needed)
+        for (const [id, tg] of this.tabGroups) {
+            if (id !== tabGroupId && tg.tabIds.includes(tabId)) {
+                tg.tabIds = tg.tabIds.filter(tgid => tgid !== tabId);
+                this.tabGroups.set(id, tg);
+                break; // Tab can only be in one tab group at a time
             }
         }
         
-        // Add to this folder if not already there
-        if (!folder.tabIds.includes(tabId)) {
-            folder.tabIds.push(tabId);
-            this.folders.set(folderId, folder);
+        // Add to this tab group if not already there
+        if (!tabGroup.tabIds.includes(tabId)) {
+            tabGroup.tabIds.push(tabId);
+            this.tabGroups.set(tabGroupId, tabGroup);
         }
         
-        // Update folder UI directly without full re-render for better performance
-        const folderElement = document.querySelector(`[data-folder-id="${folderId}"]`);
+        // Update tab group UI directly without full re-render for better performance
+        const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
         const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
         
-        if (!folderElement || !tabElement) return;
+        if (!tabGroupElement || !tabElement) return;
         
-        const folderContent = folderElement.querySelector('.folder-content');
-        if (!folderContent) {
+        const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
+        if (!tabGroupContent) {
             // Fallback: just remove from main container
-            if (tabElement.parentNode && !tabElement.closest('.folder')) {
+            if (tabElement.parentNode && !tabElement.closest('.tab-group')) {
                 tabElement.remove();
             }
             return;
         }
         
+        // Ensure tab group content is fully opened and stable before adding tabs
+        const ensureTabGroupContentReady = () => {
+            // Remove any transition/animation states
+            tabGroupElement.classList.remove('toggling');
+            
+            // Force content to be fully opened immediately (no animation)
+            tabGroupContent.style.display = 'flex';
+            tabGroupContent.style.visibility = 'visible';
+            tabGroupContent.style.opacity = '1';
+            tabGroupContent.style.maxHeight = 'none';
+            tabGroupContent.style.transition = 'none';
+            tabGroupContent.style.padding = '8px 16px 12px 16px';
+            tabGroupContent.classList.add('open');
+            
+            // Force a reflow to ensure layout is calculated
+            void tabGroupContent.offsetHeight;
+        };
+        
         // Batch DOM operations
         requestAnimationFrame(() => {
-            // Ensure folder is open
-            if (!folder.open) {
-                this.toggleFolder(folderId);
+            // Ensure tab group is open and in stable state
+            if (!tabGroup.open) {
+                tabGroup.open = true;
+                this.tabGroups.set(tabGroupId, tabGroup);
             }
             
-            // Remove tab from main container if it's there
-            if (tabElement.parentNode && !tabElement.closest('.folder')) {
-                tabElement.remove();
-            }
+            // Force content to be ready (fully opened, no transitions)
+            ensureTabGroupContentReady();
             
-            // Add tab to folder content if not already there
-            if (!folderContent.contains(tabElement)) {
-                folderContent.appendChild(tabElement);
-                this.setupTabEventListeners(tabElement, tabId);
-                this.updateTabFavicon(tabId, tabElement);
-                // Make tab draggable immediately
-                if (this.makeTabDraggable) {
-                    this.makeTabDraggable(tabElement);
-                } else {
-                    tabElement.draggable = true;
+            // Wait one more frame to ensure layout is completely stable
+            requestAnimationFrame(() => {
+                // Remove tab from wherever it currently is (main container or another tab group)
+                if (tabElement.parentNode) {
+                    // Check if it's in a tab group content
+                    const currentParent = tabElement.parentNode;
+                    if (currentParent.classList && currentParent.classList.contains('tab-group-content')) {
+                        // Remove from current tab group
+                        const currentTabGroupElement = currentParent.closest('.tab-group');
+                        if (currentTabGroupElement) {
+                            const currentTabGroupId = parseInt(currentTabGroupElement.dataset.tabGroupId, 10);
+                            if (currentTabGroupId && currentTabGroupId !== tabGroupId) {
+                                // Remove from the other tab group's data
+                                const currentTabGroup = this.tabGroups.get(currentTabGroupId);
+                                if (currentTabGroup) {
+                                    currentTabGroup.tabIds = currentTabGroup.tabIds.filter(id => id !== tabId);
+                                    this.tabGroups.set(currentTabGroupId, currentTabGroup);
+                                }
+                            }
+                        }
+                    }
+                    tabElement.remove();
                 }
-            }
-            
-            // Remove empty state if present (only query if needed)
-            const folderEmpty = folderContent.querySelector('.folder-empty');
-            if (folderEmpty) {
-                folderEmpty.remove();
-            }
+                
+                // Completely reset all inline styles on tab element
+                tabElement.style.cssText = '';
+                tabElement.style.display = 'block';
+                tabElement.style.position = 'relative';
+                tabElement.style.margin = '0';
+                tabElement.style.width = '100%';
+                tabElement.style.boxSizing = 'border-box';
+                
+                // Completely reset tab-content styles
+                const tabContent = tabElement.querySelector('.tab-content');
+                if (tabContent) {
+                    tabContent.style.cssText = '';
+                    tabContent.style.display = 'flex';
+                    tabContent.style.position = 'relative';
+                    tabContent.style.height = '34px';
+                    tabContent.style.minHeight = '34px';
+                }
+                
+                // Ensure tab has correct classes and remove any problematic ones
+                tabElement.classList.add('pinned');
+                tabElement.classList.remove('dragging', 'active');
+                
+                // Force reflows to ensure styles are applied
+                void tabElement.offsetHeight;
+                void tabGroupContent.offsetHeight;
+                
+                // Always add tab to tab group content (even if it was there before, we've removed it)
+                // This ensures it's properly added even if it was previously in this or another tab group
+                if (tabElement.parentNode !== tabGroupContent) {
+                    tabGroupContent.appendChild(tabElement);
+                }
+                
+                // Force another reflow after adding to DOM
+                requestAnimationFrame(() => {
+                    void tabElement.offsetHeight;
+                    void tabGroupContent.offsetHeight;
+                    
+                    // Re-enable transitions after tab is properly added
+                    tabGroupContent.style.transition = '';
+                    
+                    // Always re-setup event listeners to ensure they're fresh
+                    this.setupTabEventListeners(tabElement, tabId);
+                    this.updateTabFavicon(tabId, tabElement);
+                    // Make tab draggable immediately
+                    if (this.makeTabDraggable) {
+                        this.makeTabDraggable(tabElement);
+                    } else {
+                        tabElement.draggable = true;
+                    }
+                });
+                
+                // Remove empty state if present
+                const tabGroupEmpty = tabGroupContent.querySelector('.tab-group-empty');
+                if (tabGroupEmpty) {
+                    tabGroupEmpty.remove();
+                }
+            });
         });
         
-        this.saveFolders();
+        this.saveTabGroups();
     }
 
-    removeTabFromFolder(tabId, folderId) {
-        const folder = this.folders.get(folderId);
-        if (!folder) return;
+    removeTabFromTabGroup(tabId, tabGroupId) {
+        const tabGroup = this.tabGroups.get(tabGroupId);
+        if (!tabGroup) return;
         
-        folder.tabIds = folder.tabIds.filter(id => id !== tabId);
-        this.folders.set(folderId, folder);
+        tabGroup.tabIds = tabGroup.tabIds.filter(id => id !== tabId);
+        this.tabGroups.set(tabGroupId, tabGroup);
         
         // Move tab back to main container
         const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
         const tabsContainer = document.querySelector('.tabs-container');
         const separator = document.getElementById('tabs-separator');
-        const folderElement = document.querySelector(`[data-folder-id="${folderId}"]`);
+        const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
         
-        if (!tabElement || !tabsContainer || !separator || !folderElement) return;
+        if (!tabElement || !tabsContainer || !separator || !tabGroupElement) return;
         
-        // Clean up any drag-related classes and styles on folder first
-        folderElement.classList.remove('dragging', 'drag-over-folder', 'drag-over-folder-top', 'drag-over-folder-bottom');
+        // Clean up any drag-related classes and styles on tab group first
+        tabGroupElement.classList.remove('dragging', 'drag-over-tab-group', 'drag-over-tab-group-top', 'drag-over-tab-group-bottom');
         
         // Store original styles to restore later
-        const folderContent = folderElement.querySelector('.folder-content');
-        const originalFolderTransition = folderElement.style.transition;
-        const originalFolderPointerEvents = folderElement.style.pointerEvents;
-        const originalFolderTransform = folderElement.style.transform;
-        const originalFolderFilter = folderElement.style.filter;
-        const originalFolderOpacity = folderElement.style.opacity;
+        const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
+        const originalTabGroupTransition = tabGroupElement.style.transition;
+        const originalTabGroupPointerEvents = tabGroupElement.style.pointerEvents;
+        const originalTabGroupTransform = tabGroupElement.style.transform;
+        const originalTabGroupFilter = tabGroupElement.style.filter;
+        const originalTabGroupOpacity = tabGroupElement.style.opacity;
         const originalTabTransition = tabElement.style.transition;
         
         // Temporarily disable transitions and reset any transform/filter/opacity that might be stuck
-        folderElement.style.transition = 'none';
-        folderElement.style.pointerEvents = 'none';
-        folderElement.style.transform = '';
-        folderElement.style.filter = '';
-        folderElement.style.opacity = '';
+        tabGroupElement.style.transition = 'none';
+        tabGroupElement.style.pointerEvents = 'none';
+        tabGroupElement.style.transform = '';
+        tabGroupElement.style.filter = '';
+        tabGroupElement.style.opacity = '';
         tabElement.style.transition = 'none';
         
         // Batch all DOM updates in a single frame
         requestAnimationFrame(() => {
-            // Remove tab from folder content
+            // Remove tab from tab group content
             tabElement.remove();
+            
+            // Completely reset tab element styles and state
+            tabElement.style.cssText = '';
+            tabElement.style.display = 'block';
+            tabElement.style.position = 'relative';
+            tabElement.style.margin = '0';
+            tabElement.style.width = '100%';
+            tabElement.style.boxSizing = 'border-box';
+            
+            // Reset tab-content styles
+            const tabContentEl = tabElement.querySelector('.tab-content');
+            if (tabContentEl) {
+                tabContentEl.style.cssText = '';
+                tabContentEl.style.display = 'flex';
+                tabContentEl.style.position = 'relative';
+                tabContentEl.style.height = '34px';
+                tabContentEl.style.minHeight = '34px';
+            }
+            
+            // Ensure tab has correct classes
+            tabElement.classList.add('pinned');
+            tabElement.classList.remove('dragging', 'active');
             
             // Insert in pinned section
             tabsContainer.insertBefore(tabElement, separator);
             
-            // Remove any empty state message if it exists
-            const folderEmpty = folderContent?.querySelector('.folder-empty');
-            if (folderEmpty) {
-                folderEmpty.remove();
+            // Re-setup event listeners to ensure they're fresh
+            this.setupTabEventListeners(tabElement, tabId);
+            
+            // Make tab draggable again
+            if (this.makeTabDraggable) {
+                this.makeTabDraggable(tabElement);
+            } else {
+                tabElement.draggable = true;
             }
             
-            // If folder was open but is now empty, close it completely
-            if (folder.open && folder.tabIds.length === 0) {
-                folder.open = false;
-                this.folders.set(folder.id, folder);
-                const folderIcon = folderElement.querySelector('.folder-icon');
-                if (folderIcon) {
-                    folderIcon.classList.remove('fa-folder-open');
-                    folderIcon.classList.add('fa-folder');
-                }
-                folderContent.classList.remove('open');
-                folderContent.style.display = 'none';
-                folderContent.style.visibility = 'hidden';
-                folderContent.style.maxHeight = '0px';
-                folderContent.style.padding = '0';
-                folderContent.style.opacity = '0';
+            // Remove any empty state message if it exists
+            const tabGroupEmpty = tabGroupContent?.querySelector('.tab-group-empty');
+            if (tabGroupEmpty) {
+                tabGroupEmpty.remove();
+            }
+            
+            // If tab group was open but is now empty, close it completely
+            if (tabGroup.open && tabGroup.tabIds.length === 0) {
+                tabGroup.open = false;
+                this.tabGroups.set(tabGroup.id, tabGroup);
+                tabGroupContent.classList.remove('open');
+                tabGroupContent.style.display = 'none';
+                tabGroupContent.style.visibility = 'hidden';
+                tabGroupContent.style.maxHeight = '0px';
+                tabGroupContent.style.padding = '0';
+                tabGroupContent.style.opacity = '0';
             }
             
             // Restore styles immediately (no need for double RAF)
-            folderElement.style.transition = originalFolderTransition || '';
-            folderElement.style.pointerEvents = originalFolderPointerEvents || '';
-            folderElement.style.transform = originalFolderTransform || '';
-            folderElement.style.filter = originalFolderFilter || '';
-            folderElement.style.opacity = originalFolderOpacity || '';
+            tabGroupElement.style.transition = originalTabGroupTransition || '';
+            tabGroupElement.style.pointerEvents = originalTabGroupPointerEvents || '';
+            tabGroupElement.style.transform = originalTabGroupTransform || '';
+            tabGroupElement.style.filter = originalTabGroupFilter || '';
+            tabGroupElement.style.opacity = originalTabGroupOpacity || '';
             tabElement.style.transition = originalTabTransition || '';
             
             // Ensure all drag classes are removed
-            folderElement.classList.remove('dragging', 'drag-over-folder', 'drag-over-folder-top', 'drag-over-folder-bottom');
+            tabGroupElement.classList.remove('dragging', 'drag-over-tab-group', 'drag-over-tab-group-top', 'drag-over-tab-group-bottom');
+            
+            // Force a reflow to ensure everything is properly laid out
+            void tabElement.offsetHeight;
         });
         
-        this.saveFolders();
+        this.saveTabGroups();
     }
 
-    deleteFolder(folderId) {
-        const folder = this.folders.get(folderId);
-        if (!folder) return;
+    deleteTabGroup(tabGroupId) {
+        const tabGroup = this.tabGroups.get(tabGroupId);
+        if (!tabGroup) return;
         
         // Move all tabs back to main container
-        folder.tabIds.forEach(tabId => {
+        tabGroup.tabIds.forEach(tabId => {
             const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
             const tabsContainer = document.querySelector('.tabs-container');
             const separator = document.getElementById('tabs-separator');
@@ -6743,47 +7284,130 @@ class AxisBrowser {
             }
         });
         
-        // Remove folder
-        this.folders.delete(folderId);
-        this.saveFolders();
-        this.renderFolders();
+        // Remove tab group
+        this.tabGroups.delete(tabGroupId);
+        this.saveTabGroups();
+        this.renderTabGroups();
     }
 
-    saveFolders() {
-        const foldersArray = Array.from(this.folders.values()).map(folder => ({
-            id: folder.id,
-            name: folder.name,
-            tabIds: folder.tabIds,
-            open: folder.open,
-            order: folder.order
-        }));
-        
-        this.saveSetting('folders', foldersArray);
-    }
-
-    async loadFolders() {
-        try {
-            const foldersData = this.settings.folders || [];
-            if (!Array.isArray(foldersData)) return;
+    saveTabGroups() {
+        const tabGroupsArray = Array.from(this.tabGroups.values()).map(tabGroup => {
+            // Save tab data for each tab in the group so we can recreate them on load
+            const tabs = tabGroup.tabIds.map(tabId => {
+                const tab = this.tabs.get(tabId);
+                if (tab) {
+                    return {
+                        id: tabId,
+                        url: tab.url || null,
+                        title: tab.title || 'New Tab',
+                        favicon: tab.favicon || null
+                    };
+                }
+                return null;
+            }).filter(t => t !== null);
             
-            foldersData.forEach(folderData => {
-                this.folders.set(folderData.id, {
-                    id: folderData.id,
-                    name: folderData.name || `Folder ${folderData.id}`,
-                    tabIds: folderData.tabIds || [],
-                    open: folderData.open !== false, // Default to open
-                    order: folderData.order || 0
+            return {
+                id: tabGroup.id,
+                name: tabGroup.name,
+                tabIds: tabGroup.tabIds,
+                tabs: tabs, // Save tab data so we can recreate tabs on load
+                open: tabGroup.open,
+                order: tabGroup.order,
+                color: tabGroup.color || '#FF6B6B'
+            };
+        });
+        
+        this.saveSetting('tabGroups', tabGroupsArray);
+    }
+
+    async loadTabGroups() {
+        try {
+            const tabGroupsData = this.settings.tabGroups || [];
+            if (!Array.isArray(tabGroupsData)) return;
+            
+            // First, load all tab groups
+            tabGroupsData.forEach(tabGroupData => {
+                this.tabGroups.set(tabGroupData.id, {
+                    id: tabGroupData.id,
+                    name: tabGroupData.name || `Tab Group ${tabGroupData.id}`,
+                    tabIds: tabGroupData.tabIds || [],
+                    open: tabGroupData.open !== false, // Default to open
+                    order: tabGroupData.order || 0,
+                    color: tabGroupData.color || '#FF6B6B',
+                    tabs: tabGroupData.tabs || [] // Store tab data for tabs in this group
                 });
             });
             
-            this.renderFolders();
+            // Create tabs that are in tab groups but don't exist yet
+            const tabsContainer = document.querySelector('.tabs-container');
+            const separator = document.getElementById('tabs-separator');
+            
+            tabGroupsData.forEach(tabGroupData => {
+                if (!tabGroupData.tabIds || !Array.isArray(tabGroupData.tabIds)) return;
+                
+                tabGroupData.tabIds.forEach(tabId => {
+                    // Check if tab already exists
+                    if (this.tabs.has(tabId)) return;
+                    
+                    // Try to find tab data from the tab group's saved tabs
+                    const savedTabData = tabGroupData.tabs?.find(t => t.id === tabId);
+                    
+                    if (savedTabData && tabsContainer && separator) {
+                        // Create the tab element
+                        const tabElement = document.createElement('div');
+                        tabElement.className = 'tab pinned';
+                        tabElement.dataset.tabId = tabId;
+                        
+                        tabElement.innerHTML = `
+                            <div class="tab-content">
+                                <div class="tab-left">
+                                    <img class="tab-favicon" src="" alt="" onerror="this.style.visibility='hidden'">
+                                    <span class="tab-audio-indicator" style="display: none;"><i class="fas fa-volume-up"></i></span>
+                                    <span class="tab-title">${this.escapeHtml(savedTabData.title || 'New Tab')}</span>
+                                </div>
+                                <div class="tab-right">
+                                    <button class="tab-close"><i class="fas fa-times"></i></button>
+                                </div>
+                            </div>
+                        `;
+                        
+                        // Store tab data
+                        this.tabs.set(tabId, {
+                            id: tabId,
+                            url: savedTabData.url || null,
+                            title: savedTabData.title || 'New Tab',
+                            favicon: savedTabData.favicon || null,
+                            canGoBack: false,
+                            canGoForward: false,
+                            history: savedTabData.url ? [savedTabData.url] : [],
+                            historyIndex: savedTabData.url ? 0 : -1,
+                            pinned: true,
+                            webview: null // No webview initially - tab is closed
+                        });
+                        
+                        // Mark as closed since it has no webview
+                        tabElement.classList.add('closed');
+                        
+                        // Set up event listeners
+                        this.setupTabEventListeners(tabElement, tabId);
+                        
+                        // Update favicon
+                        this.updateTabFavicon(tabId, tabElement);
+                        
+                        // Update closed state
+                        this.updatePinnedTabClosedState(tabId);
+                    }
+                });
+            });
+            
+            this.renderTabGroups();
         } catch (error) {
-            console.error('Error loading folders:', error);
+            console.error('Error loading tab groups:', error);
         }
     }
 
-    showFolderContextMenu(e, folderId) {
-        const contextMenu = document.getElementById('folder-context-menu');
+    showTabGroupContextMenu(e, tabGroupId) {
+        const contextMenu = document.getElementById('tab-group-context-menu');
         if (contextMenu) {
             // Hide other context menus
             this.hideTabContextMenu();
@@ -6796,7 +7420,7 @@ class AxisBrowser {
             
             // Position menu and ensure it stays visible
             const menuWidth = 200;
-            const menuHeight = 100;
+            const menuHeight = 120;
             const isRight = this.isSidebarRight();
             
             let left = e.pageX;
@@ -6827,7 +7451,7 @@ class AxisBrowser {
             contextMenu.style.top = top + 'px';
             contextMenu.style.right = 'auto';
             contextMenu.style.display = 'block';
-            this.contextMenuFolderId = folderId;
+            this.contextMenuTabGroupId = tabGroupId;
             
             // Reset animations on all menu items
             const menuItems = contextMenu.querySelectorAll('.context-menu-item');
@@ -6842,8 +7466,8 @@ class AxisBrowser {
         }
     }
 
-    hideFolderContextMenu() {
-        const contextMenu = document.getElementById('folder-context-menu');
+    hideTabGroupContextMenu() {
+        const contextMenu = document.getElementById('tab-group-context-menu');
         if (contextMenu && !contextMenu.classList.contains('hidden')) {
             contextMenu.classList.add('closing');
             contextMenu.classList.remove('expanded');
@@ -6855,14 +7479,14 @@ class AxisBrowser {
                 contextMenu.style.opacity = '0';
             }, 250);
         }
-        this.contextMenuFolderId = null;
+        this.contextMenuTabGroupId = null;
     }
 
-    renameCurrentFolder() {
-        if (this.contextMenuFolderId) {
-            const folderElement = document.querySelector(`[data-folder-id="${this.contextMenuFolderId}"]`);
-            if (folderElement) {
-                const nameInput = folderElement.querySelector('.folder-name-input');
+    renameCurrentTabGroup() {
+        if (this.contextMenuTabGroupId) {
+            const tabGroupElement = document.querySelector(`[data-tab-group-id="${this.contextMenuTabGroupId}"]`);
+            if (tabGroupElement) {
+                const nameInput = tabGroupElement.querySelector('.tab-group-name-input');
                 if (nameInput) {
                     const currentName = nameInput.value;
                     
@@ -6905,17 +7529,17 @@ class AxisBrowser {
                         // Restore the nameInput element
                         const newNameInput = document.createElement('input');
                         newNameInput.type = 'text';
-                        newNameInput.className = 'folder-name-input tab-title';
+                        newNameInput.className = 'tab-group-name-input tab-title';
                         newNameInput.value = newName;
                         newNameInput.readOnly = true;
                         input.parentNode.replaceChild(newNameInput, input);
                         
-                        // Update folder data
-                        const folder = this.folders.get(this.contextMenuFolderId);
-                        if (folder) {
-                            folder.name = newName;
-                            this.folders.set(this.contextMenuFolderId, folder);
-                            this.saveFolders();
+                        // Update tab group data
+                        const tabGroup = this.tabGroups.get(this.contextMenuTabGroupId);
+                        if (tabGroup) {
+                            tabGroup.name = newName;
+                            this.tabGroups.set(this.contextMenuTabGroupId, tabGroup);
+                            this.saveTabGroups();
                         }
                     };
                     
@@ -6935,11 +7559,11 @@ class AxisBrowser {
         }
     }
 
-    deleteCurrentFolder() {
-        if (this.contextMenuFolderId) {
-            const folder = this.folders.get(this.contextMenuFolderId);
-            if (folder && confirm(`Delete folder "${folder.name}"? Tabs will be moved back to the sidebar.`)) {
-                this.deleteFolder(this.contextMenuFolderId);
+    deleteCurrentTabGroup() {
+        if (this.contextMenuTabGroupId) {
+            const tabGroup = this.tabGroups.get(this.contextMenuTabGroupId);
+            if (tabGroup && confirm(`Delete tab group "${tabGroup.name}"? Tabs will be moved back to the sidebar.`)) {
+                this.deleteTabGroup(this.contextMenuTabGroupId);
             }
         }
     }
@@ -7646,12 +8270,224 @@ class AxisBrowser {
         });
     }
 
+    // Show library media popup on hover
+    async showLibraryMediaPopup() {
+        const popup = document.getElementById('library-media-popup');
+        if (!popup) return;
+        
+        // Position popup within sidebar boundaries, above footer buttons
+        const sidebar = document.getElementById('sidebar');
+        const sidebarFooter = document.querySelector('.sidebar-footer');
+        
+        if (sidebar && sidebarFooter) {
+            const sidebarRect = sidebar.getBoundingClientRect();
+            const footerRect = sidebarFooter.getBoundingClientRect();
+            
+            // Calculate position relative to sidebar (not viewport)
+            // Get the footer's position relative to the sidebar
+            const footerTopRelative = footerRect.top - sidebarRect.top;
+            
+            // Position very close to the footer, leaving just enough space to hover
+            // Calculate the exact height needed for 3 items (each ~44px + 2px gap)
+            const itemHeight = 44; // min-height of each item
+            const gap = 2; // gap between items
+            const listPadding = 8; // top + bottom padding of list
+            const exactHeight = (itemHeight * 3) + (gap * 2) + listPadding;
+            
+            // Position just above the footer with minimal spacing (2px for hover area)
+            const topPosition = footerTopRelative - exactHeight - 2;
+            
+            // Ensure it doesn't go above the sidebar
+            const finalTop = Math.max(8, topPosition);
+            
+            popup.style.position = 'absolute';
+            popup.style.top = `${finalTop}px`;
+            popup.style.left = '0';
+            popup.style.right = '0';
+            popup.style.width = '100%';
+            popup.style.height = `${exactHeight}px`;
+            popup.style.maxHeight = `${exactHeight}px`;
+            popup.style.bottom = 'auto';
+        }
+        
+        // Load and populate media items
+        await this.populateLibraryMediaPopup();
+        
+        // Show popup with security panel style animation
+        popup.style.opacity = '0';
+        popup.style.transform = 'scale(0.95)';
+        requestAnimationFrame(() => {
+            popup.classList.remove('hidden');
+            popup.style.transition = 'opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)';
+            requestAnimationFrame(() => {
+                popup.style.opacity = '1';
+                popup.style.transform = 'scale(1)';
+            });
+        });
+    }
+    
+    // Hide library media popup with closing animation (matching security panel)
+    hideLibraryMediaPopup() {
+        const popup = document.getElementById('library-media-popup');
+        if (popup && !popup.classList.contains('hidden')) {
+            // Hide with security panel style animation
+            popup.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
+            popup.style.opacity = '0';
+            popup.style.transform = 'scale(0.95)';
+            
+            const mediaList = document.getElementById('library-media-list');
+            
+            setTimeout(() => {
+                popup.classList.add('hidden');
+                popup.style.opacity = '';
+                popup.style.transform = '';
+                popup.style.transition = '';
+                // Clear content after hiding to free memory
+                if (mediaList) {
+                    mediaList.innerHTML = '';
+                }
+            }, 150);
+        }
+    }
+    
+    // Populate library media popup with videos and pictures
+    async populateLibraryMediaPopup() {
+        const mediaList = document.getElementById('library-media-list');
+        if (!mediaList) return;
+        
+        const { items } = await this.getLibraryItems('desktop');
+        
+        // Filter to only show media (videos and pictures)
+        // Reverse order so newest items appear at the bottom
+        const mediaItems = items.filter(item => 
+            item.kind === 'video' || item.kind === 'image'
+        ).reverse().slice(-3); // Get last 3 items (newest at bottom)
+        
+        mediaList.innerHTML = '';
+        
+        if (!mediaItems || mediaItems.length === 0) {
+            mediaList.innerHTML = `
+                <div class="library-media-empty">
+                    <i class="fas fa-folder-open"></i>
+                    <p>No media files</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Add items simply - no animations
+        mediaItems.forEach((file, index) => {
+            const mediaItem = document.createElement('div');
+            mediaItem.className = 'library-media-item';
+            mediaItem.draggable = true;
+            
+            // Format time ago
+            const timeAgo = this.formatTimeAgo(file.mtime);
+            
+            // Create thumbnail with actual image or video
+            let thumbnail;
+            if (file.kind === 'image') {
+                // Use actual image file - format path properly for file:// URL
+                // Replace backslashes with forward slashes and encode the path
+                const normalizedPath = file.path.replace(/\\/g, '/');
+                const imageUrl = `file://${normalizedPath}`;
+                thumbnail = `<div class="library-media-thumbnail library-media-thumbnail-image">
+                     <img src="${this.escapeHtml(imageUrl)}" alt="${this.escapeHtml(file.name)}" onerror="this.style.display='none'; this.parentElement.innerHTML='<i class=\\'fas fa-image\\'></i>';" />
+                   </div>`;
+            } else {
+                // For videos, show video icon (could be enhanced to show video thumbnail later)
+                thumbnail = `<div class="library-media-thumbnail library-media-thumbnail-video">
+                     <i class="fas fa-video"></i>
+                   </div>`;
+            }
+            
+            mediaItem.innerHTML = `
+                ${thumbnail}
+                <div class="library-media-info">
+                    <div class="library-media-title">${this.escapeHtml(file.name)}</div>
+                </div>
+                <div class="library-media-time">${timeAgo}</div>
+            `;
+            
+            // Click to open file
+            mediaItem.addEventListener('click', () => {
+                this.openLibraryItem(file.path);
+                this.hideLibraryMediaPopup();
+            });
+            
+            // Drag functionality for drag-to-upload
+            mediaItem.addEventListener('dragstart', async (e) => {
+                e.stopPropagation();
+                mediaItem.classList.add('dragging');
+                
+                // Set drag data with file path - format for Electron/webview compatibility
+                e.dataTransfer.effectAllowed = 'copy';
+                const normalizedPath = file.path.replace(/\\/g, '/');
+                const fileUrl = `file://${normalizedPath}`;
+                
+                // Set multiple data formats for maximum compatibility
+                e.dataTransfer.setData('text/plain', file.path);
+                e.dataTransfer.setData('text/uri-list', fileUrl);
+                
+                // For web uploads, we need to create a File object
+                // Note: In Electron, we can't directly create File objects from file paths
+                // But we can set the file path which webviews can handle
+                try {
+                    // Try to read file and create a File-like object
+                    const response = await fetch(fileUrl);
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        const fileObj = new File([blob], file.name, { 
+                            type: blob.type || (file.kind === 'image' ? 'image/*' : file.kind === 'video' ? 'video/*' : 'application/octet-stream')
+                        });
+                        
+                        // Use DataTransferItemList for better file drag support
+                        const dt = e.dataTransfer;
+                        if (dt.items) {
+                            dt.items.clear();
+                            dt.items.add(fileObj);
+                        }
+                    }
+                } catch (err) {
+                    // Fallback: set file path as text/uri-list which some sites can handle
+                    console.log('Using fallback drag data:', file.path);
+                }
+                
+                // Create drag image preview
+                const dragImage = mediaItem.cloneNode(true);
+                dragImage.style.position = 'absolute';
+                dragImage.style.top = '-1000px';
+                dragImage.style.opacity = '0.9';
+                dragImage.style.transform = 'scale(1.1)';
+                dragImage.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.4)';
+                document.body.appendChild(dragImage);
+                
+                e.dataTransfer.setDragImage(dragImage, 40, 40);
+                
+                setTimeout(() => {
+                    if (dragImage.parentNode) {
+                        dragImage.parentNode.removeChild(dragImage);
+                    }
+                }, 0);
+            });
+            
+            mediaItem.addEventListener('dragend', () => {
+                mediaItem.classList.remove('dragging');
+            });
+            
+            mediaList.appendChild(mediaItem);
+        });
+    }
+
     // Downloads management
     toggleDownloads() {
         const downloadsPanel = document.getElementById('downloads-panel');
         const settingsPanel = document.getElementById('settings-panel');
         const securityPanel = document.getElementById('security-panel');
         const backdrop = document.getElementById('modal-backdrop');
+        
+        // Mark as explicitly opened
+        this.libraryExplicitlyOpened = downloadsPanel.classList.contains('hidden');
         
         // Close other panels with animation
         if (!settingsPanel.classList.contains('hidden')) {
@@ -7662,37 +8498,120 @@ class AxisBrowser {
         }
         
         if (downloadsPanel.classList.contains('hidden')) {
-            // Smooth fade-in animation
-            downloadsPanel.classList.remove('hidden');
+            // Update library info first
+            this.populateDownloads(this.currentLibraryLocation || 'desktop');
+            
+            // Show backdrop
             if (backdrop) {
                 backdrop.classList.remove('hidden');
-                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                backdrop.style.opacity = '0';
+                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1)';
+                requestAnimationFrame(() => {
+                    backdrop.style.opacity = '1';
+                });
             }
             
-            // Add entrance animation class
-            downloadsPanel.classList.add('downloads-entering');
+            // Show panel with animation (matching security panel)
+            downloadsPanel.classList.remove('hidden');
+            downloadsPanel.style.opacity = '0';
+            downloadsPanel.style.transform = 'translate(-50%, -48%) scale(0.95)';
             
-            // Populate library immediately
-            this.populateDownloads(this.currentLibraryLocation || 'downloads');
-            
-            // Remove animation class after animation completes (200ms)
-            setTimeout(() => {
-                downloadsPanel.classList.remove('downloads-entering');
-            }, 200);
-            
-                // Refresh popup themes
-                this.refreshPopupThemes();
+            requestAnimationFrame(() => {
+                downloadsPanel.style.transition = 'opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)';
+                downloadsPanel.style.opacity = '1';
+                downloadsPanel.style.transform = 'translate(-50%, -50%) scale(1)';
+            });
             
         } else {
-            // Smooth fade-out animation
-            downloadsPanel.classList.add('downloads-closing');
+            // Hide with animation (matching security panel)
+            downloadsPanel.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
+            downloadsPanel.style.opacity = '0';
+            downloadsPanel.style.transform = 'translate(-50%, -48%) scale(0.95)';
+            this.libraryExplicitlyOpened = false;
+            
+            if (backdrop) {
+                backdrop.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
+                backdrop.style.opacity = '0';
+            }
             
             setTimeout(() => {
                 downloadsPanel.classList.add('hidden');
-                downloadsPanel.classList.remove('downloads-closing');
-                if (backdrop) backdrop.classList.add('hidden');
+                downloadsPanel.style.opacity = '';
+                downloadsPanel.style.transform = '';
+                downloadsPanel.style.transition = '';
+                if (backdrop) {
+                    backdrop.classList.add('hidden');
+                    backdrop.style.opacity = '';
+                    backdrop.style.transition = '';
+                }
             }, 150);
         }
+    }
+
+    async populateDownloadsMediaOnly(locationKey = 'desktop') {
+        const downloadsList = document.getElementById('downloads-list');
+        const { baseDir, items } = await this.getLibraryItems(locationKey);
+        this.currentLibraryLocation = locationKey;
+        this.currentLibraryBaseDir = baseDir;
+        
+        // Filter to only show media (videos and pictures)
+        // Reverse order so newest items appear at the bottom
+        const mediaItems = items.filter(item => 
+            item.kind === 'video' || item.kind === 'image'
+        ).reverse();
+        
+        // Clear list
+        downloadsList.innerHTML = '';
+        
+        if (!mediaItems || mediaItems.length === 0) {
+            downloadsList.innerHTML = `
+                <div class="no-downloads">
+                    <i class="fas fa-folder-open"></i>
+                    <p>No media files found</p>
+                    <p class="no-downloads-subtitle">Videos and pictures will appear here</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Add items simply - no animations
+        mediaItems.forEach((file, index) => {
+            const downloadItem = document.createElement('div');
+            downloadItem.className = 'download-item';
+                
+                const iconClass = file.isDirectory
+                    ? 'fas fa-folder'
+                    : (file.kind === 'image'
+                        ? 'fas fa-file-image'
+                        : file.kind === 'video'
+                            ? 'fas fa-file-video'
+                            : 'fas fa-file');
+                
+                const meta = this.formatLibraryMeta(file);
+
+                downloadItem.innerHTML = `
+                    <i class="${iconClass} download-icon"></i>
+                    <div class="download-info">
+                        <div class="download-name">${file.name}</div>
+                        <div class="download-progress">${meta}</div>
+                        <div class="download-url">${file.path}</div>
+                    </div>
+                    <div class="download-actions">
+                        <button class="download-btn" title="Open" data-path="${file.path}">
+                            <i class="fas fa-external-link-alt"></i>
+                        </button>
+                    </div>
+                `;
+                
+                // Open file/folder
+                const openBtn = downloadItem.querySelector('.download-btn[title="Open"]');
+                openBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.openLibraryItem(file.path);
+                });
+                
+                downloadsList.appendChild(downloadItem);
+            });
     }
 
     async populateDownloads(locationKey = 'all') {
@@ -7701,32 +8620,28 @@ class AxisBrowser {
         this.currentLibraryLocation = locationKey;
         this.currentLibraryBaseDir = baseDir;
         
-        // Clear with fade out animation
-        downloadsList.style.opacity = '0';
-        downloadsList.style.transform = 'translateY(10px)';
+        // Reverse order so newest items appear at the bottom
+        // Limit to 20 most recent items (10 less than before)
+        const limitedItems = items ? items.reverse().slice(-20) : [];
         
-        setTimeout(() => {
-            downloadsList.innerHTML = '';
-            
-            if (!items || items.length === 0) {
-                downloadsList.innerHTML = `
-                    <div class="no-downloads">
-                        <i class="fas fa-folder-open"></i>
-                        <p>No files found</p>
-                        <p class="no-downloads-subtitle">Your files will appear here</p>
-                    </div>
-                `;
-                downloadsList.style.opacity = '1';
-                downloadsList.style.transform = 'translateY(0)';
-                return;
-            }
-            
-            // Add items with staggered animation
-            items.forEach((file, index) => {
-                const downloadItem = document.createElement('div');
-                downloadItem.className = 'download-item';
-                downloadItem.style.opacity = '0';
-                downloadItem.style.transform = 'translateY(20px)';
+        // Clear list
+        downloadsList.innerHTML = '';
+        
+        if (!limitedItems || limitedItems.length === 0) {
+            downloadsList.innerHTML = `
+                <div class="no-downloads">
+                    <i class="fas fa-folder-open"></i>
+                    <p>No files found</p>
+                    <p class="no-downloads-subtitle">Your files will appear here</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Add items simply - no animations
+        limitedItems.forEach((file, index) => {
+            const downloadItem = document.createElement('div');
+            downloadItem.className = 'download-item';
                 
                 const iconClass = file.isDirectory
                     ? 'fas fa-folder'
@@ -7766,20 +8681,7 @@ class AxisBrowser {
                 });
                 
                 downloadsList.appendChild(downloadItem);
-                
-                // Staggered entrance animation
-                setTimeout(() => {
-                    downloadItem.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
-                    downloadItem.style.opacity = '1';
-                    downloadItem.style.transform = 'translateY(0)';
-                }, index * 50); // 50ms delay between items
             });
-            
-            // Fade in the list
-            downloadsList.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
-            downloadsList.style.opacity = '1';
-            downloadsList.style.transform = 'translateY(0)';
-        }, 150);
     }
 
     // Refresh is no longer exposed via UI, but keep helper in case we reuse later
@@ -7788,7 +8690,7 @@ class AxisBrowser {
         const restoreContent = this.showLoadingState(downloadsList, 'Refreshing library...');
         
         try {
-            await this.populateDownloads(this.currentLibraryLocation || 'all');
+            await this.populateDownloads(this.currentLibraryLocation || 'desktop');
         } catch (error) {
             this.showErrorFeedback(downloadsList, 'Failed to refresh library');
         } finally {
@@ -7874,11 +8776,11 @@ class AxisBrowser {
     }
 
     async openLibraryRoot() {
-        // Open the current library base directory, defaulting to Downloads
+        // Open the current library base directory, defaulting to Desktop
         if (this.currentLibraryBaseDir) {
             await this.openLibraryItem(this.currentLibraryBaseDir);
         } else {
-            const result = await this.getLibraryItems('downloads');
+            const result = await this.getLibraryItems('desktop');
             if (result && result.baseDir) {
                 await this.openLibraryItem(result.baseDir);
             }
@@ -8033,6 +8935,73 @@ class AxisBrowser {
         let startX = 0;
         let startWidth = 0;
         let animationFrame = null;
+        let hoverTimeout = null;
+        let isNearEdge = false;
+        
+        // Show resize handle after 1 second of hovering near the edge
+        const showResizeHandle = () => {
+            if (hoverTimeout) {
+                clearTimeout(hoverTimeout);
+            }
+            hoverTimeout = setTimeout(() => {
+                if (isNearEdge) {
+                    resizeHandle.classList.add('visible');
+                }
+            }, 1000);
+        };
+        
+        // Hide resize handle immediately
+        const hideResizeHandle = () => {
+            if (hoverTimeout) {
+                clearTimeout(hoverTimeout);
+                hoverTimeout = null;
+            }
+            resizeHandle.classList.remove('visible');
+            isNearEdge = false;
+        };
+        
+        // Track mouse movement on sidebar to detect when near edge
+        sidebar.addEventListener('mousemove', (e) => {
+            const rect = sidebar.getBoundingClientRect();
+            const isRightSide = sidebar.classList.contains('sidebar-right');
+            const edgeThreshold = 20; // pixels from edge
+            
+            let nearEdge = false;
+            if (isRightSide) {
+                // Sidebar on right - check left edge
+                nearEdge = e.clientX <= rect.left + edgeThreshold;
+            } else {
+                // Sidebar on left - check right edge
+                nearEdge = e.clientX >= rect.right - edgeThreshold;
+            }
+            
+            if (nearEdge && !isNearEdge) {
+                // Just entered edge area
+                isNearEdge = true;
+                showResizeHandle();
+            } else if (!nearEdge && isNearEdge) {
+                // Just left edge area
+                hideResizeHandle();
+            }
+        });
+        
+        // Hide when mouse leaves sidebar
+        sidebar.addEventListener('mouseleave', () => {
+            hideResizeHandle();
+        });
+        
+        // Show immediately when directly hovering on resize handle
+        resizeHandle.addEventListener('mouseenter', () => {
+            isNearEdge = true;
+            if (hoverTimeout) {
+                clearTimeout(hoverTimeout);
+            }
+            resizeHandle.classList.add('visible');
+        });
+        
+        resizeHandle.addEventListener('mouseleave', () => {
+            hideResizeHandle();
+        });
 
         const startResize = (e) => {
             if (isResizing) return;
@@ -8259,11 +9228,11 @@ class AxisBrowser {
                     hideInsertionLine();
                     return;
                 }
-                // Don't interfere with folder dragging - let folders handle their own dragover
-                // Also hide insertion line if over folder content
-                if (e.target.classList.contains('folder') || 
-                    e.target.closest('.folder') || 
-                    e.target.closest('.folder-content')) {
+                // Don't interfere with tab group dragging - let tab groups handle their own dragover
+                // Also hide insertion line if over tab group content
+                if (e.target.classList.contains('tab-group') || 
+                    e.target.closest('.tab-group') || 
+                    e.target.closest('.tab-group-content')) {
                     hideInsertionLine();
                     return;
                 }
@@ -8272,21 +9241,21 @@ class AxisBrowser {
                 const dropY = e.clientY;
                 const containerRect = tabsContainer.getBoundingClientRect();
                 
-                // Check if we're near a folder (above or below it) - handle folder positioning
-                const allFolders = document.querySelectorAll('.folder');
-                for (const folder of allFolders) {
-                    const folderRect = folder.getBoundingClientRect();
-                    // Check if mouse is in the gap area above or below the folder
+                // Check if we're near a tab group (above or below it) - handle tab group positioning
+                const allTabGroups = document.querySelectorAll('.tab-group');
+                for (const tabGroup of allTabGroups) {
+                    const tabGroupRect = tabGroup.getBoundingClientRect();
+                    // Check if mouse is in the gap area above or below the tab group
                     const gapSize = 8; // Same as CSS gap
-                    const isNearFolderTop = dropY >= folderRect.top - gapSize && dropY < folderRect.top;
-                    const isNearFolderBottom = dropY > folderRect.bottom && dropY <= folderRect.bottom + gapSize;
+                    const isNearTabGroupTop = dropY >= tabGroupRect.top - gapSize && dropY < tabGroupRect.top;
+                    const isNearTabGroupBottom = dropY > tabGroupRect.bottom && dropY <= tabGroupRect.bottom + gapSize;
                     
-                    if (isNearFolderTop || isNearFolderBottom) {
-                        // Show insertion line near folder
-                        const isAbove = dropY < folderRect.top + folderRect.height / 2;
-                        const lineY = isAbove ? folderRect.top - containerRect.top - 4 : folderRect.bottom - containerRect.top + 4;
+                    if (isNearTabGroupTop || isNearTabGroupBottom) {
+                        // Show insertion line near tab group
+                        const isAbove = dropY < tabGroupRect.top + tabGroupRect.height / 2;
+                        const lineY = isAbove ? tabGroupRect.top - containerRect.top - 4 : tabGroupRect.bottom - containerRect.top + 4;
                         showInsertionLine(lineY);
-                        folder.dataset.dropSide = isAbove ? 'top' : 'bottom';
+                        tabGroup.dataset.dropSide = isAbove ? 'top' : 'bottom';
                         e.preventDefault();
                         e.dataTransfer.dropEffect = 'move';
                         return;
@@ -8343,30 +9312,30 @@ class AxisBrowser {
                 
                 // Don't interfere with tab-to-tab dropping - let tabs handle their own drop
                 if (e.target.classList.contains('tab') || e.target.closest('.tab')) return;
-                // Don't interfere with folder dropping - let folders handle their own drop
-                if (e.target.classList.contains('folder') || e.target.closest('.folder')) return;
+                // Don't interfere with tab group dropping - let tab groups handle their own drop
+                if (e.target.classList.contains('tab-group') || e.target.closest('.tab-group')) return;
                 
-                // Check if we're dropping near a folder (in the gap above or below it)
+                // Check if we're dropping near a tab group (in the gap above or below it)
                 const dropY = e.clientY;
-                const allFolders = document.querySelectorAll('.folder');
-                for (const folder of allFolders) {
-                    const folderRect = folder.getBoundingClientRect();
+                const allTabGroups = document.querySelectorAll('.tab-group');
+                for (const tabGroup of allTabGroups) {
+                    const tabGroupRect = tabGroup.getBoundingClientRect();
                     const gapSize = 8;
-                    const isNearFolderTop = dropY >= folderRect.top - gapSize && dropY < folderRect.top;
-                    const isNearFolderBottom = dropY > folderRect.bottom && dropY <= folderRect.bottom + gapSize;
+                    const isNearTabGroupTop = dropY >= tabGroupRect.top - gapSize && dropY < tabGroupRect.top;
+                    const isNearTabGroupBottom = dropY > tabGroupRect.bottom && dropY <= tabGroupRect.bottom + gapSize;
                     
-                    if (isNearFolderTop || isNearFolderBottom) {
-                        // Handle drop near folder
+                    if (isNearTabGroupTop || isNearTabGroupBottom) {
+                        // Handle drop near tab group
                         const tabId = parseInt(draggedTab.dataset.tabId, 10);
                         const tab = this.tabs.get(tabId);
                         if (!tab) return;
                         
-                        // Check if tab was dragged from a folder
-                        const draggedTabParentFolder = draggedTab.closest('.folder');
-                        if (draggedTabParentFolder) {
-                            const folderId = parseInt(draggedTabParentFolder.dataset.folderId, 10);
-                            if (folderId) {
-                                this.removeTabFromFolder(tabId, folderId);
+                        // Check if tab was dragged from a tab group
+                        const draggedTabParentTabGroup = draggedTab.closest('.tab-group');
+                        if (draggedTabParentTabGroup) {
+                            const tabGroupId = parseInt(draggedTabParentTabGroup.dataset.tabGroupId, 10);
+                            if (tabGroupId) {
+                                this.removeTabFromTabGroup(tabId, tabGroupId);
                             }
                         }
                         
@@ -8497,12 +9466,12 @@ class AxisBrowser {
                 const tabId = parseInt(tab.dataset.tabId, 10);
                 if (tabId) {
                     // Find which folder this tab belongs to
-                    const parentFolder = tab.closest('.folder');
-                    if (parentFolder) {
-                        const folderId = parseInt(parentFolder.dataset.folderId, 10);
-                        const folder = this.folders.get(folderId);
+                    const parentTabGroup = tab.closest('.tab-group');
+                    if (parentTabGroup) {
+                        const tabGroupId = parseInt(parentTabGroup.dataset.tabGroupId, 10);
+                        const tabGroup = this.tabGroups.get(tabGroupId);
                         
-                        // Check if tab is still in the folder or was moved out
+                        // Check if tab is still in the tab group or was moved out
                         if (folder && !parentFolder.contains(tab)) {
                             // Tab was moved out of folder
                             this.removeTabFromFolder(tabId, folderId);
@@ -8523,8 +9492,8 @@ class AxisBrowser {
                 document.querySelectorAll('.tab').forEach(t => {
                     delete t.dataset.dropSide;
                 });
-                document.querySelectorAll('.folder').forEach(f => {
-                    delete f.dataset.dropSide;
+                document.querySelectorAll('.tab-group').forEach(tg => {
+                    delete tg.dataset.dropSide;
                 });
                 
                 // Remove drag section indicators
@@ -8539,9 +9508,9 @@ class AxisBrowser {
                 e.dataTransfer.dropEffect = 'move';
                 
                 // Check if dragging a folder (use dragging class since getData doesn't work in dragover)
-                const draggedFolder = document.querySelector('.folder.dragging');
+                const draggedTabGroup = document.querySelector('.tab-group.dragging');
                 
-                if (draggedFolder) {
+                if (draggedTabGroup) {
                     // Handle folder dragging over tab
                     const rect = tab.getBoundingClientRect();
                     const containerRect = tabsContainer.getBoundingClientRect();
@@ -8588,9 +9557,9 @@ class AxisBrowser {
                 
                 // Check if dragging a folder (use getData in drop or dragging class)
                 const draggedFolderId = e.dataTransfer.getData('application/folder-id');
-                const currentDraggedFolder = (draggedFolderId ? document.querySelector(`[data-folder-id="${draggedFolderId}"]`) : null) || document.querySelector('.folder.dragging');
+                const currentDraggedTabGroup = (draggedTabGroupId ? document.querySelector(`[data-tab-group-id="${draggedTabGroupId}"]`) : null) || document.querySelector('.tab-group.dragging');
                 
-                if (currentDraggedFolder) {
+                if (currentDraggedTabGroup) {
                     // Handle folder drop on tab
                     const isAbove = tab.dataset.dropSide === 'top';
                     
@@ -8709,8 +9678,8 @@ class AxisBrowser {
                 document.querySelectorAll('.tab').forEach(t => {
                     delete t.dataset.dropSide;
                 });
-                document.querySelectorAll('.folder').forEach(f => {
-                    delete f.dataset.dropSide;
+                document.querySelectorAll('.tab-group').forEach(tg => {
+                    delete tg.dataset.dropSide;
                 });
             });
         };
@@ -8735,7 +9704,7 @@ class AxisBrowser {
         observer.observe(tabsContainer, { childList: true, subtree: true });
         
         // Also observe folder content for tabs added to folders
-        const folderObserver = new MutationObserver((mutations) => {
+        const tabGroupObserver = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('tab')) {
@@ -8745,41 +9714,41 @@ class AxisBrowser {
             });
         });
         
-        // Track observed folder contents to prevent duplicate observations
-        const observedFolderContents = new WeakSet();
+        // Track observed tab group contents to prevent duplicate observations
+        const observedTabGroupContents = new WeakSet();
         
-        // Observe all folder content areas
-        document.querySelectorAll('.folder-content').forEach(folderContent => {
-            if (!observedFolderContents.has(folderContent)) {
-                folderObserver.observe(folderContent, { childList: true });
-                observedFolderContents.add(folderContent);
+        // Observe all tab group content areas
+        document.querySelectorAll('.tab-group-content').forEach(tabGroupContent => {
+            if (!observedTabGroupContents.has(tabGroupContent)) {
+                tabGroupObserver.observe(tabGroupContent, { childList: true });
+                observedTabGroupContents.add(tabGroupContent);
             }
         });
         
-        // Also observe when new folders are created
-        const folderContainerObserver = new MutationObserver((mutations) => {
+        // Also observe when new tab groups are created
+        const tabGroupContainerObserver = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('folder')) {
-                        const folderContent = node.querySelector('.folder-content');
-                        if (folderContent && !observedFolderContents.has(folderContent)) {
-                            folderObserver.observe(folderContent, { childList: true });
-                            observedFolderContents.add(folderContent);
-                            // Make existing tabs in this folder draggable
-                            folderContent.querySelectorAll('.tab').forEach(makeTabDraggable);
+                    if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('tab-group')) {
+                        const tabGroupContent = node.querySelector('.tab-group-content');
+                        if (tabGroupContent && !observedTabGroupContents.has(tabGroupContent)) {
+                            tabGroupObserver.observe(tabGroupContent, { childList: true });
+                            observedTabGroupContents.add(tabGroupContent);
+                            // Make existing tabs in this tab group draggable
+                            tabGroupContent.querySelectorAll('.tab').forEach(makeTabDraggable);
                         }
                     }
                 });
             });
         });
         
-        folderContainerObserver.observe(tabsContainer, { childList: true });
+        tabGroupContainerObserver.observe(tabsContainer, { childList: true });
         
         // Store observers on instance for potential cleanup (though they'll be cleaned up when page unloads)
         this._dragDropObservers = {
             mainObserver: observer,
-            folderObserver: folderObserver,
-            folderContainerObserver: folderContainerObserver
+            tabGroupObserver: tabGroupObserver,
+            tabGroupContainerObserver: tabGroupContainerObserver
         };
     }
 
