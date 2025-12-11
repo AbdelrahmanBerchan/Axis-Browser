@@ -542,8 +542,14 @@ body.theme-switching *::after {
     background: transparent;
     cursor: col-resize;
     z-index: 1000;
-    transition: background 0.15s ease;
+    transition: background 0.15s ease, opacity 0.2s ease;
     border-radius: 2px;
+    opacity: 0;
+    pointer-events: auto; /* Always allow interaction, just hide visually */
+}
+
+.resize-handle.visible {
+    opacity: 1;
 }
 
 /* Larger invisible hit area for easier grabbing without making it visually thicker */
@@ -927,6 +933,22 @@ body.resizing .resize-handle {
     transition: transform 0.06s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Copy link button uses same animation as security button */
+#copy-link-btn:hover {
+    transform: scale(1.05) !important;
+    background: var(--button-hover) !important;
+    color: var(--text-color) !important;
+    border-radius: 10px !important;
+    transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+#copy-link-btn:active {
+    transform: scale(0.95) !important;
+    transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
 /* Ensure security button in URL bar is themed */
 #security-btn {
     color: var(--icon-color) !important;
@@ -1053,18 +1075,23 @@ body.resizing .resize-handle {
     background: transparent;
     border-radius: 10px;
     cursor: pointer;
-    transition: background 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                box-shadow 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                outline 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: none !important;
     position: relative;
     border: none;
     box-shadow: none;
     outline: 1px solid transparent;
     box-sizing: border-box;
     overflow: hidden;
-    flex-shrink: 0;
-    user-select: none;
-    will-change: transform, background, box-shadow;
+}
+
+.tab:hover,
+.tab:hover *,
+.tab:hover::before,
+.tab:hover::after {
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
 }
 
 /* Smooth close animation: shrink height and fade out so siblings move smoothly */
@@ -1086,7 +1113,7 @@ body.resizing .resize-handle {
     filter: blur(0.5px);
 }
 
-.folder.dragging {
+.tab-group.dragging {
     opacity: 0.4;
     transform: rotate(2deg) scale(0.95);
     z-index: 1000;
@@ -1119,6 +1146,27 @@ body.resizing .resize-handle {
     box-shadow: 0 4px 12px var(--animation-shadow-light);
     background: var(--animation-overlay-hover);
     border: none;
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
+}
+
+.tab:hover:not(.active)::before,
+.tab:hover:not(.active)::after {
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
+}
+
+.tab:hover:not(.active) *,
+.tab:hover:not(.active) *::before,
+.tab:hover:not(.active) *::after {
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
 }
 
 .tab.active {
@@ -1164,8 +1212,28 @@ body.resizing .resize-handle {
     flex-shrink: 0;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+    transition: none !important;
     transform: translateX(8px);
+}
+
+/* Make close button always visible for tabs NOT in tab groups (easier to remove) */
+.tabs-container > .tab:not(.tab-group .tab) .tab-right {
+    opacity: 0.7;
+    pointer-events: auto;
+    transform: translateX(0);
+}
+
+.tabs-container > .tab:not(.tab-group .tab):hover .tab-right {
+    opacity: 1;
+}
+
+.tab:hover .tab-right {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
 }
 
 .tab.active .tab-right {
@@ -1174,11 +1242,49 @@ body.resizing .resize-handle {
     transform: translateX(0);
 }
 
+/* Ensure close button is always clickable on pinned tabs, even when inactive */
+.tab.pinned .tab-right {
+    pointer-events: auto !important;
+}
+
+.tab.pinned .tab-close {
+    pointer-events: auto !important;
+    cursor: pointer;
+}
+
+.tab.pinned:hover .tab-right {
+    opacity: 1;
+    pointer-events: auto !important;
+    transform: translateX(0);
+}
+
+/* Ensure close button works on closed pinned tabs too */
+.tab.pinned.closed .tab-right {
+    pointer-events: auto !important;
+}
+
+.tab.pinned.closed .tab-close {
+    pointer-events: auto !important;
+    cursor: pointer;
+}
+
+.tab.pinned.closed:hover .tab-right {
+    opacity: 1;
+    pointer-events: auto !important;
+    transform: translateX(0);
+}
+
 .tab-favicon {
     width: 14px;
     height: 14px;
     border-radius: 4px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: none !important;
+}
+
+.tab:hover .tab-favicon {
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
 }
 
 .tab-settings-icon {
@@ -2987,56 +3093,27 @@ body.light-theme .shortcut-desc {
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
 }
 
-/* Downloads Panel - Enhanced */
+/* Downloads Panel - Matching Security Panel */
 .downloads-panel {
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate3d(-50%, -50%, 0);
-    backface-visibility: hidden;
-    perspective: 1000px;
-    width: 600px;
+    transform: translate(-50%, -50%);
+    width: 500px;
     max-width: 90vw;
-    height: auto;
-    max-height: 85vh;
-    min-height: 400px;
-    background: rgba(15, 15, 15, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 24px;
+    max-height: 70vh;
+    background: #252526;
+    border: 1px solid #383838;
+    border-radius: 12px;
     z-index: 1001;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), visibility 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     display: flex;
     flex-direction: column;
-    box-shadow: 
-        0 40px 80px rgba(0, 0, 0, 0.8),
-        0 0 0 1px rgba(255, 255, 255, 0.06),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(40px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     overflow: hidden;
 }
 
-.downloads-panel:not(.hidden):not(.downloads-closing) {
-    opacity: 1;
-    visibility: visible;
-}
-
-.downloads-panel.downloads-entering {
-    animation: notesPanelFadeIn 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    will-change: transform, opacity;
-}
-
-.downloads-panel.downloads-closing {
-    animation: notesPanelFadeOut 0.15s cubic-bezier(0.55, 0.06, 0.68, 0.19) forwards !important;
-    transition: none !important;
-    visibility: visible !important;
-    will-change: transform, opacity;
-}
-
 .downloads-panel.hidden {
-    opacity: 0;
-    visibility: hidden;
+    display: none;
 }
 
 /* Downloads Search Bar */
@@ -3367,36 +3444,19 @@ body.light-theme .shortcut-desc {
     color: #ff4444;
 }
 
-/* Downloads Styles - Enhanced */
+/* Downloads Styles - Matching Security Panel */
 .downloads-header {
-    height: 70px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 24px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%);
-    border-radius: 24px 24px 0 0;
-    flex-shrink: 0;
-    backdrop-filter: blur(15px);
-    position: relative;
-    overflow: hidden;
-}
-
-.downloads-header::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    padding: 20px 24px;
+    border-bottom: 1px solid #383838;
 }
 
 .downloads-header h3 {
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 600;
-    color: var(--text-color);
+    color: #fff;
     margin: 0;
     flex: 1;
 }
@@ -3408,44 +3468,33 @@ body.light-theme .shortcut-desc {
 }
 
 .refresh-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: rgba(255, 255, 255, 0.8);
+    background: transparent;
+    border: none;
+    color: #999;
     padding: 8px;
-    border-radius: 8px;
+    border-radius: 6px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background 0.2s ease;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
 }
 
 .refresh-btn:hover {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.3);
-    color: rgba(255, 255, 255, 1);
-    transform: scale(1.05);
-}
-
-.refresh-btn:active {
-    transform: scale(0.95);
-}
-
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
 }
 
 .downloads-header .clear-btn {
-    background: rgba(255, 59, 48, 0.1);
-    border: 1px solid rgba(255, 59, 48, 0.3);
-    color: #ff3b30;
-    padding: 8px 14px;
-    border-radius: 10px;
+    background: transparent;
+    border: none;
+    color: #999;
+    padding: 8px 12px;
+    border-radius: 6px;
     font-size: 13px;
-    transition: all 0.2s ease;
+    transition: background 0.2s ease;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -3453,177 +3502,135 @@ body.light-theme .shortcut-desc {
 }
 
 .downloads-header .clear-btn:hover {
-    background: rgba(255, 59, 48, 0.2);
-    border-color: rgba(255, 59, 48, 0.5);
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
 }
 
 .downloads-header .close-settings {
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: var(--text-color-secondary);
+    border: none;
+    color: #999;
     padding: 8px;
-    border-radius: 10px;
-    transition: all 0.2s ease;
+    border-radius: 6px;
+    transition: background 0.2s ease;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
 }
 
 .downloads-header .close-settings:hover {
-    background: rgba(255, 255, 255, 0.15);
-    color: var(--text-color);
-    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
 }
 
 .downloads-content {
-    padding: 20px 24px;
+    padding: 20px 24px 24px;
     overflow-y: auto;
     overflow-x: hidden;
     flex: 1;
     min-height: 0;
-    background: linear-gradient(135deg, rgba(20, 20, 20, 0.4) 0%, rgba(15, 15, 15, 0.6) 100%);
-    position: relative;
     display: flex;
     flex-direction: column;
-}
-
-.downloads-content::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
 }
 
 .downloads-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    animation: downloadsListSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    gap: 0;
     width: 100%;
     min-height: fit-content;
 }
 
-@keyframes downloadsListSlideIn {
-    0% {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    100% {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-/* Download items styling - Enhanced */
+/* Download items styling - Matching Security Panel */
 .download-item {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 16px 20px;
-    background: linear-gradient(135deg, rgba(42, 42, 42, 0.7) 0%, rgba(35, 35, 35, 0.8) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    backdrop-filter: blur(15px);
-    position: relative;
-    overflow: hidden;
-    margin-bottom: 8px;
+    gap: 12px;
+    padding: 12px 16px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border-bottom: 1px solid #383838;
+    min-height: 60px;
+    box-sizing: border-box;
+    margin-bottom: 4px;
 }
 
-.download-item::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-    transition: left 0.5s ease;
+.download-item:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
 }
 
 .download-item:hover {
-    background: linear-gradient(135deg, rgba(50, 50, 50, 0.8) 0%, rgba(45, 45, 45, 0.9) 100%);
-    border-color: rgba(255, 255, 255, 0.15);
-    transform: translateY(-2px) scale(1.01);
-    box-shadow: 
-        0 8px 25px rgba(0, 0, 0, 0.3),
-        0 0 0 1px rgba(255, 255, 255, 0.1);
-}
-
-.download-item:hover::before {
-    left: 100%;
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .download-icon {
-    color: rgba(255, 255, 255, 0.6);
+    color: #999;
     font-size: 16px;
 }
 
 .download-info {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .download-name {
-    font-weight: 600;
-    color: var(--text-color);
-    font-size: 15px;
-    margin-bottom: 4px;
+    font-weight: 500;
+    color: #fff;
+    font-size: 14px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    line-height: 1.4;
 }
 
 .download-progress {
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.7);
-    font-weight: 500;
+    color: #999;
+    font-weight: 400;
+    line-height: 1.3;
 }
 
 .download-url {
     font-size: 12px;
-    color: var(--text-color-muted);
+    color: #999;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin-top: 2px;
+    line-height: 1.3;
 }
 
 .download-actions {
     display: flex;
-    gap: 8px;
+    gap: 4px;
 }
 
 .download-btn {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border: none;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
-    color: rgba(255, 255, 255, 0.7);
-    border-radius: 8px;
+    background: transparent;
+    color: #999;
+    border-radius: 6px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
+    transition: background 0.2s ease;
     font-size: 14px;
 }
 
 .download-btn:hover {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.15) 100%);
-    color: var(--text-color);
-    transform: translateY(-1px) scale(1.05);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
 }
 
 /* Security Panel */
@@ -4236,11 +4243,21 @@ body.light-theme .shortcut-desc {
 
 /* Professional Tab Animations */
 .tab {
-    transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, background 0.2s ease-out;
+    transition: none !important;
     position: relative;
     will-change: transform;
     backface-visibility: hidden;
     transform: translateZ(0);
+}
+
+.tab:hover,
+.tab:hover *,
+.tab:hover::before,
+.tab:hover::after {
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
 }
 
 .tab::before {
@@ -4251,7 +4268,7 @@ body.light-theme .shortcut-desc {
     width: 100%;
     height: 100%;
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-    transition: left 0.3s ease-out;
+    transition: none !important;
     z-index: 1;
     pointer-events: none;
 }
@@ -4262,20 +4279,60 @@ body.light-theme .shortcut-desc {
     box-shadow: 0 4px 12px var(--animation-shadow-light);
     background: var(--animation-overlay-hover);
     border: none;
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
+}
+
+.tab:hover:not(.active)::before,
+.tab:hover:not(.active)::after {
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
 }
 
 .tab:hover:not(.active) .tab-title {
     color: var(--text-color);
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
 }
 
 .tab:hover:not(.active) .tab-favicon {
     transform: scale(1.05);
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
 }
 
 .tab:hover .tab-right {
     opacity: 1;
     pointer-events: auto;
     transform: translateX(0);
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
+}
+
+.tab:hover .tab-content {
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
+}
+
+.tab:hover *,
+.tab:hover *::before,
+.tab:hover *::after {
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
 }
 
 .tab.active {
@@ -4315,6 +4372,49 @@ body.light-theme .shortcut-desc {
     z-index: 10;
 }
 
+/* Closed pinned tab visual indicator */
+.tab.pinned.closed {
+    opacity: 0.5;
+    filter: grayscale(0.6) brightness(0.7);
+    transition: none !important;
+}
+
+.tab.pinned.closed .tab-title {
+    color: var(--text-color);
+    opacity: 0.4;
+}
+
+.tab.pinned.closed .tab-favicon {
+    opacity: 0.5;
+}
+
+.tab.pinned.closed:hover {
+    opacity: 0.7;
+    filter: grayscale(0.4) brightness(0.8);
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
+}
+
+.tab.pinned.closed:hover *,
+.tab.pinned.closed:hover *::before,
+.tab.pinned.closed:hover *::after {
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
+}
+
+.tab.pinned.closed:hover .tab-title {
+    color: var(--text-color);
+    opacity: 0.6;
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
+}
+
 .tab.just-pinned {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
@@ -4335,19 +4435,16 @@ body.light-theme .shortcut-desc {
     }
 }
 
-/* Folder Styles - Simple, no highlighting */
-.folder {
+/* Tab Group Styles - Matching tabs exactly with color highlighting */
+.tab-group {
     width: 100%;
     min-height: 34px;
     background: transparent;
     border-radius: 10px;
     cursor: pointer;
-    transition: background 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-                border 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
-    border: none;
+    border: 2px solid;
+    border-color: rgba(255, 107, 107, 0.3);
     box-shadow: none;
     box-sizing: border-box;
     overflow: visible;
@@ -4356,41 +4453,90 @@ body.light-theme .shortcut-desc {
     margin: 2px 0;
     display: flex;
     flex-direction: column;
-    will-change: transform, background, box-shadow;
-    transform: translateZ(0);
-    backface-visibility: hidden;
+    transition: border-color 0.2s ease, background 0.2s ease;
 }
 
-.folder:hover:not(.active) {
+/* Color surrounding the tab group - subtle border with background tint */
+.tab-group {
+    border-color: rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.3);
+}
+
+.tab-group::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    background: rgb(var(--tab-group-color-rgb, 255, 107, 107));
+    opacity: 0.08;
+    pointer-events: none;
+    z-index: 0;
+    transition: opacity 0.2s ease;
+}
+
+.tab-group:hover::after {
+    opacity: 0.06;
+}
+
+/* Remove the old color indicator */
+.tab-group-color-indicator {
+    display: none;
+}
+
+/* Instant hover - no animations, matching tabs */
+.tab-group:hover,
+.tab-group:hover *,
+.tab-group:hover::before,
+.tab-group:hover::after {
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
+}
+
+.tab-group:hover:not(.active) {
     transform: none;
-    box-shadow: 0 4px 12px var(--animation-shadow-light);
-    background: transparent;
-    border: none;
+    box-shadow: 0 4px 12px var(--animation-shadow-light), 0 0 0 1px rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.3);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.5);
+    transition: none !important;
 }
 
-.folder:hover:not(.active) .folder-icon {
+.tab-group:hover:not(.active) .tab-group-icon {
     transform: scale(1.05);
+    transition: none !important;
+    color: var(--tab-group-color, #FF6B6B);
 }
 
-.folder:hover:not(.active) .folder-name-input {
+.tab-group:hover:not(.active) .tab-group-name-input {
     color: var(--text-color);
+    transition: none !important;
 }
 
-/* Ensure folders without hover are transparent - same as tabs */
-.folder:not(:hover) {
+/* Tab group always has color border */
+.tab-group:not(:hover) {
     background: transparent !important;
-    border: none !important;
     box-shadow: none !important;
 }
 
-.folder .tab-content {
+.tab-group .tab-content {
     height: 34px;
     min-height: 34px;
     flex-shrink: 0;
     padding: 8px 16px;
+    position: relative;
+    z-index: 1;
 }
 
-.folder-icon {
+/* Ensure tab group tab-content doesn't shift when input is focused */
+.tab-group .tab-content .tab-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.tab-group-icon {
     color: var(--text-color-muted);
     font-size: 16px;
     width: 16px;
@@ -4400,29 +4546,15 @@ body.light-theme .shortcut-desc {
     justify-content: center;
     flex-shrink: 0;
     opacity: 0.7;
-    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-    will-change: color, transform;
-    transform: translateZ(0);
-    backface-visibility: hidden;
+    transition: color 0.2s ease;
 }
 
-.folder-icon-animate {
-    animation: folderIconOpen 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+.tab-group:hover .tab-group-icon {
+    color: var(--tab-group-color, #FF6B6B);
+    opacity: 0.9;
 }
 
-@keyframes folderIconOpen {
-    0% {
-        transform: scale(1) rotate(0deg);
-    }
-    50% {
-        transform: scale(1.15) rotate(-5deg);
-    }
-    100% {
-        transform: scale(1) rotate(0deg);
-    }
-}
-
-.folder-name-input {
+.tab-group-name-input {
     flex: 1;
     background: transparent;
     border: 1px solid transparent;
@@ -4432,7 +4564,6 @@ body.light-theme .shortcut-desc {
     padding: 0;
     margin: 0;
     outline: none;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     font-family: 'Nunito', sans-serif;
     min-width: 0;
     text-overflow: ellipsis;
@@ -4442,26 +4573,28 @@ body.light-theme .shortcut-desc {
     user-select: none;
 }
 
-.folder-name-input:read-only {
+.tab-group-name-input:read-only {
     cursor: pointer;
     pointer-events: none;
 }
 
-.folder-name-input:not(:read-only) {
+.tab-group-name-input:not(:read-only) {
     cursor: text;
     user-select: auto;
 }
 
-.folder-name-input:focus {
+.tab-group-name-input:focus {
     background: rgba(255, 255, 255, 0.08);
     border-radius: 4px;
-    padding: 2px 6px;
-    margin: -2px -6px;
+    padding: 0;
+    margin: 0;
+    outline: 2px solid var(--tab-group-color, rgba(255, 255, 255, 0.2));
+    outline-offset: -2px;
 }
 
 
-/* Professional folder drag animations */
-.folder::before {
+/* Professional tab group drag animations */
+.tab-group::before {
     content: '';
     position: absolute;
     left: -2px;
@@ -4478,73 +4611,45 @@ body.light-theme .shortcut-desc {
                 box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: 0 0 0 0 transparent;
     z-index: 0;
-    will-change: opacity, border-color, box-shadow;
-    transform: translateZ(0);
-    backface-visibility: hidden;
 }
 
-.folder.drag-over-folder {
+/* Remove outline when tab group is open (not dragging) */
+.tab-group:not(.drag-over-tab-group)::before {
+    opacity: 0 !important;
+    border-color: transparent !important;
+}
+
+.tab-group.drag-over-tab-group {
     background: rgba(255, 255, 255, 0.12);
 }
 
-.folder.drag-over-folder::before {
-    border-color: rgba(255, 255, 255, 0.6);
+.tab-group.drag-over-tab-group::before {
+    border-color: var(--tab-group-color, rgba(255, 255, 255, 0.6));
     opacity: 1;
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15),
                 0 4px 16px rgba(255, 255, 255, 0.25);
 }
 
-.folder.drag-over-folder .folder-icon {
-    color: rgba(255, 255, 255, 0.9);
+.tab-group.drag-over-tab-group .tab-group-icon {
+    color: var(--tab-group-color, rgba(255, 255, 255, 0.9));
     transform: scale(1.05);
 }
 
-.folder.drag-over-folder-top,
-.folder.drag-over-folder-bottom {
+.tab-group.drag-over-tab-group-top,
+.tab-group.drag-over-tab-group-bottom {
     position: relative;
 }
 
-.folder.drag-over-folder .folder-name-input {
+.tab-group.drag-over-tab-group .tab-group-name-input {
     color: rgba(255, 255, 255, 0.95);
 }
 
-.folder.drag-over-folder .folder-content {
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 8px;
+.tab-group.drag-over-tab-group .tab-group-content {
+    background: transparent;
+    border-radius: 0;
 }
 
-@keyframes fadeInFolder {
-    from {
-        background: transparent;
-    }
-    to {
-        background: rgba(255, 255, 255, 0.12);
-    }
-}
-
-@keyframes fadeInFolderBorder {
-    from {
-        opacity: 0;
-        border-color: transparent;
-        box-shadow: 0 0 0 0 transparent;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-@keyframes fadeInFolderIcon {
-    from {
-        color: var(--text-color-muted);
-        transform: scale(1);
-    }
-    to {
-        color: rgba(255, 255, 255, 0.9);
-        transform: scale(1.05);
-    }
-}
-
-.folder-content {
+.tab-group-content {
     max-height: 0;
     overflow: hidden;
     transition: max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94),
@@ -4560,12 +4665,12 @@ body.light-theme .shortcut-desc {
     visibility: hidden;
     width: 100%;
     box-sizing: border-box;
-    will-change: max-height, opacity;
-    transform: translateZ(0);
-    backface-visibility: hidden;
+    background: transparent;
+    border: none;
+    outline: none;
 }
 
-.folder-content.open {
+.tab-group-content.open {
     opacity: 1;
     padding: 8px 16px 12px 16px;
     visibility: visible;
@@ -4575,75 +4680,76 @@ body.light-theme .shortcut-desc {
                 padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-.folder.toggling .folder-content {
+.tab-group.toggling .tab-group-content {
     pointer-events: none;
 }
 
-/* Removed dotted folder-content drag-over - using only folder.drag-over-folder instead */
-
-.folder-empty {
-    padding: 16px;
-    text-align: center;
-    color: var(--text-color-muted);
-    font-size: 12px;
-    font-style: italic;
-    opacity: 0.5;
-}
-
-.folder .tab {
+.tab-group .tab {
     margin: 0;
     transform: none;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.02);
+    border-radius: 10px;
+    background: transparent;
     opacity: 1;
     visibility: visible;
     display: block;
+    position: relative;
+    border: none;
+    box-shadow: none;
+    outline: 1px solid transparent;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
-.folder .tab:hover {
-    transform: translateX(4px);
-    background: var(--animation-overlay);
+.tab-group .tab:hover:not(.active) {
+    transform: none;
+    box-shadow: 0 4px 12px var(--animation-shadow-light);
+    background: var(--animation-overlay-hover);
+    border: none;
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
 }
 
-.folder .tab-content {
+
+.tab-group .tab-content {
     opacity: 1 !important;
     visibility: visible !important;
     display: flex !important;
 }
 
-.folder .tab {
+.tab-group .tab {
     display: block !important;
     visibility: visible !important;
     opacity: 1 !important;
 }
 
-.folder .tab-right {
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.15s ease-out, transform 0.15s ease-out;
-    transform: translateX(8px);
+.tab-group .tab.active {
+    background: var(--animation-overlay);
+    outline: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 2px 8px var(--animation-shadow);
 }
 
-.folder:hover .tab-right {
+.tab-group .tab .tab-right {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(8px);
+    transition: none;
+}
+
+.tab-group:hover .tab-right {
     opacity: 1;
     pointer-events: auto;
     transform: translateX(0);
+    transition: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation: none !important;
 }
 
-.folder-delete {
+.tab-group-delete {
     opacity: 1;
     pointer-events: auto;
-}
-
-@keyframes folderSlideIn {
-    0% {
-        opacity: 0;
-        transform: translateY(-8px) scale(0.98);
-    }
-    100% {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
 }
 
 /* Smooth scrolling */
@@ -4760,14 +4866,15 @@ body.light-theme .settings-actions {
 /* Removed pulse animation that was causing freezing */
 
 /* Smooth transitions for specific interactive elements */
-button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .security-btn {
+button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .security-btn, #copy-link-btn {
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Consistent hover effects for buttons - sidebar buttons have their own styles */
 .add-tab-btn:hover,
 .settings-btn:hover,
-.security-btn:hover {
+.security-btn:hover,
+#copy-link-btn:hover {
     transform: scale(1.05);
     background: var(--button-hover);
     color: var(--text-color);
@@ -4832,11 +4939,11 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 
 /* Smooth tab transitions */
 .tab-content {
-    transition: all 0.2s ease;
+    transition: none !important;
 }
 
 .tab-title {
-    transition: all 0.2s ease;
+    transition: none !important;
 }
 
 /* Professional Loading Animation */
@@ -4967,20 +5074,20 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 /* ===== REFINED MICRO-INTERACTIONS ===== */
 
 /* Refined Button Press Animations */
-.nav-btn, .tab-close, .url-icon, .settings-btn, .security-btn, .nav-menu-btn, .download-btn, .close-settings, .refresh-btn, .clear-btn {
+.nav-btn, .tab-close, .url-icon, .settings-btn, .security-btn, #copy-link-btn, .nav-menu-btn, .download-btn, .close-settings, .refresh-btn, .clear-btn {
     transition: all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     position: relative;
     overflow: hidden;
 }
 
 /* Active styles - sidebar buttons have their own specific styles */
-.tab-close:active, .add-tab-btn:active, .settings-btn:active:not(.sidebar-footer .nav-btn), .security-btn:active, .nav-menu-btn:active, .download-btn:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
+.tab-close:active, .add-tab-btn:active, .settings-btn:active:not(.sidebar-footer .nav-btn), .security-btn:active, #copy-link-btn:active, .nav-menu-btn:active, .download-btn:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
     transform: scale(0.95);
     transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Premium Ripple Effect for Buttons */
-.nav-btn::before, .tab-close::before, .url-icon::before, .settings-btn::before, .security-btn::before, .nav-menu-btn::before, .download-btn::before, .close-settings::before, .refresh-btn::before, .clear-btn::before {
+.nav-btn::before, .tab-close::before, .url-icon::before, .settings-btn::before, .security-btn::before, #copy-link-btn::before, .nav-menu-btn::before, .download-btn::before, .close-settings::before, .refresh-btn::before, .clear-btn::before {
     content: '';
     position: absolute;
     top: 50%;
@@ -4997,7 +5104,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 }
 
 /* Ripple effect - removed for sidebar buttons to keep animations clean */
-.tab-close:active::before, .add-tab-btn:active::before, .settings-btn:active::before:not(.sidebar-footer .nav-btn::before), .security-btn:active::before, .nav-menu-btn:active::before, .download-btn:active::before, .close-settings:active::before, .refresh-btn:active::before, .clear-btn:active::before {
+.tab-close:active::before, .add-tab-btn:active::before, .settings-btn:active::before:not(.sidebar-footer .nav-btn::before), .security-btn:active::before, #copy-link-btn:active::before, .nav-menu-btn:active::before, .download-btn:active::before, .close-settings:active::before, .refresh-btn:active::before, .clear-btn:active::before {
     width: 80px;
     height: 80px;
     opacity: 1;
@@ -5046,6 +5153,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 /* This rule only applies to non-sidebar buttons */
 .settings-btn:hover:not(.sidebar-footer .nav-btn), 
 .security-btn:hover, 
+#copy-link-btn:hover,
 .nav-menu-btn:hover, 
 .download-btn:hover, 
 .close-settings:hover, 
@@ -5219,7 +5327,7 @@ input:focus, select:focus, button:focus {
 }
 
 /* Refined Transitions for Interactive Elements */
-button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .security-btn, .nav-menu-btn, .download-btn, .close-settings, .refresh-btn, .clear-btn, .nav-menu-item {
+button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .security-btn, #copy-link-btn, .nav-menu-btn, .download-btn, .close-settings, .refresh-btn, .clear-btn, .nav-menu-item {
     transition: all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
@@ -5466,4 +5574,246 @@ body.light-theme .btn-secondary:active {
 
 body.light-theme .btn-primary {
     border-color: rgba(255, 77, 79, 0.45);
+}
+
+/* Library Media Hover Popup - Clean Design */
+.library-media-popup {
+    position: absolute;
+    width: 100%;
+    max-width: 100%;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    z-index: 1002;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.95);
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+                visibility 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: none;
+    overflow: hidden;
+    will-change: opacity, transform;
+    backface-visibility: hidden;
+    padding: 0 8px;
+    box-sizing: border-box;
+}
+
+.library-media-popup:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+    transform: scale(1);
+}
+
+.library-media-popup.hidden {
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.95);
+    transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), 
+                visibility 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.library-media-list {
+    padding: 4px 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    height: 100%;
+}
+
+.library-media-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    margin: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    gap: 8px;
+    user-select: none;
+    border: none;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 44px;
+}
+
+.library-media-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.library-media-item:active {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.library-media-thumbnail {
+    width: 36px;
+    height: 36px;
+    border-radius: 5px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.library-media-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 6px;
+}
+
+.library-media-thumbnail-image {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
+}
+
+.library-media-thumbnail-video {
+    background: linear-gradient(135deg, rgba(250, 112, 154, 0.2) 0%, rgba(254, 225, 64, 0.2) 100%);
+}
+
+.library-media-thumbnail i {
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.library-media-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.library-media-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+}
+
+.library-media-time {
+    font-size: 10px;
+    color: var(--text-color-secondary);
+    font-weight: 400;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-left: 6px;
+}
+
+.library-media-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-color-secondary);
+}
+
+.library-media-empty i {
+    font-size: 32px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+.library-media-empty p {
+    font-size: 13px;
+    margin: 0;
+}
+
+/* Tab Group Color Picker */
+.color-picker {
+    position: fixed;
+    background: #252526;
+    border: 1px solid #383838;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    padding: 16px;
+    z-index: 10000;
+    min-width: 200px;
+    display: none;
+}
+
+.color-picker:not(.hidden) {
+    display: block !important;
+}
+
+.color-picker.hidden {
+    display: none !important;
+}
+
+.color-picker-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #383838;
+}
+
+.color-picker-header span {
+    color: var(--text-color);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.color-picker-close {
+    background: transparent;
+    border: none;
+    color: var(--text-color-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.color-picker-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-color);
+}
+
+.color-picker-colors {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+}
+
+.color-option {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 2px solid transparent;
+    position: relative;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.color-option:hover {
+    transform: scale(1.1) translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.color-option.selected {
+    border-color: #fff;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.4), 0 6px 20px rgba(0, 0, 0, 0.5);
+    transform: scale(1.2) translateY(-3px);
+}
+
+.color-option.selected::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font-size: 20px;
+    font-weight: bold;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
 }
