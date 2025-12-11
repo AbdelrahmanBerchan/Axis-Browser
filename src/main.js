@@ -557,6 +557,19 @@ ipcMain.handle('get-library-items', async (event, locationKey = 'all') => {
     const items = [];
     let defaultBaseDir = null;
 
+    // Prioritize desktop as default baseDir
+    if (locationKey === 'all' || locationKey === 'desktop') {
+      const desktopDir = locations.desktop;
+      if (desktopDir) {
+        try {
+          await fs.promises.access(desktopDir, fs.constants.R_OK);
+          defaultBaseDir = desktopDir;
+        } catch {
+          // Desktop not accessible, will use first available
+        }
+      }
+    }
+
     for (const key of keys) {
       const baseDir = locations[key];
       if (!baseDir) continue;
