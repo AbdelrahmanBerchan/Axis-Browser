@@ -43,7 +43,9 @@
                         </div>
                     </div>
                     <div class="url-bar-container vertical">
+                        <div class="url-bar-input-wrapper">
                         <input type="text" id="url-bar" placeholder="Search or enter URL" autocomplete="off">
+                        </div>
                         <div class="url-bar-icons">
                             <button id="copy-link-btn" class="url-icon" title="Copy Link">
                                 <i class="fas fa-link"></i>
@@ -111,7 +113,7 @@
                                  partition="persist:main"
                                  useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                                  autosize="true"
-                                 style="will-change: transform; transform: translateZ(0); backface-visibility: hidden;">
+                                 style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; opacity: 0; visibility: hidden; background: transparent;">
                         </webview>
                         <!-- Empty State Welcome Message -->
                         <div id="empty-state" class="empty-state">
@@ -181,10 +183,15 @@
             <i class="fas fa-edit"></i>
             <span>Rename Tab Group</span>
         </div>
+        <div class="context-menu-item" id="duplicate-tab-group-option">
+            <i class="fas fa-copy"></i>
+            <span>Duplicate Tab Group</span>
+        </div>
         <div class="context-menu-item" id="change-tab-group-color-option">
             <i class="fas fa-palette"></i>
             <span>Change Color</span>
         </div>
+        <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="delete-tab-group-option">
             <i class="fas fa-times"></i>
             <span>Delete Tab Group</span>
@@ -588,9 +595,45 @@
                 <div class="spotlight-input-container">
                     <i class="fas fa-search spotlight-search-icon"></i>
                     <input type="text" id="spotlight-input" placeholder="Search or Enter URL..." autocomplete="off">
+                    <div id="spotlight-search-engine-pill" class="search-engine-pill hidden">
+                        <span id="spotlight-search-engine-name"></span>
+                    </div>
+                    <div id="spotlight-search-engine-suggestion" class="search-engine-suggestion hidden">
+                        <span id="spotlight-search-engine-suggestion-text"></span>
+                        <span class="tab-hint">Tab</span>
+                    </div>
                 </div>
                 <div class="spotlight-suggestions" id="spotlight-suggestions">
                     <!-- Suggestions will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- File Preview Window -->
+        <div id="file-preview-backdrop" class="file-preview-backdrop hidden">
+            <div id="file-preview-window" class="file-preview-window">
+                <div class="file-preview-header">
+                    <div class="file-preview-title">
+                        <span id="file-preview-name"></span>
+                        <span class="file-preview-time" id="file-preview-time"></span>
+                    </div>
+                    <div class="file-preview-actions">
+                        <button class="file-preview-nav-btn" id="file-preview-prev" disabled title="Previous item">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <button class="file-preview-nav-btn" id="file-preview-next" disabled title="Next item">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                        <button class="file-preview-close-btn" id="file-preview-close" title="Close">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <button class="file-preview-open-btn" id="file-preview-open">
+                            Open in Preview <i class="fas fa-arrow-up-right"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="file-preview-content" id="file-preview-content">
+                    <!-- Preview content will be loaded here -->
                 </div>
             </div>
         </div>
