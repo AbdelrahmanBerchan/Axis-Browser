@@ -6,12 +6,48 @@ class AxisBrowser {
         this.tabGroups = new Map(); // Store tab groups: { id, name, tabIds: [], open: true, color: '#FF6B6B' }
         this.pendingTabGroupColor = null; // Color selected for new tab group
         this.settings = {};
+        this.selectedSearchEngine = null; // Track selected search engine shortcut
         this.closedTabs = []; // Store recently closed tabs for recovery
+        // Search engine shortcuts mapping
+        this.searchEngineShortcuts = {
+            'g': 'google',
+            'google': 'google',
+            'y': 'youtube',
+            'yt': 'youtube',
+            'youtube': 'youtube',
+            'b': 'bing',
+            'bing': 'bing',
+            'd': 'duckduckgo',
+            'ddg': 'duckduckgo',
+            'duckduckgo': 'duckduckgo',
+            'yahoo': 'yahoo',
+            'y!': 'yahoo',
+            'w': 'wikipedia',
+            'wiki': 'wikipedia',
+            'wikipedia': 'wikipedia',
+            'r': 'reddit',
+            'reddit': 'reddit',
+            'gh': 'github',
+            'github': 'github',
+            'a': 'amazon',
+            'amazon': 'amazon',
+            'tw': 'twitter',
+            'twitter': 'twitter',
+            'x': 'twitter',
+            'ig': 'instagram',
+            'instagram': 'instagram',
+            'fb': 'facebook',
+            'facebook': 'facebook'
+        };
         this.loadingTimeout = null; // Timeout for stuck loading pages (main view)
         this.isBenchmarking = false; // suppress non-critical work on Speedometer
         this.spotlightSelectedIndex = -1; // Track selected suggestion index
         this.contextMenuTabGroupId = null; // Track which tab group context menu is open
         this.themeCache = new Map(); // Cache theme colors per domain for instant theme switching
+        this.currentLibraryItems = []; // Store library items for preview navigation
+        this.currentPreviewFile = null; // Current file being previewed
+        this.currentPreviewIndex = -1; // Index of current file in library items
+        this.previewListenersSetup = false; // Track if preview listeners are set up
         
         // Cache frequently accessed DOM elements for performance
         this.cacheDOMElements();
@@ -63,9 +99,53 @@ class AxisBrowser {
     }
 
     async init() {
+        // Load settings first and apply theme immediately
         await this.loadSettings();
+        
+        // ALWAYS apply theme on startup - either custom or default
+        // Apply theme with multiple fallback strategies to ensure it works
+        const applyThemeNow = () => {
+            try {
+                if (document.body) {
+                    // Apply custom theme colors if they exist
+                    if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+                        this.applyCustomThemeFromSettings();
+                    } else {
+                        // Apply default black theme if no custom colors
+                        this.resetToBlackTheme();
+                    }
+                } else {
+                    // If body doesn't exist yet, wait for it
+                    requestAnimationFrame(applyThemeNow);
+                }
+            } catch (error) {
+                console.error('Error applying theme on init:', error);
+                // Retry after a short delay
+                setTimeout(() => {
+                    try {
+                        if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+                            this.applyCustomThemeFromSettings();
+                        } else {
+                            this.resetToBlackTheme();
+                        }
+                    } catch (e) {
+                        console.error('Error applying theme (retry):', e);
+                    }
+                }, 100);
+            }
+        };
+        
+        // Try to apply immediately
+        applyThemeNow();
+        
+        // Also try after a short delay as backup
+        setTimeout(() => {
+            if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+                this.applyCustomThemeFromSettings();
+            }
+        }, 50);
+        
         this.applySidebarPosition(); // Apply saved sidebar position
-        this.resetToBlackTheme(); // Start with black theme
         this.setupEventListeners();
         this.setupWebview();
         this.setupTabSearch();
@@ -149,6 +229,10 @@ class AxisBrowser {
     async loadSettings() {
         try {
             this.settings = await window.electronAPI.getSettings();
+            // Ensure settings object exists even if empty
+            if (!this.settings) {
+                this.settings = {};
+            }
         } catch (error) {
             console.error('Failed to load settings:', error);
             this.settings = {
@@ -195,8 +279,33 @@ class AxisBrowser {
             });
 
             el.urlBar.addEventListener('focus', () => {
-                const fullUrl = el.urlBar.getAttribute('data-full-url') || el.urlBar.value;
-                el.urlBar.value = fullUrl;
+                // Only show URL if there's an active tab with a valid URL
+                if (!this.currentTab || !this.tabs.has(this.currentTab)) {
+                    el.urlBar.value = '';
+                    el.urlBar.removeAttribute('data-full-url');
+                    el.urlBar.classList.remove('summarized');
+                    el.urlBar.classList.add('expanded');
+                    return;
+                }
+                
+                const tab = this.tabs.get(this.currentTab);
+                // Don't show URL for empty/new tabs
+                if (!tab || !tab.url || tab.url === 'about:blank') {
+                    el.urlBar.value = '';
+                    el.urlBar.removeAttribute('data-full-url');
+                    el.urlBar.classList.remove('summarized');
+                    el.urlBar.classList.add('expanded');
+                    return;
+                }
+                
+                // For settings tabs, show axis://settings when focused
+                if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+                    el.urlBar.value = 'axis://settings';
+                    el.urlBar.setAttribute('data-full-url', 'axis://settings');
+                } else {
+                    const fullUrl = el.urlBar.getAttribute('data-full-url') || tab.url || el.urlBar.value;
+                    el.urlBar.value = fullUrl;
+                }
                 el.urlBar.classList.remove('summarized');
                 el.urlBar.classList.add('expanded');
                 el.urlBar.select();
@@ -318,7 +427,28 @@ class AxisBrowser {
         // Spotlight search functionality - use cached element with throttling
         if (el.spotlightInput) {
             el.spotlightInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+                // Handle Tab key for search engine shortcuts
+                if (e.key === 'Tab' && !e.shiftKey) {
+                    const value = el.spotlightInput.value.trim().toLowerCase();
+                    const shortcut = value.split(/\s+/)[0]; // Get first word
+                    
+                    if (this.searchEngineShortcuts[shortcut]) {
+                        e.preventDefault();
+                        const engine = this.searchEngineShortcuts[shortcut];
+                        this.hideSpotlightSearchEngineSuggestion();
+                        this.selectSpotlightSearchEngine(engine, el.spotlightInput);
+                        // Remove the shortcut from input
+                        const remaining = value.substring(shortcut.length).trim();
+                        el.spotlightInput.value = remaining;
+                        el.spotlightInput.focus();
+                    }
+                } else if (e.key === 'Backspace') {
+                    // Only clear search engine if input becomes empty
+                    const value = el.spotlightInput.value;
+                    if (!value || value.trim() === '') {
+                        this.clearSpotlightSearchEngine();
+                    }
+                } else if (e.key === 'Enter') {
                 e.preventDefault();
                 // If a suggestion is selected, click it; otherwise perform search
                 if (this.spotlightSelectedIndex >= 0) {
@@ -347,7 +477,31 @@ class AxisBrowser {
             }, 50);
             
             el.spotlightInput.addEventListener('input', (e) => {
-                throttledUpdateSuggestions(e.target.value);
+                const value = e.target.value.trim();
+                
+                // Only show/hide suggestion if no engine is selected
+                // If engine is selected, keep it visible while typing
+                if (!this.selectedSearchEngine) {
+                    if (!value) {
+                        this.hideSpotlightSearchEngineSuggestion();
+                        throttledUpdateSuggestions(value);
+                        return;
+                    }
+                    
+                    const valueLower = value.toLowerCase();
+                    const shortcut = valueLower.split(/\s+/)[0]; // Get first word
+                    const hasSpace = value.includes(' ');
+                    
+                    // Show suggestion if typing a shortcut (exact match, no spaces, no selected engine)
+                    if (!hasSpace && this.searchEngineShortcuts && this.searchEngineShortcuts[shortcut] && valueLower === shortcut) {
+                        this.showSpotlightSearchEngineSuggestion(this.searchEngineShortcuts[shortcut]);
+                    } else {
+                        // Hide suggestion if user starts typing something else
+                        this.hideSpotlightSearchEngineSuggestion();
+                    }
+                }
+                
+                throttledUpdateSuggestions(value);
             });
         }
 
@@ -363,41 +517,11 @@ class AxisBrowser {
 
         // Backdrop click closes any open modal - use cached elements
         if (el.modalBackdrop) {
-        el.modalBackdrop.addEventListener('click', () => {
-            const settingsPanel = el.settingsPanel;
-            const downloadsPanel = el.downloadsPanel;
-            const notesPanel = el.notesPanel;
-            
-            // Close settings with animation
-            if (settingsPanel && !settingsPanel.classList.contains('hidden')) {
-                settingsPanel.classList.add('settings-closing');
-                setTimeout(() => {
-                    settingsPanel.classList.add('hidden');
-                    settingsPanel.classList.remove('settings-closing');
-                }, 150);
-            }
-            
-            // Close downloads with animation
-            if (downloadsPanel && !downloadsPanel.classList.contains('hidden')) {
-                downloadsPanel.classList.add('downloads-closing');
-                setTimeout(() => {
-                    downloadsPanel.classList.add('hidden');
-                    downloadsPanel.classList.remove('downloads-closing');
-                }, 150);
-            }
-            
-            // Close notes with animation
-            if (notesPanel && !notesPanel.classList.contains('hidden')) {
-                notesPanel.classList.add('notes-closing');
-                setTimeout(() => {
-                    notesPanel.classList.add('hidden');
-                    notesPanel.classList.remove('notes-closing');
-                    el.modalBackdrop.classList.add('hidden');
-                }, 150);
-                return;
-            }
-            
-            el.modalBackdrop.classList.add('hidden');
+            el.modalBackdrop.addEventListener('click', (e) => {
+                // Only close if clicking directly on backdrop, not on a child element
+                if (e.target === el.modalBackdrop) {
+                    this.closeAllPopups();
+                }
         });
         }
 
@@ -443,7 +567,7 @@ class AxisBrowser {
             this.showTabGroupColorPicker((color) => {
                 this.createNewTabGroup(color);
                 this.hideTabGroupColorPicker();
-                this.hideSidebarContextMenu();
+            this.hideSidebarContextMenu();
             });
         });
 
@@ -455,12 +579,33 @@ class AxisBrowser {
         // Nav menu sidebar position button - REMOVED
 
         // Tab group context menu event listeners
-        document.getElementById('rename-tab-group-option').addEventListener('click', () => {
+        const renameTabGroupOption = document.getElementById('rename-tab-group-option');
+        const duplicateTabGroupOption = document.getElementById('duplicate-tab-group-option');
+        const changeTabGroupColorOption = document.getElementById('change-tab-group-color-option');
+        const deleteTabGroupOption = document.getElementById('delete-tab-group-option');
+
+        if (renameTabGroupOption) {
+            renameTabGroupOption.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
             this.renameCurrentTabGroup();
             this.hideTabGroupContextMenu();
         });
+        }
 
-        document.getElementById('change-tab-group-color-option').addEventListener('click', () => {
+        if (duplicateTabGroupOption) {
+            duplicateTabGroupOption.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            this.duplicateCurrentTabGroup();
+            this.hideTabGroupContextMenu();
+        });
+        }
+
+        if (changeTabGroupColorOption) {
+            changeTabGroupColorOption.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
             this.showTabGroupColorPicker((color) => {
                 if (this.contextMenuTabGroupId) {
                     const tabGroup = this.tabGroups.get(this.contextMenuTabGroupId);
@@ -475,11 +620,16 @@ class AxisBrowser {
                 this.hideTabGroupContextMenu();
             });
         });
+        }
 
-        document.getElementById('delete-tab-group-option').addEventListener('click', () => {
+        if (deleteTabGroupOption) {
+            deleteTabGroupOption.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
             this.deleteCurrentTabGroup();
             this.hideTabGroupContextMenu();
         });
+        }
         
         // Setup tab group color picker
         this.setupTabGroupColorPicker();
@@ -503,16 +653,9 @@ class AxisBrowser {
                 this.selectAll();
             }
             
-            // Escape key to close panels
+            // Escape key to close all popups
             if (e.key === 'Escape') {
-                const downloadsPanel = document.getElementById('downloads-panel');
-                const settingsPanel = document.getElementById('settings-panel');
-                
-                if (!downloadsPanel.classList.contains('hidden')) {
-                    this.toggleDownloads();
-                } else if (!settingsPanel.classList.contains('hidden')) {
-                    this.toggleSettings();
-                }
+                this.closeAllPopups();
             }
         });
 
@@ -651,140 +794,32 @@ class AxisBrowser {
             this.showQuitConfirmation();
         });
         
-        // Listen for browser shortcuts from main process (works even when webview is focused)
+        // All keyboard shortcuts are now routed through the configurable
+        // shortcut system in the main process.
+        // This ensures ONLY the current mapping (default or user-chosen)
+        // works, and old hardcoded combos no longer trigger actions.
         window.electronAPI.onBrowserShortcut((action) => {
             this.executeBrowserShortcut(action);
-        });
-
-        // Keyboard shortcuts - Cmd+W must be in capture phase to intercept before webview handles it
-        document.addEventListener('keydown', (e) => {
-            // Cmd/Ctrl + W - Close tab (critical: handle in capture phase)
-            if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                if (this.currentTab) {
-                    this.closeTab(this.currentTab);
-                }
-                return false;
-            }
-        }, true); // Capture phase - intercepts before webview
-        
-        // Other keyboard shortcuts (normal phase)
-        document.addEventListener('keydown', (e) => {
-            // Cmd/Ctrl + T - Show spotlight search
-            if ((e.metaKey || e.ctrlKey) && e.key === 't') {
-                e.preventDefault();
-                this.showSpotlightSearch();
-            }
-            
-            // Cmd/Ctrl + B - Toggle sidebar
-            if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
-                e.preventDefault();
-                this.toggleSidebar();
-            }
-            
-            // Cmd/Ctrl + R - Refresh
-            if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
-                e.preventDefault();
-                this.refresh();
-            }
-            
-            // Cmd/Ctrl + L - Focus URL bar
-            if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
-                e.preventDefault();
-                document.getElementById('url-bar').focus();
-                document.getElementById('url-bar').select();
-            }
-
-            // Alt + P - Toggle pin on active tab
-            if (e.altKey && (e.key === 'p' || e.key === 'P')) {
-                const activeTabEl = document.querySelector('.tab.active');
-                if (activeTabEl) {
-                    const activeTabId = parseInt(activeTabEl.dataset.tabId, 10);
-                    this.togglePinTab(activeTabId, activeTabEl, null);
-                }
-            }
-            
-            // Cmd/Ctrl + N - New window
-            if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
-                e.preventDefault();
-                // This would open a new window - for now just create a new tab
-                this.createNewTab();
-            }
-            
-            // Cmd/Ctrl + , - Open settings
-            if ((e.metaKey || e.ctrlKey) && e.key === ',') {
-                e.preventDefault();
-                this.toggleSettings();
-            }
-            
-            // Cmd/Ctrl + Z - Recover closed tab
-            if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
-                e.preventDefault();
-                this.recoverClosedTab();
-            }
-            
-            // Cmd/Ctrl + Y - Open history (now in settings)
-            if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
-                e.preventDefault();
-                this.toggleSettings();
-                this.switchSettingsTab('history');
-            }
-            
-            // Cmd/Ctrl + J - Open downloads
-            if ((e.metaKey || e.ctrlKey) && e.key === 'j') {
-                e.preventDefault();
-                this.toggleDownloads();
-            }
-            
-            
-            // Cmd/Ctrl + Shift + H - Clear history
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'H') {
-                e.preventDefault();
-                this.clearAllHistory();
-            }
-            
-            // Cmd/Ctrl + Shift + J - Clear downloads
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'J') {
-                e.preventDefault();
-                this.clearAllDownloads();
-            }
-            
-            // Cmd/Ctrl + Plus/Minus - Zoom in/out
-            if ((e.metaKey || e.ctrlKey) && (e.key === '+' || e.key === '=')) {
-                e.preventDefault();
-                this.zoomIn();
-            }
-            
-            if ((e.metaKey || e.ctrlKey) && e.key === '-') {
-                e.preventDefault();
-                this.zoomOut();
-            }
-            
-            // Cmd/Ctrl + 0 - Reset zoom
-            if ((e.metaKey || e.ctrlKey) && e.key === '0') {
-                e.preventDefault();
-                this.resetZoom();
-            }
-            
-            // Tab switching shortcuts (Cmd/Ctrl + 1-9)
-            if ((e.metaKey || e.ctrlKey) && e.key >= '1' && e.key <= '9') {
-                e.preventDefault();
-                const tabIndex = parseInt(e.key) - 1;
-                this.switchToTabByIndex(tabIndex);
-            }
-            
-            // Cmd/Ctrl + Shift + C - Copy current URL
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'c') {
-                e.preventDefault();
-                this.copyCurrentUrl();
-            }
         });
     }
     
     // Copy the current tab's URL to clipboard
     copyCurrentUrl() {
+        // Check if current tab is settings
+        if (this.currentTab) {
+            const tab = this.tabs.get(this.currentTab);
+            if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+                try {
+                    navigator.clipboard.writeText('axis://settings');
+                    this.showNotification('Settings URL copied', 'success');
+                    return;
+                } catch (e) {
+                    console.error('Failed to copy URL:', e);
+                    return;
+                }
+            }
+        }
+        
         const webview = this.getActiveWebview();
         if (!webview) return;
         
@@ -930,11 +965,11 @@ class AxisBrowser {
         webview.addEventListener('dom-ready', () => {
             if (!isActiveTab() || this.isBenchmarking) return;
             
-            const currentUrl = webview.getURL();
-            if (currentUrl && currentUrl !== 'about:blank') {
-                // Extract theme early - DOM is ready even if images/scripts are still loading
-                this.extractAndApplyWebpageColors(webview);
-            }
+            // Auto-tinting disabled - using custom theme colors instead
+            // const currentUrl = webview.getURL();
+            // if (currentUrl && currentUrl !== 'about:blank') {
+            //     this.extractAndApplyWebpageColors(webview);
+            // }
         });
         
         webview.addEventListener('did-finish-load', () => {
@@ -978,8 +1013,8 @@ class AxisBrowser {
                 this.updateTabFavicon(tabId, tabElement);
             }
             
-            // Final theme extraction with caching
-            this.extractAndApplyWebpageColors(webview);
+            // Auto-tinting disabled - using custom theme colors instead
+            // this.extractAndApplyWebpageColors(webview);
         });
 
         webview.addEventListener('did-stop-loading', () => {
@@ -992,7 +1027,8 @@ class AxisBrowser {
                     () => this.updateNavigationButtons(),
                     () => this.updateTabTitle()
                 ]);
-                this.extractAndApplyWebpageColors(webview);
+                // Auto-tinting disabled - using custom theme colors instead
+                // this.extractAndApplyWebpageColors(webview);
         });
         
         webview.addEventListener('console-message', (e) => {
@@ -1008,6 +1044,15 @@ class AxisBrowser {
                     }
                 } catch (err) {
                     // Ignore parse errors
+                }
+            }
+            // Catch shortcuts messages from console
+            if (e.message && e.message.startsWith('SHORTCUTS_MESSAGE:')) {
+                try {
+                    const data = JSON.parse(e.message.replace('SHORTCUTS_MESSAGE:', ''));
+                    this.handleShortcutsMessage(data, webview);
+                } catch (err) {
+                    console.error('Error parsing shortcuts message:', err);
                 }
             }
         });
@@ -1673,6 +1718,74 @@ class AxisBrowser {
         this.applyCustomTheme(colors);
     }
 
+    applyCustomThemeFromSettings() {
+        // Ensure settings exist
+        if (!this.settings) {
+            this.settings = {};
+        }
+        
+        const themeColor = this.settings.themeColor || '#1a1a1a';
+        const gradientColor = this.settings.gradientColor || '#2a2a2a';
+        
+        // Generate harmonious colors from theme color
+        const colors = this.generateHarmoniousColors(themeColor);
+        
+        // Add gradient color if gradient is enabled
+        if (this.settings.gradientEnabled) {
+            colors.gradientColor = gradientColor;
+        }
+        
+        // Apply the theme - force apply even if body check fails
+        try {
+            this.applyCustomTheme(colors);
+        } catch (error) {
+            console.error('Error applying custom theme:', error);
+            // Fallback: try again after a short delay
+            setTimeout(() => {
+                try {
+                    this.applyCustomTheme(colors);
+                } catch (e) {
+                    console.error('Error applying custom theme (retry):', e);
+                }
+            }, 100);
+        }
+    }
+
+    // Apply theme only to sidebar (used when no tabs are open)
+    applyThemeToSidebarOnly() {
+        if (!this.settings) {
+            this.settings = {};
+        }
+        
+        const themeColor = this.settings.themeColor || '#1a1a1a';
+        const gradientColor = this.settings.gradientColor || '#2a2a2a';
+        const gradientEnabled = this.settings.gradientEnabled || false;
+        const gradientDirection = this.settings.gradientDirection || 'to right';
+        
+        // Create sidebar background
+        let sidebarBg;
+        if (gradientEnabled) {
+            const themeRgba = this.hexToRgba(themeColor, 0.3);
+            const gradientRgba = this.hexToRgba(gradientColor, 0.3);
+            sidebarBg = `linear-gradient(${gradientDirection}, ${themeRgba}, ${gradientRgba})`;
+        } else {
+            sidebarBg = this.hexToRgba(themeColor, 0.3);
+        }
+        
+        // Apply to sidebar only
+        if (this.elements?.sidebar) {
+            this.elements.sidebar.style.setProperty('background', sidebarBg, 'important');
+            this.elements.sidebar.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+            this.elements.sidebar.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+        }
+        
+        // Also apply to app container for the blur effect
+        const app = document.getElementById('app');
+        if (app) {
+            app.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+            app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+        }
+    }
 
     // Color utility functions
     hexToHsl(hex) {
@@ -2290,6 +2403,16 @@ class AxisBrowser {
     }
     
     resetToBlackTheme() {
+        // If the user has a custom theme configured, never force the app
+        // back to the default black theme. Instead, just re‑apply their
+        // custom theme so there is no flashing when this method is called
+        // from various fallback/error paths.
+        if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+            this.applyCustomThemeFromSettings();
+            return;
+        }
+
+        // No custom theme saved – fall back to the default subtle black theme.
         const colors = {
             primary: '#1a1a1a', // Lighter black instead of pure black
             secondary: '#222222', // Less contrast
@@ -2312,6 +2435,25 @@ class AxisBrowser {
     }
 
     applyCustomTheme(colors) {
+        // Ensure document.body exists before applying theme
+        if (!document.body) {
+            // If body doesn't exist yet, wait for it
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => {
+                    this.applyCustomTheme(colors);
+                });
+                return;
+            } else {
+                // If document is ready but body doesn't exist, wait a bit
+                setTimeout(() => {
+                    if (document.body) {
+                        this.applyCustomTheme(colors);
+                    }
+                }, 0);
+                return;
+            }
+        }
+        
         // Disable transitions for instant theme switching
         document.body.classList.add('theme-switching');
         
@@ -2334,23 +2476,44 @@ class AxisBrowser {
         const root = document.documentElement;
         const style = root.style;
         
+        // Apply gradient if enabled and provided (check before setting background-color)
+        const gradientEnabled = this.settings?.gradientEnabled !== false && colors.gradientColor;
+        const gradientDirection = this.settings?.gradientDirection || '135deg';
+        
         // Core theme colors - batch update
+        if (gradientEnabled) {
+            const gradient = `linear-gradient(${gradientDirection}, ${darkerPrimary} 0%, ${colors.gradientColor} 100%)`;
+            style.setProperty('--background-color', gradient);
+        } else {
         style.setProperty('--background-color', darkerPrimary);
+        }
         style.setProperty('--text-color', colors.text);
         style.setProperty('--text-color-secondary', textSecondary);
         style.setProperty('--text-color-muted', colors.textMuted || colors.text);
         // Use a glassy, semi-opaque version of the primary color for app surfaces.
         // Very slightly transparent (barely noticeable) to allow blur to be visible
-        const glassSidebarBg = this.hexToRgba(darkerPrimary, 0.96) || `rgba(20, 20, 20, 0.96)`;
-        style.setProperty('--popup-background', glassSidebarBg);
+        let glassSidebarBg;
+        if (gradientEnabled) {
+            // For gradient, create a semi-transparent version
+            const primaryRgba = this.hexToRgba(darkerPrimary, 0.96);
+            const gradientRgba = this.hexToRgba(colors.gradientColor, 0.96);
+            glassSidebarBg = `linear-gradient(${gradientDirection}, ${primaryRgba} 0%, ${gradientRgba} 100%)`;
+        } else {
+            glassSidebarBg = this.hexToRgba(darkerPrimary, 0.96) || `rgba(20, 20, 20, 0.96)`;
+        }
+        // Popups use subtle dominant color (primary color, even if gradient)
+        // Extract primary color and make it subtle for popups
+        const popupBgRgba = this.hexToRgba(darkerPrimary, 0.85);
+        style.setProperty('--popup-background-subtle', popupBgRgba);
         style.setProperty('--popup-header', headerBg);
         style.setProperty('--button-background', 'transparent');
         style.setProperty('--button-hover', buttonHoverBg);
         style.setProperty('--button-text', colors.text);
         style.setProperty('--button-text-hover', colors.text);
         style.setProperty('--sidebar-background', glassSidebarBg);
-        style.setProperty('--url-bar-background', urlBarBg);
-        style.setProperty('--url-bar-focus-background', urlBarFocusBg);
+        // URL bar now uses glassmorphism effect, no need to set background color
+        // style.setProperty('--url-bar-background', urlBarBg);
+        // style.setProperty('--url-bar-focus-background', urlBarFocusBg);
         style.setProperty('--url-bar-text', colors.text);
         style.setProperty('--url-bar-text-muted', textSecondary);
         style.setProperty('--tab-background', 'transparent');
@@ -2367,6 +2530,18 @@ class AxisBrowser {
         style.setProperty('--accent-color', colors.accent);
         style.setProperty('--primary-color', darkerPrimary);
         style.setProperty('--secondary-color', secondaryColor);
+        
+        // Set gradient variables
+        if (gradientEnabled) {
+            const gradient = `linear-gradient(${gradientDirection}, ${darkerPrimary} 0%, ${colors.gradientColor} 100%)`;
+            style.setProperty('--primary-gradient', gradient);
+            style.setProperty('--theme-color', darkerPrimary);
+            style.setProperty('--gradient-color', colors.gradientColor);
+            style.setProperty('--gradient-enabled', '1');
+        } else {
+            style.setProperty('--theme-color', darkerPrimary);
+            style.setProperty('--gradient-enabled', '0');
+        }
         
         // Animation colors - batch update based on theme brightness
         if (isDark) {
@@ -2400,28 +2575,83 @@ class AxisBrowser {
         style.setProperty('--animation-shadow-medium', `rgba(0, 0, 0, ${shadowOpacityMedium})`);
         
         // Only update critical elements directly - CSS variables handle everything else
-        // Body stays transparent so macOS vibrancy/light can come through behind our tinted surfaces
-        document.body.style.background = 'transparent';
+        // Body uses theme background
+        document.body.style.background = gradientEnabled ? 
+            `linear-gradient(${gradientDirection}, ${darkerPrimary} 0%, ${colors.gradientColor} 100%)` : 
+            darkerPrimary;
         document.body.style.color = colors.text;
         
-        // Update cached sidebar and content area to use glass background with !important override
-        // Force apply background directly to ensure it's visible with stronger blur
-        if (this.elements?.sidebar) {
-            this.elements.sidebar.style.setProperty('background', glassSidebarBg, 'important');
-            this.elements.sidebar.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-            this.elements.sidebar.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-        }
+        // Check if there are any tabs open
+        const hasTabs = this.tabs && this.tabs.size > 0;
+        
+        const mainArea = document.getElementById('main-area');
         const contentArea = document.getElementById('content-area');
-        if (contentArea) {
-            contentArea.style.setProperty('background', glassSidebarBg, 'important');
-            contentArea.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-            contentArea.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-        }
-        // Also apply blur to the app container for overall effect
         const app = document.getElementById('app');
+        
+        if (hasTabs) {
+            // When tabs are open: Apply theme to main-area for seamless blend
+            if (mainArea) {
+                mainArea.style.setProperty('background', glassSidebarBg, 'important');
+                mainArea.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+                mainArea.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+            }
+            
+            // Remove backgrounds from individual elements to prevent duplication
+        if (this.elements?.sidebar) {
+                this.elements.sidebar.style.setProperty('background', 'transparent', 'important');
+                this.elements.sidebar.style.setProperty('backdrop-filter', 'none', 'important');
+                this.elements.sidebar.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        }
+        if (contentArea) {
+                contentArea.style.setProperty('background', 'transparent', 'important');
+                contentArea.style.setProperty('backdrop-filter', 'none', 'important');
+                contentArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        }
+            
         if (app) {
+                app.style.setProperty('background', gradientEnabled ? 
+                    `linear-gradient(${gradientDirection}, ${darkerPrimary} 0%, ${colors.gradientColor} 100%)` : 
+                    darkerPrimary, 'important');
             app.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
             app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+            }
+        } else {
+            // When NO tabs are open: Keep theme background everywhere, just hide webviews
+            // Apply theme to main-area so background is visible
+            if (mainArea) {
+                mainArea.style.setProperty('background', glassSidebarBg, 'important');
+                mainArea.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+                mainArea.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+            }
+            
+            // Also apply to app element
+            if (app) {
+                app.style.setProperty('background', gradientEnabled ? 
+                    `linear-gradient(${gradientDirection}, ${darkerPrimary} 0%, ${colors.gradientColor} 100%)` : 
+                    darkerPrimary, 'important');
+                app.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+                app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+            }
+            
+            // Remove backgrounds from individual elements to prevent duplication
+            if (this.elements?.sidebar) {
+                this.elements.sidebar.style.setProperty('background', 'transparent', 'important');
+                this.elements.sidebar.style.setProperty('backdrop-filter', 'none', 'important');
+                this.elements.sidebar.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+            }
+            
+            // Content area also transparent so main-area background shows through
+            if (contentArea) {
+                contentArea.style.setProperty('background', 'transparent', 'important');
+                contentArea.style.setProperty('backdrop-filter', 'none', 'important');
+                contentArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+            }
+            
+            // App container keeps blur for overall effect
+            if (app) {
+                app.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+                app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+            }
         }
         
         // Re-enable transitions after theme is applied (use RAF to ensure CSS variables are updated first)
@@ -2824,25 +3054,29 @@ class AxisBrowser {
                         tab.url = 'axis://settings';
                         this.tabs.set(tabId, tab);
                     }
+                    // Set webview background immediately to prevent flash
+                    if (webview) {
+                        webview.style.setProperty('background', 'rgba(40, 40, 40, 0.95)', 'important');
+                    }
                     if (currentSrc === 'about:blank' || !currentSrc) {
                         this.loadSettingsInWebview();
                     }
-                    this.resetToBlackTheme();
+                    // Don't reset theme - keep the user's theme while showing settings
                 } else if (tab.url && tab.url.startsWith('axis:note://')) {
                     const noteId = tab.url.replace('axis:note://', '');
                     if (!currentSrc || currentSrc === 'about:blank' || !currentSrc.includes('axis:note://')) {
                         this.loadNoteInWebview(noteId);
                     }
-                    this.resetToBlackTheme();
+                    // Don't reset theme - keep the user's theme while showing notes
                 } else if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
                     const sanitizedTabUrl = this.sanitizeUrl(tab.url);
                     if (!currentSrc || currentSrc === 'about:blank' || currentSrc !== sanitizedTabUrl) {
                         webview.src = sanitizedTabUrl || 'https://www.google.com';
                     } else {
-                        // Page is already loaded - extract theme asynchronously to not block
-                        requestAnimationFrame(() => {
-                            this.extractAndApplyWebpageColors(webview);
-                        });
+                        // Auto-tinting disabled - using custom theme colors instead
+                        // requestAnimationFrame(() => {
+                        //     this.extractAndApplyWebpageColors(webview);
+                        // });
                     }
                 } else {
                     if (tab.url !== 'axis://settings' && (!currentSrc || currentSrc === 'about:blank')) {
@@ -2879,11 +3113,67 @@ class AxisBrowser {
             // Show empty state but keep content hidden (blank screen)
             emptyState.classList.remove('hidden');
             if (emptyContent) emptyContent.classList.add('hidden');
-            this.resetToBlackTheme();
+            
+            // Reapply theme to ensure background is visible when no tabs
+            if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+                this.applyCustomThemeFromSettings();
+            } else {
+                // Apply default theme with background
+                const colors = {
+                    primary: '#1a1a1a',
+                    secondary: '#222222',
+                    accent: '#2a2a2a',
+                    text: '#ffffff',
+                    textSecondary: '#cccccc',
+                    textMuted: '#999999',
+                    border: 'rgba(255, 255, 255, 0.08)',
+                    borderLight: 'rgba(255, 255, 255, 0.12)'
+                };
+                this.applyCustomTheme(colors);
+            }
+            
+            // Ensure webviews are hidden
+            const webviewContainer = document.querySelector('.webview-container');
+            if (webviewContainer) {
+                webviewContainer.style.setProperty('background', 'transparent', 'important');
+                webviewContainer.style.setProperty('backdrop-filter', 'none', 'important');
+                webviewContainer.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+            }
+            
+            // Hide all webviews when no tabs are open
+            const webviews = document.querySelectorAll('webview');
+            webviews.forEach(wv => {
+                wv.style.setProperty('opacity', '0', 'important');
+                wv.style.setProperty('visibility', 'hidden', 'important');
+                wv.style.setProperty('background', 'transparent', 'important');
+            });
+            
+            const webviewsContainer = document.getElementById('webviews-container');
+            if (webviewsContainer) {
+                webviewsContainer.style.setProperty('background', 'transparent', 'important');
+            }
         } else {
             // Hide empty state
             emptyState.classList.add('hidden');
             if (emptyContent) emptyContent.classList.add('hidden');
+            
+            // Reapply theme background when tabs are open
+            if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+                this.applyCustomThemeFromSettings();
+            } else {
+                // Apply default theme with background
+                const colors = {
+                    primary: '#1a1a1a',
+                    secondary: '#222222',
+                    accent: '#2a2a2a',
+                    text: '#ffffff',
+                    textSecondary: '#cccccc',
+                    textMuted: '#999999',
+                    border: 'rgba(255, 255, 255, 0.08)',
+                    borderLight: 'rgba(255, 255, 255, 0.12)'
+                };
+                this.applyCustomTheme(colors);
+            }
         }
     }
 
@@ -3347,16 +3637,18 @@ class AxisBrowser {
 
         if (!this.currentTab || !this.tabs.has(this.currentTab)) {
             urlBar.value = '';
+            urlBar.removeAttribute('data-full-url');
             urlBar.classList.remove('summarized');
             return;
         }
 
         const tab = this.tabs.get(this.currentTab);
         
-        // Handle settings tabs
-        if (tab && tab.url === 'axis://settings') {
-            urlBar.value = 'axis://settings';
-            urlBar.classList.remove('summarized');
+        // Handle settings tabs - show "Axis Settings" but store full URL
+        if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+            urlBar.value = 'Axis Settings';
+            urlBar.setAttribute('data-full-url', 'axis://settings');
+            urlBar.classList.add('summarized');
             return;
         }
         
@@ -3367,35 +3659,54 @@ class AxisBrowser {
             return;
         }
 
-        const webview = el?.webview;
-        if (!webview) return;
-        
-        // Don't update URL from webview if it's a settings tab - keep axis://settings
-        if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
-            urlBar.value = 'axis://settings';
-            urlBar.classList.remove('summarized');
+        // Use getActiveWebview() to ensure we get the correct webview for current tab
+        const webview = this.getActiveWebview();
+        if (!webview) {
+            // No webview means no page loaded - clear URL bar
+            if (urlBar.value && urlBar.value !== '') {
+                urlBar.value = '';
+                urlBar.removeAttribute('data-full-url');
+            }
             return;
         }
         
-        const newUrl = webview.getURL();
+        let newUrl;
+        try {
+            newUrl = webview.getURL();
+        } catch (e) {
+            newUrl = null;
+        }
         
-        // Handle case where URL might be null/undefined temporarily
-        if (!newUrl || newUrl === 'about:blank') {
-            return;
+        // Handle case where URL might be null/undefined or about:blank
+        if (!newUrl || newUrl === 'about:blank' || newUrl.trim() === '') {
+            // Use tab.url if available, otherwise clear
+            if (tab && tab.url && tab.url !== 'about:blank' && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://')) {
+                newUrl = tab.url;
+            } else {
+                // Clear URL bar if there's no valid URL
+                urlBar.value = '';
+                urlBar.removeAttribute('data-full-url');
+                urlBar.classList.remove('summarized');
+                return;
+            }
         }
         
         // Get current displayed URL (check both full URL and summarized)
         const currentFullUrl = urlBar.getAttribute('data-full-url') || urlBar.value;
         const isCurrentlyExpanded = urlBar.classList.contains('expanded');
         
-        // Update if URL changed, or if URL bar is expanded and needs to be summarized
-        if (currentFullUrl !== newUrl || isCurrentlyExpanded) {
+        // Always update if URL changed, if tab changed (check by comparing with tab.url), or if expanded
+        const shouldUpdate = currentFullUrl !== newUrl || 
+                            isCurrentlyExpanded || 
+                            (tab && tab.url && tab.url !== currentFullUrl && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://'));
+        
+        if (shouldUpdate) {
             urlBar.value = newUrl;
+            urlBar.setAttribute('data-full-url', newUrl);
             // Always summarize after updating URL to ensure it's in summarized state
             this.summarizeUrlBar();
             
             // Also update tab data - but NEVER overwrite settings or note URLs
-            const tab = this.tabs.get(this.currentTab);
             if (tab && tab.url !== newUrl && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://') && !tab.isSettings) {
                 tab.url = newUrl;
             }
@@ -3409,9 +3720,32 @@ class AxisBrowser {
 
     summarizeUrlBar() {
         const urlBar = document.getElementById('url-bar');
-        const fullUrl = urlBar.value;
+        if (!urlBar) return;
+        
+        // Check if this is a settings tab
+        if (this.currentTab) {
+            const tab = this.tabs.get(this.currentTab);
+            if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+                urlBar.value = 'Axis Settings';
+                urlBar.setAttribute('data-full-url', 'axis://settings');
+                urlBar.classList.add('summarized');
+                urlBar.classList.remove('expanded');
+                return;
+            }
+        }
+        
+        const fullUrl = urlBar.getAttribute('data-full-url') || urlBar.value;
         
         if (fullUrl && fullUrl !== 'about:blank') {
+            // Check for axis://settings
+            if (fullUrl === 'axis://settings') {
+                urlBar.value = 'Axis Settings';
+                urlBar.setAttribute('data-full-url', 'axis://settings');
+                urlBar.classList.add('summarized');
+                urlBar.classList.remove('expanded');
+                return;
+            }
+            
             try {
                 const url = new URL(fullUrl);
                 let summarizedUrl = '';
@@ -3593,12 +3927,23 @@ class AxisBrowser {
         const webview = this.getActiveWebview();
         if (!webview) return;
 
+        // Set webview background immediately to prevent flash
+        webview.style.setProperty('background', 'rgba(40, 40, 40, 0.95)', 'important');
+
         // Reload settings from storage to ensure we have latest values
         await this.loadSettings();
 
         // Get current settings (with defaults)
         const sidebarPosition = this.settings.sidebarPosition || 'left';
         const searchEngine = this.settings.searchEngine || 'google';
+
+        // Get keyboard shortcuts
+        let shortcuts = {};
+        try {
+            shortcuts = await window.electronAPI.getShortcuts();
+        } catch (err) {
+            console.error('Failed to load shortcuts:', err);
+        }
 
         // Get history for history tab
         const history = await this.getHistory();
@@ -3633,7 +3978,8 @@ class AxisBrowser {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #000000;
+            /* Let the main app theme show through instead of forcing grey */
+            background: transparent;
             color: #fff;
             min-height: 100vh;
             padding: 0;
@@ -3644,13 +3990,16 @@ class AxisBrowser {
             display: flex;
             flex-direction: column;
             height: 100vh;
-            background: #000000;
+            /* Transparent so it sits on top of the existing theme */
+            background: transparent;
         }
         .settings-header {
             display: flex;
             align-items: center;
             padding: 20px 24px;
-            background: #000000;
+            background: rgba(40, 40, 40, 0.95);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }
         .header-title {
@@ -3732,6 +4081,24 @@ class AxisBrowser {
             color: #fff;
             margin: 0 0 16px 0;
         }
+        .section-title-with-icon {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .section-title-with-icon .section-title {
+            margin: 0;
+        }
+        .shortcuts-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .shortcuts-title-row .section-title {
+            margin: 0;
+        }
         .option-button {
             display: flex;
             align-items: center;
@@ -3773,6 +4140,10 @@ class AxisBrowser {
         }
         .settings-tab-content {
             display: none;
+            overflow-x: hidden;
+            overflow-y: auto;
+            width: 100%;
+            box-sizing: border-box;
         }
         .settings-tab-content.active {
             display: block;
@@ -3898,6 +4269,9 @@ class AxisBrowser {
         }
         .shortcut-group {
             margin-bottom: 24px;
+            width: 100%;
+            box-sizing: border-box;
+            overflow-x: hidden;
         }
         .shortcut-group:last-child {
             margin-bottom: 0;
@@ -3916,6 +4290,10 @@ class AxisBrowser {
             align-items: center;
             padding: 12px 0;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            gap: 16px;
+            min-width: 0;
+            width: 100%;
+            box-sizing: border-box;
         }
         .shortcut-item:last-child {
             border-bottom: none;
@@ -3935,6 +4313,99 @@ class AxisBrowser {
         .shortcut-desc {
             font-size: 14px;
             color: rgba(255, 255, 255, 0.8);
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .shortcuts-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            gap: 16px;
+            flex-wrap: wrap;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .shortcuts-info {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.5);
+            margin: 0;
+        }
+        .reset-shortcuts-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+        .reset-shortcuts-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.2);
+            color: #fff;
+        }
+        .reset-shortcuts-btn:active {
+            transform: scale(0.98);
+        }
+        .reset-shortcuts-btn i {
+            font-size: 12px;
+        }
+        .shortcut-input {
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            padding: 8px 12px;
+            background: #0a0a0a;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 500;
+            min-width: 80px;
+            max-width: 150px;
+            width: auto;
+            flex-shrink: 0;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .shortcut-input:hover {
+            border-color: rgba(255, 255, 255, 0.25);
+            background: #111;
+        }
+        .shortcut-input:focus {
+            border-color: #4a9eff;
+            background: #111;
+            box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.2);
+        }
+        .shortcut-input.recording {
+            border-color: #ff9800;
+            background: rgba(255, 152, 0, 0.1);
+            animation: pulse-recording 1.5s infinite;
+        }
+        @keyframes pulse-recording {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.4); }
+            50% { box-shadow: 0 0 0 4px rgba(255, 152, 0, 0.2); }
+        }
+        .shortcut-item.editable {
+            cursor: default;
+        }
+        .shortcut-item.editable:hover {
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 8px;
         }
         .empty-state {
             text-align: center;
@@ -4047,6 +4518,289 @@ class AxisBrowser {
             background: #1a1a1a;
             color: #fff;
         }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 2px;
+            background-color: #fff;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+        .toggle-switch:hover .toggle-slider {
+            background-color: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        .gradient-settings {
+            transition: opacity 0.3s ease, max-height 0.3s ease;
+        }
+        .custom-color-picker-wrapper {
+            position: relative;
+        }
+        .custom-color-picker-trigger {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 8px 14px;
+            min-width: 140px;
+            height: 36px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            outline: none;
+            position: relative;
+            overflow: hidden;
+        }
+        .custom-color-picker-trigger::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: inherit;
+            border-radius: 8px;
+            z-index: 0;
+        }
+        .custom-color-picker-trigger:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.08);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        .custom-color-picker-trigger:active {
+            transform: translateY(0);
+        }
+        .color-picker-hex {
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            color: #fff;
+            font-weight: 500;
+            z-index: 1;
+            position: relative;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        }
+        .color-picker-arrow {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.7);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1;
+            position: relative;
+        }
+        .custom-color-picker-trigger.active .color-picker-arrow {
+            transform: rotate(180deg);
+        }
+        .custom-color-picker-popup {
+            position: fixed;
+            width: 280px;
+            background: rgba(20, 20, 20, 0.98);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-10px) scale(0.95);
+            transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+            z-index: 10000;
+            overflow: visible;
+        }
+        .custom-color-picker-popup.show {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0) scale(1);
+        }
+        .color-picker-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .color-picker-header span {
+            font-size: 13px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .color-picker-close {
+            width: 24px;
+            height: 24px;
+            border: none;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            padding: 0;
+        }
+        .color-picker-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+        .color-picker-body {
+            padding: 16px;
+        }
+        .color-picker-saturation {
+            width: 100%;
+            height: 180px;
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: crosshair;
+            margin-bottom: 12px;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+            background: #ff0000;
+        }
+        .color-picker-white {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(to right, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0));
+            pointer-events: none;
+        }
+        .color-picker-black {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(to top, rgba(0, 0, 0, 1), rgba(0, 0, 0, 0));
+            pointer-events: none;
+        }
+        .color-picker-cursor {
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.4);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            transition: transform 0.05s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 10;
+        }
+        .color-picker-hue {
+            width: 100%;
+            height: 12px;
+            position: relative;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            cursor: pointer;
+            background: linear-gradient(to right, 
+                #ff0000 0%, 
+                #ffff00 16.66%, 
+                #00ff00 33.33%, 
+                #00ffff 50%, 
+                #0000ff 66.66%, 
+                #ff00ff 83.33%, 
+                #ff0000 100%);
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+        .color-picker-hue-cursor {
+            position: absolute;
+            top: 50%;
+            width: 18px;
+            height: 18px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 2px 6px rgba(0, 0, 0, 0.4);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            transition: left 0.05s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 10;
+        }
+        .color-picker-inputs {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 8px;
+        }
+        .color-input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .color-input-group label {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .color-input {
+            width: 100%;
+            padding: 6px 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: #fff;
+            font-size: 12px;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+        .color-input:focus {
+            border-color: rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .color-input.hex-input {
+            grid-column: 1 / -1;
+        }
+        .theme-preview {
+            width: 200px;
+            height: 60px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .theme-preview-gradient {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, var(--theme-color, #1a1a1a) 0%, var(--gradient-color, #2a2a2a) 100%);
+        }
         .fade-in {
             animation: fadeIn 0.3s ease;
         }
@@ -4107,6 +4861,140 @@ class AxisBrowser {
                             </select>
                         </div>
                     </div>
+                    
+                    <div class="section fade-in">
+                        <div class="section-title-with-icon">
+                            <div class="section-icon"><i class="fas fa-palette"></i></div>
+                            <h2 class="section-title">Theme Colors</h2>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-row-content">
+                                <div class="setting-row-title">Theme Color</div>
+                                <div class="setting-row-desc">Choose your primary theme color</div>
+                            </div>
+                            <div class="custom-color-picker-wrapper">
+                                <button class="custom-color-picker-trigger" id="theme-color-trigger" style="background: ${this.settings.themeColor || '#1a1a1a'};">
+                                    <span class="color-picker-hex" id="theme-color-display">${this.settings.themeColor || '#1a1a1a'}</span>
+                                    <i class="fas fa-chevron-down color-picker-arrow"></i>
+                                </button>
+                                <div class="custom-color-picker-popup" id="theme-color-picker-popup">
+                                    <div class="color-picker-header">
+                                        <span>Theme Color</span>
+                                        <button class="color-picker-close"><i class="fas fa-times"></i></button>
+                                    </div>
+                                    <div class="color-picker-body">
+                                        <div class="color-picker-saturation" id="theme-saturation">
+                                            <div class="color-picker-white"></div>
+                                            <div class="color-picker-black"></div>
+                                            <div class="color-picker-cursor" id="theme-cursor"></div>
+                                        </div>
+                                        <div class="color-picker-hue" id="theme-hue">
+                                            <div class="color-picker-hue-cursor" id="theme-hue-cursor"></div>
+                                        </div>
+                                        <div class="color-picker-inputs">
+                                            <div class="color-input-group">
+                                                <label>Hex</label>
+                                                <input type="text" class="color-input hex-input" id="theme-hex-input" value="${this.settings.themeColor || '#1a1a1a'}">
+                                            </div>
+                                            <div class="color-input-group">
+                                                <label>R</label>
+                                                <input type="number" class="color-input rgb-input" id="theme-r-input" min="0" max="255" value="26">
+                                            </div>
+                                            <div class="color-input-group">
+                                                <label>G</label>
+                                                <input type="number" class="color-input rgb-input" id="theme-g-input" min="0" max="255" value="26">
+                                            </div>
+                                            <div class="color-input-group">
+                                                <label>B</label>
+                                                <input type="number" class="color-input rgb-input" id="theme-b-input" min="0" max="255" value="26">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-row-content">
+                                <div class="setting-row-title">Enable Gradient</div>
+                                <div class="setting-row-desc">Use a gradient instead of a solid color</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="gradient-enabled" ${this.settings.gradientEnabled ? 'checked' : ''}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="setting-row gradient-settings" id="gradient-settings-row" style="display: ${this.settings.gradientEnabled ? 'flex' : 'none'};">
+                            <div class="setting-row-content">
+                                <div class="setting-row-title">Gradient Color</div>
+                                <div class="setting-row-desc">Choose a second color for gradient effects</div>
+                            </div>
+                            <div class="custom-color-picker-wrapper">
+                                <button class="custom-color-picker-trigger" id="gradient-color-trigger" style="background: ${this.settings.gradientColor || '#2a2a2a'};">
+                                    <span class="color-picker-hex" id="gradient-color-display">${this.settings.gradientColor || '#2a2a2a'}</span>
+                                    <i class="fas fa-chevron-down color-picker-arrow"></i>
+                                </button>
+                                <div class="custom-color-picker-popup" id="gradient-color-picker-popup">
+                                    <div class="color-picker-header">
+                                        <span>Gradient Color</span>
+                                        <button class="color-picker-close"><i class="fas fa-times"></i></button>
+                                    </div>
+                                    <div class="color-picker-body">
+                                        <div class="color-picker-saturation" id="gradient-saturation">
+                                            <div class="color-picker-white"></div>
+                                            <div class="color-picker-black"></div>
+                                            <div class="color-picker-cursor" id="gradient-cursor"></div>
+                                        </div>
+                                        <div class="color-picker-hue" id="gradient-hue">
+                                            <div class="color-picker-hue-cursor" id="gradient-hue-cursor"></div>
+                                        </div>
+                                        <div class="color-picker-inputs">
+                                            <div class="color-input-group">
+                                                <label>Hex</label>
+                                                <input type="text" class="color-input hex-input" id="gradient-hex-input" value="${this.settings.gradientColor || '#2a2a2a'}">
+                                            </div>
+                                            <div class="color-input-group">
+                                                <label>R</label>
+                                                <input type="number" class="color-input rgb-input" id="gradient-r-input" min="0" max="255" value="42">
+                                            </div>
+                                            <div class="color-input-group">
+                                                <label>G</label>
+                                                <input type="number" class="color-input rgb-input" id="gradient-g-input" min="0" max="255" value="42">
+                                            </div>
+                                            <div class="color-input-group">
+                                                <label>B</label>
+                                                <input type="number" class="color-input rgb-input" id="gradient-b-input" min="0" max="255" value="42">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="setting-row gradient-settings" id="gradient-direction-row" style="display: ${this.settings.gradientEnabled ? 'flex' : 'none'};">
+                            <div class="setting-row-content">
+                                <div class="setting-row-title">Gradient Direction</div>
+                                <div class="setting-row-desc">Choose the direction of the gradient</div>
+                            </div>
+                            <select id="gradient-direction" class="setting-select">
+                                <option value="to right" ${this.settings.gradientDirection === 'to right' ? 'selected' : ''}>→ Right</option>
+                                <option value="to left" ${this.settings.gradientDirection === 'to left' ? 'selected' : ''}>← Left</option>
+                                <option value="to bottom" ${this.settings.gradientDirection === 'to bottom' ? 'selected' : ''}>↓ Bottom</option>
+                                <option value="to top" ${this.settings.gradientDirection === 'to top' ? 'selected' : ''}>↑ Top</option>
+                                <option value="135deg" ${this.settings.gradientDirection === '135deg' ? 'selected' : ''}>↗ Diagonal Right</option>
+                                <option value="45deg" ${this.settings.gradientDirection === '45deg' ? 'selected' : ''}>↘ Diagonal Left</option>
+                                <option value="225deg" ${this.settings.gradientDirection === '225deg' ? 'selected' : ''}>↙ Diagonal Bottom Right</option>
+                                <option value="315deg" ${this.settings.gradientDirection === '315deg' ? 'selected' : ''}>↖ Diagonal Top Right</option>
+                            </select>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-row-content">
+                                <div class="setting-row-title">Preview</div>
+                                <div class="setting-row-desc">See how your theme looks</div>
+                            </div>
+                            <div class="theme-preview" id="theme-preview">
+                                <div class="theme-preview-gradient"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 
                 <div class="settings-tab-content" id="history-tab">
@@ -4129,103 +5017,104 @@ class AxisBrowser {
                 
                 <div class="settings-tab-content" id="shortcuts-tab">
                     <div class="section fade-in">
-                        <div class="section-title-with-icon">
+                        <div class="section-title-with-icon shortcuts-title-row">
+                            <div style="display: flex; align-items: center; gap: 10px;">
                             <div class="section-icon"><i class="fas fa-keyboard"></i></div>
                             <h2 class="section-title">Keyboard Shortcuts</h2>
+                            </div>
+                            <button id="reset-shortcuts-btn" class="reset-shortcuts-btn">
+                                <i class="fas fa-undo"></i> Reset to Defaults
+                            </button>
                         </div>
                         <div class="shortcut-group">
                             <h4>Navigation</h4>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="spotlight-search">
                                 <span class="shortcut-desc">New Tab / Spotlight</span>
-                                <span class="shortcut-key">⌘ + T</span>
+                                <input type="text" class="shortcut-input" readonly data-action="spotlight-search">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="close-tab">
                                 <span class="shortcut-desc">Close Tab</span>
-                                <span class="shortcut-key">⌘ + W</span>
+                                <input type="text" class="shortcut-input" readonly data-action="close-tab">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="new-tab">
                                 <span class="shortcut-desc">New Window</span>
-                                <span class="shortcut-key">⌘ + N</span>
+                                <input type="text" class="shortcut-input" readonly data-action="new-tab">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="recover-tab">
                                 <span class="shortcut-desc">Recover Closed Tab</span>
-                                <span class="shortcut-key">⌘ + Z</span>
+                                <input type="text" class="shortcut-input" readonly data-action="recover-tab">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="refresh">
                                 <span class="shortcut-desc">Refresh Page</span>
-                                <span class="shortcut-key">⌘ + R</span>
+                                <input type="text" class="shortcut-input" readonly data-action="refresh">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="focus-url">
                                 <span class="shortcut-desc">Focus URL Bar</span>
-                                <span class="shortcut-key">⌘ + L</span>
+                                <input type="text" class="shortcut-input" readonly data-action="focus-url">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="find">
                                 <span class="shortcut-desc">Find in Page</span>
-                                <span class="shortcut-key">⌘ + F</span>
+                                <input type="text" class="shortcut-input" readonly data-action="find">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="copy-url">
                                 <span class="shortcut-desc">Copy Current URL</span>
-                                <span class="shortcut-key">⇧ + ⌘ + C</span>
+                                <input type="text" class="shortcut-input" readonly data-action="copy-url">
                             </div>
                         </div>
                         
                         <div class="shortcut-group">
                             <h4>Tab Management</h4>
-                            <div class="shortcut-item">
-                                <span class="shortcut-desc">Switch to Tab 1-9</span>
-                                <span class="shortcut-key">⌘ + 1-9</span>
-                            </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="pin-tab">
                                 <span class="shortcut-desc">Pin / Unpin Tab</span>
-                                <span class="shortcut-key">⌘ + P</span>
+                                <input type="text" class="shortcut-input" readonly data-action="pin-tab">
                             </div>
                         </div>
                         
                         <div class="shortcut-group">
                             <h4>Zoom</h4>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="zoom-in">
                                 <span class="shortcut-desc">Zoom In</span>
-                                <span class="shortcut-key">⌘ + +</span>
+                                <input type="text" class="shortcut-input" readonly data-action="zoom-in">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="zoom-out">
                                 <span class="shortcut-desc">Zoom Out</span>
-                                <span class="shortcut-key">⌘ + -</span>
+                                <input type="text" class="shortcut-input" readonly data-action="zoom-out">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="reset-zoom">
                                 <span class="shortcut-desc">Reset Zoom</span>
-                                <span class="shortcut-key">⌘ + 0</span>
+                                <input type="text" class="shortcut-input" readonly data-action="reset-zoom">
                             </div>
                         </div>
                         
                         <div class="shortcut-group">
                             <h4>Panels & Menus</h4>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="toggle-sidebar">
                                 <span class="shortcut-desc">Toggle Sidebar</span>
-                                <span class="shortcut-key">⌘ + B</span>
+                                <input type="text" class="shortcut-input" readonly data-action="toggle-sidebar">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="history">
                                 <span class="shortcut-desc">Open History</span>
-                                <span class="shortcut-key">⌘ + Y</span>
+                                <input type="text" class="shortcut-input" readonly data-action="history">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="downloads">
                                 <span class="shortcut-desc">Open Downloads</span>
-                                <span class="shortcut-key">⌘ + J</span>
+                                <input type="text" class="shortcut-input" readonly data-action="downloads">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="settings">
                                 <span class="shortcut-desc">Open Settings</span>
-                                <span class="shortcut-key">⌘ + ,</span>
+                                <input type="text" class="shortcut-input" readonly data-action="settings">
                             </div>
                         </div>
                         
                         <div class="shortcut-group">
                             <h4>Data Management</h4>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="clear-history">
                                 <span class="shortcut-desc">Clear History</span>
-                                <span class="shortcut-key">⇧ + ⌘ + H</span>
+                                <input type="text" class="shortcut-input" readonly data-action="clear-history">
                             </div>
-                            <div class="shortcut-item">
+                            <div class="shortcut-item editable" data-action="clear-downloads">
                                 <span class="shortcut-desc">Clear Downloads</span>
-                                <span class="shortcut-key">⇧ + ⌘ + J</span>
+                                <input type="text" class="shortcut-input" readonly data-action="clear-downloads">
                             </div>
                         </div>
                     </div>
@@ -4235,6 +5124,9 @@ class AxisBrowser {
     </div>
     
     <script>
+        // Inject keyboard shortcuts from parent
+        window._axisShortcuts = ${JSON.stringify(shortcuts)};
+        
         // Navigation switching
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', () => {
@@ -4267,6 +5159,414 @@ class AxisBrowser {
                 const value = e.target.value;
                 console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: key, value: value }));
             });
+        }
+        
+        // Custom color picker implementation
+        function initColorPicker(pickerId, triggerId, popupId, saturationId, hueId, cursorId, hueCursorId, hexInputId, rInputId, gInputId, bInputId, displayId, settingKey) {
+            const trigger = document.getElementById(triggerId);
+            const popup = document.getElementById(popupId);
+            const saturation = document.getElementById(saturationId);
+            const hue = document.getElementById(hueId);
+            const cursor = document.getElementById(cursorId);
+            const hueCursor = document.getElementById(hueCursorId);
+            const hexInput = document.getElementById(hexInputId);
+            const rInput = document.getElementById(rInputId);
+            const gInput = document.getElementById(gInputId);
+            const bInput = document.getElementById(bInputId);
+            const display = document.getElementById(displayId);
+            
+            if (!trigger || !popup) return;
+            
+            let currentHue = 0;
+            let currentSaturation = 1;
+            let currentBrightness = 0.1;
+            let isDragging = false;
+            let isHueDragging = false;
+            
+            // Initialize color from current value
+            function initColor(hex) {
+                const rgb = hexToRgb(hex);
+                if (!rgb) return;
+                const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+                currentHue = hsv.h;
+                currentSaturation = hsv.s;
+                currentBrightness = hsv.v;
+                updateColor();
+            }
+            
+            // Initialize on load
+            const initialHex = display ? display.textContent : (settingKey === 'themeColor' ? '#1a1a1a' : '#2a2a2a');
+            initColor(initialHex);
+            
+            function hexToRgb(hex) {
+                const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
+                return result ? {
+                    r: parseInt(result[1], 16),
+                    g: parseInt(result[2], 16),
+                    b: parseInt(result[3], 16)
+                } : null;
+            }
+            
+            function rgbToHsv(r, g, b) {
+                r /= 255; g /= 255; b /= 255;
+                const max = Math.max(r, g, b);
+                const min = Math.min(r, g, b);
+                let h, s, v = max;
+                const d = max - min;
+                s = max === 0 ? 0 : d / max;
+                if (max === min) {
+                    h = 0;
+                } else {
+                    switch (max) {
+                        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+                        case g: h = ((b - r) / d + 2) / 6; break;
+                        case b: h = ((r - g) / d + 4) / 6; break;
+                    }
+                }
+                return { h: h * 360, s, v };
+            }
+            
+            function hsvToRgb(h, s, v) {
+                h = h / 360;
+                const i = Math.floor(h * 6);
+                const f = h * 6 - i;
+                const p = v * (1 - s);
+                const q = v * (1 - f * s);
+                const t = v * (1 - (1 - f) * s);
+                let r, g, b;
+                switch (i % 6) {
+                    case 0: r = v; g = t; b = p; break;
+                    case 1: r = q; g = v; b = p; break;
+                    case 2: r = p; g = v; b = t; break;
+                    case 3: r = p; g = q; b = v; break;
+                    case 4: r = t; g = p; b = v; break;
+                    case 5: r = v; g = p; b = q; break;
+                }
+                return {
+                    r: Math.round(r * 255),
+                    g: Math.round(g * 255),
+                    b: Math.round(b * 255)
+                };
+            }
+            
+            function rgbToHex(r, g, b) {
+                return '#' + [r, g, b].map(x => {
+                    const hex = x.toString(16);
+                    return hex.length === 1 ? '0' + hex : hex;
+                }).join('');
+            }
+            
+            function updateColor() {
+                const rgb = hsvToRgb(currentHue, currentSaturation, currentBrightness);
+                const hex = rgbToHex(rgb.r, rgb.g, rgb.b);
+                
+                // Update UI
+                if (trigger) {
+                    trigger.style.background = hex;
+                }
+                if (display) {
+                    display.textContent = hex.toUpperCase();
+                }
+                if (hexInput) {
+                    hexInput.value = hex.toUpperCase();
+                }
+                if (rInput) rInput.value = rgb.r;
+                if (gInput) gInput.value = rgb.g;
+                if (bInput) bInput.value = rgb.b;
+                
+                // Update saturation background with hue
+                if (saturation) {
+                    const hueColor = hsvToRgb(currentHue, 1, 1);
+                    const hueHex = rgbToHex(hueColor.r, hueColor.g, hueColor.b);
+                    // The saturation area background shows the pure hue
+                    saturation.style.background = hueHex;
+                }
+                
+                // Update cursor positions
+                if (cursor && saturation) {
+                    const rect = saturation.getBoundingClientRect();
+                    const x = currentSaturation * rect.width;
+                    const y = (1 - currentBrightness) * rect.height;
+                    cursor.style.left = x + 'px';
+                    cursor.style.top = y + 'px';
+                }
+                
+                if (hueCursor && hue) {
+                    const rect = hue.getBoundingClientRect();
+                    const x = (currentHue / 360) * rect.width;
+                    hueCursor.style.left = x + 'px';
+                }
+                
+                // Update preview
+                updateThemePreview();
+                
+                // Save setting
+                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: settingKey, value: hex }));
+            }
+            
+            // Toggle popup
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = popup.classList.contains('show');
+                if (isOpen) {
+                    closePopup();
+                } else {
+                    openPopup();
+                }
+            });
+            
+            function positionPopup() {
+                // Calculate position relative to trigger button
+                const triggerRect = trigger.getBoundingClientRect();
+                const popupWidth = 280;
+                const popupHeight = 320; // Approximate height
+                const spacing = 8;
+                
+                // Position popup below trigger, aligned to right
+                let top = triggerRect.bottom + spacing;
+                let right = window.innerWidth - triggerRect.right;
+                
+                // Check if popup would go off bottom of screen
+                if (top + popupHeight > window.innerHeight) {
+                    // Position above trigger instead
+                    top = triggerRect.top - popupHeight - spacing;
+                    // Make sure it doesn't go off top
+                    if (top < 0) {
+                        top = spacing;
+                    }
+                }
+                
+                // Check if popup would go off right edge
+                if (right + popupWidth > window.innerWidth) {
+                    right = window.innerWidth - triggerRect.left;
+                }
+                
+                // Check if popup would go off left edge
+                if (right > window.innerWidth - 20) {
+                    right = 20;
+                }
+                
+                // Apply positioning
+                popup.style.top = top + 'px';
+                popup.style.right = right + 'px';
+                popup.style.left = 'auto';
+                popup.style.bottom = 'auto';
+            }
+            
+            function openPopup() {
+                positionPopup();
+                popup.classList.add('show');
+                trigger.classList.add('active');
+                // Initialize color from current value
+                const currentHex = display ? display.textContent : (settingKey === 'themeColor' ? '#1a1a1a' : '#2a2a2a');
+                initColor(currentHex);
+                
+                // Reposition on window resize
+                const resizeHandler = () => {
+                    if (popup.classList.contains('show')) {
+                        positionPopup();
+                    }
+                };
+                window.addEventListener('resize', resizeHandler);
+                // Store handler for cleanup if needed
+                popup._resizeHandler = resizeHandler;
+            }
+            
+            function closePopup() {
+                popup.classList.remove('show');
+                trigger.classList.remove('active');
+                // Remove resize handler if it exists
+                if (popup._resizeHandler) {
+                    window.removeEventListener('resize', popup._resizeHandler);
+                    delete popup._resizeHandler;
+                }
+            }
+            
+            // Close on outside click (use capture phase for better detection)
+            const handleOutsideClick = (e) => {
+                if (popup.classList.contains('show') && 
+                    !popup.contains(e.target) && 
+                    !trigger.contains(e.target)) {
+                    closePopup();
+                }
+            };
+            document.addEventListener('click', handleOutsideClick, true);
+            
+            // Close button
+            const closeBtn = popup.querySelector('.color-picker-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', closePopup);
+            }
+            
+            // Saturation picker
+            if (saturation) {
+                const startDrag = (e) => {
+                    e.preventDefault();
+                    isDragging = true;
+                    updateSaturationFromEvent(e);
+                };
+                
+                const drag = (e) => {
+                    if (isDragging) {
+                        e.preventDefault();
+                        updateSaturationFromEvent(e);
+                    }
+                };
+                
+                const endDrag = () => {
+                    isDragging = false;
+                };
+                
+                saturation.addEventListener('mousedown', startDrag);
+                saturation.addEventListener('touchstart', startDrag, { passive: false });
+                
+                document.addEventListener('mousemove', drag);
+                document.addEventListener('touchmove', drag, { passive: false });
+                
+                document.addEventListener('mouseup', endDrag);
+                document.addEventListener('touchend', endDrag);
+            }
+            
+            function updateSaturationFromEvent(e) {
+                if (!saturation) return;
+                const rect = saturation.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+                const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
+                currentSaturation = x / rect.width;
+                currentBrightness = 1 - (y / rect.height);
+                updateColor();
+            }
+            
+            // Hue picker
+            if (hue) {
+                const startHueDrag = (e) => {
+                    e.preventDefault();
+                    isHueDragging = true;
+                    updateHueFromEvent(e);
+                };
+                
+                const dragHue = (e) => {
+                    if (isHueDragging) {
+                        e.preventDefault();
+                        updateHueFromEvent(e);
+                    }
+                };
+                
+                const endHueDrag = () => {
+                    isHueDragging = false;
+                };
+                
+                hue.addEventListener('mousedown', startHueDrag);
+                hue.addEventListener('touchstart', startHueDrag, { passive: false });
+                
+                document.addEventListener('mousemove', dragHue);
+                document.addEventListener('touchmove', dragHue, { passive: false });
+                
+                document.addEventListener('mouseup', endHueDrag);
+                document.addEventListener('touchend', endHueDrag);
+            }
+            
+            function updateHueFromEvent(e) {
+                if (!hue) return;
+                const rect = hue.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+                currentHue = (x / rect.width) * 360;
+                updateColor();
+            }
+            
+            // Input handlers
+            if (hexInput) {
+                hexInput.addEventListener('input', (e) => {
+                    const hex = e.target.value;
+                    if (/^#[0-9A-Fa-f]{6}$/.test(hex)) {
+                        initColor(hex);
+                    }
+                });
+            }
+            
+            [rInput, gInput, bInput].forEach((input, index) => {
+                if (input) {
+                    input.addEventListener('input', (e) => {
+                        const r = parseInt(rInput?.value || 0);
+                        const g = parseInt(gInput?.value || 0);
+                        const b = parseInt(bInput?.value || 0);
+                        if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+                            const hsv = rgbToHsv(r, g, b);
+                            currentHue = hsv.h;
+                            currentSaturation = hsv.s;
+                            currentBrightness = hsv.v;
+                            updateColor();
+                        }
+                    });
+                }
+            });
+        }
+        
+        // Initialize both color pickers
+        initColorPicker('theme', 'theme-color-trigger', 'theme-color-picker-popup', 
+            'theme-saturation', 'theme-hue', 'theme-cursor', 'theme-hue-cursor',
+            'theme-hex-input', 'theme-r-input', 'theme-g-input', 'theme-b-input',
+            'theme-color-display', 'themeColor');
+        
+        initColorPicker('gradient', 'gradient-color-trigger', 'gradient-color-picker-popup',
+            'gradient-saturation', 'gradient-hue', 'gradient-cursor', 'gradient-hue-cursor',
+            'gradient-hex-input', 'gradient-r-input', 'gradient-g-input', 'gradient-b-input',
+            'gradient-color-display', 'gradientColor');
+        
+        // Gradient toggle handler
+        const gradientEnabled = document.getElementById('gradient-enabled');
+        const gradientSettingsRow = document.getElementById('gradient-settings-row');
+        const gradientDirectionRow = document.getElementById('gradient-direction-row');
+        
+        if (gradientEnabled) {
+            gradientEnabled.addEventListener('change', (e) => {
+                const enabled = e.target.checked;
+                if (gradientSettingsRow) {
+                    gradientSettingsRow.style.display = enabled ? 'flex' : 'none';
+                }
+                if (gradientDirectionRow) {
+                    gradientDirectionRow.style.display = enabled ? 'flex' : 'none';
+                }
+                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'gradientEnabled', value: enabled }));
+                updateThemePreview();
+            });
+        }
+        
+        // Gradient direction handler
+        const gradientDirection = document.getElementById('gradient-direction');
+        if (gradientDirection) {
+            gradientDirection.addEventListener('change', (e) => {
+                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'gradientDirection', value: e.target.value }));
+                updateThemePreview();
+            });
+        }
+        
+        // Theme preview update
+        function updateThemePreview() {
+            const themePreview = document.getElementById('theme-preview');
+            const themeDisplay = document.getElementById('theme-color-display');
+            const gradientDisplay = document.getElementById('gradient-color-display');
+            const gradientEnabledCheckbox = document.getElementById('gradient-enabled');
+            const gradientDirectionSelect = document.getElementById('gradient-direction');
+            
+            if (themePreview && themeDisplay) {
+                const themeColor = themeDisplay.textContent;
+                const gradientEl = themePreview.querySelector('.theme-preview-gradient');
+                if (gradientEl) {
+                    const isGradientEnabled = gradientEnabledCheckbox ? gradientEnabledCheckbox.checked : false;
+                    const direction = gradientDirectionSelect ? gradientDirectionSelect.value : '135deg';
+                    
+                    if (isGradientEnabled && gradientDisplay) {
+                        const gradientColor = gradientDisplay.textContent;
+                        gradientEl.style.background = \`linear-gradient(\${direction}, \${themeColor} 0%, \${gradientColor} 100%)\`;
+                    } else {
+                        gradientEl.style.background = themeColor;
+                    }
+                }
+            }
         }
         
         // History search
@@ -4314,6 +5614,182 @@ class AxisBrowser {
                 }
             });
         });
+        
+        // ========== Keyboard Shortcuts Editor ==========
+        
+        // Current shortcuts state - will be injected by parent
+        let currentShortcuts = window._axisShortcuts || {};
+        let isRecording = false;
+        
+        // Format shortcut for display (convert Cmd+T to ⌘ + T)
+        function formatShortcutDisplay(shortcut) {
+            if (!shortcut) return '';
+            return shortcut
+                .replace(/Cmd/g, '⌘')
+                .replace(/Ctrl/g, '⌃')
+                .replace(/Alt/g, '⌥')
+                .replace(/Shift/g, '⇧')
+                .replace(/\\+/g, ' + ')
+                .replace(/\\+([A-Z0-9,\\.\\-=])/gi, ' + $1');
+        }
+        
+        // Parse key event to shortcut string
+        function keyEventToShortcut(e) {
+            const parts = [];
+            const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+            
+            // Escape explicitly means "cancel recording"
+            if (e.key === 'Escape') return '__CANCEL__';
+            
+            if (isMac) {
+                if (e.metaKey) parts.push('Cmd');
+                if (e.ctrlKey) parts.push('Ctrl');
+            } else {
+                if (e.ctrlKey) parts.push('Ctrl');
+                if (e.metaKey) parts.push('Meta');
+            }
+            if (e.altKey) parts.push('Alt');
+            if (e.shiftKey) parts.push('Shift');
+            
+            // Get the key
+            let key = e.key;
+            if (key === ' ') key = 'Space';
+            else if (key === '+') key = '='; // Normalize + to =
+            else if (key.length === 1) key = key.toUpperCase();
+            
+            // If user pressed only a modifier (Cmd, Ctrl, etc), keep recording
+            // and wait for a real key instead of cancelling.
+            if (['Control', 'Meta', 'Alt', 'Shift'].includes(key)) return null;
+            
+            parts.push(key);
+            return parts.join('+');
+        }
+        
+        // Update display with current shortcuts
+        function updateShortcutInputs() {
+            document.querySelectorAll('.shortcut-input').forEach(input => {
+                const action = input.dataset.action;
+                if (currentShortcuts[action]) {
+                    input.value = formatShortcutDisplay(currentShortcuts[action]);
+                }
+            });
+        }
+        
+        // Save shortcuts - send via console.log
+        function saveShortcuts() {
+            console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'setShortcuts', shortcuts: currentShortcuts }));
+        }
+        
+        // Pause global shortcuts during recording
+        function pauseGlobalShortcuts() {
+            console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'pauseShortcuts' }));
+        }
+        
+        // Resume global shortcuts after recording
+        function resumeGlobalShortcuts() {
+            console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'resumeShortcuts' }));
+        }
+        
+        // Reset shortcuts to defaults
+        function resetShortcuts() {
+            console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'resetShortcuts' }));
+        }
+        
+        // Handle messages from parent window (for receiving shortcuts data)
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'shortcutsLoaded') {
+                currentShortcuts = event.data.shortcuts || {};
+                updateShortcutInputs();
+            }
+        });
+        
+        // Setup shortcut input listeners
+        document.querySelectorAll('.shortcut-input').forEach(input => {
+            input.addEventListener('focus', () => {
+                isRecording = true;
+                input.value = 'Press keys...';
+                input.classList.add('recording');
+                // Pause global shortcuts while recording
+                pauseGlobalShortcuts();
+            });
+            
+            input.addEventListener('blur', () => {
+                input.classList.remove('recording');
+                // Restore the original value if nothing was set
+                const action = input.dataset.action;
+                if (input.value === 'Press keys...' && currentShortcuts[action]) {
+                    input.value = formatShortcutDisplay(currentShortcuts[action]);
+                }
+                isRecording = false;
+                // Resume global shortcuts
+                resumeGlobalShortcuts();
+            });
+            
+            input.addEventListener('keydown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const shortcut = keyEventToShortcut(e);
+                
+                // '__CANCEL__' means explicit cancel (Escape)
+                if (shortcut === '__CANCEL__') {
+                    input.blur();
+                    return;
+                }
+                
+                // null / empty shortcut means only modifiers were pressed so far;
+                // keep recording and wait for a non‑modifier key.
+                if (!shortcut) {
+                    return;
+                }
+                
+                // Check for conflicts
+                const action = input.dataset.action;
+                let conflict = null;
+                for (const [existingAction, existingShortcut] of Object.entries(currentShortcuts)) {
+                    if (existingAction !== action && existingShortcut === shortcut) {
+                        conflict = existingAction;
+                        break;
+                    }
+                }
+                
+                if (conflict) {
+                    // Show conflict warning
+                    const conflictName = conflict.replace(/-/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());
+                    if (!confirm('This shortcut is already used by "' + conflictName + '". Do you want to replace it?')) {
+                        input.blur();
+                        return;
+                    }
+                    // Remove from conflicting action
+                    delete currentShortcuts[conflict];
+                }
+                
+                // Update the shortcut
+                currentShortcuts[action] = shortcut;
+                input.value = formatShortcutDisplay(shortcut);
+                input.classList.remove('recording');
+                input.blur();
+                
+                // Save changes
+                saveShortcuts();
+                
+                // Update other inputs in case of conflict resolution
+                updateShortcutInputs();
+            });
+        });
+        
+        // Reset button
+        const resetBtn = document.getElementById('reset-shortcuts-btn');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                if (confirm('Reset all keyboard shortcuts to their defaults?')) {
+                    resetShortcuts();
+                }
+            });
+        }
+        
+        // Initialize shortcuts display on page load
+        updateShortcutInputs();
         
     </script>
 </body>
@@ -4463,6 +5939,9 @@ class AxisBrowser {
                 // Apply setting changes immediately
                 if (key === 'sidebarPosition') {
                     this.applySidebarPosition();
+                } else if (key === 'themeColor' || key === 'gradientColor' || key === 'gradientEnabled' || key === 'gradientDirection') {
+                    // Apply theme colors immediately
+                    this.applyCustomThemeFromSettings();
                 }
                 // Theme mode and autoTheme changes will take effect on next page load
                 
@@ -4517,6 +5996,23 @@ class AxisBrowser {
             // Open a site permissions guide in a new tab
             this.createNewTab('https://myaccount.google.com/security');
             this.showNotification('Opening site permissions in a new tab', 'info');
+            return;
+        }
+        
+        // Handle keyboard shortcuts messages
+        if (event.data.type === 'getShortcuts') {
+            this.loadAndSendShortcuts();
+            return;
+        }
+        
+        if (event.data.type === 'setShortcuts') {
+            const { shortcuts } = event.data;
+            this.saveCustomShortcuts(shortcuts);
+            return;
+        }
+        
+        if (event.data.type === 'resetShortcuts') {
+            this.resetShortcutsToDefaults();
             return;
         }
         
@@ -6125,6 +7621,7 @@ class AxisBrowser {
 
     closeNavMenu() {
         const navMenu = document.getElementById('nav-menu');
+        if (navMenu && !navMenu.classList.contains('hidden')) {
         navMenu.classList.add('closing');
         
         // Remove the menu after animation completes
@@ -6132,7 +7629,8 @@ class AxisBrowser {
             navMenu.classList.add('hidden');
             navMenu.classList.remove('closing');
             navMenu.style.visibility = 'hidden';
-        }, 200); // Match animation duration
+            }, 200);
+        }
     }
 
     setupSidebarSlideBack() {
@@ -6866,12 +8364,13 @@ class AxisBrowser {
             }
         }, true);
 
-        // Right-click for context menu
+        // Right-click for context menu - use capture phase to run before sidebar handler
         tabGroupElement.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            e.stopImmediatePropagation(); // Stop all other handlers
             this.showTabGroupContextMenu(e, tabGroup.id);
-        });
+        }, true); // Use capture phase
 
         // Rename tab group - only when input is made editable
         nameInput.addEventListener('blur', () => {
@@ -6950,26 +8449,26 @@ class AxisBrowser {
             
             // Force reflow to get accurate height
             const height = tabGroupContent.offsetHeight;
-            
+                
             // Reset and animate
             tabGroupContent.style.maxHeight = '0px';
             tabGroupContent.style.opacity = '0';
             tabGroupContent.style.transition = 'max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-            
-            requestAnimationFrame(() => {
+                
+                requestAnimationFrame(() => {
                 tabGroupContent.classList.add('open');
                 tabGroupContent.style.maxHeight = height + 'px';
                 tabGroupContent.style.opacity = '1';
-                
+                        
                 // After animation, allow full expansion
-                setTimeout(() => {
+                        setTimeout(() => {
                     tabGroupContent.style.transition = 'none';
                     tabGroupContent.style.maxHeight = '9999px';
                     tabGroupElement.classList.remove('toggling');
-                    setTimeout(() => {
+                            setTimeout(() => {
                         tabGroupContent.style.transition = '';
-                    }, 50);
-                }, 400);
+                            }, 50);
+                        }, 400);
             });
         } else {
             // Closing: get current height, then animate to 0
@@ -6982,15 +8481,15 @@ class AxisBrowser {
                 tabGroupContent.classList.remove('open');
                 tabGroupContent.style.maxHeight = '0px';
                 tabGroupContent.style.opacity = '0';
-                
+                    
                 // Clean up after animation
-                setTimeout(() => {
+                    setTimeout(() => {
                     tabGroupContent.style.display = 'none';
                     tabGroupContent.style.visibility = 'hidden';
                     tabGroupContent.style.maxHeight = '';
                     tabGroupContent.style.transition = '';
                     tabGroupElement.classList.remove('toggling');
-                }, 380);
+                    }, 380);
             });
         }
         
@@ -7017,6 +8516,8 @@ class AxisBrowser {
             if (id !== tabGroupId && tg.tabIds.includes(tabId)) {
                 tg.tabIds = tg.tabIds.filter(tgid => tgid !== tabId);
                 this.tabGroups.set(id, tg);
+                // Save the other group's state
+                this.saveTabGroups();
                 break; // Tab can only be in one tab group at a time
             }
         }
@@ -7026,6 +8527,10 @@ class AxisBrowser {
             tabGroup.tabIds.push(tabId);
             this.tabGroups.set(tabGroupId, tabGroup);
         }
+        
+        // Update tab's tabGroupId property
+        tab.tabGroupId = tabGroupId;
+        this.tabs.set(tabId, tab);
         
         // Update tab group UI directly without full re-render for better performance
         const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
@@ -7092,9 +8597,9 @@ class AxisBrowser {
                             }
                         }
                     }
-                    tabElement.remove();
-                }
-                
+                tabElement.remove();
+            }
+            
                 // Completely reset all inline styles on tab element
                 tabElement.style.cssText = '';
                 tabElement.style.display = 'block';
@@ -7136,21 +8641,21 @@ class AxisBrowser {
                     tabGroupContent.style.transition = '';
                     
                     // Always re-setup event listeners to ensure they're fresh
-                    this.setupTabEventListeners(tabElement, tabId);
-                    this.updateTabFavicon(tabId, tabElement);
-                    // Make tab draggable immediately
-                    if (this.makeTabDraggable) {
-                        this.makeTabDraggable(tabElement);
-                    } else {
-                        tabElement.draggable = true;
-                    }
+                this.setupTabEventListeners(tabElement, tabId);
+                this.updateTabFavicon(tabId, tabElement);
+                // Make tab draggable immediately
+                if (this.makeTabDraggable) {
+                    this.makeTabDraggable(tabElement);
+                } else {
+                    tabElement.draggable = true;
+                }
                 });
-                
+            
                 // Remove empty state if present
                 const tabGroupEmpty = tabGroupContent.querySelector('.tab-group-empty');
                 if (tabGroupEmpty) {
                     tabGroupEmpty.remove();
-                }
+            }
             });
         });
         
@@ -7161,8 +8666,16 @@ class AxisBrowser {
         const tabGroup = this.tabGroups.get(tabGroupId);
         if (!tabGroup) return;
         
+        // Remove tab from group's tabIds array
         tabGroup.tabIds = tabGroup.tabIds.filter(id => id !== tabId);
         this.tabGroups.set(tabGroupId, tabGroup);
+        
+        // Clear tabGroupId from tab data
+        const tab = this.tabs.get(tabId);
+        if (tab) {
+            tab.tabGroupId = undefined;
+            this.tabs.set(tabId, tab);
+        }
         
         // Move tab back to main container
         const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
@@ -7272,12 +8785,20 @@ class AxisBrowser {
         const tabGroup = this.tabGroups.get(tabGroupId);
         if (!tabGroup) return;
         
-        // Move all tabs back to main container
+        // Move all tabs back to main container and clean up tab data
         tabGroup.tabIds.forEach(tabId => {
+            const tab = this.tabs.get(tabId);
             const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
             const tabsContainer = document.querySelector('.tabs-container');
             const separator = document.getElementById('tabs-separator');
             
+            // Clear tabGroupId from tab data if tab exists
+            if (tab) {
+                tab.tabGroupId = undefined;
+                this.tabs.set(tabId, tab);
+            }
+            
+            // Only move tab if it exists in DOM
             if (tabElement && tabsContainer && separator) {
                 tabElement.remove();
                 tabsContainer.insertBefore(tabElement, separator);
@@ -7286,6 +8807,8 @@ class AxisBrowser {
         
         // Remove tab group
         this.tabGroups.delete(tabGroupId);
+        
+        // Save before rendering to ensure state consistency
         this.saveTabGroups();
         this.renderTabGroups();
     }
@@ -7408,7 +8931,11 @@ class AxisBrowser {
 
     showTabGroupContextMenu(e, tabGroupId) {
         const contextMenu = document.getElementById('tab-group-context-menu');
-        if (contextMenu) {
+        if (!contextMenu) {
+            console.error('Tab group context menu element not found');
+            return;
+        }
+        
             // Hide other context menus
             this.hideTabContextMenu();
             this.hideWebpageContextMenu();
@@ -7416,15 +8943,17 @@ class AxisBrowser {
             
             // Remove closing state and reset opacity before showing
             contextMenu.classList.remove('closing', 'hidden');
-            contextMenu.style.opacity = '';
+        contextMenu.style.opacity = '1';
+        contextMenu.style.visibility = 'visible';
+        contextMenu.style.zIndex = '10000';
             
             // Position menu and ensure it stays visible
             const menuWidth = 200;
-            const menuHeight = 120;
+            const menuHeight = 180; // Updated for duplicate option and separator
             const isRight = this.isSidebarRight();
             
-            let left = e.pageX;
-            let top = e.pageY;
+        let left = e.pageX || e.clientX;
+        let top = e.pageY || e.clientY;
             
             // Adjust if menu would go off-screen
             if (isRight) {
@@ -7437,6 +8966,9 @@ class AxisBrowser {
             } else {
                 if (left + menuWidth > window.innerWidth) {
                     left = window.innerWidth - menuWidth - 10;
+                }
+            if (left < 10) {
+                left = 10;
                 }
             }
             
@@ -7452,18 +8984,20 @@ class AxisBrowser {
             contextMenu.style.right = 'auto';
             contextMenu.style.display = 'block';
             this.contextMenuTabGroupId = tabGroupId;
+        
+        // Force a reflow to ensure the menu is visible
+        void contextMenu.offsetHeight;
             
             // Reset animations on all menu items
             const menuItems = contextMenu.querySelectorAll('.context-menu-item');
-            menuItems.forEach(item => {
+        menuItems.forEach((item, index) => {
                 item.style.animation = 'none';
-                item.offsetHeight; // Trigger reflow
+            void item.offsetHeight; // Trigger reflow
                 item.style.animation = '';
             });
             
             // Add slide-in animation
             contextMenu.style.animation = 'contextMenuSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
-        }
     }
 
     hideTabGroupContextMenu() {
@@ -7477,7 +9011,8 @@ class AxisBrowser {
                 contextMenu.classList.remove('closing');
                 contextMenu.style.display = 'none';
                 contextMenu.style.opacity = '0';
-            }, 250);
+                contextMenu.style.visibility = 'hidden';
+            }, 200);
         }
         this.contextMenuTabGroupId = null;
     }
@@ -7568,6 +9103,109 @@ class AxisBrowser {
         }
     }
 
+    duplicateCurrentTabGroup() {
+        if (!this.contextMenuTabGroupId) {
+            return;
+        }
+
+        const originalTabGroup = this.tabGroups.get(this.contextMenuTabGroupId);
+        if (!originalTabGroup) {
+            return;
+        }
+
+        // Create new tab group with same color and name + "Copy"
+        const newTabGroupId = Date.now();
+        const newTabGroupName = `${originalTabGroup.name} Copy`;
+        const newTabGroup = {
+            id: newTabGroupId,
+            name: newTabGroupName,
+            tabIds: [],
+            open: originalTabGroup.open,
+            order: this.tabGroups.size,
+            color: originalTabGroup.color || '#FF6B6B',
+            tabs: []
+        };
+
+        // Duplicate all tabs in the group
+        const newTabIds = [];
+        originalTabGroup.tabIds.forEach(tabId => {
+            const originalTab = this.tabs.get(tabId);
+            if (originalTab) {
+                // Get URL from tab data or webview
+                let urlToDuplicate = originalTab.url;
+                
+                if (!urlToDuplicate || urlToDuplicate === 'about:blank') {
+                    const webview = originalTab.webview;
+                    if (webview) {
+                        try {
+                            urlToDuplicate = webview.getURL();
+                        } catch (e) {
+                            console.error('Error getting URL from webview:', e);
+                        }
+                    }
+                }
+
+                // Only duplicate if we have a valid URL
+                if (urlToDuplicate && urlToDuplicate !== 'about:blank' && urlToDuplicate.startsWith('http')) {
+                    // Create new tab
+                    const newTabId = this.createNewTab(urlToDuplicate);
+                    if (newTabId) {
+                        newTabIds.push(newTabId);
+                        
+                        // Get the newly created tab to save its data
+                        const newTab = this.tabs.get(newTabId);
+                        if (newTab) {
+                            // Store tab data for persistence
+                            newTabGroup.tabs.push({
+                                id: newTabId,
+                                url: newTab.url || urlToDuplicate,
+                                title: newTab.title || originalTab.title || 'New Tab',
+                                favicon: newTab.favicon || originalTab.favicon || null
+                            });
+                        }
+                    }
+                }
+            }
+        });
+
+        // Set the new tab IDs
+        newTabGroup.tabIds = newTabIds;
+
+        // Add new tab group
+        this.tabGroups.set(newTabGroupId, newTabGroup);
+        
+        // Move duplicated tabs into the new tab group
+        newTabIds.forEach(tabId => {
+            const tab = this.tabs.get(tabId);
+            if (tab) {
+                // Remove from sidebar first
+                const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+                if (tabElement) {
+                    tabElement.remove();
+                }
+                
+                // Mark as pinned and add to tab group - ensure all properties are synced
+                tab.pinned = true;
+                tab.tabGroupId = newTabGroupId;
+                // Ensure tab is properly added to the group's tabIds (should already be done, but double-check)
+                if (!newTabGroup.tabIds.includes(tabId)) {
+                    newTabGroup.tabIds.push(tabId);
+                }
+                this.tabs.set(tabId, tab);
+            }
+        });
+        
+        // Update the tab group with potentially modified tabIds
+        this.tabGroups.set(newTabGroupId, newTabGroup);
+
+        // Render tab groups and save
+        this.renderTabGroups();
+        this.saveTabGroups();
+        
+        // Show notification
+        this.showNotification('Tab group duplicated', 'success');
+    }
+
     setupSidebarContextMenu() {
         const sidebar = document.getElementById('sidebar');
         if (!sidebar) {
@@ -7584,6 +9222,7 @@ class AxisBrowser {
             
             // Check what we're clicking on
             const isTab = target.closest('.tab');
+            const isTabGroup = target.closest('.tab-group');
             const isButton = target.closest('button');
             const isInput = target.tagName === 'INPUT' || target.closest('input');
             const isResizeHandle = target.closest('#sidebar-resize-handle');
@@ -7593,11 +9232,18 @@ class AxisBrowser {
                 target: target.tagName,
                 targetClasses: target.className,
                 isTab: !!isTab,
+                isTabGroup: !!isTabGroup,
                 isButton: !!isButton,
                 isInput: !!isInput,
                 isResizeHandle: !!isResizeHandle,
                 isContextMenu: !!isContextMenu
             });
+            
+            // IMPORTANT: If clicking on a tab group, don't interfere - let tab group handler process it
+            if (isTabGroup) {
+                // Don't prevent default or stop propagation - let tab group handler run
+                return;
+            }
             
             // Allow right-click on empty space - be more permissive
             // Only block if it's clearly an interactive element
@@ -7720,7 +9366,7 @@ class AxisBrowser {
                 contextMenu.classList.remove('closing');
                 contextMenu.style.display = 'none';
                 contextMenu.style.opacity = '0';
-            }, 250); // Slightly longer than animation duration to ensure smooth fade
+            }, 200);
         }
         this.contextMenuTabId = null;
     }
@@ -7919,7 +9565,7 @@ class AxisBrowser {
                 contextMenu.classList.remove('closing');
                 contextMenu.style.display = 'none';
                 contextMenu.style.opacity = '0';
-            }, 250); // Slightly longer than animation duration to ensure smooth fade
+            }, 200);
         }
     }
 
@@ -8363,6 +10009,11 @@ class AxisBrowser {
             item.kind === 'video' || item.kind === 'image'
         ).reverse().slice(-3); // Get last 3 items (newest at bottom)
         
+        // Store all media items for navigation
+        this.currentLibraryItems = items.filter(item => 
+            item.kind === 'video' || item.kind === 'image'
+        ).reverse();
+        
         mediaList.innerHTML = '';
         
         if (!mediaItems || mediaItems.length === 0) {
@@ -8411,7 +10062,7 @@ class AxisBrowser {
             
             // Click to open file
             mediaItem.addEventListener('click', () => {
-                this.openLibraryItem(file.path);
+                this.openLibraryItem(file.path, file);
                 this.hideLibraryMediaPopup();
             });
             
@@ -8523,28 +10174,9 @@ class AxisBrowser {
             });
             
         } else {
-            // Hide with animation (matching security panel)
-            downloadsPanel.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
-            downloadsPanel.style.opacity = '0';
-            downloadsPanel.style.transform = 'translate(-50%, -48%) scale(0.95)';
+            // Use consistent close animation
+            this.closePanelWithAnimation(downloadsPanel);
             this.libraryExplicitlyOpened = false;
-            
-            if (backdrop) {
-                backdrop.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
-                backdrop.style.opacity = '0';
-            }
-            
-            setTimeout(() => {
-                downloadsPanel.classList.add('hidden');
-                downloadsPanel.style.opacity = '';
-                downloadsPanel.style.transform = '';
-                downloadsPanel.style.transition = '';
-                if (backdrop) {
-                    backdrop.classList.add('hidden');
-                    backdrop.style.opacity = '';
-                    backdrop.style.transition = '';
-                }
-            }, 150);
         }
     }
 
@@ -8607,7 +10239,7 @@ class AxisBrowser {
                 const openBtn = downloadItem.querySelector('.download-btn[title="Open"]');
                 openBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    this.openLibraryItem(file.path);
+                    this.openLibraryItem(file.path, file);
                 });
                 
                 downloadsList.appendChild(downloadItem);
@@ -8616,71 +10248,73 @@ class AxisBrowser {
 
     async populateDownloads(locationKey = 'all') {
         const downloadsList = document.getElementById('downloads-list');
+        if (!downloadsList) return;
+
         const { baseDir, items } = await this.getLibraryItems(locationKey);
         this.currentLibraryLocation = locationKey;
         this.currentLibraryBaseDir = baseDir;
         
-        // Reverse order so newest items appear at the bottom
-        // Limit to 20 most recent items (10 less than before)
-        const limitedItems = items ? items.reverse().slice(-20) : [];
-        
-        // Clear list
-        downloadsList.innerHTML = '';
-        
-        if (!limitedItems || limitedItems.length === 0) {
-            downloadsList.innerHTML = `
-                <div class="no-downloads">
-                    <i class="fas fa-folder-open"></i>
-                    <p>No files found</p>
-                    <p class="no-downloads-subtitle">Your files will appear here</p>
-                </div>
-            `;
-            return;
-        }
-        
-        // Add items simply - no animations
-        limitedItems.forEach((file, index) => {
-            const downloadItem = document.createElement('div');
-            downloadItem.className = 'download-item';
-                
-                const iconClass = file.isDirectory
-                    ? 'fas fa-folder'
-                    : (file.kind === 'image'
-                        ? 'fas fa-file-image'
-                        : file.kind === 'video'
-                            ? 'fas fa-file-video'
-                            : file.kind === 'audio'
-                                ? 'fas fa-file-audio'
-                                : file.kind === 'pdf'
-                                    ? 'fas fa-file-pdf'
-                                    : file.kind === 'document'
-                                        ? 'fas fa-file-alt'
-                                        : 'fas fa-file');
-                
-                const meta = this.formatLibraryMeta(file);
+        // Filter to media files only (images + videos) and sort by most recent
+        const mediaItems = (items || [])
+            .filter(item => item.kind === 'image' || item.kind === 'video')
+            .sort((a, b) => b.mtime - a.mtime);
 
-                downloadItem.innerHTML = `
-                    <i class="${iconClass} download-icon"></i>
-                    <div class="download-info">
-                        <div class="download-name">${file.name}</div>
-                        <div class="download-progress">${meta}</div>
-                        <div class="download-url">${file.path}</div>
-                    </div>
-                    <div class="download-actions">
-                        <button class="download-btn" title="Open" data-path="${file.path}">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
+        // Limit to the 20 most recent items
+        const limitedItems = mediaItems.slice(0, 20);
+
+        // Store for preview navigation
+        this.currentLibraryItems = limitedItems;
+        
+        // Clear list and apply grid class
+            downloadsList.innerHTML = '';
+        downloadsList.classList.add('library-popup-grid');
+            
+        if (!limitedItems.length) {
+                downloadsList.innerHTML = `
+                <div class="no-downloads no-library-media">
+                    <i class="fas fa-images"></i>
+                    <p>No recent media found</p>
+                    <p class="no-downloads-subtitle">Your latest screenshots, photos, and videos will appear here.</p>
                     </div>
                 `;
+                return;
+            }
+            
+        // Render simple media tiles – image/video only, no text
+        limitedItems.forEach((file) => {
+            const item = document.createElement('div');
+            item.className = 'library-popup-item';
                 
-                // Open file/folder
-                const openBtn = downloadItem.querySelector('.download-btn[title="Open"]');
-                openBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.openLibraryItem(file.path);
+            const normalizedPath = file.path.replace(/\\/g, '/');
+            const fileUrl = `file://${normalizedPath}`;
+
+            let inner = '';
+            if (file.kind === 'image') {
+                inner = `
+                    <div class="library-popup-thumb">
+                        <img src="${this.escapeHtml(fileUrl)}" alt="${this.escapeHtml(file.name)}" />
+                    </div>
+                `;
+            } else {
+                // Video – show frame with play icon overlay
+                inner = `
+                    <div class="library-popup-thumb library-popup-thumb-video">
+                        <div class="library-popup-thumb-video-overlay">
+                            <i class="fas fa-play"></i>
+                        </div>
+                        <video src="${this.escapeHtml(fileUrl)}" muted></video>
+                    </div>
+                `;
+            }
+
+            item.innerHTML = inner;
+
+            // Click opens in the same preview window we already use
+            item.addEventListener('click', () => {
+                this.openLibraryItem(file.path, file);
                 });
                 
-                downloadsList.appendChild(downloadItem);
+            downloadsList.appendChild(item);
             });
     }
 
@@ -8747,16 +10381,207 @@ class AxisBrowser {
         return `${value.toFixed(value >= 10 ? 0 : 1)} ${sizes[i]}`;
     }
 
-    async openLibraryItem(fullPath) {
+    async openLibraryItem(fullPath, fileInfo = null) {
         try {
-            const success = await window.electronAPI.openLibraryItem(fullPath);
-            if (!success) {
-                this.showNotification('Failed to open item', 'error');
-            }
+            // Show preview instead of opening in OS
+            this.showFilePreview(fullPath, fileInfo);
         } catch (error) {
             console.error('Failed to open library item:', error);
             this.showNotification('Failed to open item', 'error');
         }
+    }
+
+    async showFilePreview(fullPath, fileInfo = null) {
+        const backdrop = document.getElementById('file-preview-backdrop');
+        const previewWindow = document.getElementById('file-preview-window');
+        const previewContent = document.getElementById('file-preview-content');
+        const previewName = document.getElementById('file-preview-name');
+        const previewTime = document.getElementById('file-preview-time');
+        const previewOpenBtn = document.getElementById('file-preview-open');
+        const previewPrevBtn = document.getElementById('file-preview-prev');
+        const previewNextBtn = document.getElementById('file-preview-next');
+
+        if (!backdrop || !previewWindow) return;
+
+        // Get file info if not provided
+        if (!fileInfo) {
+            // Try to get from current library items
+            const libraryItems = this.currentLibraryItems || [];
+            fileInfo = libraryItems.find(item => item.path === fullPath);
+            
+            if (!fileInfo) {
+                // Create basic file info from path
+                const pathParts = fullPath.split(/[/\\]/);
+                const fileName = pathParts[pathParts.length - 1];
+                const ext = fileName.split('.').pop()?.toLowerCase() || '';
+                
+                let kind = 'file';
+                if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'].includes(ext)) {
+                    kind = 'image';
+                } else if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext)) {
+                    kind = 'video';
+                } else if (ext === 'pdf') {
+                    kind = 'pdf';
+                }
+                
+                fileInfo = {
+                    name: fileName,
+                    path: fullPath,
+                    kind: kind,
+                    mtime: Date.now()
+                };
+            }
+        }
+
+        // Store current file info
+        this.currentPreviewFile = fileInfo;
+        this.currentPreviewIndex = this.currentLibraryItems ? 
+            this.currentLibraryItems.findIndex(item => item.path === fullPath) : -1;
+
+        // Update title
+        previewName.textContent = fileInfo.name;
+        previewTime.textContent = fileInfo.mtime ? this.formatTimeAgo(fileInfo.mtime) : '';
+
+        // Update navigation buttons
+        if (this.currentLibraryItems && this.currentPreviewIndex >= 0) {
+            previewPrevBtn.disabled = this.currentPreviewIndex === 0;
+            previewNextBtn.disabled = this.currentPreviewIndex === this.currentLibraryItems.length - 1;
+        } else {
+            previewPrevBtn.disabled = true;
+            previewNextBtn.disabled = true;
+        }
+
+        // Clear previous content
+        previewContent.innerHTML = '';
+
+        // Load content based on file type
+        const normalizedPath = fullPath.replace(/\\/g, '/');
+        const fileUrl = `file://${normalizedPath}`;
+
+        if (fileInfo.kind === 'image') {
+            const img = document.createElement('img');
+            img.src = fileUrl;
+            img.onerror = () => {
+                previewContent.innerHTML = `
+                    <div class="file-preview-unsupported">
+                        <i class="fas fa-image"></i>
+                        <p>Unable to load image</p>
+                    </div>
+                `;
+            };
+            previewContent.appendChild(img);
+        } else if (fileInfo.kind === 'video') {
+            const video = document.createElement('video');
+            video.src = fileUrl;
+            video.controls = true;
+            video.style.maxWidth = '100%';
+            video.style.maxHeight = '100%';
+            previewContent.appendChild(video);
+        } else if (fileInfo.kind === 'pdf') {
+            const iframe = document.createElement('iframe');
+            iframe.src = fileUrl;
+            previewContent.appendChild(iframe);
+        } else {
+            previewContent.innerHTML = `
+                <div class="file-preview-unsupported">
+                    <i class="fas fa-file"></i>
+                    <p>Preview not available for this file type</p>
+                </div>
+            `;
+        }
+
+        // Show preview
+        backdrop.classList.remove('hidden');
+        document.body.classList.add('preview-open');
+
+        // Setup event listeners if not already set
+        if (!this.previewListenersSetup) {
+            this.setupPreviewListeners();
+            this.previewListenersSetup = true;
+        }
+    }
+
+    setupPreviewListeners() {
+        const backdrop = document.getElementById('file-preview-backdrop');
+        const previewOpenBtn = document.getElementById('file-preview-open');
+        const previewPrevBtn = document.getElementById('file-preview-prev');
+        const previewNextBtn = document.getElementById('file-preview-next');
+        const previewCloseBtn = document.getElementById('file-preview-close');
+
+        if (!backdrop) return;
+
+        // Close button
+        if (previewCloseBtn) {
+            previewCloseBtn.addEventListener('click', () => {
+                this.hideFilePreview();
+            });
+        }
+
+        // Close on backdrop click
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) {
+                this.hideFilePreview();
+            }
+        });
+
+        // Close on backdrop click (already handled above)
+
+        // Open in Preview button
+        if (previewOpenBtn) {
+            previewOpenBtn.addEventListener('click', async () => {
+                if (this.currentPreviewFile) {
+                    try {
+                        await window.electronAPI.openLibraryItem(this.currentPreviewFile.path);
+                    } catch (error) {
+                        console.error('Failed to open file:', error);
+                        this.showNotification('Failed to open file', 'error');
+                    }
+                }
+            });
+        }
+
+        // Navigation buttons
+        if (previewPrevBtn) {
+            previewPrevBtn.addEventListener('click', () => {
+                if (this.currentLibraryItems && this.currentPreviewIndex > 0) {
+                    const prevFile = this.currentLibraryItems[this.currentPreviewIndex - 1];
+                    this.showFilePreview(prevFile.path, prevFile);
+                }
+            });
+        }
+
+        if (previewNextBtn) {
+            previewNextBtn.addEventListener('click', () => {
+                if (this.currentLibraryItems && this.currentPreviewIndex < this.currentLibraryItems.length - 1) {
+                    const nextFile = this.currentLibraryItems[this.currentPreviewIndex + 1];
+                    this.showFilePreview(nextFile.path, nextFile);
+                }
+            });
+        }
+
+        // ESC key to close (use capture to handle before other handlers)
+        const escHandler = (e) => {
+            if (e.key === 'Escape' && !backdrop.classList.contains('hidden')) {
+                e.stopPropagation();
+                this.hideFilePreview();
+            }
+        };
+        document.addEventListener('keydown', escHandler, true);
+        
+        // Store handler for cleanup if needed
+        this.previewEscHandler = escHandler;
+    }
+
+    hideFilePreview() {
+        const backdrop = document.getElementById('file-preview-backdrop');
+        if (!backdrop) return;
+
+        backdrop.classList.add('closing');
+        setTimeout(() => {
+            backdrop.classList.add('hidden');
+            backdrop.classList.remove('closing');
+            document.body.classList.remove('preview-open');
+        }, 200);
     }
 
     filterDownloads(searchTerm) {
@@ -9869,27 +11694,8 @@ class AxisBrowser {
             });
             
         } else {
-            // Hide with animation
-            securityPanel.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
-            securityPanel.style.opacity = '0';
-            securityPanel.style.transform = 'translate(-50%, -48%) scale(0.95)';
-            
-            if (backdrop) {
-                backdrop.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
-                backdrop.style.opacity = '0';
-            }
-            
-            setTimeout(() => {
-                securityPanel.classList.add('hidden');
-                securityPanel.style.opacity = '';
-                securityPanel.style.transform = '';
-                securityPanel.style.transition = '';
-                if (backdrop) {
-                    backdrop.classList.add('hidden');
-                    backdrop.style.opacity = '';
-                    backdrop.style.transition = '';
-                }
-            }, 150);
+            // Use consistent close animation
+            this.closePanelWithAnimation(securityPanel);
         }
     }
 
@@ -9975,6 +11781,61 @@ class AxisBrowser {
         this.showNotification('Security settings opened', 'info');
     }
 
+    closeAllPopups() {
+        // Close all popups smoothly with consistent animations
+        
+        // Close panels (downloads, security, notes)
+        const downloadsPanel = document.getElementById('downloads-panel');
+        const securityPanel = document.getElementById('security-panel');
+        const notesPanel = document.getElementById('notes-panel');
+        
+        if (downloadsPanel && !downloadsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(downloadsPanel);
+        }
+        if (securityPanel && !securityPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(securityPanel);
+        }
+        if (notesPanel && !notesPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(notesPanel);
+        }
+        
+        // Close nav menu
+        const navMenu = document.getElementById('nav-menu');
+        if (navMenu && !navMenu.classList.contains('hidden')) {
+            this.closeNavMenu();
+        }
+        
+        // Close context menus
+        this.hideTabContextMenu();
+        this.hideTabGroupContextMenu();
+        this.hideSidebarContextMenu();
+        this.hideWebpageContextMenu();
+        
+        // Close quit modal
+        const quitBackdrop = document.getElementById('quit-modal-backdrop');
+        if (quitBackdrop && !quitBackdrop.classList.contains('hidden')) {
+            this.hideQuitConfirmation();
+        }
+        
+        // Close file preview
+        const filePreviewBackdrop = document.getElementById('file-preview-backdrop');
+        if (filePreviewBackdrop && !filePreviewBackdrop.classList.contains('hidden')) {
+            this.hideFilePreview();
+        }
+        
+        // Close spotlight search
+        const spotlightSearch = document.getElementById('spotlight-search');
+        if (spotlightSearch && !spotlightSearch.classList.contains('hidden')) {
+            this.closeSpotlightSearch();
+        }
+        
+        // Close color picker
+        const colorPicker = document.getElementById('tab-group-color-picker');
+        if (colorPicker && !colorPicker.classList.contains('hidden')) {
+            this.hideTabGroupColorPicker();
+        }
+    }
+
     closePanelWithAnimation(panel) {
         // Determine the correct closing class based on panel ID
         let closingClass = 'closing';
@@ -9994,7 +11855,7 @@ class AxisBrowser {
         // Add backdrop fade out
         const backdrop = document.getElementById('modal-backdrop');
         if (backdrop && !backdrop.classList.contains('hidden')) {
-            backdrop.style.transition = 'opacity 0.15s cubic-bezier(0.55, 0.06, 0.68, 0.19)';
+            backdrop.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
             backdrop.style.opacity = '0';
         }
         
@@ -10031,6 +11892,8 @@ class AxisBrowser {
         document.getElementById('spotlight-input').value = '';
         document.getElementById('spotlight-suggestions').style.display = 'none';
         this.spotlightSelectedIndex = -1; // Reset selection
+        // Clear search engine selection
+        this.clearSpotlightSearchEngine();
     }
 
     navigateSuggestions(direction) {
@@ -10072,6 +11935,9 @@ class AxisBrowser {
         const query = input.value.trim();
         
         if (query) {
+            // Save selected search engine before closing (which clears it)
+            const selectedEngine = this.selectedSearchEngine;
+            
             // Close spotlight first
             this.closeSpotlightSearch();
             
@@ -10088,12 +11954,19 @@ class AxisBrowser {
                 this.saveSetting('recentSearches', this.settings.recentSearches);
             }
             
+            // Check for special axis:// URLs first
+            if (query.toLowerCase() === 'axis://settings') {
+                this.toggleSettings();
+                return;
+            }
+            
             // Determine if it's a URL or search query
             let searchUrl;
             if (this.isValidUrl(query)) {
                 searchUrl = query.startsWith('http') ? query : `https://${query}`;
             } else {
-                searchUrl = this.getSearchUrl(query);
+                // Use selected search engine if available
+                searchUrl = this.getSearchUrl(query, selectedEngine);
             }
             
             // Create a new tab and navigate to the search URL
@@ -10182,6 +12055,9 @@ class AxisBrowser {
             `;
             
             suggestionEl.addEventListener('click', () => {
+                // Save selected search engine before closing (which clears it)
+                const selectedEngine = this.selectedSearchEngine;
+                
                 // Do not close spotlight preemptively; only close when navigating
                 if (suggestion.isTab) {
                     if (suggestion.tabId) {
@@ -10214,18 +12090,32 @@ class AxisBrowser {
                     this.openNoteAsTab(suggestion.noteId);
                 } else if (suggestion.isSearch) {
                     this.closeSpotlightSearch();
-                    const searchUrl = this.getSearchUrl(suggestion.searchQuery);
+                    // Use selected search engine if available
+                    const searchUrl = this.getSearchUrl(suggestion.searchQuery, selectedEngine);
                     this.createNewTab(searchUrl);
                 } else if (suggestion.isHistory) {
                     this.closeSpotlightSearch();
+                    // If search engine is selected, search the history item on that engine
+                    if (selectedEngine) {
+                        const searchUrl = this.getSearchUrl(suggestion.text || suggestion.url, selectedEngine);
+                        this.createNewTab(searchUrl);
+                    } else {
                     this.createNewTab(suggestion.url);
+                    }
                 } else if (suggestion.isCompletion) {
                     this.closeSpotlightSearch();
-                    const searchUrl = this.getSearchUrl(suggestion.searchQuery);
+                    // Use selected search engine if available
+                    const searchUrl = this.getSearchUrl(suggestion.searchQuery, selectedEngine);
                     this.createNewTab(searchUrl);
                 } else if (suggestion.isUrl) {
                     this.closeSpotlightSearch();
+                    // If search engine is selected, search the URL text on that engine
+                    if (selectedEngine) {
+                        const searchUrl = this.getSearchUrl(suggestion.text || suggestion.url, selectedEngine);
+                        this.createNewTab(searchUrl);
+                    } else {
                     this.createNewTab(suggestion.url);
+                    }
                 } else {
                     // Default search behavior requires Enter; keep spotlight open
                     const input = document.getElementById('spotlight-input');
@@ -11254,8 +13144,8 @@ class AxisBrowser {
         return suggestions;
     }
 
-    getSearchUrl(query) {
-        const searchEngine = this.settings?.searchEngine || 'google';
+    getSearchUrl(query, engine = null) {
+        const searchEngine = engine || this.selectedSearchEngine || this.settings?.searchEngine || 'google';
         const encodedQuery = encodeURIComponent(query);
         
         switch (searchEngine) {
@@ -11264,9 +13154,212 @@ class AxisBrowser {
             case 'duckduckgo':
                 // Use HTML version for better webview compatibility
                 return `https://html.duckduckgo.com/html/?q=${encodedQuery}`;
+            case 'youtube':
+                return `https://www.youtube.com/results?search_query=${encodedQuery}`;
+            case 'yahoo':
+                return `https://search.yahoo.com/search?p=${encodedQuery}`;
+            case 'wikipedia':
+                return `https://en.wikipedia.org/wiki/Special:Search?search=${encodedQuery}`;
+            case 'reddit':
+                return `https://www.reddit.com/search/?q=${encodedQuery}`;
+            case 'github':
+                return `https://github.com/search?q=${encodedQuery}`;
+            case 'amazon':
+                return `https://www.amazon.com/s?k=${encodedQuery}`;
+            case 'twitter':
+                return `https://twitter.com/search?q=${encodedQuery}`;
+            case 'instagram':
+                return `https://www.instagram.com/explore/tags/${encodedQuery}/`;
+            case 'facebook':
+                return `https://www.facebook.com/search/top/?q=${encodedQuery}`;
             case 'google':
             default:
                 return `https://www.google.com/search?q=${encodedQuery}`;
+        }
+    }
+
+    selectSearchEngine(engine, urlBar) {
+        this.selectedSearchEngine = engine;
+        const pill = document.getElementById('search-engine-pill');
+        const pillName = document.getElementById('search-engine-name');
+        
+        if (pill && pillName) {
+            // Format engine name for display with special cases
+            const displayNames = {
+                'google': 'Google',
+                'youtube': 'YouTube',
+                'bing': 'Bing',
+                'duckduckgo': 'DuckDuckGo',
+                'yahoo': 'Yahoo!',
+                'wikipedia': 'Wikipedia',
+                'reddit': 'Reddit',
+                'github': 'GitHub',
+                'amazon': 'Amazon',
+                'twitter': 'Twitter',
+                'instagram': 'Instagram',
+                'facebook': 'Facebook'
+            };
+            const displayName = displayNames[engine] || engine.charAt(0).toUpperCase() + engine.slice(1);
+            pillName.textContent = displayName;
+            
+            // Remove all engine-specific classes
+            pill.className = 'search-engine-pill';
+            // Add engine-specific class for color coding
+            pill.classList.add(`search-engine-${engine}`);
+            pill.classList.remove('hidden');
+            
+            urlBar.classList.add('has-search-engine');
+            // Update placeholder
+            urlBar.placeholder = 'Search...';
+        }
+    }
+
+    clearSearchEngine() {
+        this.selectedSearchEngine = null;
+        const pill = document.getElementById('search-engine-pill');
+        const urlBar = document.getElementById('url-bar');
+        
+        if (pill) {
+            pill.classList.add('hidden');
+        }
+        if (urlBar) {
+            urlBar.classList.remove('has-search-engine');
+            // Restore default placeholder
+            urlBar.placeholder = 'Search or enter URL';
+        }
+        this.hideSearchEngineSuggestion();
+    }
+
+    showSearchEngineSuggestion(engine) {
+        const suggestion = document.getElementById('search-engine-suggestion');
+        const suggestionText = document.getElementById('search-engine-suggestion-text');
+        
+        if (!suggestion || !suggestionText) {
+            console.warn('Search engine suggestion elements not found');
+            return;
+        }
+        
+        const displayNames = {
+            'google': 'Google',
+            'youtube': 'YouTube',
+            'bing': 'Bing',
+            'duckduckgo': 'DuckDuckGo',
+            'yahoo': 'Yahoo!',
+            'wikipedia': 'Wikipedia',
+            'reddit': 'Reddit',
+            'github': 'GitHub',
+            'amazon': 'Amazon',
+            'twitter': 'Twitter',
+            'instagram': 'Instagram',
+            'facebook': 'Facebook'
+        };
+        const displayName = displayNames[engine] || engine.charAt(0).toUpperCase() + engine.slice(1);
+        suggestionText.textContent = `Search ${displayName}!`;
+        suggestion.classList.remove('hidden');
+    }
+
+    hideSearchEngineSuggestion() {
+        const suggestion = document.getElementById('search-engine-suggestion');
+        if (suggestion) {
+            suggestion.classList.add('hidden');
+        }
+    }
+
+    isSearchEngineShortcut(value) {
+        const shortcut = value.toLowerCase().trim();
+        return this.searchEngineShortcuts.hasOwnProperty(shortcut);
+    }
+
+    // Spotlight search engine methods
+    selectSpotlightSearchEngine(engine, spotlightInput) {
+        this.selectedSearchEngine = engine;
+        const pill = document.getElementById('spotlight-search-engine-pill');
+        const pillName = document.getElementById('spotlight-search-engine-name');
+        
+        if (pill && pillName) {
+            const displayNames = {
+                'google': 'Google',
+                'youtube': 'YouTube',
+                'bing': 'Bing',
+                'duckduckgo': 'DuckDuckGo',
+                'yahoo': 'Yahoo!',
+                'wikipedia': 'Wikipedia',
+                'reddit': 'Reddit',
+                'github': 'GitHub',
+                'amazon': 'Amazon',
+                'twitter': 'Twitter',
+                'instagram': 'Instagram',
+                'facebook': 'Facebook'
+            };
+            const displayName = displayNames[engine] || engine.charAt(0).toUpperCase() + engine.slice(1);
+            pillName.textContent = displayName;
+            
+            // Remove all engine-specific classes
+            pill.className = 'search-engine-pill';
+            // Add engine-specific class for color coding
+            pill.classList.add(`search-engine-${engine}`);
+            pill.classList.remove('hidden');
+            
+            // Calculate dynamic padding based on pill width
+            requestAnimationFrame(() => {
+                const pillWidth = pill.offsetWidth;
+                const gap = 14; // Small gap between pill and text
+                const leftOffset = 44; // Search icon width + padding
+                spotlightInput.style.paddingLeft = `${leftOffset + pillWidth + gap}px`;
+            });
+            
+            spotlightInput.classList.add('has-search-engine');
+            spotlightInput.placeholder = 'Search...';
+        }
+    }
+
+    clearSpotlightSearchEngine() {
+        this.selectedSearchEngine = null;
+        const pill = document.getElementById('spotlight-search-engine-pill');
+        const spotlightInput = document.getElementById('spotlight-input');
+        
+        if (pill) {
+            pill.classList.add('hidden');
+        }
+        if (spotlightInput) {
+            spotlightInput.classList.remove('has-search-engine');
+            spotlightInput.style.paddingLeft = ''; // Reset to default
+            spotlightInput.placeholder = 'Search or Enter URL...';
+        }
+        this.hideSpotlightSearchEngineSuggestion();
+    }
+
+    showSpotlightSearchEngineSuggestion(engine) {
+        const suggestion = document.getElementById('spotlight-search-engine-suggestion');
+        const suggestionText = document.getElementById('spotlight-search-engine-suggestion-text');
+        
+        if (!suggestion || !suggestionText) {
+            return;
+        }
+        
+        const displayNames = {
+            'google': 'Google',
+            'youtube': 'YouTube',
+            'bing': 'Bing',
+            'duckduckgo': 'DuckDuckGo',
+            'yahoo': 'Yahoo!',
+            'wikipedia': 'Wikipedia',
+            'reddit': 'Reddit',
+            'github': 'GitHub',
+            'amazon': 'Amazon',
+            'twitter': 'Twitter',
+            'instagram': 'Instagram',
+            'facebook': 'Facebook'
+        };
+        const displayName = displayNames[engine] || engine.charAt(0).toUpperCase() + engine.slice(1);
+        suggestionText.textContent = `Search ${displayName}!`;
+        suggestion.classList.remove('hidden');
+    }
+
+    hideSpotlightSearchEngineSuggestion() {
+        const suggestion = document.getElementById('spotlight-search-engine-suggestion');
+        if (suggestion) {
+            suggestion.classList.add('hidden');
         }
     }
 
@@ -11343,6 +13436,10 @@ class AxisBrowser {
     }
 
     isValidUrl(string) {
+        // Check for axis:// protocol URLs
+        if (string.toLowerCase().startsWith('axis://')) {
+            return true;
+        }
         try {
             const url = new URL(string);
             // Only allow http, https, and about protocols
@@ -11406,7 +13503,9 @@ class AxisBrowser {
             modal.className = 'quit-modal-card';
             modal.innerHTML = `
                 <div class="quit-modal-content">
-                    <div class="quit-modal-icon">⎋</div>
+                    <div class="quit-modal-icon">
+                        <i class="fas fa-power-off"></i>
+                    </div>
                     <div class="quit-modal-title">Quit Axis?</div>
                     <div class="quit-modal-subtitle">Are you sure you want to exit the application?</div>
                     <div class="quit-modal-actions">
@@ -11433,16 +13532,105 @@ class AxisBrowser {
     hideQuitConfirmation() {
         const backdrop = document.getElementById('quit-modal-backdrop');
         if (!backdrop) return;
+        
+        const modal = backdrop.querySelector('.quit-modal-card');
+        if (modal) {
+            // Add closing class to trigger fade-out animation
+            modal.classList.add('closing');
+        }
+        
+        // Add closing class to backdrop
+        backdrop.classList.add('closing');
+        
+        // Wait for animation to complete before hiding
+        setTimeout(() => {
         backdrop.classList.add('hidden');
+            backdrop.classList.remove('closing');
+            if (modal) {
+                modal.classList.remove('closing');
+            }
         document.body.classList.remove('modal-open');
         // Reset quit flag so X button works normally again
         window.electronAPI.cancelQuit();
+        }, 300); // Match the transition duration
+    }
+
+    // ========== Keyboard Shortcuts Management ==========
+    
+    async handleShortcutsMessage(data, webview) {
+        try {
+            switch (data.type) {
+                case 'setShortcuts':
+                    await window.electronAPI.setShortcuts(data.shortcuts);
+                    this.showNotification('Keyboard shortcuts saved', 'success');
+                    break;
+                    
+                case 'resetShortcuts':
+                    const defaultShortcuts = await window.electronAPI.resetShortcuts();
+                    // Send the defaults back to the settings page
+                    if (webview) {
+                        webview.executeJavaScript(`
+                            window._axisShortcuts = ${JSON.stringify(defaultShortcuts)};
+                            if (typeof currentShortcuts !== 'undefined') {
+                                currentShortcuts = window._axisShortcuts;
+                                updateShortcutInputs();
+                            }
+                        `);
+                    }
+                    this.showNotification('Keyboard shortcuts reset to defaults', 'success');
+                    break;
+                    
+                case 'pauseShortcuts':
+                    await window.electronAPI.disableShortcuts();
+                    break;
+                    
+                case 'resumeShortcuts':
+                    await window.electronAPI.enableShortcuts();
+                    break;
+            }
+        } catch (error) {
+            console.error('Error handling shortcuts message:', error);
+        }
+    }
+    
+    async loadAndSendShortcuts() {
+        try {
+            const shortcuts = await window.electronAPI.getShortcuts();
+            // Send shortcuts to the settings page via webview
+            const webview = this.getActiveWebview();
+            if (webview) {
+                webview.executeJavaScript(`
+                    window._axisShortcuts = ${JSON.stringify(shortcuts)};
+                    if (typeof currentShortcuts !== 'undefined') {
+                        currentShortcuts = window._axisShortcuts;
+                        updateShortcutInputs();
+                    }
+                `);
+            }
+        } catch (error) {
+            console.error('Error loading shortcuts:', error);
+        }
     }
 }
 
 // Initialize the browser when DOM is loaded
+// Initialize browser immediately
+let browserInstance = null;
+
 document.addEventListener('DOMContentLoaded', () => {
-    new AxisBrowser();
+    browserInstance = new AxisBrowser();
+});
+
+// Also ensure theme applies on window load as backup
+window.addEventListener('load', () => {
+    if (browserInstance && browserInstance.settings) {
+        // Force reapply theme on window load to ensure it's applied
+        if (browserInstance.settings.themeColor || browserInstance.settings.gradientColor) {
+            browserInstance.applyCustomThemeFromSettings();
+        } else {
+            browserInstance.resetToBlackTheme();
+        }
+    }
 });
 
 
