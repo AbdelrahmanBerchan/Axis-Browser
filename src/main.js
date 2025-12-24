@@ -17,6 +17,75 @@ let mainWindow;
 let isQuitConfirmed = false;
 let isUserQuitting = false;
 
+// ========== Keyboard Shortcuts (Global Functions) ==========
+
+// Default keyboard shortcuts
+const getDefaultShortcuts = () => {
+  const cmdOrCtrl = process.platform === 'darwin' ? 'Cmd' : 'Ctrl';
+  return {
+    'close-tab': `${cmdOrCtrl}+W`,
+    'spotlight-search': `${cmdOrCtrl}+T`,
+    'toggle-sidebar': `${cmdOrCtrl}+B`,
+    'refresh': `${cmdOrCtrl}+R`,
+    'focus-url': `${cmdOrCtrl}+L`,
+    'pin-tab': `${cmdOrCtrl}+P`,
+    'new-tab': `${cmdOrCtrl}+N`,
+    'settings': `${cmdOrCtrl}+,`,
+    'recover-tab': `${cmdOrCtrl}+Z`,
+    'history': `${cmdOrCtrl}+Y`,
+    'downloads': `${cmdOrCtrl}+J`,
+    'find': `${cmdOrCtrl}+F`,
+    'copy-url': `${cmdOrCtrl}+Shift+C`,
+    'clear-history': `${cmdOrCtrl}+Shift+H`,
+    'clear-downloads': `${cmdOrCtrl}+Shift+J`,
+    'zoom-in': `${cmdOrCtrl}+=`,
+    'zoom-out': `${cmdOrCtrl}+-`,
+    'reset-zoom': `${cmdOrCtrl}+0`,
+    'switch-tab-1': `${cmdOrCtrl}+1`,
+    'switch-tab-2': `${cmdOrCtrl}+2`,
+    'switch-tab-3': `${cmdOrCtrl}+3`,
+    'switch-tab-4': `${cmdOrCtrl}+4`,
+    'switch-tab-5': `${cmdOrCtrl}+5`,
+    'switch-tab-6': `${cmdOrCtrl}+6`,
+    'switch-tab-7': `${cmdOrCtrl}+7`,
+    'switch-tab-8': `${cmdOrCtrl}+8`,
+    'switch-tab-9': `${cmdOrCtrl}+9`
+  };
+};
+
+// Get shortcuts (custom or default)
+const getShortcuts = () => {
+  const customShortcuts = store.get('keyboardShortcuts', null);
+  if (customShortcuts) {
+    // Merge with defaults to ensure all actions have shortcuts
+    return { ...getDefaultShortcuts(), ...customShortcuts };
+  }
+  return getDefaultShortcuts();
+};
+
+// Register global shortcuts when window is focused (works even in webviews)
+const registerShortcuts = () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  
+  const shortcuts = getShortcuts();
+  
+  Object.entries(shortcuts).forEach(([action, key]) => {
+    try {
+      globalShortcut.register(key, () => {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
+          mainWindow.webContents.send('browser-shortcut', action);
+        }
+      });
+    } catch (error) {
+      console.error(`Failed to register shortcut ${key} for action ${action}:`, error);
+    }
+  });
+};
+
+const unregisterShortcuts = () => {
+  globalShortcut.unregisterAll();
+};
+
 // Apply consolidated Chromium/Electron performance flags as early as possible
 (function applyPerformanceFlags() {
   // GPU + rasterization
@@ -144,54 +213,6 @@ function createWindow() {
     // Show window controls by default (sidebar is visible)
     mainWindow.setWindowButtonVisibility(true);
   });
-  
-  // Register global shortcuts when window is focused (works even in webviews)
-  const registerShortcuts = () => {
-    const cmdOrCtrl = process.platform === 'darwin' ? 'Cmd' : 'Ctrl';
-    
-    const shortcuts = [
-      { key: `${cmdOrCtrl}+W`, action: 'close-tab' },
-      { key: `${cmdOrCtrl}+T`, action: 'spotlight-search' },
-      { key: `${cmdOrCtrl}+B`, action: 'toggle-sidebar' },
-      { key: `${cmdOrCtrl}+R`, action: 'refresh' },
-      { key: `${cmdOrCtrl}+L`, action: 'focus-url' },
-      { key: `${cmdOrCtrl}+P`, action: 'pin-tab' },
-      { key: `${cmdOrCtrl}+N`, action: 'new-tab' },
-      { key: `${cmdOrCtrl}+,`, action: 'settings' },
-      { key: `${cmdOrCtrl}+Z`, action: 'recover-tab' },
-      { key: `${cmdOrCtrl}+Y`, action: 'history' },
-      { key: `${cmdOrCtrl}+J`, action: 'downloads' },
-      { key: `${cmdOrCtrl}+F`, action: 'find' },
-      { key: `${cmdOrCtrl}+Shift+C`, action: 'copy-url' },
-      { key: `${cmdOrCtrl}+Shift+H`, action: 'clear-history' },
-      { key: `${cmdOrCtrl}+Shift+J`, action: 'clear-downloads' },
-      { key: `${cmdOrCtrl}+=`, action: 'zoom-in' },
-      { key: `${cmdOrCtrl}+Plus`, action: 'zoom-in' },
-      { key: `${cmdOrCtrl}+-`, action: 'zoom-out' },
-      { key: `${cmdOrCtrl}+0`, action: 'reset-zoom' },
-      { key: `${cmdOrCtrl}+1`, action: 'switch-tab-1' },
-      { key: `${cmdOrCtrl}+2`, action: 'switch-tab-2' },
-      { key: `${cmdOrCtrl}+3`, action: 'switch-tab-3' },
-      { key: `${cmdOrCtrl}+4`, action: 'switch-tab-4' },
-      { key: `${cmdOrCtrl}+5`, action: 'switch-tab-5' },
-      { key: `${cmdOrCtrl}+6`, action: 'switch-tab-6' },
-      { key: `${cmdOrCtrl}+7`, action: 'switch-tab-7' },
-      { key: `${cmdOrCtrl}+8`, action: 'switch-tab-8' },
-      { key: `${cmdOrCtrl}+9`, action: 'switch-tab-9' }
-    ];
-    
-    shortcuts.forEach(({ key, action }) => {
-      globalShortcut.register(key, () => {
-        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
-          mainWindow.webContents.send('browser-shortcut', action);
-        }
-      });
-    });
-  };
-  
-  const unregisterShortcuts = () => {
-    globalShortcut.unregisterAll();
-  };
   
   // Register shortcuts when window gains focus
   mainWindow.on('focus', () => {
@@ -326,6 +347,10 @@ function createWindow() {
 }
 
 function createMenu() {
+  // Use current shortcuts so menu accelerators always match user settings
+  const shortcuts = getShortcuts();
+  const closeTabShortcut = shortcuts['close-tab'] || 'CmdOrCtrl+W';
+
   const template = [
     {
       label: 'File',
@@ -338,7 +363,7 @@ function createMenu() {
         },
         {
           label: 'Close Tab',
-          accelerator: 'CmdOrCtrl+W',
+          accelerator: closeTabShortcut,
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('close-tab');
@@ -450,6 +475,44 @@ ipcMain.handle('get-settings', () => {
 
 ipcMain.handle('set-setting', (event, key, value) => {
   store.set(key, value);
+  return true;
+});
+
+// Keyboard shortcuts management
+ipcMain.handle('get-shortcuts', () => {
+  return getShortcuts();
+});
+
+ipcMain.handle('get-default-shortcuts', () => {
+  return getDefaultShortcuts();
+});
+
+ipcMain.handle('set-shortcuts', (event, shortcuts) => {
+  store.set('keyboardShortcuts', shortcuts);
+  // Re-register shortcuts with new values
+  unregisterShortcuts();
+  registerShortcuts();
+  // Rebuild application menu so accelerators match new shortcuts
+  createMenu();
+  return shortcuts;
+});
+
+ipcMain.handle('reset-shortcuts', () => {
+  store.delete('keyboardShortcuts');
+  // Re-register shortcuts with defaults
+  unregisterShortcuts();
+  registerShortcuts();
+  return getDefaultShortcuts();
+});
+
+// Temporarily disable/enable shortcuts (e.g., when recording a new shortcut)
+ipcMain.handle('disable-shortcuts', () => {
+  unregisterShortcuts();
+  return true;
+});
+
+ipcMain.handle('enable-shortcuts', () => {
+  registerShortcuts();
   return true;
 });
 
