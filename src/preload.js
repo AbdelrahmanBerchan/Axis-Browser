@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onCloseTab: (callback) => ipcRenderer.on('close-tab', callback),
   onRequestQuit: (callback) => ipcRenderer.on('request-quit', callback),
   onBrowserShortcut: (callback) => ipcRenderer.on('browser-shortcut', (event, action) => callback(action)),
+  onOpenPopupUrl: (callback) => ipcRenderer.on('open-popup-url', (event, url) => callback(url)),
   confirmQuit: () => ipcRenderer.send('confirm-quit'),
   cancelQuit: () => ipcRenderer.send('cancel-quit'),
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
@@ -42,5 +43,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteNote: (id) => ipcRenderer.invoke('delete-note', id),
   
   // Window controls
-  setWindowButtonVisibility: (visible) => ipcRenderer.invoke('set-window-button-visibility', visible)
+  setWindowButtonVisibility: (visible) => ipcRenderer.invoke('set-window-button-visibility', visible),
+  
+  // Keyboard shortcuts
+  getShortcuts: () => ipcRenderer.invoke('get-shortcuts'),
+  getDefaultShortcuts: () => ipcRenderer.invoke('get-default-shortcuts'),
+  setShortcuts: (shortcuts) => ipcRenderer.invoke('set-shortcuts', shortcuts),
+  resetShortcuts: () => ipcRenderer.invoke('reset-shortcuts'),
+  disableShortcuts: () => ipcRenderer.invoke('disable-shortcuts'),
+  enableShortcuts: () => ipcRenderer.invoke('enable-shortcuts'),
+  
+  // Performance monitoring
+  getPerformanceMetrics: () => ipcRenderer.invoke('get-performance-metrics'),
+  getTabMemoryUsage: (tabId) => ipcRenderer.invoke('get-tab-memory-usage', tabId)
 });
