@@ -61,7 +61,12 @@
                     <div class="tabs-container vertical">
                         <!-- Pinned tabs will be added above the separator -->
                         <!-- Separator between pinned and unpinned tabs -->
-                        <div id="tabs-separator" class="tabs-separator"></div>
+                        <div id="tabs-separator" class="tabs-separator">
+                            <button class="clear-unpinned-btn" title="Clear all unpinned tabs">
+                                <span class="clear-text">Clear</span>
+                                <i class="fas fa-chevron-down clear-arrow"></i>
+                            </button>
+                        </div>
                         <!-- Unpinned tabs will be added below the separator -->
                     </div>
                 </div>
@@ -258,12 +263,39 @@
     </div>
     
     <!-- Webpage Context Menu -->
-    <div id="webpage-context-menu" class="context-menu hidden">
-        <div class="context-menu-item" id="webpage-back">
+    <div id="webpage-context-menu" class="context-menu webpage-context-menu hidden">
+        <!-- Link options (shown when right-clicking a link) -->
+        <div class="context-menu-item link-option" id="webpage-open-link-new-tab">
+            <i class="fas fa-external-link-alt"></i>
+            <span>Open Link in New Tab</span>
+        </div>
+        <div class="context-menu-item link-option" id="webpage-copy-link">
+            <i class="fas fa-link"></i>
+            <span>Copy Link Address</span>
+        </div>
+        <div class="context-menu-separator link-option"></div>
+        
+        <!-- Image options (shown when right-clicking an image) -->
+        <div class="context-menu-item image-option" id="webpage-open-image-new-tab">
+            <i class="fas fa-image"></i>
+            <span>Open Image in New Tab</span>
+        </div>
+        <div class="context-menu-item image-option" id="webpage-copy-image">
+            <i class="fas fa-copy"></i>
+            <span>Copy Image</span>
+        </div>
+        <div class="context-menu-item image-option" id="webpage-copy-image-url">
+            <i class="fas fa-link"></i>
+            <span>Copy Image Address</span>
+        </div>
+        <div class="context-menu-separator image-option"></div>
+        
+        <!-- Navigation options -->
+        <div class="context-menu-item nav-option" id="webpage-back">
             <i class="fas fa-arrow-left"></i>
             <span>Back</span>
         </div>
-        <div class="context-menu-item" id="webpage-forward">
+        <div class="context-menu-item nav-option" id="webpage-forward">
             <i class="fas fa-arrow-right"></i>
             <span>Forward</span>
         </div>
@@ -272,7 +304,9 @@
             <span>Reload</span>
         </div>
         <div class="context-menu-separator"></div>
-        <div class="context-menu-item" id="webpage-cut">
+        
+        <!-- Edit options -->
+        <div class="context-menu-item edit-option" id="webpage-cut">
             <i class="fas fa-cut"></i>
             <span>Cut</span>
         </div>
@@ -284,14 +318,58 @@
             <i class="fas fa-paste"></i>
             <span>Paste</span>
         </div>
-        <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="webpage-select-all">
             <i class="fas fa-check-square"></i>
             <span>Select All</span>
         </div>
-        <div class="context-menu-item" id="webpage-search">
+        <div class="context-menu-separator"></div>
+        
+        <!-- Selection options -->
+        <div class="context-menu-item selection-option" id="webpage-search-selection">
             <i class="fas fa-search"></i>
-            <span>Search</span>
+            <span>Search for "<span class="selection-text"></span>"</span>
+        </div>
+        <div class="context-menu-separator selection-option"></div>
+        
+        <!-- Page options -->
+        <div class="context-menu-item" id="webpage-copy-url">
+            <i class="fas fa-globe"></i>
+            <span>Copy Page URL</span>
+        </div>
+        <div class="context-menu-item" id="webpage-inspect">
+            <i class="fas fa-code"></i>
+            <span>Inspect Element</span>
+        </div>
+    </div>
+
+    <!-- AI Text Selection Button -->
+    <div id="ai-selection-button" class="ai-selection-button hidden">
+        <button class="ai-button" title="Ask AI about selection">
+            <i class="fas fa-sparkles"></i>
+        </button>
+    </div>
+
+    <!-- AI Floating Box -->
+    <div id="ai-popup" class="ai-popup hidden">
+        <div class="ai-popup-container">
+            <div class="ai-popup-content">
+                <div class="ai-popup-drag-handle" id="ai-popup-drag-handle">
+                    <i class="fas fa-grip"></i>
+                </div>
+                <input 
+                    type="text" 
+                    id="ai-custom-question" 
+                    class="ai-custom-input" 
+                    placeholder="Ask AI about the selected text..."
+                    autocomplete="off"
+                />
+                <button class="ai-submit-btn" title="Submit (Enter)">
+                    <i class="fas fa-arrow-up"></i>
+                </button>
+            </div>
+            <div class="ai-response-area hidden" id="ai-response-area">
+                <div class="ai-response-content"></div>
+            </div>
         </div>
     </div>
 
