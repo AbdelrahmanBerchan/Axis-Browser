@@ -635,7 +635,7 @@ body.resizing .resize-handle {
     position: fixed;
     top: 0;
     left: 0;
-    background: var(--popup-background-subtle, rgba(40, 40, 40, 0.85)) !important;
+    background: rgba(15, 15, 15, 0.98) !important;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 10px;
     padding: 8px 0;
@@ -844,13 +844,42 @@ body.resizing .resize-handle {
     color: #ffffff;
     z-index: 10;
     pointer-events: none;
-    transition: all 0.2s ease;
-    transform: translateY(-50%);
+    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                visibility 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+                background 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: translateY(-50%) translateX(-15px) scale(0.9);
     top: 50%;
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    opacity: 0;
+    visibility: hidden;
+    will-change: opacity, transform;
+}
+
+.search-engine-pill:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(-50%) translateX(0) scale(1);
+    animation: pillEntrance 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes pillEntrance {
+    0% {
+        opacity: 0;
+        transform: translateY(-50%) translateX(-15px) scale(0.9);
+    }
+    60% {
+        transform: translateY(-50%) translateX(2px) scale(1.05);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(-50%) translateX(0) scale(1);
+    }
 }
 
 /* Color coding for different search engines */
@@ -938,15 +967,6 @@ body.resizing .resize-handle {
     box-shadow: 0 2px 8px rgba(24, 119, 242, 0.3);
 }
 
-.search-engine-pill.hidden {
-    opacity: 0;
-    visibility: hidden;
-}
-
-.search-engine-pill:not(.hidden) {
-    opacity: 1;
-    visibility: visible;
-}
 
 #url-bar.has-search-engine {
     padding-left: 130px;
@@ -981,18 +1001,36 @@ body.resizing .resize-handle {
 }
 
 #spotlight-search-engine-suggestion-text {
-    color: #ffffff;
+    color: rgba(255, 255, 255, 0.9);
     font-size: 14px;
-    font-weight: 400;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.search-engine-suggestion .tab-hint {
+#spotlight-search-engine-suggestion:not(.hidden) #spotlight-search-engine-suggestion-text {
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.search-engine-suggestion .tab-hint,
+#spotlight-search-engine-suggestion .tab-hint {
     background: rgba(255, 255, 255, 0.12);
     border-radius: 6px;
     padding: 4px 10px;
     font-size: 12px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.85);
+    transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+#spotlight-search-engine-suggestion:not(.hidden) .tab-hint {
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.9);
 }
 
 #url-bar.summarized {
@@ -1080,7 +1118,7 @@ body.resizing .resize-handle {
     right: 14px;
 }
 
-.url-bar-container:hover .url-bar-icons {
+#sidebar:hover .url-bar-icons {
     opacity: 1;
 }
 
@@ -1194,25 +1232,28 @@ body.resizing .resize-handle {
 
 /* Separator between pinned and unpinned tabs */
 .tabs-separator {
-    height: 0.5px;
-    background: linear-gradient(to right, transparent, var(--border-color), transparent);
-    margin: 8px 0;
-    border-radius: 0.5px;
+    height: 20px;
+    background: transparent;
+    margin: 0;
     flex-shrink: 0;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     pointer-events: auto;
+    display: flex;
+    align-items: center;
 }
 
+/* The actual separator line */
 .tabs-separator::before {
     content: '';
     position: absolute;
     top: 50%;
     left: 0;
     right: 0;
-    height: 0.5px;
+    height: 1px;
     background: var(--border-color-light);
     transform: translateY(-50%);
+    z-index: 1;
 }
 
 /* Hide separator if it's the first child (no pinned tabs above) */
@@ -1220,17 +1261,82 @@ body.resizing .resize-handle {
     display: none;
 }
 
+/* Clear unpinned tabs button */
+.clear-unpinned-btn {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    background: var(--sidebar-background);
+    border: none;
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 2;
+    white-space: nowrap;
+    font-family: inherit;
+    backdrop-filter: blur(80px) saturate(200%);
+    -webkit-backdrop-filter: blur(80px) saturate(200%);
+}
+
+.clear-unpinned-btn .clear-text {
+    font-size: 10px;
+    letter-spacing: 0.02em;
+    font-weight: 500;
+    transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.clear-unpinned-btn .clear-arrow {
+    font-size: 7px;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+    opacity: 0.7;
+}
+
+/* Show button when sidebar is hovered */
+#sidebar:hover .clear-unpinned-btn {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.clear-unpinned-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.75);
+    transform: translateY(-50%) scale(1.02);
+}
+
+.clear-unpinned-btn:hover .clear-arrow {
+    transform: translateY(1px);
+    opacity: 1;
+}
+
+.clear-unpinned-btn:active {
+    transform: translateY(-50%) scale(0.94);
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 1);
+    transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.clear-unpinned-btn:active .clear-arrow {
+    transform: translateY(2px);
+}
+
+/* Hide clear button when separator is hidden (no pinned tabs) */
+.tabs-separator:first-child .clear-unpinned-btn {
+    display: none;
+}
+
 /* Separator color change when dragging over pinned/unpinned sections */
-.tabs-separator.drag-over-pinned {
-    background: linear-gradient(to right, transparent, rgba(255, 193, 7, 0.6), transparent);
-}
-
 .tabs-separator.drag-over-pinned::before {
-    background: rgba(255, 193, 7, 0.8);
-}
-
-.tabs-separator.drag-over-unpinned {
-    background: linear-gradient(to right, transparent, var(--border-color-light), transparent);
+    background: rgba(255, 193, 7, 0.6);
 }
 
 .tabs-separator.drag-over-unpinned::before {
@@ -1289,6 +1395,66 @@ body.resizing .resize-handle {
     transform: translateY(-4px) !important;
 }
 
+/* Smooth in-place drag system for tabs */
+.tab.smooth-dragging {
+    z-index: 1000 !important;
+    position: relative !important;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.2) !important;
+    background: var(--animation-overlay-hover) !important;
+    outline: 1px solid rgba(255, 255, 255, 0.35) !important;
+    cursor: grabbing !important;
+    user-select: none !important;
+    will-change: transform !important;
+    transform-origin: center center !important;
+    /* No transition on dragged element - follows mouse directly */
+    transition: none !important;
+    /* Slight scale to show it's lifted */
+    scale: 1.02 !important;
+}
+
+.tab.smooth-dragging * {
+    pointer-events: none !important;
+}
+
+/* Smooth sliding animation for tabs being displaced */
+.tab.drag-sliding,
+.tab.drag-sliding:hover {
+    transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1) !important;
+    transition-duration: 0.15s !important;
+    transition-delay: 0s !important;
+    will-change: transform !important;
+}
+
+/* Smooth in-place drag system for tab groups */
+.tab-group.smooth-dragging {
+    z-index: 1000 !important;
+    position: relative !important;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.2) !important;
+    background: var(--animation-overlay-hover) !important;
+    outline: 1px solid rgba(255, 255, 255, 0.35) !important;
+    cursor: grabbing !important;
+    user-select: none !important;
+    will-change: transform !important;
+    transform-origin: center center !important;
+    /* No transition on dragged element - follows mouse directly */
+    transition: none !important;
+    scale: 1.02 !important;
+}
+
+.tab-group.smooth-dragging * {
+    pointer-events: none !important;
+}
+
+/* Smooth sliding animation for tab groups being displaced */
+.tab-group.drag-sliding,
+.tab-group.drag-sliding:hover {
+    transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1) !important;
+    transition-duration: 0.15s !important;
+    transition-delay: 0s !important;
+    will-change: transform !important;
+}
+
+/* Legacy HTML5 drag styles - keeping for compatibility but mostly unused now */
 .tab.dragging {
     opacity: 0.4;
     transform: rotate(2deg) scale(0.95);
@@ -1401,60 +1567,70 @@ body.resizing .resize-handle {
     pointer-events: none;
     transition: none !important;
     transform: translateX(8px);
+    width: 0;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
 }
 
-/* Close button only shows on hover or when tab is active - applies to ALL tabs */
+/* Close button only shows on hover - applies to ALL tabs including active */
 .tab:hover .tab-right {
     opacity: 1;
     pointer-events: auto;
     transform: translateX(0);
+    width: auto;
     transition: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
 }
 
+/* Active tabs don't show buttons unless hovered */
 .tab.active .tab-right {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateX(0);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(8px);
 }
 
-/* Pinned tabs follow same rule - only show on hover or when active */
+/* Pinned tabs follow same rule - only show on hover */
 .tab.pinned .tab-right {
     opacity: 0;
     pointer-events: none;
     transform: translateX(8px);
 }
 
+/* Active pinned tabs don't show buttons unless hovered */
 .tab.pinned.active .tab-right {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateX(0);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(8px);
 }
 
 .tab.pinned:hover .tab-right {
     opacity: 1;
     pointer-events: auto;
     transform: translateX(0);
+    width: auto;
 }
 
-/* Closed pinned tabs follow same rule - only show on hover or when active */
+/* Closed pinned tabs follow same rule - only show on hover */
 .tab.pinned.closed .tab-right {
     opacity: 0;
     pointer-events: none;
     transform: translateX(8px);
 }
 
+/* Active closed pinned tabs don't show buttons unless hovered */
 .tab.pinned.closed.active .tab-right {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateX(0);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(8px);
 }
 
 .tab.pinned.closed:hover .tab-right {
     opacity: 1;
     pointer-events: auto;
     transform: translateX(0);
+    width: auto;
 }
 
 .tab-favicon {
@@ -3315,7 +3491,7 @@ body.light-theme .shortcut-desc {
     width: 900px;
     max-width: 95vw;
     max-height: 85vh;
-    background: var(--popup-background-subtle, rgba(40, 40, 40, 0.85)) !important;
+    background: rgba(15, 15, 15, 0.98) !important;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     z-index: 1001;
@@ -3325,7 +3501,6 @@ body.light-theme .shortcut-desc {
     overflow: hidden;
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
-}
 }
 
 .downloads-panel.hidden {
@@ -3367,7 +3542,7 @@ body.light-theme .shortcut-desc {
 /* Professional Context Menu */
 .context-menu {
     position: fixed;
-    background: var(--popup-background-subtle, rgba(40, 40, 40, 0.85)) !important;
+    background: rgba(15, 15, 15, 0.98) !important;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 10px;
     padding: 8px 0;
@@ -3395,7 +3570,9 @@ body.light-theme .shortcut-desc {
 .context-menu.closing {
     opacity: 0 !important;
     transform: scale(0.95) translateY(-5px) !important;
-    pointer-events: none;
+    pointer-events: none !important;
+    transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), 
+                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
 .context-menu-item {
@@ -3463,6 +3640,36 @@ body.light-theme .shortcut-desc {
     height: 1px;
     background: #444;
     margin: 4px 0;
+}
+
+/* Webpage context menu specific styles */
+.webpage-context-menu {
+    min-width: 200px;
+}
+
+.webpage-context-menu .context-menu-item.disabled,
+.context-menu-item.disabled {
+    opacity: 0.35 !important;
+    cursor: not-allowed !important;
+    pointer-events: none !important;
+    background: transparent !important;
+    color: rgba(255, 255, 255, 0.25) !important;
+}
+
+.webpage-context-menu .context-menu-item.disabled:hover,
+.context-menu-item.disabled:hover {
+    background: transparent !important;
+    transform: none !important;
+}
+
+.webpage-context-menu .selection-text {
+    font-style: italic;
+    opacity: 0.8;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+    vertical-align: bottom;
 }
 
 /* Search Modal */
@@ -3951,7 +4158,7 @@ body.light-theme .shortcut-desc {
     transform: translate(-50%, -50%);
     width: 420px;
     max-width: 90vw;
-    background: var(--popup-background-subtle, rgba(40, 40, 40, 0.85)) !important;
+    background: rgba(15, 15, 15, 0.98) !important;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     z-index: 1001;
@@ -4120,23 +4327,53 @@ body.light-theme .shortcut-desc {
     z-index: 2000;
     opacity: 0;
     visibility: hidden;
-    transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
     display: flex;
     align-items: center;
     justify-content: center;
-    transform: scale(0.95);
+    will-change: opacity, transform;
 }
 
-.spotlight-search:not(.hidden) {
+.spotlight-search.opening {
+    opacity: 0;
+    visibility: visible;
+    animation: spotlightFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.spotlight-search:not(.hidden):not(.opening):not(.closing) {
     opacity: 1;
     visibility: visible;
-    transform: scale(1);
 }
 
 .spotlight-search.closing {
-    opacity: 0;
-    visibility: hidden;
-    transform: scale(0.95);
+    opacity: 1;
+    visibility: visible;
+    animation: spotlightFadeOut 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes spotlightFadeIn {
+    0% {
+        opacity: 0;
+        visibility: visible;
+        transform: scale(0.98);
+    }
+    100% {
+        opacity: 1;
+        visibility: visible;
+        transform: scale(1);
+    }
+}
+
+@keyframes spotlightFadeOut {
+    0% {
+        opacity: 1;
+        visibility: visible;
+        transform: scale(1);
+    }
+    100% {
+        opacity: 0;
+        visibility: hidden;
+        transform: scale(0.98);
+    }
 }
 
 .spotlight-backdrop {
@@ -4146,32 +4383,142 @@ body.light-theme .shortcut-desc {
     width: 100%;
     height: 100%;
     background: transparent;
-    transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .spotlight-content {
     position: relative;
     width: 600px;
     max-width: 90vw;
-    background: rgba(20, 20, 20, 0.6);
+    background: rgba(15, 15, 15, 0.98);
     border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 10px;
-    backdrop-filter: blur(12px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-    padding: 0;
-    transform: scale(0.9) translateY(30px);
-    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
-    overflow: hidden; /* ensure children respect rounded corners */
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6),
+                0 4px 16px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    padding-top: 54px;
+    overflow: visible; /* allow content to be fully visible */
+    transition: border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    will-change: opacity, transform;
 }
 
-.spotlight-search:not(.hidden) .spotlight-content {
-    transform: scale(1) translateY(0);
+.spotlight-search.opening .spotlight-content {
+    animation: spotlightContentFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.spotlight-search.closing .spotlight-content {
+    animation: spotlightContentFadeOut 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes spotlightContentFadeIn {
+    0% {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.98);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes spotlightContentFadeOut {
+    0% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.98);
+    }
+}
+
+/* Search engine border colors for spotlight */
+.spotlight-content.has-engine-youtube {
+    border-color: rgba(255, 0, 0, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 0, 0, 0.2);
+}
+
+.spotlight-content.has-engine-google {
+    border-color: rgba(66, 133, 244, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(66, 133, 244, 0.2);
+}
+
+.spotlight-content.has-engine-bing {
+    border-color: rgba(0, 161, 225, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 161, 225, 0.2);
+}
+
+.spotlight-content.has-engine-duckduckgo {
+    border-color: rgba(222, 93, 93, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(222, 93, 93, 0.2);
+}
+
+.spotlight-content.has-engine-yahoo {
+    border-color: rgba(123, 104, 238, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(123, 104, 238, 0.2);
+}
+
+.spotlight-content.has-engine-wikipedia {
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.spotlight-content.has-engine-reddit {
+    border-color: rgba(255, 69, 0, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 69, 0, 0.2);
+}
+
+.spotlight-content.has-engine-github {
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.spotlight-content.has-engine-amazon {
+    border-color: rgba(255, 153, 0, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 153, 0, 0.2);
+}
+
+.spotlight-content.has-engine-twitter {
+    border-color: rgba(29, 161, 242, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(29, 161, 242, 0.2);
+}
+
+.spotlight-content.has-engine-instagram {
+    border-color: rgba(225, 48, 108, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(225, 48, 108, 0.2);
+}
+
+.spotlight-content.has-engine-facebook {
+    border-color: rgba(24, 119, 242, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(24, 119, 242, 0.2);
 }
 
 .spotlight-input-container {
-    position: relative;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
     padding: 0;
     border-bottom: none;
+    height: 54px;
+    z-index: 1;
+    transform: translateZ(0);
+    will-change: auto;
+}
+
+.spotlight-input-container::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 16px;
+    right: 16px;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .spotlight-input-container input {
@@ -4194,9 +4541,7 @@ body.light-theme .shortcut-desc {
     box-sizing: border-box;
 }
 
-.spotlight-input-container input.has-search-engine {
-    /* Padding is set dynamically in JavaScript based on pill width */
-}
+/* Padding for .spotlight-input-container input.has-search-engine is set dynamically in JavaScript based on pill width */
 
 .spotlight-input-container input:focus {
     border-bottom: none;
@@ -4232,9 +4577,6 @@ body.light-theme .shortcut-desc {
 
 #spotlight-search-engine-pill.search-engine-pill {
     margin-right: 8px;
-}
-
-#spotlight-search-engine-pill.search-engine-pill {
     /* Same styling as regular pill but positioned for spotlight */
 }
 
@@ -4243,8 +4585,31 @@ body.light-theme .shortcut-desc {
     position: absolute;
     right: 20px;
     top: 50%;
-    transform: translateY(-50%);
+    transform: translateY(-50%) translateX(10px);
     z-index: 10;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                visibility 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    pointer-events: none;
+    will-change: opacity, transform;
+}
+
+#spotlight-search-engine-suggestion:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(-50%) translateX(0);
+}
+
+#spotlight-search-engine-suggestion.hidden {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-50%) translateX(10px);
 }
 
 .spotlight-suggestions {
@@ -4252,17 +4617,35 @@ body.light-theme .shortcut-desc {
     background: transparent;
     border: none;
     border-radius: 0;
-    max-height: 300px;
-    overflow-y: auto;
+    max-height: 0;
+    overflow: hidden;
     z-index: 10;
-    display: none;
     opacity: 0;
-    transform: translateY(-10px);
-    transition: all 0.3s ease;
-    padding: 8px 4px;
+    visibility: hidden;
+    transition: max-height 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                visibility 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                padding 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 0 4px;
+    will-change: opacity;
     /* Disable browser scroll hints */
     scrollbar-width: none;
     -ms-overflow-style: none;
+}
+
+/* When spotlight is opening/closing, suggestions should be at full height and only fade */
+.spotlight-search.hidden .spotlight-suggestions.show,
+.spotlight-search.closing .spotlight-suggestions.show {
+    max-height: 300px !important;
+    padding: 8px 4px !important;
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                visibility 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* When spotlight is visible, suggestions fade in smoothly */
+.spotlight-search:not(.hidden):not(.closing) .spotlight-suggestions.show {
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                visibility 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .spotlight-suggestions::-webkit-scrollbar {
@@ -4270,29 +4653,33 @@ body.light-theme .shortcut-desc {
 }
 
 .spotlight-suggestions.show {
-    display: block;
+    max-height: 300px;
     opacity: 1;
-    transform: translateY(0);
+    visibility: visible;
+    padding: 8px 4px;
+    overflow-y: auto;
 }
 
 .spotlight-suggestions.hiding {
+    max-height: 0;
     opacity: 0;
-    transform: translateY(-10px);
-    transition: all 0.3s ease;
+    visibility: hidden;
+    padding: 0 4px;
+    overflow: hidden;
 }
 
 .spotlight-suggestion-item {
     display: flex;
     align-items: center;
-    padding: 12px 14px;
-    margin: 4px 6px;
+    padding: 10px 14px;
+    margin: 2px 8px;
     background: transparent;
-    border-radius: 8px;
+    border-radius: 10px;
     cursor: pointer;
-    transition: transform 0.15s cubic-bezier(0.23, 1, 0.32, 1),
-                background 0.15s cubic-bezier(0.23, 1, 0.32, 1),
-                opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
+    will-change: background;
     border-bottom: none;
     transform: translateX(0);
     opacity: 1;
@@ -4303,18 +4690,18 @@ body.light-theme .shortcut-desc {
 }
 
 .spotlight-suggestion-item:hover {
-    background: rgba(255, 255, 255, 0.07);
-    transform: translateX(3px);
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateX(2px);
 }
 
 .spotlight-suggestion-item:active {
-    background: rgba(255, 255, 255, 0.1);
-    transform: translateX(2px) translateY(1px);
-    transition: all 0.08s cubic-bezier(0.23, 1, 0.32, 1);
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateX(1px);
+    transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .spotlight-suggestion-item.active {
-    background: rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.1);
     transform: translateX(2px);
 }
 
@@ -4345,28 +4732,30 @@ body.light-theme .shortcut-desc {
 
 .spotlight-suggestion-text {
     flex: 1;
-    color: rgba(255, 255, 255, 0.9);
+    color: rgba(255, 255, 255, 0.95);
     font-size: 14px;
     font-weight: 400;
     margin-right: 12px;
 }
 
 .spotlight-suggestion-action {
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(255, 255, 255, 0.85);
     font-size: 12px;
-    padding: 4px 8px;
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 6px;
-    border: none;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     font-weight: 500;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .spotlight-suggestion-item:hover .spotlight-suggestion-action {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 1);
 }
 
 .spotlight-dismiss-btn {
@@ -4422,29 +4811,6 @@ body.light-theme .shortcut-desc {
     pointer-events: none;
 }
 
-/* Loading indicator for suggestions */
-.spotlight-suggestions.loading {
-    position: relative;
-}
-
-.spotlight-suggestions.loading::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 20px;
-    height: 20px;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    border-top: 2px solid rgba(255, 255, 255, 0.6);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: translate(-50%, -50%) rotate(0deg); }
-    100% { transform: translate(-50%, -50%) rotate(360deg); }
-}
 
 @keyframes slideInFromLeft {
     0% {
@@ -5037,17 +5403,19 @@ body.light-theme .shortcut-desc {
     transition: none;
 }
 
-/* Tabs inside tab groups show close button on hover or when active */
+/* Tabs inside tab groups show close button only on hover */
 .tab-group .tab:hover .tab-right {
     opacity: 1;
     pointer-events: auto;
     transform: translateX(0);
+    width: auto;
 }
 
+/* Active tabs in groups don't show buttons unless hovered */
 .tab-group .tab.active .tab-right {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateX(0);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(8px);
 }
 
 .tab-group-delete {
@@ -5737,7 +6105,7 @@ select:focus {
     transform: translate(-50%, -50%) scale(0.9);
     width: 420px;
     max-width: 90vw;
-    background: var(--popup-background-subtle, rgba(40, 40, 40, 0.85)) !important;
+    background: rgba(15, 15, 15, 0.98) !important;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 20px;
     z-index: 1001;
@@ -5973,10 +6341,10 @@ body.light-theme .btn-primary {
     z-index: 1002;
     opacity: 0;
     visibility: hidden;
-    transform: scale(0.95);
-    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
-                visibility 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-                transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: scale(0.98);
+    transition: opacity 0.12s cubic-bezier(0.16, 1, 0.3, 1), 
+                visibility 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.12s cubic-bezier(0.16, 1, 0.3, 1);
     box-shadow: none;
     overflow: hidden;
     will-change: opacity, transform;
@@ -5994,10 +6362,10 @@ body.light-theme .btn-primary {
 .library-media-popup.hidden {
     opacity: 0;
     visibility: hidden;
-    transform: scale(0.95);
-    transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), 
-                visibility 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: scale(0.98);
+    transition: opacity 0.1s cubic-bezier(0.4, 0, 0.2, 1), 
+                visibility 0.1s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .library-media-list {
@@ -6016,13 +6384,14 @@ body.light-theme .btn-primary {
     margin: 0;
     border-radius: 6px;
     cursor: pointer;
-    transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background 0.12s cubic-bezier(0.16, 1, 0.3, 1);
     gap: 8px;
     user-select: none;
     border: none;
     width: 100%;
     box-sizing: border-box;
     min-height: 44px;
+    will-change: background;
 }
 
 .library-media-item:hover {
@@ -6126,8 +6495,8 @@ body.light-theme .btn-primary {
     z-index: 2000;
     opacity: 0;
     visibility: hidden;
-    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-                visibility 0s linear 0.2s;
+    transition: opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+                visibility 0s linear 0.15s;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -6142,8 +6511,8 @@ body.light-theme .btn-primary {
 .file-preview-backdrop.closing {
     opacity: 0;
     visibility: hidden;
-    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-                visibility 0s linear 0.2s;
+    transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                visibility 0s linear 0.15s;
 }
 
 .file-preview-window {
@@ -6165,9 +6534,9 @@ body.light-theme .btn-primary {
     display: flex;
     flex-direction: column;
     opacity: 0;
-    transform: scale(0.96) translateY(10px);
-    transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-                transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    transform: scale(0.98) translateY(8px);
+    transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     overflow: hidden;
 }
 
@@ -6178,9 +6547,9 @@ body.light-theme .btn-primary {
 
 .file-preview-backdrop.closing .file-preview-window {
     opacity: 0;
-    transform: scale(0.96) translateY(10px);
-    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: scale(0.98) translateY(8px);
+    transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .file-preview-header {
@@ -6504,7 +6873,7 @@ body:not(.light-theme) .file-preview-content .file-preview-unsupported i {
 /* Tab Group Color Picker */
 .color-picker {
     position: fixed;
-    background: var(--popup-background-subtle, rgba(40, 40, 40, 0.85)) !important;
+    background: rgba(15, 15, 15, 0.98) !important;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -6624,4 +6993,267 @@ body.light-theme .color-option:hover {
 body.light-theme .color-option.selected {
     border-color: var(--text-color);
     box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.2), 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* AI Text Selection Button - Above Selected Text */
+.ai-selection-button {
+    position: fixed;
+    z-index: 10000;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-8px) scale(0.85);
+    transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                visibility 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    visibility: hidden;
+    display: block !important;
+}
+
+.ai-selection-button.hidden {
+    opacity: 0 !important;
+    transform: translateY(-8px) scale(0.85) !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+.ai-selection-button:not(.hidden) {
+    opacity: 1 !important;
+    transform: translateY(0) scale(1) !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    display: block !important;
+}
+
+.ai-button {
+    width: 28px;
+    height: 28px;
+    border-radius: 14px;
+    border: none;
+    background: var(--sidebar-background);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    color: var(--text-color);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3),
+                0 2px 4px rgba(0, 0, 0, 0.2),
+                0 0 0 1px rgba(255, 255, 255, 0.1);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: visible;
+}
+
+.ai-button::before {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text-color);
+    opacity: 0.15;
+    z-index: 0;
+}
+
+.ai-button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4),
+                0 4px 8px rgba(0, 0, 0, 0.3),
+                0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.ai-button:hover::before {
+    opacity: 0.2;
+}
+
+.ai-button:active {
+    transform: scale(0.98);
+    transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ai-button i {
+    position: relative;
+    z-index: 1;
+}
+
+/* AI Floating Popup - Draggable */
+.ai-popup {
+    position: fixed;
+    z-index: 20000;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+                visibility 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    left: 60px;
+    top: 20px;
+}
+
+.ai-popup:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.ai-popup-container {
+    position: relative;
+    width: 380px;
+    min-width: 300px;
+    max-width: 90vw;
+    background: rgba(12, 12, 12, 0.98);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8),
+                0 8px 24px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+    pointer-events: auto;
+}
+
+.ai-popup-content {
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    pointer-events: auto;
+}
+
+.ai-popup-drag-handle {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    cursor: move;
+    padding: 6px;
+    opacity: 1;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    pointer-events: auto;
+}
+
+.ai-popup-drag-handle:hover {
+    opacity: 1;
+    color: rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.12);
+    transform: scale(1.05);
+}
+
+.ai-popup-drag-handle:active {
+    cursor: grabbing;
+    opacity: 1;
+    transform: scale(0.95);
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.ai-custom-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: auto;
+}
+
+.ai-custom-input:focus {
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: none;
+}
+
+.ai-custom-input::placeholder {
+    color: var(--text-color-secondary);
+}
+
+.ai-submit-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: none;
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text-color);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    flex-shrink: 0;
+    pointer-events: auto;
+}
+
+.ai-submit-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+    transform: scale(1.05);
+}
+
+.ai-submit-btn:active {
+    transform: scale(0.95);
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.ai-submit-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.ai-response-area {
+    padding: 12px;
+    border-top: none;
+    background: rgba(0, 0, 0, 0.2);
+    max-height: 280px;
+    overflow-y: auto;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: auto;
+}
+
+.ai-response-area:not(.hidden) {
+    display: block;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.ai-response-content {
+    color: var(--text-color);
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    opacity: 0;
+    animation: smoothReveal 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.ai-response-content.revealing {
+    animation: smoothReveal 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes smoothReveal {
+    0% {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
