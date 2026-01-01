@@ -1,42 +1,44 @@
 // Axis Browser Renderer Process
 class AxisBrowser {
     constructor() {
-        this.currentTab = null; // Start with no tabs
+        this.currentTab = null;
+        // Track webviews that have had listeners set up to prevent duplicates
+        this.webviewListenersSetup = new WeakMap(); // Start with no tabs
         this.tabs = new Map(); // Start with empty tabs
         this.tabGroups = new Map(); // Store tab groups: { id, name, tabIds: [], open: true, color: '#FF6B6B' }
         this.pendingTabGroupColor = null; // Color selected for new tab group
         this.settings = {};
         this.selectedSearchEngine = null; // Track selected search engine shortcut
         this.closedTabs = []; // Store recently closed tabs for recovery
-        // Search engine shortcuts mapping
-        this.searchEngineShortcuts = {
-            'g': 'google',
+        // Search engine full word mapping (no shortcuts, only full words)
+        this.searchEngineWords = [
+            'google',
+            'youtube',
+            'bing',
+            'duckduckgo',
+            'yahoo',
+            'wikipedia',
+            'reddit',
+            'github',
+            'amazon',
+            'twitter',
+            'instagram',
+            'facebook'
+        ];
+        
+        // Map words to their engine names
+        this.searchEngineWordMap = {
             'google': 'google',
-            'y': 'youtube',
-            'yt': 'youtube',
             'youtube': 'youtube',
-            'b': 'bing',
             'bing': 'bing',
-            'd': 'duckduckgo',
-            'ddg': 'duckduckgo',
             'duckduckgo': 'duckduckgo',
             'yahoo': 'yahoo',
-            'y!': 'yahoo',
-            'w': 'wikipedia',
-            'wiki': 'wikipedia',
             'wikipedia': 'wikipedia',
-            'r': 'reddit',
             'reddit': 'reddit',
-            'gh': 'github',
             'github': 'github',
-            'a': 'amazon',
             'amazon': 'amazon',
-            'tw': 'twitter',
             'twitter': 'twitter',
-            'x': 'twitter',
-            'ig': 'instagram',
             'instagram': 'instagram',
-            'fb': 'facebook',
             'facebook': 'facebook'
         };
         this.loadingTimeout = null; // Timeout for stuck loading pages (main view)
@@ -58,7 +60,8 @@ class AxisBrowser {
         this.addButtonInteractions();
 
         // Listen for messages from embedded note pages
-        window.addEventListener('message', (event) => this.onEmbeddedMessage(event));
+        this.messageHandler = (event) => this.onEmbeddedMessage(event);
+        window.addEventListener('message', this.messageHandler);
     }
     
     // Cache DOM elements to avoid repeated queries
@@ -307,8 +310,16 @@ class AxisBrowser {
                     el.urlBar.value = fullUrl;
                 }
                 el.urlBar.classList.remove('summarized');
+                if (el.urlBar) {
                 el.urlBar.classList.add('expanded');
-                el.urlBar.select();
+                if (typeof el.urlBar.select === 'function') {
+                    try {
+                        el.urlBar.select();
+                    } catch (e) {
+                        // Ignore select errors
+                    }
+                }
+            }
             });
 
             el.urlBar.addEventListener('blur', () => {
@@ -318,6 +329,9 @@ class AxisBrowser {
 
         // Sidebar slide-back functionality
         this.setupSidebarSlideBack();
+
+        // AI text selection detection
+        this.setupAISelectionDetection();
 
         // Settings - use cached elements
         el.settingsBtnFooter?.addEventListener('click', () => this.toggleSettings());
@@ -364,7 +378,7 @@ class AxisBrowser {
             if (libraryHoverTimeout) clearTimeout(libraryHoverTimeout);
             libraryHoverTimeout = setTimeout(() => {
                 this.showLibraryMediaPopup();
-            }, 300); // 300ms delay before showing
+            }, 50); // Fast 50ms delay before showing
         });
         
         el.downloadsBtnFooter?.addEventListener('mouseleave', () => {
@@ -380,7 +394,7 @@ class AxisBrowser {
                         if (!libraryMediaPopup.matches(':hover') && !el.downloadsBtnFooter?.matches(':hover')) {
                             this.hideLibraryMediaPopup();
                         }
-                    }, 200);
+                    }, 100);
                 });
             }
         });
@@ -401,7 +415,7 @@ class AxisBrowser {
                         if (!libraryMediaPopup.matches(':hover') && !el.downloadsBtnFooter?.matches(':hover')) {
                             this.hideLibraryMediaPopup();
                         }
-                    }, 200);
+                    }, 100);
                 });
             });
         }
@@ -409,6 +423,13 @@ class AxisBrowser {
         // Clear history button
         const clearHistoryBtn = document.getElementById('clear-history');
         clearHistoryBtn?.addEventListener('click', () => this.clearAllHistory());
+
+        // Clear unpinned tabs button
+        const clearUnpinnedBtn = document.querySelector('.clear-unpinned-btn');
+        clearUnpinnedBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.clearUnpinnedTabs();
+        });
 
         // Empty state new tab buttons - use cached elements
         el.emptyStateBtn?.addEventListener('click', () => this.showSpotlightSearch());
@@ -427,20 +448,35 @@ class AxisBrowser {
         // Spotlight search functionality - use cached element with throttling
         if (el.spotlightInput) {
             el.spotlightInput.addEventListener('keydown', (e) => {
-                // Handle Tab key for search engine shortcuts
+                // Handle Tab key for search engine word matching
                 if (e.key === 'Tab' && !e.shiftKey) {
                     const value = el.spotlightInput.value.trim().toLowerCase();
-                    const shortcut = value.split(/\s+/)[0]; // Get first word
+                    const firstWord = value.split(/\s+/)[0]; // Get first word
                     
-                    if (this.searchEngineShortcuts[shortcut]) {
+                    // Find matching word that starts with the typed text
+                    if (this.searchEngineWords) {
+                        const matchingWord = this.searchEngineWords.find(word => 
+                            word.startsWith(firstWord) && firstWord.length > 0
+                        );
+                        
+                        if (matchingWord && this.searchEngineWordMap[matchingWord]) {
                         e.preventDefault();
-                        const engine = this.searchEngineShortcuts[shortcut];
+                            const engine = this.searchEngineWordMap[matchingWord];
                         this.hideSpotlightSearchEngineSuggestion();
                         this.selectSpotlightSearchEngine(engine, el.spotlightInput);
-                        // Remove the shortcut from input
-                        const remaining = value.substring(shortcut.length).trim();
-                        el.spotlightInput.value = remaining;
-                        el.spotlightInput.focus();
+                            // Remove the word from input
+                            const remaining = value.substring(firstWord.length).trim();
+                        if (el.spotlightInput) {
+                            el.spotlightInput.value = remaining;
+                            if (typeof el.spotlightInput.focus === 'function') {
+                                try {
+                                    el.spotlightInput.focus();
+                                } catch (e) {
+                                    // Ignore focus errors
+                                }
+                            }
+                        }
+                        }
                     }
                 } else if (e.key === 'Backspace') {
                     // Only clear search engine if input becomes empty
@@ -489,12 +525,22 @@ class AxisBrowser {
                     }
                     
                     const valueLower = value.toLowerCase();
-                    const shortcut = valueLower.split(/\s+/)[0]; // Get first word
+                    const firstWord = valueLower.split(/\s+/)[0]; // Get first word
                     const hasSpace = value.includes(' ');
                     
-                    // Show suggestion if typing a shortcut (exact match, no spaces, no selected engine)
-                    if (!hasSpace && this.searchEngineShortcuts && this.searchEngineShortcuts[shortcut] && valueLower === shortcut) {
-                        this.showSpotlightSearchEngineSuggestion(this.searchEngineShortcuts[shortcut]);
+                    // Show suggestion if typing the beginning of a full word (no spaces, no selected engine)
+                    if (!hasSpace && this.searchEngineWords) {
+                        // Find matching word that starts with the typed text
+                        const matchingWord = this.searchEngineWords.find(word => 
+                            word.startsWith(firstWord) && firstWord.length > 0
+                        );
+                        
+                        if (matchingWord && this.searchEngineWordMap[matchingWord]) {
+                            this.showSpotlightSearchEngineSuggestion(this.searchEngineWordMap[matchingWord]);
+                        } else {
+                            // Hide suggestion if no match
+                            this.hideSpotlightSearchEngineSuggestion();
+                        }
                     } else {
                         // Hide suggestion if user starts typing something else
                         this.hideSpotlightSearchEngineSuggestion();
@@ -684,23 +730,100 @@ class AxisBrowser {
             }
         });
 
-        // Click outside to close context menu and nav menu
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('.context-menu') && !e.target.closest('.tab') && !e.target.closest('.tab-group')) {
-                this.hideTabContextMenu();
+        // Create invisible backdrop to catch clicks when context menu is open
+        this.contextMenuBackdrop = document.createElement('div');
+        this.contextMenuBackdrop.id = 'context-menu-backdrop';
+        this.contextMenuBackdrop.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1001;
+            display: none;
+            background: transparent;
+        `;
+        document.body.appendChild(this.contextMenuBackdrop);
+        
+        // Track mouse position to detect when over menu
+        let mouseOverMenu = false;
+        const mouseMoveHandler = (e) => {
+            const contextMenu = document.getElementById('webpage-context-menu');
+            if (contextMenu && !contextMenu.classList.contains('hidden')) {
+                const rect = contextMenu.getBoundingClientRect();
+                mouseOverMenu = (
+                    e.clientX >= rect.left && 
+                    e.clientX <= rect.right && 
+                    e.clientY >= rect.top && 
+                    e.clientY <= rect.bottom
+                );
+                // Enable/disable backdrop based on mouse position
+                if (this.contextMenuBackdrop) {
+                    this.contextMenuBackdrop.style.pointerEvents = mouseOverMenu ? 'none' : 'auto';
+                }
+            } else {
+                mouseOverMenu = false;
+                if (this.contextMenuBackdrop) {
+                    this.contextMenuBackdrop.style.pointerEvents = 'auto';
+                }
+            }
+        };
+        document.addEventListener('mousemove', mouseMoveHandler);
+        this._contextMenuMouseMoveHandler = mouseMoveHandler;
+        
+        // Click handler for backdrop - closes menu if clicking outside
+        this.contextMenuBackdrop.addEventListener('mousedown', (e) => {
+            const contextMenu = document.getElementById('webpage-context-menu');
+            if (!contextMenu || contextMenu.classList.contains('hidden')) return;
+            
+            // If mouse is over menu, backdrop should be disabled, so this shouldn't fire
+            // But double-check anyway
+            if (mouseOverMenu) {
+                return;
+            }
+            
+            // Click is outside menu - close it
+            e.preventDefault();
+            e.stopPropagation();
                 this.hideWebpageContextMenu();
+        });
+        
+        // Global click handler for non-webview areas
+        const globalClickHandler = (e) => {
+            const contextMenu = document.getElementById('webpage-context-menu');
+            if (!contextMenu || contextMenu.classList.contains('hidden')) return;
+            
+            // Check if click is on the menu
+            if (e.target.closest('.context-menu') || mouseOverMenu) {
+                return; // Click is on menu - don't close
+            }
+            
+            // Click is outside menu - close it
+            this.hideWebpageContextMenu();
+        };
+        
+        // Use capture phase to catch clicks early
+        document.addEventListener('mousedown', globalClickHandler, true);
+        this._globalContextMenuClickHandler = globalClickHandler;
+        
+        // Click anywhere else to close context menus (for non-webview areas)
+        document.addEventListener('mousedown', (e) => {
+            // Check if clicking on any context menu or backdrop - if so, don't close
+            if (e.target.closest('.context-menu') || e.target.id === 'context-menu-backdrop') {
+                return;
+            }
+            
+            // Close all context menus smoothly
+            this.hideWebpageContextMenu();
+            
+            if (!e.target.closest('.tab') && !e.target.closest('.tab-group')) {
+                this.hideTabContextMenu();
                 this.hideSidebarContextMenu();
                 this.hideTabGroupContextMenu();
             }
+            
             if (!e.target.closest('.nav-menu') && !e.target.closest('#nav-menu-btn')) {
                 this.hideNavMenu();
-            }
-        });
-
-        // Click outside to close webpage context menu
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('.context-menu')) {
-                this.hideWebpageContextMenu();
             }
         });
 
@@ -715,43 +838,110 @@ class AxisBrowser {
         });
 
         // Webpage context menu event listeners
-        document.getElementById('webpage-back').addEventListener('click', () => {
+        document.getElementById('webpage-back')?.addEventListener('click', (e) => {
+            if (e.target.closest('.disabled')) return;
             this.goBack();
             this.hideWebpageContextMenu();
         });
 
-        document.getElementById('webpage-forward').addEventListener('click', () => {
+        document.getElementById('webpage-forward')?.addEventListener('click', (e) => {
+            if (e.target.closest('.disabled')) return;
             this.goForward();
             this.hideWebpageContextMenu();
         });
 
-        document.getElementById('webpage-reload').addEventListener('click', () => {
+        document.getElementById('webpage-reload')?.addEventListener('click', () => {
             this.refresh();
             this.hideWebpageContextMenu();
         });
 
-        document.getElementById('webpage-cut').addEventListener('click', () => {
+        document.getElementById('webpage-cut')?.addEventListener('click', (e) => {
+            if (e.target.closest('.disabled')) return;
             this.cut();
             this.hideWebpageContextMenu();
         });
 
-        document.getElementById('webpage-copy').addEventListener('click', () => {
+        document.getElementById('webpage-copy')?.addEventListener('click', (e) => {
+            if (e.target.closest('.disabled')) return;
             this.copy();
             this.hideWebpageContextMenu();
         });
 
-        document.getElementById('webpage-paste').addEventListener('click', () => {
+        document.getElementById('webpage-paste')?.addEventListener('click', (e) => {
+            if (e.target.closest('.disabled')) return;
             this.paste();
             this.hideWebpageContextMenu();
         });
 
-        document.getElementById('webpage-select-all').addEventListener('click', () => {
+        document.getElementById('webpage-select-all')?.addEventListener('click', () => {
             this.selectAll();
             this.hideWebpageContextMenu();
         });
 
-        document.getElementById('webpage-search').addEventListener('click', () => {
-            this.toggleSearch();
+        document.getElementById('webpage-search-selection')?.addEventListener('click', () => {
+            const ctx = this.webviewContextInfo || {};
+            if (ctx.selectionText) {
+                this.showSpotlightSearch(ctx.selectionText);
+            }
+            this.hideWebpageContextMenu();
+        });
+        
+        // Link options
+        document.getElementById('webpage-open-link-new-tab')?.addEventListener('click', () => {
+            const ctx = this.webviewContextInfo || {};
+            if (ctx.linkURL) {
+                this.createNewTab(ctx.linkURL);
+            }
+            this.hideWebpageContextMenu();
+        });
+        
+        document.getElementById('webpage-copy-link')?.addEventListener('click', async () => {
+            const ctx = this.webviewContextInfo || {};
+            if (ctx.linkURL) {
+                await navigator.clipboard.writeText(ctx.linkURL);
+                this.showNotification('Link copied to clipboard', 'success');
+            }
+            this.hideWebpageContextMenu();
+        });
+        
+        // Image options
+        document.getElementById('webpage-open-image-new-tab')?.addEventListener('click', () => {
+            const ctx = this.webviewContextInfo || {};
+            if (ctx.srcURL) {
+                this.createNewTab(ctx.srcURL);
+            }
+            this.hideWebpageContextMenu();
+        });
+        
+        document.getElementById('webpage-copy-image')?.addEventListener('click', () => {
+            const webview = this.getActiveWebview();
+            if (webview) {
+                webview.copyImageAt(this.webviewContextInfo?.x || 0, this.webviewContextInfo?.y || 0);
+                this.showNotification('Image copied to clipboard', 'success');
+            }
+            this.hideWebpageContextMenu();
+        });
+        
+        document.getElementById('webpage-copy-image-url')?.addEventListener('click', async () => {
+            const ctx = this.webviewContextInfo || {};
+            if (ctx.srcURL) {
+                await navigator.clipboard.writeText(ctx.srcURL);
+                this.showNotification('Image URL copied to clipboard', 'success');
+            }
+            this.hideWebpageContextMenu();
+        });
+        
+        // Page options
+        document.getElementById('webpage-copy-url')?.addEventListener('click', async () => {
+            await this.copyCurrentUrl();
+            this.hideWebpageContextMenu();
+        });
+        
+        document.getElementById('webpage-inspect')?.addEventListener('click', () => {
+            const webview = this.getActiveWebview();
+            if (webview) {
+                webview.openDevTools();
+            }
             this.hideWebpageContextMenu();
         });
 
@@ -913,7 +1103,72 @@ class AxisBrowser {
     setupWebviewEventListeners(webview, tabId) {
         if (!webview) return;
 
+        // Check if listeners are already set up for this webview instance using WeakMap
+        if (this.webviewListenersSetup.has(webview)) {
+            // Update tabId in case it changed
+            webview.dataset.tabId = String(tabId);
+            return;
+        }
+
         webview.dataset.tabId = String(tabId);
+        
+        // Mark this webview as having listeners set up
+        this.webviewListenersSetup.set(webview, true);
+        
+        // Store handlers object
+        webview.__eventHandlers = {};
+        
+        // Try to increase max listeners on the underlying WebContents when it becomes available
+        // We'll try this in dom-ready handler as well for better reliability
+        const trySetMaxListeners = () => {
+            try {
+                // Try multiple ways to access WebContents
+                let webContents = null;
+                
+                // Method 1: Direct getWebContents() call
+                if (webview.getWebContents && typeof webview.getWebContents === 'function') {
+                    webContents = webview.getWebContents();
+                }
+                
+                // Method 2: Access through webview's internal API
+                if (!webContents && webview.getWebContentsId) {
+                    const id = webview.getWebContentsId();
+                    if (id && require && require('electron')) {
+                        const { remote } = require('electron');
+                        if (remote && remote.webContents) {
+                            webContents = remote.webContents.fromId(id);
+                        }
+                    }
+                }
+                
+                // Method 3: Access through webview's guestInstanceId
+                if (!webContents && webview.guestInstanceId !== undefined) {
+                    // Try to get WebContents through guestInstanceId
+                    try {
+                        if (require && require('electron')) {
+                            const { remote } = require('electron');
+                            if (remote && remote.webContents) {
+                                webContents = remote.webContents.fromId(webview.guestInstanceId);
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore
+                    }
+                }
+                
+                if (webContents && typeof webContents.setMaxListeners === 'function') {
+                    webContents.setMaxListeners(50); // Increase limit significantly to prevent warnings
+                }
+            } catch (e) {
+                // WebContents might not be accessible, that's okay
+            }
+        };
+        
+        // Try immediately (might not work if webview isn't ready)
+        trySetMaxListeners();
+        
+        // Also try after a short delay to ensure webview is attached
+        setTimeout(trySetMaxListeners, 100);
         
         // Optimize webview for performance
         webview.style.willChange = 'transform';
@@ -929,7 +1184,8 @@ class AxisBrowser {
             }
         };
         
-        webview.addEventListener('did-start-loading', () => {
+        // Create named handler functions that can be removed
+        const didStartLoadingHandler = () => {
             if (!isActiveTab()) return;
 
             const currentUrl = webview.getURL() || '';
@@ -959,10 +1215,16 @@ class AxisBrowser {
                 }
                 clearLoadingTimeout();
             }, 30000);
-        });
+        };
+        webview.__eventHandlers.didStartLoading = didStartLoadingHandler;
+        webview.addEventListener('did-start-loading', didStartLoadingHandler);
 
         // Extract theme early on dom-ready (before all resources load)
-        webview.addEventListener('dom-ready', () => {
+        const domReadyHandler = () => {
+            // Always try to set max listeners when dom is ready (WebContents should be available)
+            // Do this BEFORE any early returns
+            trySetMaxListeners();
+            
             if (!isActiveTab() || this.isBenchmarking) return;
             
             // Auto-tinting disabled - using custom theme colors instead
@@ -970,9 +1232,11 @@ class AxisBrowser {
             // if (currentUrl && currentUrl !== 'about:blank') {
             //     this.extractAndApplyWebpageColors(webview);
             // }
-        });
+        };
+        webview.__eventHandlers.domReady = domReadyHandler;
+        webview.addEventListener('dom-ready', domReadyHandler);
         
-        webview.addEventListener('did-finish-load', () => {
+        const didFinishLoadHandler = () => {
             clearLoadingTimeout();
 
             const tab = getTab();
@@ -1015,9 +1279,11 @@ class AxisBrowser {
             
             // Auto-tinting disabled - using custom theme colors instead
             // this.extractAndApplyWebpageColors(webview);
-        });
+        };
+        webview.__eventHandlers.didFinishLoad = didFinishLoadHandler;
+        webview.addEventListener('did-finish-load', didFinishLoadHandler);
 
-        webview.addEventListener('did-stop-loading', () => {
+        const didStopLoadingHandler = () => {
             clearLoadingTimeout();
             if (!isActiveTab() || this.isBenchmarking) return;
 
@@ -1029,9 +1295,11 @@ class AxisBrowser {
                 ]);
                 // Auto-tinting disabled - using custom theme colors instead
                 // this.extractAndApplyWebpageColors(webview);
-        });
+        };
+        webview.__eventHandlers.didStopLoading = didStopLoadingHandler;
+        webview.addEventListener('did-stop-loading', didStopLoadingHandler);
         
-        webview.addEventListener('console-message', (e) => {
+        const consoleMessageHandler = (e) => {
             if (e.message && e.message.includes('DawnExperimentalSubgroupLimits') && e.message.includes('deprecated')) {
                 return;
             }
@@ -1055,9 +1323,11 @@ class AxisBrowser {
                     console.error('Error parsing shortcuts message:', err);
                 }
             }
-        });
+        };
+        webview.__eventHandlers.consoleMessage = consoleMessageHandler;
+        webview.addEventListener('console-message', consoleMessageHandler);
 
-        webview.addEventListener('did-fail-load', (event) => {
+        const didFailLoadHandler = (event) => {
             clearLoadingTimeout();
             const tab = getTab();
             
@@ -1094,14 +1364,18 @@ class AxisBrowser {
             if (tab && event.validatedURL) {
                 tab.url = event.validatedURL;
             }
-        });
+        };
+        webview.__eventHandlers.didFailLoad = didFailLoadHandler;
+        webview.addEventListener('did-fail-load', didFailLoadHandler);
 
-        webview.addEventListener('new-window', (event) => {
+        const newWindowHandler = (event) => {
             event.preventDefault();
             this.navigate(event.url);
-        });
+        };
+        webview.__eventHandlers.newWindow = newWindowHandler;
+        webview.addEventListener('new-window', newWindowHandler);
 
-        webview.addEventListener('will-navigate', (event) => {
+        const willNavigateHandler = (event) => {
             if (!isActiveTab()) return;
             const nextUrl = event.url || '';
             this.isBenchmarking = /browserbench\.org\/speedometer/i.test(nextUrl);
@@ -1112,15 +1386,19 @@ class AxisBrowser {
                     this.applyCachedTheme(nextUrl);
                 }
             }
-        });
+        };
+        webview.__eventHandlers.willNavigate = willNavigateHandler;
+        webview.addEventListener('will-navigate', willNavigateHandler);
 
-        webview.addEventListener('did-navigate', () => {
+        const didNavigateHandler = () => {
             if (!isActiveTab() || this.isBenchmarking) return;
                 this.batchDOMUpdates([
                     () => this.updateUrlBar(),
                     () => this.updateNavigationButtons()
                 ]);
-        });
+        };
+        webview.__eventHandlers.didNavigate = didNavigateHandler;
+        webview.addEventListener('did-navigate', didNavigateHandler);
 
         webview.addEventListener('did-navigate-in-page', () => {
             if (!isActiveTab() || this.isBenchmarking) return;
@@ -1178,14 +1456,28 @@ class AxisBrowser {
         // Start audio detection polling for this webview
         this.startAudioDetection(tabId, webview);
 
-        webview.addEventListener('contextmenu', (e) => {
+        // Listen for context-menu event from webview's webContents
+        webview.addEventListener('context-menu', (e) => {
             if (!isActiveTab()) return;
-            e.preventDefault();
-            e.stopPropagation();
-            const rect = webview.getBoundingClientRect();
-            const x = e.clientX + rect.left;
-            const y = e.clientY + rect.top;
-            this.showWebpageContextMenu({ pageX: x, pageY: y });
+            
+            // Store context info for the menu
+            this.webviewContextInfo = {
+                hasSelection: e.params?.selectionText?.length > 0,
+                selectionText: e.params?.selectionText || '',
+                linkURL: e.params?.linkURL || '',
+                srcURL: e.params?.srcURL || '',
+                mediaType: e.params?.mediaType || 'none',
+                isEditable: e.params?.isEditable || false,
+                canCut: e.params?.editFlags?.canCut || false,
+                canCopy: e.params?.editFlags?.canCopy || false,
+                canPaste: e.params?.editFlags?.canPaste || false,
+                canSelectAll: e.params?.editFlags?.canSelectAll || false
+            };
+            
+            this.showWebpageContextMenu({ 
+                pageX: e.params?.x || 100, 
+                pageY: e.params?.y || 100 
+            });
         });
         
         // Handle IPC messages from webview (for settings page)
@@ -1208,9 +1500,13 @@ class AxisBrowser {
                 let lastSearchEngine = null;
                 
                 // Poll for changes every 100ms and save immediately
-                const settingsPollInterval = setInterval(async () => {
+                // Store interval on webview for cleanup
+                webview.__settingsPollInterval = setInterval(async () => {
                     if (!isActiveTab() || webview.isDestroyed?.()) {
-                        clearInterval(settingsPollInterval);
+                        if (webview.__settingsPollInterval) {
+                            clearInterval(webview.__settingsPollInterval);
+                            webview.__settingsPollInterval = null;
+                        }
                         return;
                     }
                     
@@ -1247,7 +1543,10 @@ class AxisBrowser {
                 
                 // Clean up on navigation
                 webview.addEventListener('did-navigate', () => {
-                    clearInterval(settingsPollInterval);
+                    if (webview.__settingsPollInterval) {
+                        clearInterval(webview.__settingsPollInterval);
+                        webview.__settingsPollInterval = null;
+                    }
                 }, { once: true });
             }
         });
@@ -3356,6 +3655,18 @@ class AxisBrowser {
                 // Stop audio detection polling
                 this.stopAudioDetection(tab.webview);
                 
+                // Clear loading timeout if it exists
+                if (tab.webview.__loadingTimeout) {
+                    clearTimeout(tab.webview.__loadingTimeout);
+                    tab.webview.__loadingTimeout = null;
+                }
+                
+                // Clear any settings poll interval
+                if (tab.webview.__settingsPollInterval) {
+                    clearInterval(tab.webview.__settingsPollInterval);
+                    tab.webview.__settingsPollInterval = null;
+                }
+                
                 if (tab.webview.parentNode) {
                     tab.webview.parentNode.removeChild(tab.webview);
                 }
@@ -3425,6 +3736,53 @@ class AxisBrowser {
                 this.updateNavigationButtons();
             }
         }
+    }
+
+    clearUnpinnedTabs() {
+        const tabsContainer = document.querySelector('.tabs-container');
+        const separator = document.getElementById('tabs-separator');
+        if (!tabsContainer || !separator) return;
+        
+        // Get all unpinned tabs (tabs that appear after the separator)
+        const allElements = Array.from(tabsContainer.children);
+        const separatorIndex = allElements.indexOf(separator);
+        
+        // Collect unpinned tab IDs
+        const unpinnedTabIds = [];
+        for (let i = separatorIndex + 1; i < allElements.length; i++) {
+            const el = allElements[i];
+            if (el.classList.contains('tab')) {
+                const tabId = parseInt(el.dataset.tabId, 10);
+                if (!isNaN(tabId)) {
+                    const tab = this.tabs.get(tabId);
+                    if (tab && !tab.pinned) {
+                        unpinnedTabIds.push(tabId);
+                    }
+                }
+            } else if (el.classList.contains('tab-group')) {
+                // Also get tabs inside tab groups (they're in unpinned section)
+                const tabsInGroup = el.querySelectorAll('.tab');
+                tabsInGroup.forEach(t => {
+                    const tabId = parseInt(t.dataset.tabId, 10);
+                    if (!isNaN(tabId)) {
+                        unpinnedTabIds.push(tabId);
+                    }
+                });
+            }
+        }
+        
+        if (unpinnedTabIds.length === 0) {
+            return;
+        }
+        
+        // Close all unpinned tabs
+        unpinnedTabIds.forEach(tabId => {
+            this.closeTab(tabId);
+        });
+        
+        // Save state
+        this.savePinnedTabs();
+        this.saveTabGroups();
     }
 
     recoverClosedTab() {
@@ -6620,7 +6978,13 @@ class AxisBrowser {
         }
         
         editorModal.classList.remove('hidden');
-        titleInput.focus();
+        if (titleInput && typeof titleInput.focus === 'function') {
+            try {
+                titleInput.focus();
+            } catch (e) {
+                // Ignore focus errors
+            }
+        }
         
         // Setup editor event listeners
         this.setupNoteEditorListeners();
@@ -6885,9 +7249,25 @@ class AxisBrowser {
         `;
         
         // Replace title with input inline - this preserves flex layout
-        titleElement.parentNode.replaceChild(input, titleElement);
-        input.focus();
-        input.select();
+        if (titleElement && titleElement.parentNode) {
+            titleElement.parentNode.replaceChild(input, titleElement);
+        }
+        if (input) {
+            if (typeof input.focus === 'function') {
+                try {
+                    input.focus();
+                } catch (e) {
+                    // Ignore focus errors
+                }
+            }
+            if (typeof input.select === 'function') {
+                try {
+                    input.select();
+                } catch (e) {
+                    // Ignore select errors
+                }
+            }
+        }
         
         const finishRename = () => {
             const newTitle = input.value.trim() || currentTitle;
@@ -6948,34 +7328,13 @@ class AxisBrowser {
     }
 
     showNotification(message, type = 'info') {
-        // Create toast notification element
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div class="toast-icon">
-                    ${type === 'success' ? '<i class="fas fa-check-circle" style="color: #4CAF50;"></i>' : 
-                      type === 'error' ? '<i class="fas fa-exclamation-circle" style="color: #f44336;"></i>' : 
-                      type === 'warning' ? '<i class="fas fa-exclamation-triangle" style="color: #ff9800;"></i>' :
-                      '<i class="fas fa-info-circle" style="color: #2196F3;"></i>'}
-                </div>
-                <span>${message}</span>
-            </div>
-        `;
-        
-        // Add to DOM
-        document.body.appendChild(toast);
-        
-        // Show immediately
-            toast.classList.add('show');
-        
-        // Remove after 4 seconds
-        setTimeout(() => {
-            toast.classList.remove('show');
-                if (toast.parentNode) {
-                    toast.parentNode.removeChild(toast);
-                }
-        }, 4000);
+        // Notifications disabled - do nothing
+        return;
+    }
+
+    showToast(message) {
+        // Notifications disabled - do nothing
+        return;
     }
 
     // Premium button interactions
@@ -7724,6 +8083,508 @@ class AxisBrowser {
         });
     }
 
+    setupAISelectionDetection() {
+        const aiButton = document.getElementById('ai-selection-button');
+        const aiPopup = document.getElementById('ai-popup');
+        if (!aiButton || !aiPopup) return;
+
+        // Track selection state
+        this.aiSelectionState = {
+            text: '',
+            position: null,
+            pollingInterval: null
+        };
+
+        // Setup AI button click
+        const button = aiButton.querySelector('.ai-button');
+        button?.addEventListener('click', () => this.showAIPopup());
+
+        // Setup custom question submit - use event delegation to ensure it works
+        const setupSubmitHandler = () => {
+            const submitBtn = document.querySelector('.ai-submit-btn');
+            const customInput = document.getElementById('ai-custom-question');
+            
+            if (submitBtn) {
+                // Remove any existing listeners by cloning
+                const newSubmitBtn = submitBtn.cloneNode(true);
+                submitBtn.parentNode?.replaceChild(newSubmitBtn, submitBtn);
+                
+                newSubmitBtn.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent event from bubbling to document
+                    e.preventDefault(); // Prevent default behavior
+                    const question = customInput?.value.trim();
+                    if (question) {
+                        this.handleAICustomQuestion(question);
+                    }
+                });
+                
+                // Also prevent mousedown from closing popup
+                newSubmitBtn.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                });
+            }
+            
+            if (customInput) {
+                customInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        e.stopPropagation(); // Prevent event from bubbling
+                        const question = customInput.value.trim();
+                        if (question) {
+                            this.handleAICustomQuestion(question);
+                        }
+                    }
+                });
+                
+                // Prevent clicks inside input from closing popup
+                customInput.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+            }
+        };
+        
+        // Setup immediately and also when popup is shown
+        setupSubmitHandler();
+        this.setupAISubmitHandler = setupSubmitHandler;
+
+        // Prevent clicks inside popup from closing it
+        const popupContainer = aiPopup.querySelector('.ai-popup-container');
+        if (popupContainer) {
+            popupContainer.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+            });
+            popupContainer.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+        }
+
+        // Hide AI button when clicking outside (but not when popup is open)
+        // Use mousedown instead of click to avoid interfering with button clicks
+        document.addEventListener('mousedown', (e) => {
+            // Check if click is outside both button and popup
+            const clickedOnButton = aiButton.contains(e.target);
+            const clickedOnPopup = aiPopup.contains(e.target);
+            
+            if (!clickedOnButton && !clickedOnPopup) {
+                if (aiPopup.classList.contains('hidden')) {
+                    this.hideAIButton();
+                } else {
+                    // Close popup when clicking outside - with smooth animation
+                    this.hideAIPopup();
+                }
+            }
+        });
+
+        // Start polling for text selection
+        this.startAISelectionPolling();
+    }
+
+    setupAIPopupDrag() {
+        const aiPopup = document.getElementById('ai-popup');
+        const dragHandle = document.getElementById('ai-popup-drag-handle');
+        if (!aiPopup || !dragHandle) return;
+
+        let isDragging = false;
+        let currentX = 0;
+        let currentY = 0;
+        let initialX = 0;
+        let initialY = 0;
+        let xOffset = 0;
+        let yOffset = 0;
+
+        // Get current position
+        const rect = aiPopup.getBoundingClientRect();
+        xOffset = rect.left;
+        yOffset = rect.top;
+
+        dragHandle.addEventListener('mousedown', dragStart);
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', dragEnd);
+
+        function dragStart(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            initialX = e.clientX - xOffset;
+            initialY = e.clientY - yOffset;
+
+            if (e.target === dragHandle || dragHandle.contains(e.target)) {
+                isDragging = true;
+            }
+        }
+
+        function drag(e) {
+            if (isDragging) {
+                e.preventDefault();
+                currentX = e.clientX - initialX;
+                currentY = e.clientY - initialY;
+
+                xOffset = currentX;
+                yOffset = currentY;
+
+                aiPopup.style.left = `${xOffset}px`;
+                aiPopup.style.top = `${yOffset}px`;
+                aiPopup.style.transform = '';
+            }
+        }
+
+        function dragEnd() {
+            if (isDragging) {
+                initialX = currentX;
+                initialY = currentY;
+                isDragging = false;
+            }
+        }
+    }
+
+
+    startAISelectionPolling() {
+        // Ensure aiSelectionState exists
+        if (!this.aiSelectionState) {
+            this.aiSelectionState = {
+                text: '',
+                position: null,
+                pollingInterval: null
+            };
+        }
+        
+        // Clear any existing interval
+        if (this.aiSelectionState.pollingInterval) {
+            clearInterval(this.aiSelectionState.pollingInterval);
+            this.aiSelectionState.pollingInterval = null;
+        }
+
+        // Poll every 200ms for text selection
+        this.aiSelectionState.pollingInterval = setInterval(() => {
+            this.checkTextSelection();
+        }, 200);
+    }
+
+    stopAISelectionPolling() {
+        if (this.aiSelectionState && this.aiSelectionState.pollingInterval) {
+            clearInterval(this.aiSelectionState.pollingInterval);
+            this.aiSelectionState.pollingInterval = null;
+        }
+    }
+
+    async checkTextSelection() {
+        const webview = this.getActiveWebview();
+        if (!webview) {
+            this.hideAIButton();
+            return;
+        }
+
+        // Check if webview has executeJavaScript method
+        if (!webview.executeJavaScript) {
+            return;
+        }
+
+        try {
+            const result = await webview.executeJavaScript(`
+                (function() {
+                    try {
+                        const selection = window.getSelection();
+                        if (!selection || selection.rangeCount === 0) {
+                            return null;
+                        }
+                        
+                        const range = selection.getRangeAt(0);
+                        const text = range.toString().trim();
+                        
+                        if (!text || text.length === 0) {
+                            return null;
+                        }
+                        
+                        // Get bounding rectangle of selection (relative to webview viewport)
+                        const rect = range.getBoundingClientRect();
+                        
+                        return {
+                            text: text,
+                            x: rect.left - 2, // Slightly to the left of selection edge
+                            y: rect.top - 35, // Closer to top of selection
+                            width: rect.width,
+                            height: rect.height
+                        };
+                    } catch (e) {
+                        return null;
+                    }
+                })();
+            `);
+
+            if (result && result.text && result.text.length > 0) {
+                this.aiSelectionState.text = result.text;
+                this.aiSelectionState.position = { x: result.x, y: result.y };
+                this.showAIButton(result.x, result.y);
+            } else {
+                this.hideAIButton();
+            }
+        } catch (error) {
+            // Selection check failed, hide button
+            // Errors are expected when webview isn't ready or page isn't loaded
+            this.hideAIButton();
+        }
+    }
+
+    showAIButton(x, y) {
+        const aiButton = document.getElementById('ai-selection-button');
+        if (!aiButton) {
+            return;
+        }
+
+        // Get webview position to adjust coordinates
+        const webview = this.getActiveWebview();
+        if (!webview) {
+            return;
+        }
+
+        const webviewRect = webview.getBoundingClientRect();
+        
+        // Coordinates from webview are relative to webview's viewport
+        // Add webview's position to get absolute viewport coordinates
+        const viewportX = webviewRect.left + x;
+        const viewportY = webviewRect.top + y;
+
+        // Position button at top-left of selection, closer to the corner
+        aiButton.style.left = `${viewportX}px`;
+        aiButton.style.top = `${Math.max(10, viewportY)}px`;
+        // Remove inline transform to let CSS handle the animation
+        aiButton.style.transform = '';
+        aiButton.style.opacity = '';
+        aiButton.style.visibility = '';
+        aiButton.style.display = 'block';
+        aiButton.style.zIndex = '10000';
+        aiButton.classList.remove('hidden');
+        
+        // Force a reflow to ensure styles are applied
+        void aiButton.offsetHeight;
+    }
+
+    hideAIButton() {
+        const aiButton = document.getElementById('ai-selection-button');
+        if (aiButton) {
+            aiButton.classList.add('hidden');
+            aiButton.style.display = '';
+            aiButton.style.opacity = '';
+            aiButton.style.visibility = '';
+        }
+        if (this.aiSelectionState) {
+            this.aiSelectionState.text = '';
+            this.aiSelectionState.position = null;
+        }
+    }
+
+    showAIPopup() {
+        const aiPopup = document.getElementById('ai-popup');
+        if (!aiPopup) return;
+
+        // Position popup above the highlighted text
+        const webview = this.getActiveWebview();
+        if (webview && this.aiSelectionState.position) {
+            const webviewRect = webview.getBoundingClientRect();
+            const position = this.aiSelectionState.position;
+            
+            // Position popup above the selection, aligned to left
+            const popupX = webviewRect.left + position.x;
+            const popupY = webviewRect.top + position.y - 80; // Above the button
+            
+            aiPopup.style.left = `${popupX}px`;
+            aiPopup.style.top = `${Math.max(10, popupY)}px`;
+            aiPopup.style.transform = '';
+        } else {
+            // Fallback position if no selection position
+            const rect = aiPopup.getBoundingClientRect();
+            if (rect.width === 0 || !aiPopup.style.left) {
+                aiPopup.style.left = '60px';
+                aiPopup.style.top = '20px';
+                aiPopup.style.transform = '';
+            }
+        }
+
+        // Show popup
+        aiPopup.classList.remove('hidden');
+        
+        // Re-setup submit handler to ensure it works
+        if (this.setupAISubmitHandler) {
+            this.setupAISubmitHandler();
+        }
+        
+        // Setup drag functionality
+        this.setupAIPopupDrag();
+        
+        // Focus input
+        const input = document.getElementById('ai-custom-question');
+        setTimeout(() => input?.focus(), 100);
+    }
+
+    hideAIPopup() {
+        const aiPopup = document.getElementById('ai-popup');
+        if (aiPopup) {
+            aiPopup.classList.add('hidden');
+        }
+        
+        // Clear input and response
+        const input = document.getElementById('ai-custom-question');
+        const responseArea = document.getElementById('ai-response-area');
+        const responseContent = responseArea?.querySelector('.ai-response-content');
+        
+        // Restart polling when popup is closed so button can appear again
+        this.startAISelectionPolling();
+        
+        if (input) {
+            input.value = '';
+        }
+        if (responseArea) {
+            responseArea.classList.add('hidden');
+        }
+        if (responseContent) {
+            responseContent.textContent = '';
+        }
+    }
+
+    handleAICustomQuestion(question) {
+        const selectedText = this.aiSelectionState.text;
+        if (!selectedText || !question) return;
+
+        const prompt = `${question}\n\nContext: "${selectedText}"`;
+        this.processAIRequest(prompt, selectedText);
+    }
+
+    async processAIRequest(prompt, context) {
+        const responseArea = document.getElementById('ai-response-area');
+        const responseContent = responseArea?.querySelector('.ai-response-content');
+        const submitBtn = document.querySelector('.ai-submit-btn');
+        const input = document.getElementById('ai-custom-question');
+        
+        if (!responseArea || !responseContent) return;
+
+        // Show loading state
+        submitBtn.disabled = true;
+        responseContent.textContent = 'Processing...';
+        responseArea.classList.remove('hidden');
+
+        try {
+            // Use Groq API (very fast, generous free tier)
+            const groqApiKey = '';
+            
+            // Format the prompt with context
+            const fullPrompt = `Context: "${context}"\n\nQuestion: ${prompt}\n\nPlease provide a helpful answer based on the context provided.`;
+            
+            // Try multiple models in order of preference
+            const modelsToTry = [
+                'llama-3.3-70b-versatile',
+                'llama-3.1-8b-instant',
+                'llama-3.1-70b-versatile',
+                'llama-3-70b-8192',
+                'mixtral-8x7b-32768'
+            ];
+            
+            let lastError = null;
+            let response = null;
+            let data = null;
+            
+            for (const model of modelsToTry) {
+                try {
+                    response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${groqApiKey}`
+                        },
+                        body: JSON.stringify({
+                            model: model,
+                            messages: [
+                                {
+                                    role: 'system',
+                                    content: 'You are a helpful AI assistant. Answer questions based on the provided context.'
+                                },
+                                {
+                                    role: 'user',
+                                    content: fullPrompt
+                                }
+                            ],
+                            max_tokens: 1024,
+                            temperature: 0.7
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        data = await response.json();
+                        break; // Success, exit loop
+                    } else {
+                        const errorData = await response.json().catch(() => ({}));
+                        lastError = errorData.error?.message || `HTTP ${response.status}`;
+                        // Continue to next model
+                        continue;
+                    }
+                } catch (err) {
+                    lastError = err.message;
+                    continue; // Try next model
+                }
+            }
+            
+            if (!response || !response.ok || !data) {
+                throw new Error(`Groq API error: All models failed. Last error: ${lastError || 'Unknown error'}`);
+            }
+
+            const aiResponse = data.choices?.[0]?.message?.content || '';
+            
+            if (!aiResponse.trim()) {
+                throw new Error('Empty response from Groq');
+            }
+
+            // Smoothly reveal the text
+            this.smoothRevealText(responseContent, aiResponse.trim());
+            submitBtn.disabled = false;
+            if (input) {
+                input.value = '';
+            }
+        } catch (error) {
+            console.error('AI API Error:', error);
+            responseContent.textContent = `Error: ${error.message}\n\nPlease try again. If the issue persists, check your API key.`;
+            responseContent.classList.add('revealing');
+            submitBtn.disabled = false;
+        }
+    }
+
+    smoothRevealText(element, text) {
+        // Clear any existing content
+        element.textContent = '';
+        element.classList.remove('revealing');
+        
+        // Split text into words for smooth reveal
+        const words = text.split(' ');
+        let currentIndex = 0;
+        
+        // Function to reveal words smoothly
+        const revealNext = () => {
+            if (currentIndex < words.length) {
+                // Add next word(s) in small chunks for smoothness
+                const chunkSize = 3; // Reveal 3 words at a time
+                const chunk = words.slice(currentIndex, currentIndex + chunkSize).join(' ');
+                element.textContent += (currentIndex > 0 ? ' ' : '') + chunk;
+                currentIndex += chunkSize;
+                
+                // Use requestAnimationFrame for smooth animation
+                requestAnimationFrame(() => {
+                    setTimeout(revealNext, 20); // Small delay for smooth reveal
+                });
+            } else {
+                // Animation complete
+                element.classList.add('revealing');
+            }
+        };
+        
+        // Start revealing
+        requestAnimationFrame(() => {
+            revealNext();
+        });
+    }
+
+
+    showNotification(message) {
+        // Notifications disabled - do nothing
+        return;
+    }
+
     // Removed setupSidebarResizing method
 
     showTabGroupColorPicker(callback) {
@@ -8024,39 +8885,11 @@ class AxisBrowser {
         const deleteBtn = tabGroupElement.querySelector('.tab-group-delete');
         const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
         const tabContent = tabGroupElement.querySelector('.tab-content');
-        const tabsContainer = document.querySelector('.tabs-container');
-        
-        // Get reference to draggedTabGroup from setupTabDragDrop scope
-        // We'll use a closure or access it via the class
-        const getDraggedTabGroup = () => {
-            // Try to find it via the dragging class as fallback
-            return document.querySelector('.tab-group.dragging');
-        };
-        
-        // Use the shared insertion line from setupTabDragDrop (don't create a new one)
-        const getInsertionLine = () => document.querySelector('.drag-insertion-line');
-        
-        // Helper functions that use the shared insertion line
-        const showInsertionLine = (y) => {
-            const insertionLine = getInsertionLine();
-            if (insertionLine && tabsContainer) {
-                // Center the line in the 8px gap (4px offset from edge)
-                insertionLine.style.top = (y - 1) + 'px'; // -1px to center the 2px line
-                insertionLine.style.display = 'block';
-            }
-        };
-        
-        const hideInsertionLine = () => {
-            const insertionLine = getInsertionLine();
-            if (insertionLine) {
-                insertionLine.style.display = 'none';
-            }
-        };
 
-        // Make tab group draggable - make sure child elements don't prevent dragging
-        tabGroupElement.draggable = true;
+        // Disable HTML5 draggable - we now use custom smooth drag
+        tabGroupElement.draggable = false;
         
-        // Prevent child elements from being draggable (they should trigger parent drag)
+        // Prevent child elements from being draggable
         nameInput.draggable = false;
         deleteBtn.draggable = false;
         const tabGroupIcon = tabGroupElement.querySelector('.tab-group-icon');
@@ -8069,252 +8902,42 @@ class AxisBrowser {
             nameInput.style.pointerEvents = 'none';
         }
         
-        let isDragging = false;
-        let mouseDownPos = { x: 0, y: 0 };
-        let mouseDownTime = 0;
+        // Setup smooth drag for this tab group
+        if (this.makeTabGroupSmoothDraggable) {
+            this.makeTabGroupSmoothDraggable(tabGroupElement);
+        }
         
-        // Track mouse down to distinguish click from drag
+        // Track click state to distinguish click from drag
+        let clickStartPos = { x: 0, y: 0 };
+        let clickStartTime = 0;
+        
         tabContent.addEventListener('mousedown', (e) => {
-            // Don't track if clicking on delete button or if input is being edited
-            if (e.target.closest('.tab-group-delete') || (!nameInput.readOnly && e.target.closest('.tab-group-name-input'))) {
-                return;
-            }
-            mouseDownPos = { x: e.clientX, y: e.clientY };
-            mouseDownTime = Date.now();
+            clickStartPos = { x: e.clientX, y: e.clientY };
+            clickStartTime = Date.now();
         });
-        
-        tabGroupElement.addEventListener('dragstart', (e) => {
-            // Don't start drag if clicking on delete button or if input is being edited
-            if (e.target.closest('.tab-group-delete') || (!nameInput.readOnly && e.target.closest('.tab-group-name-input'))) {
-                e.preventDefault();
-                return;
-            }
             
-            // Aggressively prevent input focus during drag
-            if (nameInput.readOnly) {
-                nameInput.blur();
-                nameInput.style.pointerEvents = 'none';
-                // Force blur multiple times to be sure
-                requestAnimationFrame(() => {
-                    nameInput.blur();
-                    nameInput.style.pointerEvents = 'none';
-                });
-            }
-            
-            isDragging = true;
-            tabGroupElement.classList.add('dragging');
-            
-            // Set drag data
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/html', tabGroupElement.outerHTML);
-            e.dataTransfer.setData('application/tab-group-id', tabGroup.id.toString());
-        });
-        
-        // Cache tab group content element to avoid repeated queries
-        const cachedTabGroupContent = tabGroupElement.querySelector('.tab-group-content');
-        
-        // Handle tab group-to-tab group dragging
-        tabGroupElement.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            e.dataTransfer.dropEffect = 'move';
-            
-            const draggedTabGroup = getDraggedTabGroup();
-            const draggedTab = document.querySelector('.tab.dragging');
-            
-            // Handle tab group-to-tab group dragging
-            if (draggedTabGroup && draggedTabGroup !== tabGroupElement) {
-                const rect = tabGroupElement.getBoundingClientRect();
-                const containerRect = tabsContainer.getBoundingClientRect();
-                const isAbove = e.clientY < rect.top + rect.height / 2;
-                
-                // Center in gap: gap is 8px, center is 4px from edge
-                const lineY = isAbove ? rect.top - containerRect.top - 4 : rect.bottom - containerRect.top + 4;
-                showInsertionLine(lineY);
-                tabGroupElement.dataset.dropSide = isAbove ? 'top' : 'bottom';
-                return;
-            }
-            
-            // Handle tab-to-tab group dragging
-            if (draggedTab) {
-                const tabGroupRect = tabGroupElement.getBoundingClientRect();
-                const containerRect = tabsContainer.getBoundingClientRect();
-                const mouseY = e.clientY;
-                
-                // If tab group is closed, open it immediately when dragging over
-                if (!tabGroup.open && cachedTabGroupContent) {
-                    tabGroup.open = true;
-                    this.tabGroups.set(tabGroup.id, tabGroup);
-                    // Force content to be visible for drag detection
-                    cachedTabGroupContent.style.display = 'flex';
-                    cachedTabGroupContent.style.visibility = 'visible';
-                    cachedTabGroupContent.style.opacity = '1';
-                    cachedTabGroupContent.style.maxHeight = 'none';
-                    cachedTabGroupContent.style.transition = 'none';
-                    cachedTabGroupContent.style.padding = '8px 16px 12px 16px';
-                    cachedTabGroupContent.classList.add('open');
-                    void cachedTabGroupContent.offsetHeight;
-                }
-                
-                // Check if in gap (4px threshold above/below tab group)
-                const gapThreshold = 4;
-                const isInGapAbove = mouseY < tabGroupRect.top && mouseY >= tabGroupRect.top - gapThreshold;
-                const isInGapBelow = mouseY > tabGroupRect.bottom && mouseY <= tabGroupRect.bottom + gapThreshold;
-                
-                // Check if over header area (first 34px of tab group)
-                const headerHeight = 34;
-                const isOverHeader = mouseY >= tabGroupRect.top && mouseY <= tabGroupRect.top + headerHeight;
-                
-                // Check if over content area (below header)
-                const isOverContent = cachedTabGroupContent && 
-                                     cachedTabGroupContent.classList.contains('open') && 
-                                     (cachedTabGroupContent.contains(e.target) || 
-                                      (mouseY > tabGroupRect.top + headerHeight && mouseY <= tabGroupRect.bottom));
-                
-                if (isInGapAbove || isInGapBelow) {
-                    // In gap - show insertion line ONLY, no tab group animation
-                    if (tabGroupElement.classList.contains('drag-over-tab-group')) {
-                        tabGroupElement.classList.remove('drag-over-tab-group');
-                    }
-                    const isAbove = isInGapAbove;
-                    // Center in gap: gap is 8px, center is 4px from edge
-                    const lineY = isAbove ? tabGroupRect.top - containerRect.top - 4 : tabGroupRect.bottom - containerRect.top + 4;
-                    showInsertionLine(lineY);
-                    tabGroupElement.dataset.dropSide = isAbove ? 'top' : 'bottom';
-                } else if (isOverContent || isOverHeader) {
-                    // Over tab group (header or content) - show tab group animation, NO insertion line
-                    if (!tabGroupElement.classList.contains('drag-over-tab-group')) {
-                        tabGroupElement.classList.add('drag-over-tab-group');
-                    }
-                    hideInsertionLine();
-                    tabGroupElement.dataset.dropSide = 'inside';
-                } else if (mouseY >= tabGroupRect.top && mouseY <= tabGroupRect.bottom) {
-                    // Fallback: if mouse is anywhere within tab group bounds, treat as inside
-                    if (!tabGroupElement.classList.contains('drag-over-tab-group')) {
-                        tabGroupElement.classList.add('drag-over-tab-group');
-                    }
-                    hideInsertionLine();
-                    tabGroupElement.dataset.dropSide = 'inside';
-                } else {
-                    // Not over tab group - clear any drag states
-                    if (tabGroupElement.classList.contains('drag-over-tab-group')) {
-                        tabGroupElement.classList.remove('drag-over-tab-group');
-                    }
-                    hideInsertionLine();
-                    // Don't delete dropSide here - keep it if it was set
-                }
-            }
-        });
-        
-        tabGroupElement.addEventListener('dragleave', (e) => {
-            // Only clear if we're actually leaving the tab group (not just moving between children)
-            if (!tabGroupElement.contains(e.relatedTarget)) {
-                tabGroupElement.classList.remove('drag-over-tab-group');
-                // Don't delete dropSide here - let it persist until drop or dragend
-                hideInsertionLine();
-            }
-        });
-        
-        tabGroupElement.addEventListener('drop', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            hideInsertionLine();
-            
-            // Cache dropSide before cleanup
-            const dropSide = tabGroupElement.dataset.dropSide;
-            tabGroupElement.classList.remove('drag-over-tab-group');
-            delete tabGroupElement.dataset.dropSide;
-            
-            const draggedTabGroupId = e.dataTransfer.getData('application/tab-group-id');
-            const draggedTabGroup = draggedTabGroupId ? document.querySelector(`[data-tab-group-id="${draggedTabGroupId}"]`) : getDraggedTabGroup();
-            const draggedTab = document.querySelector('.tab.dragging');
-            
-            // Handle tab group drop
-            if (draggedTabGroup && draggedTabGroup !== tabGroupElement) {
-                const isAbove = dropSide === 'top';
-                draggedTabGroup.remove();
-                if (isAbove) {
-                    tabsContainer.insertBefore(draggedTabGroup, tabGroupElement);
-                } else {
-                    tabGroupElement.insertAdjacentElement('afterend', draggedTabGroup);
-                }
-                return;
-            }
-            
-            // Handle tab drop
-            if (!draggedTab) return;
-            
-            const tabId = parseInt(draggedTab.dataset.tabId, 10);
-            if (!tabId || !this.tabs.has(tabId)) return;
-            
-            // If dropSide is inside or not set, add to tab group
-            // Default to inside if dropSide is undefined (means we're over the tab group)
-            if (dropSide === 'inside' || !dropSide || dropSide === 'undefined') {
-                this.addTabToTabGroup(tabId, tabGroup.id);
-            } else if (dropSide === 'top' || dropSide === 'bottom') {
-                const isAbove = dropSide === 'top';
-                const tab = this.tabs.get(tabId);
-                if (!tab) return;
-                
-                // Check parent tab group before removing
-                const draggedTabParentTabGroup = draggedTab.closest('.tab-group');
-                if (draggedTabParentTabGroup) {
-                        const parentTabGroupId = parseInt(draggedTabParentTabGroup.dataset.tabGroupId, 10);
-                    if (parentTabGroupId) {
-                        this.removeTabFromTabGroup(tabId, parentTabGroupId);
-                    }
-                }
-                
-                const wasPinned = tab.pinned;
-                const tabGroupIsPinned = tabGroupElement.classList.contains('pinned');
-                
-                draggedTab.remove();
-                if (isAbove) {
-                    tabsContainer.insertBefore(draggedTab, tabGroupElement);
-                } else {
-                    tabGroupElement.insertAdjacentElement('afterend', draggedTab);
-                }
-                
-                if (tabGroupIsPinned && !wasPinned) {
-                    tab.pinned = true;
-                    this.tabs.set(tabId, tab);
-                    draggedTab.classList.add('pinned');
-                }
-                
-                if (wasPinned !== tab.pinned) {
-                    this.organizeTabsByPinnedState();
-                }
-                this.savePinnedTabs();
-            }
-        });
-        
-        tabGroupElement.addEventListener('dragend', (e) => {
-            isDragging = false;
-            tabGroupElement.classList.remove('dragging');
-            tabGroupElement.classList.remove('drag-over-tab-group');
-            hideInsertionLine();
-            delete tabGroupElement.dataset.dropSide;
-        });
-        
         // Toggle tab group - click anywhere on the tab group tab (including the name)
-        // Only toggle if it wasn't a drag operation
         tabContent.addEventListener('click', (e) => {
             // Don't toggle if clicking on delete button
             if (e.target.closest('.tab-group-delete')) {
                 return;
             }
+            
+            // Check if this was a drag (moved more than 5px)
+            const mouseMoved = Math.abs(e.clientX - clickStartPos.x) > 5 || Math.abs(e.clientY - clickStartPos.y) > 5;
+            const timeSinceClick = Date.now() - clickStartTime;
+            
+            // If it was a drag, don't toggle
+            if (mouseMoved && timeSinceClick > 100) {
+                return;
+            }
+            
             // If clicking on the input and it's readonly, just toggle (don't rename)
             if (e.target.closest('.tab-group-name-input') && nameInput.readOnly) {
                 e.preventDefault();
                 e.stopPropagation();
-                // Blur the input to prevent focus box
                 nameInput.blur();
-                // Only toggle if it wasn't a drag (check if mouse moved significantly)
-                const mouseMoved = Math.abs(e.clientX - mouseDownPos.x) > 5 || Math.abs(e.clientY - mouseDownPos.y) > 5;
-                const timeSinceMouseDown = Date.now() - mouseDownTime;
-                if (!isDragging && (!mouseMoved || timeSinceMouseDown < 300)) {
                     this.toggleTabGroup(tabGroup.id);
-                }
                 return;
             }
             // If input is not readonly (being edited), don't toggle
@@ -8326,12 +8949,7 @@ class AxisBrowser {
             if (nameInput.readOnly) {
                 nameInput.blur();
             }
-            // Only toggle if it wasn't a drag (check if mouse moved significantly)
-            const mouseMoved = Math.abs(e.clientX - mouseDownPos.x) > 5 || Math.abs(e.clientY - mouseDownPos.y) > 5;
-            const timeSinceMouseDown = Date.now() - mouseDownTime;
-            if (!isDragging && (!mouseMoved || timeSinceMouseDown < 300)) {
                 this.toggleTabGroup(tabGroup.id);
-            }
         });
         
         // Prevent input from being focused when readonly
@@ -9054,9 +9672,25 @@ class AxisBrowser {
                     `;
                     
                     // Replace nameInput with input inline - this preserves flex layout
-                    nameInput.parentNode.replaceChild(input, nameInput);
-                    input.focus();
-                    input.select();
+                    if (nameInput && nameInput.parentNode) {
+                        nameInput.parentNode.replaceChild(input, nameInput);
+                    }
+                    if (input) {
+                        if (typeof input.focus === 'function') {
+                            try {
+                                input.focus();
+                            } catch (e) {
+                                // Ignore focus errors
+                            }
+                        }
+                        if (typeof input.select === 'function') {
+                            try {
+                                input.select();
+                            } catch (e) {
+                                // Ignore select errors
+                            }
+                        }
+                    }
                     
                     const finishRename = () => {
                         const newName = input.value.trim() || currentName;
@@ -9632,53 +10266,151 @@ class AxisBrowser {
 
     showWebpageContextMenu(e) {
         const contextMenu = document.getElementById('webpage-context-menu');
-        if (contextMenu) {
-            // Hide tab context menu if open
+        if (!contextMenu) return;
+        
+        // Hide other context menus
             this.hideTabContextMenu();
-            
-            // Position menu and ensure it stays visible
-            const menuWidth = 200;
-            const menuHeight = 300;
-            const isRight = this.isSidebarRight();
-            
+        this.hideSidebarContextMenu();
+        this.hideTabGroupContextMenu();
+        
+        const ctx = this.webviewContextInfo || {};
+        const webview = this.getActiveWebview();
+        
+        // Show/hide link options
+        const hasLink = ctx.linkURL && ctx.linkURL.length > 0;
+        contextMenu.querySelectorAll('.link-option').forEach(el => {
+            el.style.display = hasLink ? '' : 'none';
+        });
+        
+        // Show/hide image options
+        const hasImage = ctx.mediaType === 'image' && ctx.srcURL;
+        contextMenu.querySelectorAll('.image-option').forEach(el => {
+            el.style.display = hasImage ? '' : 'none';
+        });
+        
+        // Cut is always visible, but disabled when not editable or can't cut
+        const cutOption = document.getElementById('webpage-cut');
+        if (cutOption) {
+            cutOption.style.display = ''; // Always show
+            const canCut = ctx.canCut || ctx.isEditable;
+            cutOption.classList.toggle('disabled', !canCut);
+        }
+        
+        // Paste is always visible, but disabled when not editable or can't paste
+        const pasteOption = document.getElementById('webpage-paste');
+        if (pasteOption) {
+            pasteOption.style.display = ''; // Always show
+            const canPaste = ctx.canPaste || ctx.isEditable;
+            pasteOption.classList.toggle('disabled', !canPaste);
+        }
+        
+        // Show/hide selection search option and its separator
+        const hasSelection = ctx.hasSelection && ctx.selectionText.length > 0;
+        const searchOption = document.getElementById('webpage-search-selection');
+        const selectionSeparator = contextMenu.querySelector('.context-menu-separator.selection-option');
+        if (searchOption) {
+            searchOption.style.display = hasSelection ? '' : 'none';
+            if (selectionSeparator) {
+                selectionSeparator.style.display = hasSelection ? '' : 'none';
+            }
+            const selectionTextSpan = searchOption.querySelector('.selection-text');
+            if (selectionTextSpan && hasSelection) {
+                // Truncate selection text for display
+                let displayText = ctx.selectionText.trim();
+                if (displayText.length > 20) {
+                    displayText = displayText.substring(0, 20) + '...';
+                }
+                selectionTextSpan.textContent = displayText;
+            }
+        } else if (selectionSeparator) {
+            selectionSeparator.style.display = 'none';
+        }
+        
+        // Enable/disable navigation based on webview state
+        const backOption = document.getElementById('webpage-back');
+        const forwardOption = document.getElementById('webpage-forward');
+        if (backOption && webview) {
+            try {
+                const canGoBack = webview.canGoBack();
+                backOption.classList.toggle('disabled', !canGoBack);
+            } catch (e) {
+                backOption.classList.add('disabled');
+            }
+        } else if (backOption) {
+            backOption.classList.add('disabled');
+        }
+        if (forwardOption && webview) {
+            try {
+                const canGoForward = webview.canGoForward();
+                forwardOption.classList.toggle('disabled', !canGoForward);
+            } catch (e) {
+                forwardOption.classList.add('disabled');
+            }
+        } else if (forwardOption) {
+            forwardOption.classList.add('disabled');
+        }
+        
+        // Enable/disable copy based on selection
+        const copyOption = document.getElementById('webpage-copy');
+        if (copyOption) {
+            const hasSelection = ctx.hasSelection && ctx.selectionText.length > 0;
+            const canCopy = ctx.canCopy || hasSelection;
+            copyOption.classList.toggle('disabled', !canCopy);
+        }
+        
+        // Position menu
+        const menuWidth = 220;
             let left = e.pageX;
             let top = e.pageY;
             
             // Adjust if menu would go off-screen
-            if (isRight) {
                 if (left + menuWidth > window.innerWidth) {
                     left = window.innerWidth - menuWidth - 10;
                 }
-                if (left < 10) {
-                    left = 10;
-                }
-            } else {
-                if (left + menuWidth > window.innerWidth) {
-                    left = window.innerWidth - menuWidth - 10;
-                }
-            }
+        if (left < 10) left = 10;
+        
+        // Show menu temporarily to measure height
+        contextMenu.style.visibility = 'hidden';
+        contextMenu.style.display = 'block';
+        contextMenu.classList.remove('hidden');
+        const menuHeight = contextMenu.offsetHeight;
             
             if (top + menuHeight > window.innerHeight) {
                 top = window.innerHeight - menuHeight - 10;
             }
-            if (top < 10) {
-                top = 10;
-            }
+        if (top < 10) top = 10;
             
             contextMenu.style.left = left + 'px';
             contextMenu.style.top = top + 'px';
             contextMenu.style.right = 'auto';
-            contextMenu.style.display = 'block';
-            contextMenu.classList.remove('hidden');
+        contextMenu.style.visibility = '';
+        
+        // Show the backdrop to catch clicks
+        if (this.contextMenuBackdrop) {
+            this.contextMenuBackdrop.style.display = 'block';
+            this.contextMenuBackdrop.style.pointerEvents = 'auto';
+            // Mousemove handler will disable it when mouse is over menu
         }
     }
 
     hideWebpageContextMenu() {
         const contextMenu = document.getElementById('webpage-context-menu');
-        if (contextMenu) {
-            contextMenu.classList.add('hidden');
-            contextMenu.style.display = 'none';
+        if (!contextMenu || contextMenu.classList.contains('hidden')) return;
+        
+        // Hide the backdrop
+        if (this.contextMenuBackdrop) {
+            this.contextMenuBackdrop.style.display = 'none';
         }
+        
+        // Add closing class for smooth animation
+        contextMenu.classList.add('closing');
+        
+        // Wait for animation to complete before hiding
+        setTimeout(() => {
+            contextMenu.classList.add('hidden');
+            contextMenu.classList.remove('closing');
+            contextMenu.style.display = 'none';
+        }, 150);
     }
 
     selectAll() {
@@ -9714,13 +10446,28 @@ class AxisBrowser {
     }
 
     async copyCurrentUrl() {
-        const el = this.elements;
-        if (!el?.webview) return;
+        // Try to get URL from active webview first
+        let url = null;
+        const webview = this.getActiveWebview();
         
-        const webview = el.webview;
-        if (!webview) return;
+        if (webview) {
+            try {
+                url = webview.getURL();
+            } catch (e) {
+                // Fallback to tab URL
+            }
+        }
         
-        const url = webview.getURL();
+        // Fallback to tab URL if webview URL is not available
+        if (!url || url === 'about:blank') {
+            if (this.currentTab) {
+                const tab = this.tabs.get(this.currentTab);
+                if (tab && tab.url && tab.url !== 'about:blank') {
+                    url = tab.url;
+                }
+            }
+        }
+        
         if (!url || url === 'about:blank') {
             this.showNotification('No URL to copy', 'error');
             return;
@@ -9959,12 +10706,12 @@ class AxisBrowser {
         // Load and populate media items
         await this.populateLibraryMediaPopup();
         
-        // Show popup with security panel style animation
+        // Show popup with fast, smooth animation
         popup.style.opacity = '0';
-        popup.style.transform = 'scale(0.95)';
+        popup.style.transform = 'scale(0.98)';
         requestAnimationFrame(() => {
             popup.classList.remove('hidden');
-            popup.style.transition = 'opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)';
+            popup.style.transition = 'opacity 0.12s cubic-bezier(0.16, 1, 0.3, 1), transform 0.12s cubic-bezier(0.16, 1, 0.3, 1)';
             requestAnimationFrame(() => {
                 popup.style.opacity = '1';
                 popup.style.transform = 'scale(1)';
@@ -9976,10 +10723,10 @@ class AxisBrowser {
     hideLibraryMediaPopup() {
         const popup = document.getElementById('library-media-popup');
         if (popup && !popup.classList.contains('hidden')) {
-            // Hide with security panel style animation
-            popup.style.transition = 'opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)';
+            // Hide with fast, smooth animation
+            popup.style.transition = 'opacity 0.1s cubic-bezier(0.4, 0, 0.2, 1), transform 0.1s cubic-bezier(0.4, 0, 0.2, 1)';
             popup.style.opacity = '0';
-            popup.style.transform = 'scale(0.95)';
+            popup.style.transform = 'scale(0.98)';
             
             const mediaList = document.getElementById('library-media-list');
             
@@ -9992,7 +10739,7 @@ class AxisBrowser {
                 if (mediaList) {
                     mediaList.innerHTML = '';
                 }
-            }, 150);
+            }, 100);
         }
     }
     
@@ -10934,593 +11681,398 @@ class AxisBrowser {
     setupTabDragDrop() {
         const tabsContainer = document.querySelector('.tabs-container');
         const separator = document.getElementById('tabs-separator');
-        let draggedTab = null;
-        let draggedIndex = -1;
-        let lastDragState = null; // Track last state to prevent unnecessary updates
-        let containerLastDragState = null; // Track state for container drag
+        const GAP = 4; // CSS gap between elements
         
-        // Create shared insertion line element
-        let insertionLine = document.querySelector('.drag-insertion-line');
-        if (!insertionLine) {
-            insertionLine = document.createElement('div');
-            insertionLine.className = 'drag-insertion-line';
-            tabsContainer.appendChild(insertionLine);
-        }
+        // Drag state
+        let drag = null;
         
-        // Helper function to show insertion line - centered in gap
-        const showInsertionLine = (y) => {
-            // Center the 2px line in the 8px gap (y is already at 4px offset, -1px to center the 2px line)
-            insertionLine.style.top = (y - 1) + 'px';
-            insertionLine.style.display = 'block';
-        };
-        
-        // Helper function to hide insertion line
-        const hideInsertionLine = () => {
-            insertionLine.style.display = 'none';
-        };
-
-        // Setup separator drag handlers
-        if (separator) {
+        // Initialize drag
+        const initDrag = (element, type, mouseY, container) => {
+            // Get all draggable siblings
+            const siblings = Array.from(container.children).filter(el => 
+                el.classList.contains('tab') || el.classList.contains('tab-group')
+            );
             
-            separator.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
+            const dragIndex = siblings.indexOf(element);
+            if (dragIndex === -1) return null;
                 
-                // Update visual feedback on separator
-                if (draggedTab) {
-                    const tabId = parseInt(draggedTab.dataset.tabId, 10);
-                    const tab = this.tabs.get(tabId);
-                    const isCurrentlyPinned = tab && tab.pinned;
-                    
-                    // Determine which section based on drop position - use midpoint for accuracy
-                    const separatorRect = separator.getBoundingClientRect();
-                    const separatorMidpoint = separatorRect.top + separatorRect.height / 2;
-                    const dropY = e.clientY;
-                    const isAbove = dropY < separatorMidpoint;
-                    
-                    // Determine new state
-                    let newState = null;
-                    if (!isCurrentlyPinned && isAbove) {
-                        newState = 'pinned';
-                    } else if (isCurrentlyPinned && !isAbove) {
-                        newState = 'unpinned';
-                    }
-                    
-                    // Only update if state changed to prevent flickering
-                    if (newState !== lastDragState) {
-                        // Show insertion line at separator position
-                        const separatorRect = separator.getBoundingClientRect();
-                        const containerRect = tabsContainer.getBoundingClientRect();
-                        const lineY = separatorRect.top - containerRect.top;
-                        showInsertionLine(lineY);
-                        
-                        lastDragState = newState;
-                    }
-                }
+            // Store original positions for ALL elements
+            const positions = siblings.map((el, i) => {
+                const rect = el.getBoundingClientRect();
+                return {
+                    el,
+                    index: i,
+                    top: rect.top,
+                    height: rect.height,
+                    center: rect.top + rect.height / 2
+                };
             });
-
-            separator.addEventListener('drop', (e) => {
-                e.preventDefault();
-                
-                // Reset drag state
-                lastDragState = null;
-                
-                // Remove drag visual feedback
-                hideInsertionLine();
-                
-                if (draggedTab) {
-                    const tabId = parseInt(draggedTab.dataset.tabId, 10);
-                    const tab = this.tabs.get(tabId);
-                    const tabElement = draggedTab;
-                    
-                    if (tab) {
-                        // Determine if dropping above (pin) or below (unpin) separator
-                        const separatorRect = separator.getBoundingClientRect();
-                        const dropY = e.clientY;
-                        const isAbove = dropY < separatorRect.top + separatorRect.height / 2;
-                        
-                        // Pin/unpin based on drop position
-                        if (isAbove && !tab.pinned) {
-                            // Pin the tab
-                            tab.pinned = true;
-                            this.tabs.set(tabId, tab);
-                            tabElement.classList.add('pinned');
-                            
-                            // Move to pinned section
-                            this.organizeTabsByPinnedState();
-                            this.savePinnedTabs();
-                        } else if (!isAbove && tab.pinned) {
-                            // Unpin the tab
-                            tab.pinned = false;
-                            this.tabs.set(tabId, tab);
-                            tabElement.classList.remove('pinned');
-                            
-                            // Move to unpinned section
-                            this.organizeTabsByPinnedState();
-                            this.savePinnedTabs();
-                        }
-                    }
-                }
-            });
-
-            // Allow dropping tabs in the pinned section (area above separator) or unpinning (below separator)
-            // Create a custom handler that checks if we're in empty space above or below separator
-            const handleContainerDragOver = (e) => {
-                if (!draggedTab) return;
-                
-                // Don't interfere with tab-to-tab dragging - let tabs handle their own dragover
-                if (e.target.classList.contains('tab') || e.target.closest('.tab')) {
-                    hideInsertionLine();
-                    return;
-                }
-                // Don't interfere with tab group dragging - let tab groups handle their own dragover
-                // Also hide insertion line if over tab group content
-                if (e.target.classList.contains('tab-group') || 
-                    e.target.closest('.tab-group') || 
-                    e.target.closest('.tab-group-content')) {
-                    hideInsertionLine();
-                    return;
-                }
-                
-                const separatorRect = separator.getBoundingClientRect();
-                const dropY = e.clientY;
-                const containerRect = tabsContainer.getBoundingClientRect();
-                
-                // Check if we're near a tab group (above or below it) - handle tab group positioning
-                const allTabGroups = document.querySelectorAll('.tab-group');
-                for (const tabGroup of allTabGroups) {
-                    const tabGroupRect = tabGroup.getBoundingClientRect();
-                    // Check if mouse is in the gap area above or below the tab group
-                    const gapSize = 8; // Same as CSS gap
-                    const isNearTabGroupTop = dropY >= tabGroupRect.top - gapSize && dropY < tabGroupRect.top;
-                    const isNearTabGroupBottom = dropY > tabGroupRect.bottom && dropY <= tabGroupRect.bottom + gapSize;
-                    
-                    if (isNearTabGroupTop || isNearTabGroupBottom) {
-                        // Show insertion line near tab group
-                        const isAbove = dropY < tabGroupRect.top + tabGroupRect.height / 2;
-                        const lineY = isAbove ? tabGroupRect.top - containerRect.top - 4 : tabGroupRect.bottom - containerRect.top + 4;
-                        showInsertionLine(lineY);
-                        tabGroup.dataset.dropSide = isAbove ? 'top' : 'bottom';
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = 'move';
-                        return;
-                    }
-                }
-                
-                // Use separator midpoint as exact boundary
-                const separatorMidpoint = separatorRect.top + separatorRect.height / 2;
-                const tabId = parseInt(draggedTab.dataset.tabId, 10);
-                const tab = this.tabs.get(tabId);
-                const isCurrentlyPinned = tab && tab.pinned;
-                
-                // Accurate check: above separator = pinned section, below = unpinned section
-                const isInPinnedArea = dropY < separatorMidpoint;
-                const isInUnpinnedArea = dropY > separatorMidpoint;
-                
-                // Determine new state
-                let newState = null;
-                if (separator.offsetParent !== null) {
-                    if (!isCurrentlyPinned && isInPinnedArea) {
-                        newState = 'pinned';
-                    } else if (isCurrentlyPinned && isInUnpinnedArea) {
-                        newState = 'unpinned';
-                    }
-                }
-                
-                // Only update if state changed to prevent flickering
-                if (newState !== containerLastDragState) {
-                    // Show insertion line at separator position
-                    const separatorRect = separator.getBoundingClientRect();
-                    const containerRect = tabsContainer.getBoundingClientRect();
-                    const lineY = separatorRect.top - containerRect.top;
-                    showInsertionLine(lineY);
-                    
-                    containerLastDragState = newState;
-                }
-                
-                // Allow drop if:
-                // 1. Dragging unpinned tab above separator (to pin)
-                // 2. Dragging pinned tab below separator (to unpin)
-                const shouldAllowDrop = separator.offsetParent !== null && (
-                    (!isCurrentlyPinned && isInPinnedArea) ||
-                    (isCurrentlyPinned && isInUnpinnedArea)
-                );
-                
-                if (shouldAllowDrop) {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                }
-            };
-
-            const handleContainerDrop = (e) => {
-                if (!draggedTab) return;
-                
-                // Don't interfere with tab-to-tab dropping - let tabs handle their own drop
-                if (e.target.classList.contains('tab') || e.target.closest('.tab')) return;
-                // Don't interfere with tab group dropping - let tab groups handle their own drop
-                if (e.target.classList.contains('tab-group') || e.target.closest('.tab-group')) return;
-                
-                // Check if we're dropping near a tab group (in the gap above or below it)
-                const dropY = e.clientY;
-                const allTabGroups = document.querySelectorAll('.tab-group');
-                for (const tabGroup of allTabGroups) {
-                    const tabGroupRect = tabGroup.getBoundingClientRect();
-                    const gapSize = 8;
-                    const isNearTabGroupTop = dropY >= tabGroupRect.top - gapSize && dropY < tabGroupRect.top;
-                    const isNearTabGroupBottom = dropY > tabGroupRect.bottom && dropY <= tabGroupRect.bottom + gapSize;
-                    
-                    if (isNearTabGroupTop || isNearTabGroupBottom) {
-                        // Handle drop near tab group
-                        const tabId = parseInt(draggedTab.dataset.tabId, 10);
-                        const tab = this.tabs.get(tabId);
-                        if (!tab) return;
-                        
-                        // Check if tab was dragged from a tab group
-                        const draggedTabParentTabGroup = draggedTab.closest('.tab-group');
-                        if (draggedTabParentTabGroup) {
-                            const tabGroupId = parseInt(draggedTabParentTabGroup.dataset.tabGroupId, 10);
-                            if (tabGroupId) {
-                                this.removeTabFromTabGroup(tabId, tabGroupId);
-                            }
-                        }
-                        
-                        const isAbove = dropY < folderRect.top + folderRect.height / 2;
-                        const folderIsPinned = folder.classList.contains('pinned');
-                        const wasPinned = tab.pinned;
-                        
-                        // Remove from current position
-                        draggedTab.remove();
-                        
-                        if (isAbove) {
-                            tabsContainer.insertBefore(draggedTab, folder);
-                            if (folderIsPinned && !wasPinned) {
-                                tab.pinned = true;
-                                this.tabs.set(tabId, tab);
-                                draggedTab.classList.add('pinned');
-                            }
-                        } else {
-                            folder.insertAdjacentElement('afterend', draggedTab);
-                            if (folderIsPinned && !wasPinned) {
-                                tab.pinned = true;
-                                this.tabs.set(tabId, tab);
-                                draggedTab.classList.add('pinned');
-                            }
-                        }
-                        
-                        if (wasPinned !== tab.pinned) {
-                            this.organizeTabsByPinnedState();
-                        }
-                        this.savePinnedTabs();
-                        
-                        // Hide insertion line
-                        hideInsertionLine();
-                        return;
-                    }
-                }
-                
-                const separatorRect = separator.getBoundingClientRect();
-                const tabId = parseInt(draggedTab.dataset.tabId, 10);
-                const tab = this.tabs.get(tabId);
-                
-                if (!tab) {
-                    return;
-                }
-                
-                // Check if tab was dragged from a folder
-                const draggedTabParentFolder = draggedTab.closest('.folder');
-                if (draggedTabParentFolder) {
-                    const folderId = parseInt(draggedTabParentFolder.dataset.folderId, 10);
-                    if (folderId) {
-                        this.removeTabFromFolder(tabId, folderId);
-                    }
-                }
-                
-                // Use separator midpoint as exact boundary
-                const separatorMidpoint = separatorRect.top + separatorRect.height / 2;
-                const isAbove = dropY < separatorMidpoint;
-                const isBelow = dropY > separatorMidpoint;
-                
-                // Remove drag visual feedback
-                hideInsertionLine();
-                
-                // Handle pinning: unpinned tab dropped above separator
-                if (isAbove && separator.offsetParent !== null && !tab.pinned) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    
-                    // Pin the tab
-                    tab.pinned = true;
-                    this.tabs.set(tabId, tab);
-                    draggedTab.classList.add('pinned');
-                    
-                    // Move to pinned section
-                    this.organizeTabsByPinnedState();
-                    this.savePinnedTabs();
-                }
-                // Handle unpinning: pinned tab dropped below separator
-                else if (isBelow && separator.offsetParent !== null && tab.pinned) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    
-                    // Unpin the tab
-                    tab.pinned = false;
-                    this.tabs.set(tabId, tab);
-                    draggedTab.classList.remove('pinned');
-                    
-                    // Move to unpinned section
-                    this.organizeTabsByPinnedState();
-                    this.savePinnedTabs();
-                }
-            };
-
-            const handleContainerDragLeave = (e) => {
-                // Remove drag visual feedback when leaving container
-                if (!tabsContainer.contains(e.relatedTarget)) {
-                    containerLastDragState = null;
-                    lastDragState = null;
-                }
-            };
-
-            // Add listeners to tabs container for dropping in empty pinned area
-            tabsContainer.addEventListener('dragover', handleContainerDragOver, true);
-            tabsContainer.addEventListener('drop', handleContainerDrop, true);
-            tabsContainer.addEventListener('dragleave', handleContainerDragLeave);
-        }
-
-        // Make tabs draggable - store reference so it can be called from other methods
-        const makeTabDraggable = (tab) => {
-            tab.draggable = true;
             
-            tab.addEventListener('dragstart', (e) => {
-                draggedTab = tab;
-                draggedIndex = Array.from(tabsContainer.children).indexOf(tab);
-                tab.classList.add('dragging');
+            const draggedPos = positions[dragIndex];
+            
+            return {
+                active: true,
+                element,
+                type,
+                container,
+                startY: mouseY,
+                dragIndex,
+                currentTarget: dragIndex,
+                positions,
+                draggedHeight: draggedPos.height,
+                draggedOriginalTop: draggedPos.top,
+                raf: null
+            };
+        };
                 
-                // Set drag data
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/html', tab.outerHTML);
-            });
-
-            tab.addEventListener('dragend', (e) => {
-                tab.classList.remove('dragging');
+        // Calculate target position based on mouse Y
+        const getTargetIndex = (mouseY) => {
+            if (!drag) return 0;
+            
+            const offset = mouseY - drag.startY;
+            const draggedNewCenter = drag.draggedOriginalTop + drag.draggedHeight / 2 + offset;
+            
+            let target = drag.dragIndex;
+                            
+            // Simple algorithm: find where dragged center falls among original centers
+            for (let i = 0; i < drag.positions.length; i++) {
+                if (i === drag.dragIndex) continue;
                 
-                // Hide insertion line
-                hideInsertionLine();
+                const pos = drag.positions[i];
                 
-                // Check if tab was dragged out of a folder
-                const tabId = parseInt(tab.dataset.tabId, 10);
-                if (tabId) {
-                    // Find which folder this tab belongs to
-                    const parentTabGroup = tab.closest('.tab-group');
-                    if (parentTabGroup) {
-                        const tabGroupId = parseInt(parentTabGroup.dataset.tabGroupId, 10);
-                        const tabGroup = this.tabGroups.get(tabGroupId);
-                        
-                        // Check if tab is still in the tab group or was moved out
-                        if (folder && !parentFolder.contains(tab)) {
-                            // Tab was moved out of folder
-                            this.removeTabFromFolder(tabId, folderId);
-                        }
+                if (i < drag.dragIndex) {
+                    // Element was above us - if we're now above its center, we go before it
+                    if (draggedNewCenter < pos.center) {
+                        target = Math.min(target, i);
                     }
-                }
-                
-                draggedTab = null;
-                draggedIndex = -1;
-                
-                // Reset drag states
-                if (separator) {
-                    lastDragState = null;
-                    containerLastDragState = null;
-                }
-                
-                // Clean up drop side data
-                document.querySelectorAll('.tab').forEach(t => {
-                    delete t.dataset.dropSide;
-                });
-                document.querySelectorAll('.tab-group').forEach(tg => {
-                    delete tg.dataset.dropSide;
-                });
-                
-                // Remove drag section indicators
-                if (separator) {
-                    hideInsertionLine();
-                }
-            });
-
-            tab.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.dataTransfer.dropEffect = 'move';
-                
-                // Check if dragging a folder (use dragging class since getData doesn't work in dragover)
-                const draggedTabGroup = document.querySelector('.tab-group.dragging');
-                
-                if (draggedTabGroup) {
-                    // Handle folder dragging over tab
-                    const rect = tab.getBoundingClientRect();
-                    const containerRect = tabsContainer.getBoundingClientRect();
-                    const midpoint = rect.top + rect.height / 2;
-                    const isAbove = e.clientY < midpoint;
-                    
-                    // Position insertion line
-                    const lineY = isAbove ? rect.top - containerRect.top - 4 : rect.bottom - containerRect.top + 4;
-                    showInsertionLine(lineY);
-                    
-                    // Store which side for drop handler
-                    tab.dataset.dropSide = isAbove ? 'top' : 'bottom';
-                    return;
-                }
-                
-                if (!draggedTab || draggedTab === tab) return;
-                
-                const rect = tab.getBoundingClientRect();
-                const containerRect = tabsContainer.getBoundingClientRect();
-                const midpoint = rect.top + rect.height / 2;
-                const isAbove = e.clientY < midpoint;
-                
-                // Position insertion line exactly in the gap between elements (gap is 8px, so 4px offset)
-                const lineY = isAbove ? rect.top - containerRect.top - 4 : rect.bottom - containerRect.top + 4;
-                showInsertionLine(lineY);
-                
-                // Store which side for drop handler
-                tab.dataset.dropSide = isAbove ? 'top' : 'bottom';
-            });
-
-            tab.addEventListener('dragleave', (e) => {
-                // Only remove if actually leaving the tab
-                if (!tab.contains(e.relatedTarget)) {
-                    hideInsertionLine();
-                }
-            });
-
-            tab.addEventListener('drop', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // Hide insertion line
-                hideInsertionLine();
-                
-                // Check if dragging a folder (use getData in drop or dragging class)
-                const draggedFolderId = e.dataTransfer.getData('application/folder-id');
-                const currentDraggedTabGroup = (draggedTabGroupId ? document.querySelector(`[data-tab-group-id="${draggedTabGroupId}"]`) : null) || document.querySelector('.tab-group.dragging');
-                
-                if (currentDraggedTabGroup) {
-                    // Handle folder drop on tab
-                    const isAbove = tab.dataset.dropSide === 'top';
-                    
-                    // Remove folder from DOM first
-                    currentDraggedFolder.remove();
-                    
-                    // Insert folder in correct position
-                    if (isAbove) {
-                        tabsContainer.insertBefore(currentDraggedFolder, tab);
-                    } else {
-                        tab.insertAdjacentElement('afterend', currentDraggedFolder);
-                    }
-                    
-                    // Clean up
-                    delete tab.dataset.dropSide;
-                    return;
-                }
-                
-                if (!draggedTab || draggedTab === tab) {
-                    // Clean up
-                    delete tab.dataset.dropSide;
-                    return;
-                }
-                
-                const tabId = parseInt(draggedTab.dataset.tabId, 10);
-                const draggedTabData = this.tabs.get(tabId);
-                const dropTabId = parseInt(tab.dataset.tabId, 10);
-                const dropTabData = this.tabs.get(dropTabId);
-                
-                if (!draggedTabData || !dropTabData) {
-                    // Clean up
-                    document.querySelectorAll('.tab').forEach(t => {
-                        delete t.dataset.dropSide;
-                    });
-                    document.querySelectorAll('.folder').forEach(f => {
-                        delete f.dataset.dropSide;
-                    });
-                    return;
-                }
-                
-                // Check if dragged tab was in a folder
-                const draggedTabParentFolder = draggedTab.closest('.folder');
-                if (draggedTabParentFolder) {
-                    const folderId = parseInt(draggedTabParentFolder.dataset.folderId, 10);
-                    if (folderId) {
-                        this.removeTabFromFolder(tabId, folderId);
-                    }
-                }
-                
-                const isAbove = tab.dataset.dropSide === 'top';
-                
-                // Get all tabs in order to find the correct insertion point
-                const allElements = Array.from(tabsContainer.children);
-                const targetIndex = allElements.indexOf(tab);
-                const draggedIndex = allElements.indexOf(draggedTab);
-                
-                // If dragging to same position, do nothing
-                if (draggedIndex !== -1 && targetIndex !== -1) {
-                    const newIndex = isAbove ? targetIndex : targetIndex + 1;
-                    if (draggedIndex < newIndex) {
-                        // Adjust for the fact that we're removing the dragged tab first
-                        if (newIndex > draggedIndex) {
-                            // We're moving forward, so the target index shifts
-                            const adjustedIndex = newIndex - 1;
-                            if (adjustedIndex === draggedIndex) {
-                                // Same position, do nothing
-                                return;
-                            }
-                        }
-                    }
-                }
-                
-                // Check if dropping crosses the separator boundary
-                const draggedIsPinned = draggedTabData.pinned;
-                const dropIsPinned = dropTabData.pinned;
-                
-                // If crossing separator, pin/unpin accordingly
-                if (draggedIsPinned !== dropIsPinned) {
-                    // Tab is being moved across separator - update pin state
-                    if (isAbove && dropIsPinned && !draggedIsPinned) {
-                        // Moving unpinned tab above pinned tab - pin it
-                        draggedTabData.pinned = true;
-                        this.tabs.set(tabId, draggedTabData);
-                        draggedTab.classList.add('pinned');
-                    } else if (!isAbove && !dropIsPinned && draggedIsPinned) {
-                        // Moving pinned tab below unpinned tab - unpin it
-                        draggedTabData.pinned = false;
-                        this.tabs.set(tabId, draggedTabData);
-                        draggedTab.classList.remove('pinned');
-                    }
-                }
-                
-                // Remove tab from DOM first
-                draggedTab.remove();
-                
-                // Insert tab in correct position
-                if (isAbove) {
-                    tabsContainer.insertBefore(draggedTab, tab);
                 } else {
-                    // Find the next sibling after tab
-                    const nextSibling = tab.nextElementSibling;
-                    if (nextSibling) {
-                        tabsContainer.insertBefore(draggedTab, nextSibling);
-                    } else {
-                        tabsContainer.appendChild(draggedTab);
+                    // Element was below us - if we're now below its center, we go after it
+                    if (draggedNewCenter > pos.center) {
+                        target = i;
+                }
+                }
+            }
+            
+            return target;
+        };
+                
+        // Update visuals
+        const updateVisuals = (mouseY) => {
+            if (!drag || !drag.active) return;
+            
+            // Move dragged element
+            const offset = mouseY - drag.startY;
+            drag.element.style.transform = `translateY(${offset}px)`;
+            
+            // Calculate target
+            const target = getTargetIndex(mouseY);
+            drag.currentTarget = target;
+            
+            // Calculate displacement for each sibling
+            const draggedTotalHeight = drag.draggedHeight + GAP;
+            
+            drag.positions.forEach((pos, i) => {
+                if (i === drag.dragIndex) return;
+                
+                const el = pos.el;
+                
+                // Ensure transition class is on
+                if (!el.classList.contains('drag-sliding')) {
+                    el.classList.add('drag-sliding');
+                }
+                
+                let shift = 0;
+                
+                if (target < drag.dragIndex) {
+                    // Dragging UP: elements from target to (dragIndex-1) move DOWN
+                    if (i >= target && i < drag.dragIndex) {
+                        shift = draggedTotalHeight;
+                    }
+                } else if (target > drag.dragIndex) {
+                    // Dragging DOWN: elements from (dragIndex+1) to target move UP
+                    if (i > drag.dragIndex && i <= target) {
+                        shift = -draggedTotalHeight;
                     }
                 }
                 
-                // Move the tab to new position (only reorganize if pin state changed)
-                if (draggedIsPinned !== dropIsPinned) {
-                    this.organizeTabsByPinnedState();
-                }
-                this.savePinnedTabs();
+                // Always set transform (to 0 or shift value)
+                el.style.transform = `translateY(${shift}px)`;
+            });
+            };
+
+        // Finish drag
+        const finishDrag = () => {
+            if (!drag || !drag.active) return;
+            
+            const { element, type, container, dragIndex, currentTarget, positions } = drag;
+            
+            // Reset visuals
+            element.classList.remove('smooth-dragging');
+            element.style.transform = '';
+            element.style.scale = '';
+            
+            positions.forEach(p => {
+                p.el.classList.remove('drag-sliding');
+                p.el.style.transform = '';
+            });
                 
-                // Clean up - remove from all tabs and folders
-                document.querySelectorAll('.tab').forEach(t => {
-                    delete t.dataset.dropSide;
-                });
-                document.querySelectorAll('.tab-group').forEach(tg => {
-                    delete tg.dataset.dropSide;
-                });
+            // Reorder if position changed
+            if (currentTarget !== dragIndex) {
+                // Remove element
+                element.remove();
+                
+                // Get remaining siblings
+                const remaining = Array.from(container.children).filter(el => 
+                    el.classList.contains('tab') || el.classList.contains('tab-group')
+                );
+                        
+                // Calculate insertion point
+                let insertAt = currentTarget;
+                if (currentTarget > dragIndex) {
+                    insertAt = currentTarget - 1; // Adjust for removal
+                }
+                insertAt = Math.max(0, Math.min(insertAt, remaining.length));
+                
+                // Insert
+                if (insertAt >= remaining.length) {
+                    const last = remaining[remaining.length - 1];
+                    if (last) {
+                        last.insertAdjacentElement('afterend', element);
+                        } else {
+                        const sep = container.querySelector('.tabs-separator');
+                        if (sep) {
+                            sep.insertAdjacentElement('afterend', element);
+                        } else {
+                            container.appendChild(element);
+                        }
+                    }
+                } else {
+                    container.insertBefore(element, remaining[insertAt]);
+                            }
+                
+                // Handle pinning for tabs in main container
+                if (type === 'tab' && container.classList.contains('tabs-container')) {
+                    this.updateTabPinState(element);
+                        }
+                
+                // If tab was reordered inside a tab group, update the tab group's tabIds
+                if (type === 'tab' && container.classList.contains('tab-group-content')) {
+                    const tabGroupEl = container.closest('.tab-group');
+                    if (tabGroupEl) {
+                        const tabGroupId = parseInt(tabGroupEl.dataset.tabGroupId, 10);
+                        const tabGroup = this.tabGroups.get(tabGroupId);
+                        if (tabGroup) {
+                            // Get new order of tab IDs from DOM
+                            const newTabIds = Array.from(container.querySelectorAll('.tab'))
+                                .map(t => parseInt(t.dataset.tabId, 10))
+                                .filter(id => !isNaN(id));
+                            tabGroup.tabIds = newTabIds;
+                            this.tabGroups.set(tabGroupId, tabGroup);
+                        }
+                    }
+                }
+                
+                // Save
+                this.savePinnedTabs();
+                if (this.saveTabGroups) {
+                    this.saveTabGroups();
+                }
+            }
+            
+            // Restore pointer events on tab group inputs
+            if (type === 'tab-group') {
+                const input = element.querySelector('.tab-group-name-input');
+                if (input) input.style.pointerEvents = '';
+            }
+            
+            // Cleanup
+            if (drag.raf) cancelAnimationFrame(drag.raf);
+            drag = null;
+        };
+        
+        // Mouse handlers
+        const onMove = (e) => {
+            if (!drag || !drag.active) return;
+                    e.preventDefault();
+            if (drag.raf) cancelAnimationFrame(drag.raf);
+            drag.raf = requestAnimationFrame(() => updateVisuals(e.clientY));
+            };
+
+        const onUp = (e) => {
+            // Prevent right-click or other buttons from finishing drag
+            if (e && e.button !== 0) return;
+            
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            finishDrag();
+        };
+        
+        // Start drag
+        const startDrag = (element, type, e) => {
+            // Don't start if drag is already in progress
+            if (drag && drag.active) return false;
+            
+            if (e.target.closest('.tab-close') || 
+                e.target.closest('.tab-group-delete') || 
+                e.target.closest('input:not([readonly])')) {
+                return false;
+            }
+            
+            const container = element.parentElement;
+            if (!container) return false;
+            
+            drag = initDrag(element, type, e.clientY, container);
+            if (!drag) return false;
+            
+            element.classList.add('smooth-dragging');
+            document.body.style.cursor = 'grabbing';
+            document.body.style.userSelect = 'none';
+            
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            
+            return true;
+        };
+                
+        // Update pin state after drag
+        this.updateTabPinState = (tabEl) => {
+            if (!separator || separator.offsetParent === null) return;
+            
+            const tabId = parseInt(tabEl.dataset.tabId, 10);
+            const tab = this.tabs.get(tabId);
+            if (!tab) return;
+            
+            const tabRect = tabEl.getBoundingClientRect();
+            const sepRect = separator.getBoundingClientRect();
+            const isAbove = tabRect.top + tabRect.height / 2 < sepRect.top;
+            
+            if (isAbove && !tab.pinned) {
+                tab.pinned = true;
+                this.tabs.set(tabId, tab);
+                tabEl.classList.add('pinned');
+                this.organizeTabsByPinnedState();
+            } else if (!isAbove && tab.pinned) {
+                tab.pinned = false;
+                this.tabs.set(tabId, tab);
+                tabEl.classList.remove('pinned');
+                this.organizeTabsByPinnedState();
+            }
+        };
+                
+        // Keep old method name for compatibility
+        this.handlePinStateAfterDrag = this.updateTabPinState;
+        
+        // Setup tab for dragging
+        const setupTabDrag = (tab) => {
+            if (tab._dragSetup) return;
+            tab._dragSetup = true;
+            tab.draggable = false;
+            
+            let startPos = null;
+            let dragging = false;
+
+            tab.addEventListener('mousedown', (e) => {
+                if (e.button !== 0 || e.target.closest('.tab-close')) return;
+                
+                startPos = { x: e.clientX, y: e.clientY };
+                dragging = false;
+                
+                const moveHandler = (me) => {
+                    if (dragging) return;
+                    const d = Math.hypot(me.clientX - startPos.x, me.clientY - startPos.y);
+                    if (d > 5) {
+                        dragging = true;
+                        document.removeEventListener('mousemove', moveHandler);
+                        document.removeEventListener('mouseup', upHandler);
+                        startDrag(tab, 'tab', me);
+                    }
+                };
+                
+                const upHandler = () => {
+                    document.removeEventListener('mousemove', moveHandler);
+                    document.removeEventListener('mouseup', upHandler);
+                };
+                
+                document.addEventListener('mousemove', moveHandler);
+                document.addEventListener('mouseup', upHandler);
+            });
+        };
+        
+        this.makeTabDraggable = setupTabDrag;
+        
+        // Setup tab group for dragging
+        const setupTabGroupDrag = (tabGroup) => {
+            if (tabGroup._dragSetup) return;
+            tabGroup._dragSetup = true;
+            tabGroup.draggable = false;
+            
+            const header = tabGroup.querySelector('.tab-content');
+            if (!header) return;
+            
+            let startPos = null;
+            let dragging = false;
+            
+            header.addEventListener('mousedown', (e) => {
+                if (e.button !== 0 || e.target.closest('.tab-group-delete')) return;
+                
+                const input = tabGroup.querySelector('.tab-group-name-input');
+                if (input && !input.readOnly && e.target.closest('.tab-group-name-input')) return;
+                
+                startPos = { x: e.clientX, y: e.clientY };
+                dragging = false;
+                
+                const moveHandler = (me) => {
+                    if (dragging) return;
+                    const d = Math.hypot(me.clientX - startPos.x, me.clientY - startPos.y);
+                    if (d > 5) {
+                        dragging = true;
+                        document.removeEventListener('mousemove', moveHandler);
+                        document.removeEventListener('mouseup', upHandler);
+                        
+                        // Blur input
+                        const input = tabGroup.querySelector('.tab-group-name-input');
+                        if (input) {
+                            input.blur();
+                            input.style.pointerEvents = 'none';
+                        }
+                        
+                        startDrag(tabGroup, 'tab-group', me);
+                    }
+                };
+                
+                const upHandler = () => {
+                    document.removeEventListener('mousemove', moveHandler);
+                    document.removeEventListener('mouseup', upHandler);
+                };
+                
+                document.addEventListener('mousemove', moveHandler);
+                document.addEventListener('mouseup', upHandler);
             });
         };
 
-        // Store makeTabDraggable on class so it can be accessed from other methods
-        this.makeTabDraggable = makeTabDraggable;
+        this.makeTabGroupSmoothDraggable = setupTabGroupDrag;
         
-        // Make existing tabs draggable (including those in folders)
-        document.querySelectorAll('.tab').forEach(makeTabDraggable);
+        // Initialize existing elements
+        document.querySelectorAll('.tabs-container > .tab').forEach(setupTabDrag);
+        document.querySelectorAll('.tabs-container > .tab-group').forEach(tg => {
+            setupTabGroupDrag(tg);
+            // Also make tabs inside tab groups draggable
+            tg.querySelectorAll('.tab-group-content .tab').forEach(setupTabDrag);
+        });
 
-        // Observer for new tabs in main container
+        // Observer for new elements
         const observer = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('tab')) {
-                        makeTabDraggable(node);
+                    if (node.nodeType !== Node.ELEMENT_NODE) return;
+                    
+                    if (node.classList.contains('tab')) {
+                        setupTabDrag(node);
+                    } else if (node.classList.contains('tab-group')) {
+                        setupTabGroupDrag(node);
+                        node.querySelectorAll('.tab').forEach(setupTabDrag);
                     }
                 });
             });
@@ -11528,53 +12080,8 @@ class AxisBrowser {
 
         observer.observe(tabsContainer, { childList: true, subtree: true });
         
-        // Also observe folder content for tabs added to folders
-        const tabGroupObserver = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('tab')) {
-                        makeTabDraggable(node);
-                    }
-                });
-            });
-        });
-        
-        // Track observed tab group contents to prevent duplicate observations
-        const observedTabGroupContents = new WeakSet();
-        
-        // Observe all tab group content areas
-        document.querySelectorAll('.tab-group-content').forEach(tabGroupContent => {
-            if (!observedTabGroupContents.has(tabGroupContent)) {
-                tabGroupObserver.observe(tabGroupContent, { childList: true });
-                observedTabGroupContents.add(tabGroupContent);
-            }
-        });
-        
-        // Also observe when new tab groups are created
-        const tabGroupContainerObserver = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('tab-group')) {
-                        const tabGroupContent = node.querySelector('.tab-group-content');
-                        if (tabGroupContent && !observedTabGroupContents.has(tabGroupContent)) {
-                            tabGroupObserver.observe(tabGroupContent, { childList: true });
-                            observedTabGroupContents.add(tabGroupContent);
-                            // Make existing tabs in this tab group draggable
-                            tabGroupContent.querySelectorAll('.tab').forEach(makeTabDraggable);
-                        }
-                    }
-                });
-            });
-        });
-        
-        tabGroupContainerObserver.observe(tabsContainer, { childList: true });
-        
-        // Store observers on instance for potential cleanup (though they'll be cleaned up when page unloads)
-        this._dragDropObservers = {
-            mainObserver: observer,
-            tabGroupObserver: tabGroupObserver,
-            tabGroupContainerObserver: tabGroupContainerObserver
-        };
+        // Store observer
+        this._dragObserver = observer;
     }
 
     moveTab(fromIndex, toIndex) {
@@ -11873,24 +12380,95 @@ class AxisBrowser {
 
     showSpotlightSearch() {
         const spotlightSearch = document.getElementById('spotlight-search');
+        const suggestionsContainer = document.getElementById('spotlight-suggestions');
+        
+        // Remove closing class if present
+        spotlightSearch.classList.remove('closing');
+        
+        // Expand suggestions immediately (before fade) to prevent roll-out effect
+        if (suggestionsContainer) {
+            suggestionsContainer.style.maxHeight = '300px';
+            suggestionsContainer.style.padding = '8px 4px';
+        }
+        
+        // Remove hidden class and add opening class for animation
         spotlightSearch.classList.remove('hidden');
+        
+        // Use requestAnimationFrame to ensure smooth animation start
+        requestAnimationFrame(() => {
+            spotlightSearch.classList.add('opening');
+        });
         
         // Immediately show default suggestions (2 tabs + 3 search/history)
         this.updateSpotlightSuggestions('');
         
+        // Remove opening class after animation completes to allow normal state
+        setTimeout(() => {
+            spotlightSearch.classList.remove('opening');
+            
+            // Reset inline styles after fade completes to allow CSS transitions for future changes
+            if (suggestionsContainer) {
+                suggestionsContainer.style.maxHeight = '';
+                suggestionsContainer.style.padding = '';
+            }
+        }, 300);
+        
         // Focus the input after animation
         setTimeout(() => {
-            document.getElementById('spotlight-input').focus();
-        }, 200);
+            const input = document.getElementById('spotlight-input');
+            if (input && typeof input.focus === 'function') {
+                try {
+                    input.focus();
+                } catch (e) {
+                    // Ignore focus errors (element might not be focusable)
+                }
+            }
+        }, 300);
     }
 
     closeSpotlightSearch() {
         const spotlightSearch = document.getElementById('spotlight-search');
-        this.closePanelWithAnimation(spotlightSearch);
+        const suggestionsContainer = document.getElementById('spotlight-suggestions');
+        
+        // Remove opening class if present
+        spotlightSearch.classList.remove('opening');
+        
+        // Keep suggestions at full height during fade-out to prevent roll-in effect
+        if (suggestionsContainer && suggestionsContainer.classList.contains('show')) {
+            suggestionsContainer.style.maxHeight = '300px';
+            suggestionsContainer.style.padding = '8px 4px';
+        }
+        
+        // Use requestAnimationFrame to ensure smooth animation start
+        requestAnimationFrame(() => {
+            spotlightSearch.classList.add('closing');
+        });
         
         // Clear input and suggestions
-        document.getElementById('spotlight-input').value = '';
-        document.getElementById('spotlight-suggestions').style.display = 'none';
+        const spotlightInput = document.getElementById('spotlight-input');
+        
+        if (spotlightInput) {
+            spotlightInput.value = '';
+        }
+        
+        if (suggestionsContainer) {
+            suggestionsContainer.classList.remove('show', 'loading');
+            suggestionsContainer.classList.add('hiding');
+        }
+        
+        // Hide after animation completes
+        setTimeout(() => {
+            spotlightSearch.classList.add('hidden');
+            spotlightSearch.classList.remove('closing');
+            
+            // Reset inline styles after fade completes
+            if (suggestionsContainer) {
+                suggestionsContainer.style.maxHeight = '';
+                suggestionsContainer.style.padding = '';
+                suggestionsContainer.classList.remove('hiding');
+            }
+        }, 300);
+        
         this.spotlightSelectedIndex = -1; // Reset selection
         // Clear search engine selection
         this.clearSpotlightSearchEngine();
@@ -11976,31 +12554,31 @@ class AxisBrowser {
 
     async updateSpotlightSuggestions(query) {
         const suggestionsContainer = document.getElementById('spotlight-suggestions');
+        if (!suggestionsContainer) return;
         
         // Always show suggestions (5 default when empty, 5 when typing)
         const suggestions = query.length < 1 ? this.getDefaultSuggestions() : await this.generateAdvancedSuggestions(query);
         
         if (suggestions.length > 0) {
+            // Remove hiding class if present
+            suggestionsContainer.classList.remove('hiding');
+            
             // Show loading state only for typed queries
             if (query.length > 0) {
-                suggestionsContainer.classList.add('loading');
-                suggestionsContainer.style.display = 'block';
+                suggestionsContainer.classList.add('loading', 'show');
                 
                 setTimeout(() => {
                     this.updateSuggestionsContent(suggestionsContainer, suggestions);
                 }, 200);
             } else {
                 // For empty query, show immediately without loading
+                suggestionsContainer.classList.add('show');
                 this.updateSuggestionsContent(suggestionsContainer, suggestions);
             }
         } else {
             // Hide when no suggestions
-            suggestionsContainer.classList.remove('show');
+            suggestionsContainer.classList.remove('show', 'loading');
             suggestionsContainer.classList.add('hiding');
-            setTimeout(() => {
-                suggestionsContainer.style.display = 'none';
-                suggestionsContainer.classList.remove('hiding');
-            }, 300);
         }
     }
 
@@ -12126,11 +12704,10 @@ class AxisBrowser {
             suggestionsContainer.appendChild(suggestionEl);
         });
         
-        // Show with animation
-        suggestionsContainer.style.display = 'block';
-        setTimeout(() => {
+        // Ensure show class is present (it should already be added by updateSpotlightSuggestions)
+        if (!suggestionsContainer.classList.contains('show')) {
             suggestionsContainer.classList.add('show');
-        }, 50);
+        }
     }
 
     getSuggestionId(suggestion) {
@@ -13266,8 +13843,12 @@ class AxisBrowser {
     }
 
     isSearchEngineShortcut(value) {
-        const shortcut = value.toLowerCase().trim();
-        return this.searchEngineShortcuts.hasOwnProperty(shortcut);
+        const word = value.toLowerCase().trim();
+        if (!this.searchEngineWords) return false;
+        // Check if the word matches the beginning of any search engine word
+        return this.searchEngineWords.some(engineWord => 
+            engineWord.startsWith(word) && word.length > 0
+        );
     }
 
     // Spotlight search engine methods
@@ -13275,6 +13856,7 @@ class AxisBrowser {
         this.selectedSearchEngine = engine;
         const pill = document.getElementById('spotlight-search-engine-pill');
         const pillName = document.getElementById('spotlight-search-engine-name');
+        const spotlightContent = document.querySelector('.spotlight-content');
         
         if (pill && pillName) {
             const displayNames = {
@@ -13300,6 +13882,19 @@ class AxisBrowser {
             pill.classList.add(`search-engine-${engine}`);
             pill.classList.remove('hidden');
             
+            // Update spotlight content border color
+            if (spotlightContent) {
+                // Remove all engine border classes
+                spotlightContent.classList.remove(
+                    'has-engine-youtube', 'has-engine-google', 'has-engine-bing',
+                    'has-engine-duckduckgo', 'has-engine-yahoo', 'has-engine-wikipedia',
+                    'has-engine-reddit', 'has-engine-github', 'has-engine-amazon',
+                    'has-engine-twitter', 'has-engine-instagram', 'has-engine-facebook'
+                );
+                // Add current engine border class
+                spotlightContent.classList.add(`has-engine-${engine}`);
+            }
+            
             // Calculate dynamic padding based on pill width
             requestAnimationFrame(() => {
                 const pillWidth = pill.offsetWidth;
@@ -13317,6 +13912,7 @@ class AxisBrowser {
         this.selectedSearchEngine = null;
         const pill = document.getElementById('spotlight-search-engine-pill');
         const spotlightInput = document.getElementById('spotlight-input');
+        const spotlightContent = document.querySelector('.spotlight-content');
         
         if (pill) {
             pill.classList.add('hidden');
@@ -13326,6 +13922,17 @@ class AxisBrowser {
             spotlightInput.style.paddingLeft = ''; // Reset to default
             spotlightInput.placeholder = 'Search or Enter URL...';
         }
+        
+        // Remove all engine border classes from spotlight content
+        if (spotlightContent) {
+            spotlightContent.classList.remove(
+                'has-engine-youtube', 'has-engine-google', 'has-engine-bing',
+                'has-engine-duckduckgo', 'has-engine-yahoo', 'has-engine-wikipedia',
+                'has-engine-reddit', 'has-engine-github', 'has-engine-amazon',
+                'has-engine-twitter', 'has-engine-instagram', 'has-engine-facebook'
+            );
+        }
+        
         this.hideSpotlightSearchEngineSuggestion();
     }
 
