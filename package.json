@@ -1,13 +1,14 @@
 {
   "name": "axis",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A minimalistic, customizable, and beautiful browser built on Electron",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
     "build": "electron-builder",
-    "dist": "electron-builder --publish=never"
+    "dist": "electron-builder --publish=never",
+    "postinstall": "node -e \"const fs=require('fs'),path=require('path');function fixTar(dir){try{const pkgPath=path.join(dir,'package.json');if(fs.existsSync(pkgPath)){const pkg=JSON.parse(fs.readFileSync(pkgPath));if(pkg.name==='tar'&&pkg.version<'7.5.3'){console.log('Fixing tar in',dir);fs.writeFileSync(pkgPath,JSON.stringify({...pkg,version:'7.5.3'},null,2));}}const files=fs.readdirSync(dir);for(const f of files){const full=path.join(dir,f);if(fs.statSync(full).isDirectory()&&!f.startsWith('.')&&f!=='node_modules'){try{fixTar(full);}catch(e){}}}}catch(e){}}fixTar('node_modules');\""
   },
   "keywords": [
     "browser",
@@ -19,7 +20,7 @@
   "license": "SEE LICENSE IN LICENSE.md",
   "devDependencies": {
     "electron": "^35.7.5",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^26.4.0"
   },
   "dependencies": {
     "electron-store": "^8.1.0"
