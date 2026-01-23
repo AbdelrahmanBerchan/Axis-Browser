@@ -1,8 +1,9 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const fs = require('fs');
 const os = require('os');
+const { exec } = require('child_process');
 
 // Initialize settings store
 const store = new Store();
@@ -100,8 +101,23 @@ const unregisterShortcuts = () => {
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
+  // Improve scroll performance and prevent content unloading
+  app.commandLine.appendSwitch('enable-gpu-rasterization');
+  app.commandLine.appendSwitch('enable-oop-rasterization');
+  app.commandLine.appendSwitch('enable-partial-raster');
+  app.commandLine.appendSwitch('enable-lcd-text');
+  app.commandLine.appendSwitch('enable-zero-copy');
+  
+  // Prevent viewport-based content unloading
+  app.commandLine.appendSwitch('disable-features', 'LazyFrameLoading,LazyImageLoading,DeferredImageDecoding');
+
   // Aggressive JavaScript/V8 performance optimizations for Speedometer
-  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096 --max-semi-space-size=256');
+  // Increased memory limits to prevent content unloading
+  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192 --max-semi-space-size=512 --no-expose-gc');
+  
+  // Increase renderer process memory limits
+  app.commandLine.appendSwitch('renderer-process-limit', '100');
+  app.commandLine.appendSwitch('max-active-webgl-contexts', '16');
   app.commandLine.appendSwitch('disable-hang-monitor');
   app.commandLine.appendSwitch('disable-background-networking');
   app.commandLine.appendSwitch('disable-default-apps');
@@ -125,10 +141,11 @@ const unregisterShortcuts = () => {
       'BackForwardCache',
       'CanvasOopRasterization',
       'Accelerated2dCanvas',
-      'ThrottleForegroundTimers',
       'VaapiVideoDecoder',
       'WebGPU',
-      'WebUIDarkMode'
+      'WebUIDarkMode',
+      'VizDisplayCompositor',
+      'UseSkiaRenderer'
     ].join(',')
   );
   app.commandLine.appendSwitch(
@@ -145,7 +162,14 @@ const unregisterShortcuts = () => {
       'OptimizationHints',
       'Prerender2',
       'Translate',
-      'BlinkGenPropertyTrees'
+      'BlinkGenPropertyTrees',
+      'ThrottleForegroundTimers',
+      'PartitionAlloc',
+      'LazyFrameLoading',
+      'LazyImageLoading',
+      'DeferredImageDecoding',
+      'ViewportSegments',
+      'ContentVisibility'
     ].join(',')
   );
 })();
@@ -169,7 +193,6 @@ function createWindow() {
       backgroundThrottling: false,
       offscreen: false,
       experimentalFeatures: true,
-      enableBlinkFeatures: 'CSSColorSchemeUARendering',
         // Reduce JS parse/compile time on startup
         v8CacheOptions: 'code',
         spellcheck: false,
@@ -184,14 +207,15 @@ function createWindow() {
       enableGpuRasterization: true,
       enableZeroCopy: true,
       enableHardwareAcceleration: true,
-      enableAggressiveDomStorageFlushing: true,
+      enableAggressiveDomStorageFlushing: false, // Disable to prevent content unloading
       enableExperimentalWebPlatformFeatures: true,
       enableTcpFastOpen: true,
       enableQuic: true,
-      aggressiveCacheDiscard: true,
+      aggressiveCacheDiscard: false, // Disable to prevent content unloading
       enableNetworkService: true,
       enableNetworkServiceLogging: false,
-      enableBlinkFeatures: 'CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn',
+      // Consolidated Blink features
+      enableBlinkFeatures: 'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn',
       enableThrottleForegroundTimers: true,
       enableWebGPU: true,
       enableWebGPUDawn: true
@@ -270,11 +294,31 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // Configure session for better webview support
+  // Configure session for better webview support (non-blocking)
   const mainSession = session.defaultSession;
   
-  // Clear DNS cache and configure network
+  // Optimize session for better scroll performance and prevent content unloading
+  // Use the new API instead of deprecated setPreloads
+  try {
+    if (mainSession.registerPreloadScript) {
+      mainSession.registerPreloadScript(path.join(__dirname, 'preload.js'));
+    } else if (mainSession.setPreloads) {
+      // Fallback for older Electron versions
+      mainSession.setPreloads([path.join(__dirname, 'preload.js')]);
+    }
+  } catch (error) {
+    console.warn('Could not register preload script:', error);
+  }
+  
+  // Clear DNS cache and configure network (non-blocking, can happen async)
+  setImmediate(() => {
+    try {
   mainSession.clearHostResolverCache();
+      mainSession.setSpellCheckerDictionaryDownloadURL('');
+    } catch (error) {
+      // Ignore errors
+    }
+  });
 
   // Note: command line switches are now set early to ensure Chromium honors them
   
@@ -308,39 +352,32 @@ function createWindow() {
 
   // Use default Chromium user agent for best compatibility and performance
   
-  // Configure web security - simplified
+  // Configure web security - simplified (allow all requests)
   mainSession.webRequest.onBeforeRequest((details, callback) => {
-    // Allow all requests
     callback({ cancel: false });
   });
   
-  // Enable aggressive caching
+  // Enable caching and compression (consolidated handler)
   mainSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const headers = details.requestHeaders || {};
     
-    // Add cache control headers for better performance
-    headers['Cache-Control'] = 'max-age=31536000, public';
-    headers['Pragma'] = 'cache';
-    
-    callback({ requestHeaders: headers });
-  });
-  
-  // Enable proper caching
-  mainSession.webRequest.onBeforeSendHeaders((details, callback) => {
-    const headers = details.requestHeaders || {};
-    
-    // Add proper cache headers
-    if (details.url.includes('.css') || details.url.includes('.js') || details.url.includes('.png') || details.url.includes('.jpg') || details.url.includes('.gif')) {
+    // Add cache control headers for static assets
+    if (details.url.includes('.css') || details.url.includes('.js') || 
+        details.url.includes('.png') || details.url.includes('.jpg') || 
+        details.url.includes('.gif') || details.url.includes('.webp')) {
       headers['Cache-Control'] = 'max-age=3600, public';
+    } else {
+      // General cache headers for other content
+      headers['Cache-Control'] = 'max-age=31536000, public';
     }
     
     // Enable compression
+    if (!headers['Accept-Encoding']) {
     headers['Accept-Encoding'] = 'gzip, deflate, br';
+    }
     
     callback({ requestHeaders: headers });
   });
-  
-  // Allow all requests (single handler defined above already allows)
 
   // Create application menu
   createMenu();
@@ -707,6 +744,17 @@ ipcMain.handle('open-library-item', async (event, fullPath) => {
   }
 });
 
+ipcMain.handle('show-item-in-folder', async (event, filePath) => {
+  try {
+    if (!filePath) return false;
+    shell.showItemInFolder(filePath);
+    return true;
+  } catch (error) {
+    console.error('show-item-in-folder failed:', error);
+    return false;
+  }
+});
+
 // Incognito window
 ipcMain.handle('open-incognito-window', () => {
   // Create a new session for incognito mode
@@ -807,6 +855,565 @@ ipcMain.handle('delete-note', (event, id) => {
   const notes = notesStore.get('items', []);
   const filtered = notes.filter(note => note.id !== id);
   notesStore.set('items', filtered);
+  return true;
+});
+
+// Sidebar context menu
+ipcMain.handle('show-sidebar-context-menu', async (event, x, y, isRight) => {
+  const template = [
+    {
+      label: 'New Tab',
+      click: () => {
+        event.sender.send('sidebar-context-menu-action', 'new-tab');
+      }
+    },
+    {
+      label: 'New Tab Group',
+      click: () => {
+        event.sender.send('sidebar-context-menu-action', 'new-tab-group');
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Toggle Sidebar',
+      click: () => {
+        event.sender.send('sidebar-context-menu-action', 'toggle-sidebar');
+      }
+    },
+    {
+      label: isRight ? 'Move Sidebar Left' : 'Move Sidebar Right',
+      click: () => {
+        event.sender.send('sidebar-context-menu-action', 'toggle-position');
+      }
+    }
+  ];
+  
+  const menu = Menu.buildFromTemplate(template);
+  const window = BrowserWindow.fromWebContents(event.sender);
+  
+  // Use cursor position directly - Electron will position it correctly
+  menu.popup({
+    window: window
+  });
+  
+  return true;
+});
+
+// Webpage context menu
+ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => {
+  const ctx = contextInfo || {};
+  const template = [];
+  
+  // Link options (shown when right-clicking a link)
+  if (ctx.linkURL && ctx.linkURL.length > 0) {
+    template.push({
+      label: 'Open Link in New Tab',
+      click: () => {
+        event.sender.send('webpage-context-menu-action', 'open-link-new-tab', { linkURL: ctx.linkURL });
+      }
+    });
+    template.push({
+      label: 'Copy Link Address',
+      click: () => {
+        event.sender.send('webpage-context-menu-action', 'copy-link', { linkURL: ctx.linkURL });
+      }
+    });
+    template.push({ type: 'separator' });
+  }
+  
+  // Image options (shown when right-clicking an image)
+  if (ctx.mediaType === 'image' && ctx.srcURL) {
+    template.push({
+      label: 'Open Image in New Tab',
+      click: () => {
+        event.sender.send('webpage-context-menu-action', 'open-image-new-tab', { srcURL: ctx.srcURL });
+      }
+    });
+    template.push({
+      label: 'Copy Image',
+      click: () => {
+        event.sender.send('webpage-context-menu-action', 'copy-image', { x: ctx.x || 0, y: ctx.y || 0 });
+      }
+    });
+    template.push({
+      label: 'Copy Image Address',
+      click: () => {
+        event.sender.send('webpage-context-menu-action', 'copy-image-url', { srcURL: ctx.srcURL });
+      }
+    });
+    template.push({ type: 'separator' });
+  }
+  
+  // Navigation options
+  template.push({
+    label: 'Back',
+    enabled: ctx.canGoBack || false,
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'back');
+    }
+  });
+  template.push({
+    label: 'Forward',
+    enabled: ctx.canGoForward || false,
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'forward');
+    }
+  });
+  template.push({
+    label: 'Reload',
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'reload');
+    }
+  });
+  template.push({ type: 'separator' });
+  
+  // Edit options
+  template.push({
+    label: 'Cut',
+    enabled: ctx.canCut || ctx.isEditable || false,
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'cut');
+    }
+  });
+  template.push({
+    label: 'Copy',
+    enabled: ctx.canCopy || (ctx.hasSelection && ctx.selectionText && ctx.selectionText.length > 0) || false,
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'copy');
+    }
+  });
+  template.push({
+    label: 'Paste',
+    enabled: ctx.canPaste || ctx.isEditable || false,
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'paste');
+    }
+  });
+  template.push({
+    label: 'Select All',
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'select-all');
+    }
+  });
+  
+  // Selection search option
+  if (ctx.hasSelection && ctx.selectionText && ctx.selectionText.length > 0) {
+    template.push({ type: 'separator' });
+    let displayText = ctx.selectionText.trim();
+    if (displayText.length > 20) {
+      displayText = displayText.substring(0, 20) + '...';
+    }
+    template.push({
+      label: `Search for "${displayText}"`,
+      click: () => {
+        event.sender.send('webpage-context-menu-action', 'search-selection', { selectionText: ctx.selectionText });
+      }
+    });
+  }
+  
+  template.push({ type: 'separator' });
+  
+  // Page options
+  template.push({
+    label: 'Copy Page URL',
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'copy-url');
+    }
+  });
+  template.push({
+    label: 'Inspect Element',
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'inspect');
+    }
+  });
+  
+  const menu = Menu.buildFromTemplate(template);
+  const window = BrowserWindow.fromWebContents(event.sender);
+  
+  // Use cursor position directly - Electron will position it correctly
+  menu.popup({
+    window: window
+  });
+  
+  return true;
+});
+
+// Tab context menu
+ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
+  const info = tabInfo || {};
+  const template = [
+    {
+      label: 'Rename Tab',
+      click: () => {
+        event.sender.send('tab-context-menu-action', 'rename');
+      }
+    },
+    {
+      label: 'Duplicate Tab',
+      click: () => {
+        event.sender.send('tab-context-menu-action', 'duplicate');
+      }
+    },
+    {
+      label: info.isPinned ? 'Unpin Tab' : 'Pin Tab',
+      click: () => {
+        event.sender.send('tab-context-menu-action', 'toggle-pin');
+      }
+    },
+    {
+      label: info.isMuted ? 'Unmute Tab' : 'Mute Tab',
+      click: () => {
+        event.sender.send('tab-context-menu-action', 'toggle-mute');
+      }
+    },
+    {
+      label: 'Change Icon',
+      click: () => {
+        event.sender.send('tab-context-menu-action', 'change-icon');
+      }
+    },
+    {
+      label: 'Close Tab',
+      click: () => {
+        event.sender.send('tab-context-menu-action', 'close');
+      }
+    }
+  ];
+  
+  const menu = Menu.buildFromTemplate(template);
+  const window = BrowserWindow.fromWebContents(event.sender);
+  
+  menu.popup({
+    window: window
+  });
+  
+  return true;
+});
+
+// Tab group context menu
+ipcMain.handle('show-tab-group-context-menu', async (event, x, y) => {
+  const template = [
+    {
+      label: 'Rename Tab Group',
+      click: () => {
+        event.sender.send('tab-group-context-menu-action', 'rename');
+      }
+    },
+    {
+      label: 'Duplicate Tab Group',
+      click: () => {
+        event.sender.send('tab-group-context-menu-action', 'duplicate');
+      }
+    },
+    {
+      label: 'Change Color',
+      click: () => {
+        event.sender.send('tab-group-context-menu-action', 'change-color');
+      }
+    },
+    {
+      label: 'Change Icon',
+      click: () => {
+        event.sender.send('tab-group-context-menu-action', 'change-icon');
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Delete Tab Group',
+      click: () => {
+        event.sender.send('tab-group-context-menu-action', 'delete');
+      }
+    }
+  ];
+  
+  const menu = Menu.buildFromTemplate(template);
+  const window = BrowserWindow.fromWebContents(event.sender);
+  
+  menu.popup({
+    window: window
+  });
+  
+  return true;
+});
+
+// Helper function to format time ago
+function formatTimeAgo(timestamp) {
+  const now = new Date();
+  const time = new Date(timestamp);
+  const diffMs = now - time;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return time.toLocaleDateString();
+}
+
+// Get downloads from folder for custom popup
+ipcMain.handle('get-downloads-from-folder', async (event) => {
+  try {
+    const home = os.homedir();
+    const downloadsPath = path.join(home, 'Downloads');
+    
+    let files = [];
+    try {
+      const dirFiles = await fs.promises.readdir(downloadsPath, { withFileTypes: true });
+      
+      for (const file of dirFiles) {
+        if (file.name.startsWith('.')) continue;
+        
+        const fullPath = path.join(downloadsPath, file.name);
+        
+        try {
+          const stats = await fs.promises.stat(fullPath);
+          if (!file.isDirectory()) {
+            files.push({
+              name: file.name,
+              path: fullPath,
+              mtime: stats.mtime
+            });
+          }
+        } catch (statError) {
+          continue;
+        }
+      }
+    } catch (readError) {
+      console.error('Failed to read Downloads folder:', readError);
+    }
+    
+    files.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+    return files.slice(0, 10);
+  } catch (error) {
+    console.error('Failed to get downloads from folder:', error);
+    return [];
+  }
+});
+
+// Context menu for downloads items
+ipcMain.handle('show-downloads-item-context-menu', async (event, x, y, filePath) => {
+  const template = [
+    {
+      label: 'Open',
+      click: () => {
+        event.sender.send('downloads-popup-action', 'open', { path: filePath });
+      }
+    },
+    {
+      label: 'Show in Folder',
+      click: () => {
+        event.sender.send('downloads-popup-action', 'show-in-folder', { path: filePath });
+      }
+    }
+  ];
+  
+  const menu = Menu.buildFromTemplate(template);
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const cursorPoint = screen.getCursorScreenPoint();
+  
+  menu.popup({
+    window: window,
+    x: cursorPoint.x,
+    y: cursorPoint.y
+  });
+  
+  return true;
+});
+
+// Downloads popup - native macOS menu showing recent files from Downloads folder
+ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWidth, buttonHeight) => {
+  try {
+    // Get files from Downloads folder
+    const home = os.homedir();
+    const downloadsPath = path.join(home, 'Downloads');
+    
+    let files = [];
+    try {
+      const dirFiles = await fs.promises.readdir(downloadsPath, { withFileTypes: true });
+      
+      for (const file of dirFiles) {
+        // Skip hidden files
+        if (file.name.startsWith('.')) continue;
+        
+        const fullPath = path.join(downloadsPath, file.name);
+        
+        try {
+          const stats = await fs.promises.stat(fullPath);
+          if (!file.isDirectory()) {
+            files.push({
+              name: file.name,
+              path: fullPath,
+              mtime: stats.mtime
+            });
+          }
+        } catch (statError) {
+          // Skip files we can't stat
+          continue;
+        }
+      }
+    } catch (readError) {
+      console.error('Failed to read Downloads folder:', readError);
+    }
+    
+    // Sort by modification time (newest first) and take top 10
+    files.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+    files = files.slice(0, 10);
+    
+    const template = [];
+    
+    if (files.length === 0) {
+      template.push({
+        label: 'No downloads',
+        enabled: false
+      });
+    } else {
+      files.forEach((file) => {
+        // Format filename (truncate if too long)
+        let label = file.name;
+        if (label.length > 50) {
+          label = label.substring(0, 47) + '...';
+        }
+        
+        // Format time for display
+        const timeAgo = formatTimeAgo(file.mtime);
+        const displayLabel = `${label}  ${timeAgo}`;
+        
+        template.push({
+          label: displayLabel,
+          click: () => {
+            event.sender.send('downloads-popup-action', 'open', { path: file.path });
+          },
+          submenu: [
+            {
+              label: 'Open',
+              click: () => {
+                event.sender.send('downloads-popup-action', 'open', { path: file.path });
+              }
+            },
+            {
+              label: 'Show in Folder',
+              click: () => {
+                event.sender.send('downloads-popup-action', 'show-in-folder', { path: file.path });
+              }
+            }
+          ]
+        });
+      });
+    }
+    
+    const menu = Menu.buildFromTemplate(template);
+    const window = BrowserWindow.fromWebContents(event.sender);
+    
+    // Position native macOS menu relative to button
+    if (buttonX !== undefined && buttonY !== undefined && buttonWidth !== undefined && buttonHeight !== undefined &&
+        typeof buttonX === 'number' && typeof buttonY === 'number' && 
+        typeof buttonWidth === 'number' && typeof buttonHeight === 'number' &&
+        !isNaN(buttonX) && !isNaN(buttonY) && !isNaN(buttonWidth) && !isNaN(buttonHeight)) {
+      try {
+        // Convert button position from client coordinates to screen coordinates
+        const contentBounds = window.getContentBounds();
+        if (contentBounds && typeof contentBounds.x === 'number' && typeof contentBounds.y === 'number') {
+          const screenX = contentBounds.x + buttonX;
+          const screenY = contentBounds.y + buttonY;
+          
+          // Calculate button center for arrow positioning
+          const buttonCenterX = screenX + (buttonWidth / 2);
+          
+          // Estimate menu height: ~22px per item + padding
+          const estimatedMenuHeight = Math.min(300, (template.length * 22) + 16);
+          
+          // Position menu above the button, centered horizontally for arrow alignment
+          // macOS native menus automatically show the arrow when positioned correctly
+          const estimatedMenuWidth = 280;
+          const menuX = Math.round(buttonCenterX - (estimatedMenuWidth / 2));
+          let menuY = Math.round(screenY - estimatedMenuHeight - 8); // 8px gap above button
+          
+          // Ensure menu doesn't go above screen
+          const display = screen.getDisplayNearestPoint({ x: menuX, y: menuY });
+          if (display) {
+            if (menuY < display.bounds.y) {
+              // If menu would go above screen, position it below the button instead
+              menuY = Math.round(screenY + buttonHeight + 8);
+            }
+            // Ensure menu doesn't go off screen edges
+            let finalX = menuX;
+            if (finalX + estimatedMenuWidth > display.bounds.x + display.bounds.width) {
+              finalX = display.bounds.x + display.bounds.width - estimatedMenuWidth - 8;
+            }
+            if (finalX < display.bounds.x) {
+              finalX = display.bounds.x + 8;
+            }
+            
+            // Use native macOS menu popup - it will automatically show the arrow
+            menu.popup({
+              window: window,
+              x: finalX,
+              y: menuY,
+              positioningItem: 0 // This helps macOS position the arrow correctly
+            });
+            return true;
+          }
+          
+          // Fallback with calculated position
+          if (!isNaN(menuX) && !isNaN(menuY) && isFinite(menuX) && isFinite(menuY) && menuX >= 0 && menuY >= 0) {
+            menu.popup({
+              window: window,
+              x: menuX,
+              y: menuY
+            });
+            return true;
+          }
+        }
+      } catch (error) {
+        console.error('Error calculating menu position:', error);
+      }
+    }
+    
+    // Fallback: position at cursor or let Electron position automatically
+    // macOS will automatically add the arrow when positioned near a UI element
+    try {
+      const cursorPoint = screen.getCursorScreenPoint();
+      menu.popup({
+        window: window,
+        x: cursorPoint.x,
+        y: cursorPoint.y
+      });
+    } catch (error) {
+      // Last resort: let Electron position it automatically
+      menu.popup({
+        window: window
+      });
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Failed to show downloads popup:', error);
+    return false;
+  }
+});
+
+// Icon picker - trigger native macOS emoji/symbols picker
+ipcMain.handle('show-icon-picker', async (event, type) => {
+  if (process.platform === 'darwin') {
+    // On macOS, use AppleScript to trigger the Character Viewer (emoji picker)
+    // This opens the native macOS emoji and symbols picker
+    exec('osascript -e \'tell application "System Events" to keystroke " " using {command down, control down}\'', (error) => {
+      if (error) {
+        console.error('Error triggering emoji picker:', error);
+        // Fallback: send message to renderer to create input field
+        event.sender.send('trigger-native-emoji-picker', type);
+      }
+    });
+    
+    // Also send message to renderer to create input field and listen for emoji selection
+    event.sender.send('trigger-native-emoji-picker', type);
+  } else {
+    // On non-macOS, just send the trigger message
+    event.sender.send('trigger-native-emoji-picker', type);
+  }
+  
   return true;
 });
 
