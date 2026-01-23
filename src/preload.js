@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Library (local files) management
   getLibraryItems: (locationKey) => ipcRenderer.invoke('get-library-items', locationKey),
   openLibraryItem: (fullPath) => ipcRenderer.invoke('open-library-item', fullPath),
+  showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
+  showDownloadsPopup: (x, y, width, height) => ipcRenderer.invoke('show-downloads-popup', x, y, width, height),
+  getDownloadsFromFolder: () => ipcRenderer.invoke('get-downloads-from-folder'),
+  onDownloadsPopupAction: (callback) => ipcRenderer.on('downloads-popup-action', (event, action, data) => callback(action, data)),
+  showDownloadsItemContextMenu: (x, y, filePath) => ipcRenderer.invoke('show-downloads-item-context-menu', x, y, filePath),
   
   // Event listeners
   onNewTab: (callback) => ipcRenderer.on('new-tab', callback),
@@ -55,5 +60,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Performance monitoring
   getPerformanceMetrics: () => ipcRenderer.invoke('get-performance-metrics'),
-  getTabMemoryUsage: (tabId) => ipcRenderer.invoke('get-tab-memory-usage', tabId)
+  getTabMemoryUsage: (tabId) => ipcRenderer.invoke('get-tab-memory-usage', tabId),
+  
+  // Sidebar context menu
+  showSidebarContextMenu: (x, y, isRight) => ipcRenderer.invoke('show-sidebar-context-menu', x, y, isRight),
+  onSidebarContextMenuAction: (callback) => ipcRenderer.on('sidebar-context-menu-action', (event, action) => callback(action)),
+  
+  // Webpage context menu
+  showWebpageContextMenu: (x, y, contextInfo) => ipcRenderer.invoke('show-webpage-context-menu', x, y, contextInfo),
+  onWebpageContextMenuAction: (callback) => ipcRenderer.on('webpage-context-menu-action', (event, action, data) => callback(action, data)),
+  
+  // Tab context menu
+  showTabContextMenu: (x, y, tabInfo) => ipcRenderer.invoke('show-tab-context-menu', x, y, tabInfo),
+  onTabContextMenuAction: (callback) => ipcRenderer.on('tab-context-menu-action', (event, action, data) => callback(action, data)),
+  
+  // Tab group context menu
+  showTabGroupContextMenu: (x, y) => ipcRenderer.invoke('show-tab-group-context-menu', x, y),
+  onTabGroupContextMenuAction: (callback) => ipcRenderer.on('tab-group-context-menu-action', (event, action, data) => callback(action, data)),
+  
+  // Icon picker
+  showIconPicker: (type) => ipcRenderer.invoke('show-icon-picker', type),
+  onTriggerNativeEmojiPicker: (callback) => ipcRenderer.on('trigger-native-emoji-picker', (event, type) => callback(type))
 });
