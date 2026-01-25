@@ -20,7 +20,9 @@
   "license": "SEE LICENSE IN LICENSE.md",
   "devDependencies": {
     "electron": "^35.7.5",
-    "electron-builder": "^26.4.0"
+    "electron-builder": "^26.4.0",
+    "lodash": "^4.17.23",
+    "tar": "^7.5.3"
   },
   "dependencies": {
     "electron-store": "^8.1.0"
