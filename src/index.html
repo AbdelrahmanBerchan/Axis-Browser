@@ -85,25 +85,27 @@
                                 </button>
                             </div>
                             <div class="url-bar-center">
-                                <input type="text" class="url-bar-input" id="url-bar-input" readonly>
-                                <span class="url-bar-url" id="url-bar-display"></span>
+                                <div class="url-bar-field">
+                                    <input type="text" class="url-bar-input" id="url-bar-input" readonly>
+                                    <span class="url-bar-url" id="url-bar-display"></span>
+                                </div>
                                 <div class="url-bar-actions">
-                                    <button class="url-bar-btn url-bar-action-btn" id="url-bar-security" title="Security Info">
-                                        <i class="fas fa-lock"></i>
-                                    </button>
                                     <button class="url-bar-btn url-bar-action-btn url-bar-copy-btn" id="url-bar-copy" title="Copy Link">
                                         <i class="fas fa-link"></i>
+                                    </button>
+                                    <button class="url-bar-btn url-bar-action-btn" id="url-bar-security" title="Security Info">
+                                        <i class="fas fa-lock"></i>
                                     </button>
                                 </div>
                             </div>
                             <div class="url-bar-right">
                                 <button class="url-bar-chat-btn" id="url-bar-chat" title="Chat">
-                                    <span class="chat-indicator"></span>
                                     <span>Chat</span>
                                 </button>
                             </div>
+                            <!-- Loading bar now lives inside the URL bar, directly underneath it -->
+                            <div id="loading-bar" class="loading-bar"></div>
                         </div>
-                        <div id="loading-bar" class="loading-bar"></div>
                         <div id="zoom-indicator" class="zoom-indicator hidden">
                             <div class="zoom-content">
                                 <i class="fas fa-search-plus"></i>
@@ -149,12 +151,7 @@
                                     <i class="fas fa-times"></i>
                                 </button>
                             </div>
-                            <div class="ai-chat-messages" id="ai-chat-messages">
-                                <div class="ai-chat-welcome">
-                                    <i class="fas fa-robot"></i>
-                                    <p>Hello! I'm your AI assistant. How can I help you today?</p>
-                                </div>
-                            </div>
+                            <div class="ai-chat-messages" id="ai-chat-messages"></div>
                             <div class="ai-chat-input-container">
                                 <textarea 
                                     id="ai-chat-input" 
