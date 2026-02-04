@@ -24,8 +24,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLibraryItems: (locationKey) => ipcRenderer.invoke('get-library-items', locationKey),
   openLibraryItem: (fullPath) => ipcRenderer.invoke('open-library-item', fullPath),
   showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
+  startFileDrag: (filePath) => ipcRenderer.invoke('start-file-drag', filePath),
   showDownloadsPopup: (x, y, width, height) => ipcRenderer.invoke('show-downloads-popup', x, y, width, height),
   getDownloadsFromFolder: () => ipcRenderer.invoke('get-downloads-from-folder'),
+  openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
   onDownloadsPopupAction: (callback) => ipcRenderer.on('downloads-popup-action', (event, action, data) => callback(action, data)),
   showDownloadsItemContextMenu: (x, y, filePath) => ipcRenderer.invoke('show-downloads-item-context-menu', x, y, filePath),
   
