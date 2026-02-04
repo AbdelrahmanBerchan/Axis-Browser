@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen, nativeImage } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const fs = require('fs');
@@ -225,7 +225,8 @@ function createWindow() {
     show: false,
     transparent: true,
     backgroundColor: '#00000000',
-    vibrancy: 'ultra-dark'
+    vibrancy: 'under-window',
+    visualEffectState: 'active'
   });
 
   // Load the app
@@ -268,7 +269,7 @@ function createWindow() {
       return;
     }
     
-    // For actual quit actions, show confirmation
+    // For actual quit actions (non-macOS), confirmation is sent from main via request-quit
     if (!isQuitConfirmed && isUserQuitting) {
       e.preventDefault();
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -419,11 +420,21 @@ function createMenu() {
           label: 'Quit',
           accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Ctrl+Q',
           click: () => {
-            isUserQuitting = true;
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('request-quit');
+            if (process.platform === 'darwin') {
+              if (mainWindow && !mainWindow.isDestroyed() && showNativeQuitDialog()) {
+                isQuitConfirmed = true;
+                isUserQuitting = true; // so window close handler allows quit instead of hiding
+                app.quit();
+              } else if (!mainWindow || mainWindow.isDestroyed()) {
+                app.quit();
+              }
             } else {
-              app.quit();
+              isUserQuitting = true;
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('request-quit');
+              } else {
+                app.quit();
+              }
             }
           }
         }
@@ -483,14 +494,31 @@ app.on('window-all-closed', () => {
   }
 });
 
+// Native macOS quit confirmation (Cmd+Q or when quit is requested)
+function showNativeQuitDialog() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  mainWindow.focus();
+  const response = dialog.showMessageBoxSync(mainWindow, {
+    type: 'question',
+    buttons: ['Cancel', 'Quit'],
+    defaultId: 0,
+    cancelId: 0,
+    message: 'Quit Axis?',
+    detail: 'Are you sure you want to exit the application?'
+  });
+  return response === 1;
+}
+
 // Handle Cmd+Q on macOS (before-quit fires before window close)
 app.on('before-quit', (e) => {
   if (process.platform === 'darwin' && !isQuitConfirmed) {
-    isUserQuitting = true;
-    // Prevent default quit, let the window close handler show confirmation
     e.preventDefault();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('request-quit');
+    isUserQuitting = true;
+    if (showNativeQuitDialog()) {
+      isQuitConfirmed = true;
+      app.quit();
+    } else {
+      isUserQuitting = false;
     }
   }
 });
@@ -787,7 +815,8 @@ ipcMain.handle('open-incognito-window', () => {
     show: false,
     transparent: true,
     backgroundColor: '#00000000',
-    vibrancy: 'ultra-dark'
+    vibrancy: 'under-window',
+    visualEffectState: 'active'
   });
 
   // Load the app
@@ -1173,7 +1202,8 @@ ipcMain.handle('get-downloads-from-folder', async (event) => {
             files.push({
               name: file.name,
               path: fullPath,
-              mtime: stats.mtime
+              mtime: stats.mtime,
+              size: stats.size
             });
           }
         } catch (statError) {
@@ -1185,7 +1215,7 @@ ipcMain.handle('get-downloads-from-folder', async (event) => {
     }
     
     files.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
-    return files.slice(0, 10);
+    return files.slice(0, 5);
   } catch (error) {
     console.error('Failed to get downloads from folder:', error);
     return [];
@@ -1222,6 +1252,56 @@ ipcMain.handle('show-downloads-item-context-menu', async (event, x, y, filePath)
   return true;
 });
 
+// Native file drag support (e.g. drag download out to Finder/Desktop)
+ipcMain.handle('start-file-drag', async (event, filePath) => {
+  try {
+    if (!filePath) return false;
+    
+    let icon = nativeImage.createFromPath(filePath);
+    if (!icon || icon.isEmpty()) {
+      // Fallback to an empty image if we can't load a proper icon
+      icon = nativeImage.createEmpty();
+    }
+    
+    event.sender.startDrag({
+      file: filePath,
+      icon
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Failed to start file drag:', error);
+    return false;
+  }
+});
+
+// Open the user's Downloads folder in Finder
+ipcMain.handle('open-downloads-folder', async () => {
+  const downloadsPath = path.join(os.homedir(), 'Downloads');
+  return shell.openPath(downloadsPath).catch((err) => {
+    console.error('Failed to open Downloads folder:', err);
+    return Promise.reject(err);
+  });
+});
+
+// Return a 16x16 fallback icon so menu items always show an icon
+function getFallbackFileIcon() {
+  if (process.platform === 'darwin') {
+    const systemPath = '/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericDocumentIcon.icns';
+    try {
+      const img = nativeImage.createFromPath(systemPath);
+      if (img && !img.isEmpty()) return img.resize({ width: 16, height: 16 });
+    } catch (e) {}
+  }
+  // Minimal 16x16 gray document icon as PNG data URL (always works)
+  const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAOklEQVQ4T2NkYGD4z0ABYBzVMKoBBg0MBv8ZGP4zMPxnYPjPwPD/PwPDfwYGhv8MDP8ZGP4zMPxnYPgPALmJCm0bicgAAAAASUVORK5CYII=';
+  try {
+    const img = nativeImage.createFromDataURL(dataUrl);
+    if (img && !img.isEmpty()) return img.resize({ width: 16, height: 16 });
+  } catch (e) {}
+  return nativeImage.createEmpty();
+}
+
 // Downloads popup - native macOS menu showing recent files from Downloads folder
 ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWidth, buttonHeight) => {
   try {
@@ -1257,9 +1337,9 @@ ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWid
       console.error('Failed to read Downloads folder:', readError);
     }
     
-    // Sort by modification time (newest first) and take top 10
+    // Sort by modification time (newest first) and take top 5
     files.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
-    files = files.slice(0, 10);
+    files = files.slice(0, 5);
     
     const template = [];
     
@@ -1269,39 +1349,85 @@ ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWid
         enabled: false
       });
     } else {
-      files.forEach((file) => {
+      for (const file of files) {
         // Format filename (truncate if too long)
         let label = file.name;
         if (label.length > 50) {
           label = label.substring(0, 47) + '...';
         }
         
-        // Format time for display
         const timeAgo = formatTimeAgo(file.mtime);
-        const displayLabel = `${label}  ${timeAgo}`;
+        const displayLabel = `${label}   ${timeAgo}`;
         
+        // Always get an icon: try app.getFileIcon, then createFromPath, then fallback
+        let icon = null;
+        try {
+          icon = await app.getFileIcon(file.path, { size: 'small' });
+        } catch (e) {}
+        if (!icon || icon.isEmpty()) {
+          try {
+            icon = nativeImage.createFromPath(file.path);
+            if (icon && !icon.isEmpty()) icon = icon.resize({ width: 16, height: 16 });
+            else icon = null;
+          } catch (e) {
+            icon = null;
+          }
+        }
+        if (!icon || icon.isEmpty()) {
+          icon = getFallbackFileIcon();
+        } else {
+          icon = icon.resize({ width: 16, height: 16 });
+        }
+        
+        const filePath = file.path;
+        // Native macOS: one row per file; click opens file; submenu (>) has "Reveal in Finder"
         template.push({
           label: displayLabel,
+          icon,
           click: () => {
-            event.sender.send('downloads-popup-action', 'open', { path: file.path });
+            event.sender.send('downloads-popup-action', 'open', { path: filePath });
           },
           submenu: [
             {
-              label: 'Open',
+              label: 'Reveal in Finder',
               click: () => {
-                event.sender.send('downloads-popup-action', 'open', { path: file.path });
-              }
-            },
-            {
-              label: 'Show in Folder',
-              click: () => {
-                event.sender.send('downloads-popup-action', 'show-in-folder', { path: file.path });
+                event.sender.send('downloads-popup-action', 'show-in-folder', { path: filePath });
               }
             }
           ]
         });
-      });
+      }
     }
+    
+    // Separator and "Open Downloads" button at the bottom
+    template.push({ type: 'separator' });
+    
+    let folderIcon = null;
+    try {
+      folderIcon = await app.getFileIcon(downloadsPath, { size: 'small' });
+    } catch (e) {}
+    if (!folderIcon || folderIcon.isEmpty()) {
+      try {
+        folderIcon = nativeImage.createFromPath(downloadsPath);
+        if (folderIcon && !folderIcon.isEmpty()) folderIcon = folderIcon.resize({ width: 16, height: 16 });
+        else folderIcon = null;
+      } catch (e) {
+        folderIcon = null;
+      }
+    }
+    if (!folderIcon || folderIcon.isEmpty()) {
+      folderIcon = getFallbackFileIcon();
+    } else {
+      folderIcon = folderIcon.resize({ width: 16, height: 16 });
+    }
+    
+    template.push({
+      label: 'Open Downloads',
+      icon: folderIcon,
+      click: () => {
+        shell.openPath(downloadsPath).catch((err) => console.error('Failed to open Downloads:', err));
+      }
+    });
     
     const menu = Menu.buildFromTemplate(template);
     const window = BrowserWindow.fromWebContents(event.sender);
