@@ -42,7 +42,9 @@ class AxisBrowser {
             'facebook': 'facebook'
         };
         this.loadingTimeout = null; // Timeout for stuck loading pages (main view)
+        this.loadingBarTabId = null; // Tab id for which the loading bar is currently shown (so we hide when that tab finishes)
         this.isBenchmarking = false; // suppress non-critical work on Speedometer
+        this.isWebviewLoading = false; // Track if webview is currently loading
         this.spotlightSelectedIndex = -1; // Track selected suggestion index
         this.contextMenuTabGroupId = null; // Track which tab group context menu is open
         this.themeCache = new Map(); // Cache theme colors per domain for instant theme switching
@@ -1205,8 +1207,11 @@ class AxisBrowser {
             if (this.isBenchmarking) return;
             
             clearLoadingTimeout();
+            this.isWebviewLoading = true;
+            this.loadingBarTabId = tabId; // Remember which tab is showing the loading bar
             this.showLoadingIndicator();
             this.updateNavigationButtons();
+            this.updateRefreshButton(true); // Change reload button to X
             
             // Apply cached theme instantly for faster perceived loading
             if (currentUrl && currentUrl !== 'about:blank') {
@@ -1214,7 +1219,7 @@ class AxisBrowser {
             }
             
             webview.__loadingTimeout = setTimeout(() => {
-                if (!isActiveTab()) return;
+                if (this.loadingBarTabId !== tabId) return;
                 if (webview && webview.isLoading) {
                     console.log('Page taking too long to load, forcing stop');
                     try {
@@ -1223,7 +1228,12 @@ class AxisBrowser {
                         console.error('Error stopping webview:', e);
                     }
                     this.hideLoadingIndicator();
-                    this.showNotification('Page is taking too long to load. You can try refreshing.', 'warning');
+                    this.loadingBarTabId = null;
+                    if (isActiveTab()) {
+                        this.isWebviewLoading = false;
+                        this.updateRefreshButton(false);
+                        this.showNotification('Page is taking too long to load. You can try refreshing.', 'warning');
+                    }
                 }
                 clearLoadingTimeout();
             }, 30000);
@@ -1276,8 +1286,18 @@ class AxisBrowser {
         };
         webview.addEventListener('dom-ready', domReadyOptimizeHandler);
         
-        const didFinishLoadHandler = () => {
+        const didFinishLoadHandler = (event) => {
             clearLoadingTimeout();
+            // Only hide loading when main frame finishes (avoid hiding on iframe/subframe load)
+            const isMainFrame = event == null || event.isMainFrame !== false;
+            if (isMainFrame && this.loadingBarTabId === tabId) {
+                this.hideLoadingIndicator();
+                this.loadingBarTabId = null;
+            }
+            if (tabId === this.currentTab) {
+                this.isWebviewLoading = false;
+                this.updateRefreshButton(false);
+            }
 
             const tab = getTab();
             if (tab) {
@@ -1301,8 +1321,6 @@ class AxisBrowser {
                 this.dnsRetryCount = 0;
                 return;
             }
-            
-            this.hideLoadingIndicator();
             this.errorRetryCount = 0;
             this.dnsRetryCount = 0;
             
@@ -1473,16 +1491,23 @@ class AxisBrowser {
 
         const didStopLoadingHandler = () => {
             clearLoadingTimeout();
+            // Always hide loading bar when this tab stops loading (even if user switched tabs)
+            if (this.loadingBarTabId === tabId) {
+                this.hideLoadingIndicator();
+                this.loadingBarTabId = null;
+            }
+            if (tabId === this.currentTab) {
+                this.isWebviewLoading = false;
+                this.updateRefreshButton(false);
+            }
             if (!isActiveTab() || this.isBenchmarking) return;
 
-                this.hideLoadingIndicator();
-                this.batchDOMUpdates([
-                    () => this.updateUrlBar(),
-                    () => this.updateNavigationButtons(),
-                    () => this.updateTabTitle()
-                ]);
-                // Update themed URL bar
-                this.updateUrlBar(webview);
+            this.batchDOMUpdates([
+                () => this.updateUrlBar(),
+                () => this.updateNavigationButtons(),
+                () => this.updateTabTitle()
+            ]);
+            this.updateUrlBar(webview);
         };
         webview.__eventHandlers.didStopLoading = didStopLoadingHandler;
         webview.addEventListener('did-stop-loading', didStopLoadingHandler);
@@ -1524,8 +1549,13 @@ class AxisBrowser {
                 return;
             }
 
-            if (isActiveTab()) {
-            this.hideLoadingIndicator();
+            if (this.loadingBarTabId === tabId) {
+                this.hideLoadingIndicator();
+                this.loadingBarTabId = null;
+            }
+            if (tabId === this.currentTab) {
+                this.isWebviewLoading = false;
+                this.updateRefreshButton(false);
             }
             
             if (this.errorRetryCount >= 5) {
@@ -2994,16 +3024,16 @@ class AxisBrowser {
         style.setProperty('--text-color', colors.text);
         style.setProperty('--text-color-secondary', textSecondary);
         style.setProperty('--text-color-muted', colors.textMuted || colors.text);
-        // Use a glassy, semi-opaque version of the primary color for app surfaces.
-        // Very slightly transparent (barely noticeable) to allow blur to be visible
+        // Use a glassy, semi-transparent version of the primary color for app surfaces.
+        // More transparent to allow frosted glass effect to show through
         let glassSidebarBg;
         if (gradientEnabled) {
             // For gradient, create a semi-transparent version
-            const primaryRgba = this.hexToRgba(darkerPrimary, 0.96);
-            const gradientRgba = this.hexToRgba(colors.gradientColor, 0.96);
+            const primaryRgba = this.hexToRgba(darkerPrimary, 0.4);
+            const gradientRgba = this.hexToRgba(colors.gradientColor, 0.4);
             glassSidebarBg = `linear-gradient(${gradientDirection}, ${primaryRgba} 0%, ${gradientRgba} 100%)`;
         } else {
-            glassSidebarBg = this.hexToRgba(darkerPrimary, 0.96) || `rgba(20, 20, 20, 0.96)`;
+            glassSidebarBg = this.hexToRgba(darkerPrimary, 0.4) || `rgba(20, 20, 20, 0.4)`;
         }
         // Popups use subtle dominant color (primary color, even if gradient)
         // Extract primary color and make it subtle for popups
@@ -3079,10 +3109,8 @@ class AxisBrowser {
         style.setProperty('--animation-shadow-medium', `rgba(0, 0, 0, ${shadowOpacityMedium})`);
         
         // Only update critical elements directly - CSS variables handle everything else
-        // Body uses theme background
-        document.body.style.background = gradientEnabled ? 
-            `linear-gradient(${gradientDirection}, ${darkerPrimary} 0%, ${colors.gradientColor} 100%)` : 
-            darkerPrimary;
+        // Body should be transparent to allow frosted glass effect
+        document.body.style.background = 'transparent';
         document.body.style.color = colors.text;
         
         // Check if there are any tabs open
@@ -3113,11 +3141,13 @@ class AxisBrowser {
         }
             
         if (app) {
-                app.style.setProperty('background', gradientEnabled ? 
-                    `linear-gradient(${gradientDirection}, ${darkerPrimary} 0%, ${colors.gradientColor} 100%)` : 
-                    darkerPrimary, 'important');
-            app.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-            app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+                // Use semi-transparent background for frosted glass effect
+                const appBg = gradientEnabled ? 
+                    `linear-gradient(${gradientDirection}, ${this.hexToRgba(darkerPrimary, 0.4)} 0%, ${this.hexToRgba(colors.gradientColor, 0.4)} 100%)` : 
+                    this.hexToRgba(darkerPrimary, 0.4);
+                app.style.setProperty('background', appBg, 'important');
+            app.style.setProperty('backdrop-filter', 'blur(80px) saturate(180%)', 'important');
+            app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(180%)', 'important');
             }
         } else {
             // When NO tabs are open: Keep theme background everywhere, just hide webviews
@@ -3130,11 +3160,13 @@ class AxisBrowser {
             
             // Also apply to app element
             if (app) {
-                app.style.setProperty('background', gradientEnabled ? 
-                    `linear-gradient(${gradientDirection}, ${darkerPrimary} 0%, ${colors.gradientColor} 100%)` : 
-                    darkerPrimary, 'important');
-                app.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-                app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+                // Use semi-transparent background for frosted glass effect
+                const appBg = gradientEnabled ? 
+                    `linear-gradient(${gradientDirection}, ${this.hexToRgba(darkerPrimary, 0.4)} 0%, ${this.hexToRgba(colors.gradientColor, 0.4)} 100%)` : 
+                    this.hexToRgba(darkerPrimary, 0.4);
+                app.style.setProperty('background', appBg, 'important');
+                app.style.setProperty('backdrop-filter', 'blur(80px) saturate(180%)', 'important');
+                app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(180%)', 'important');
             }
             
             // Remove backgrounds from individual elements to prevent duplication
@@ -3637,9 +3669,36 @@ class AxisBrowser {
             this.updateEmptyState();
             this.updateNavigationButtons();
             this.updateUrlBar();
-            // Update themed URL bar
+            // Update themed URL bar and loading bar to match the tab we switched to
             if (tab && tab.webview) {
                 this.updateUrlBar(tab.webview);
+                try {
+                    this.isWebviewLoading = tab.webview.isLoading();
+                    this.updateRefreshButton(this.isWebviewLoading);
+                    if (this.isWebviewLoading) {
+                        this.loadingBarTabId = tabId;
+                        this.showLoadingIndicator();
+                    } else {
+                        if (this.loadingBarTabId != null) {
+                            this.hideLoadingIndicator();
+                            this.loadingBarTabId = null;
+                        }
+                    }
+                } catch (e) {
+                    this.isWebviewLoading = false;
+                    this.updateRefreshButton(false);
+                    if (this.loadingBarTabId != null) {
+                        this.hideLoadingIndicator();
+                        this.loadingBarTabId = null;
+                    }
+                }
+            } else {
+                this.isWebviewLoading = false;
+                this.updateRefreshButton(false);
+                if (this.loadingBarTabId != null) {
+                    this.hideLoadingIndicator();
+                    this.loadingBarTabId = null;
+                }
             }
         });
     }
@@ -4212,8 +4271,38 @@ class AxisBrowser {
 
     refresh() {
         const webview = this.getActiveWebview();
-        if (webview) {
-            webview.reload();
+        if (!webview) return;
+        
+        // If webview is currently loading, stop it smoothly.
+        // We rely on did-stop-loading / did-finish-load events to update UI
+        if (this.isWebviewLoading) {
+            try {
+                webview.stop();
+            } catch (e) {
+                console.error('Error stopping webview:', e);
+            }
+            return;
+        }
+
+        // Otherwise, start a normal reload
+        webview.reload();
+    }
+    
+    updateRefreshButton(isLoading) {
+        const refreshBtn = this.elements?.urlBarRefresh;
+        if (!refreshBtn) return;
+        
+        const icon = refreshBtn.querySelector('i');
+        if (!icon) return;
+        
+        if (isLoading) {
+            // Change to X (stop) icon
+            icon.className = 'fas fa-times';
+            refreshBtn.title = 'Stop Loading';
+        } else {
+            // Change back to reload icon
+            icon.className = 'fas fa-redo-alt';
+            refreshBtn.title = 'Reload';
         }
     }
 
@@ -8720,12 +8809,6 @@ class AxisBrowser {
             }
         });
 
-        // Auto-resize textarea
-        chatInput.addEventListener('input', () => {
-            chatInput.style.height = 'auto';
-            chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
-        });
-
         // Close chat on Escape key
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && !chatPanel.classList.contains('hidden')) {
@@ -8772,15 +8855,8 @@ class AxisBrowser {
         const message = chatInput.value.trim();
         if (!message) return;
 
-        // Clear input
+        // Clear input (fixed height – no resize)
         chatInput.value = '';
-        chatInput.style.height = 'auto';
-
-        // Remove welcome message if it exists
-        const welcome = chatMessages.querySelector('.ai-chat-welcome');
-        if (welcome) {
-            welcome.remove();
-        }
 
         // Add user message
         this.addChatMessage('user', message);
@@ -8860,12 +8936,57 @@ class AxisBrowser {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
+    /**
+     * Get current page content from the active tab's webview for AI context.
+     * Returns { title, url, text } or null if unavailable (no webview, internal page, or error).
+     */
+    async getPageContextForAI() {
+        const webview = this.getActiveWebview();
+        if (!webview || !webview.executeJavaScript) return null;
+
+        const tab = this.currentTab != null && this.tabs.has(this.currentTab) ? this.tabs.get(this.currentTab) : null;
+        const url = tab?.url || '';
+        if (!url || url === 'about:blank' || url.startsWith('axis://') || url.startsWith('axis:note://')) {
+            return null;
+        }
+
+        const maxChars = 12000; // Keep context size reasonable
+        try {
+            const result = await webview.executeJavaScript(`
+                (function() {
+                    try {
+                        var title = document.title || '';
+                        var body = document.body;
+                        var text = body ? (body.innerText || body.textContent || '').replace(/\\s+/g, ' ').trim() : '';
+                        if (text.length > ${maxChars}) text = text.slice(0, ${maxChars}) + '...[truncated]';
+                        return { title: title, text: text };
+                    } catch (e) { return null; }
+                })();
+            `);
+            if (!result || typeof result.title === 'undefined') return null;
+            return { title: result.title || '', url: url, text: (result.text || '').trim() };
+        } catch (e) {
+            return null;
+        }
+    }
+
     async getChatAIResponse(userMessage) {
+        // Optional: include current page so the AI can read the page
+        let pageContext = null;
+        try {
+            pageContext = await this.getPageContextForAI();
+        } catch (e) {}
+
+        const systemContent = 'You are a helpful AI assistant. Provide clear, concise, and helpful responses.';
+        const systemWithPage = pageContext && (pageContext.title || pageContext.text)
+            ? systemContent + '\n\nThe user is viewing a web page. Use the following to answer questions about the page when relevant.\n\nPage title: ' + (pageContext.title || '(none)') + '\nURL: ' + (pageContext.url || '') + '\n\nPage content (excerpt):\n' + (pageContext.text || '(no text content)')
+            : systemContent;
+
         // Build conversation history
         const messages = [
             {
                 role: 'system',
-                content: 'You are a helpful AI assistant. Provide clear, concise, and helpful responses.'
+                content: systemWithPage
             }
         ];
 
@@ -10882,28 +11003,106 @@ class AxisBrowser {
         });
     }
 
-    // Show native macOS downloads popup
+    // Show native macOS downloads menu (Electron Menu.popup)
     async showDownloadsPopup() {
         try {
-            // Get button position for accurate menu placement
             const button = document.getElementById('downloads-btn-footer');
             if (!button) {
                 await window.electronAPI.showDownloadsPopup();
                 return;
             }
-            
-            const buttonRect = button.getBoundingClientRect();
-            
-            // Pass button position to main process for native menu
-            await window.electronAPI.showDownloadsPopup(
-                buttonRect.left,
-                buttonRect.top,
-                buttonRect.width,
-                buttonRect.height
-            );
+            const rect = button.getBoundingClientRect();
+            await window.electronAPI.showDownloadsPopup(rect.left, rect.top, rect.width, rect.height);
         } catch (error) {
             console.error('Failed to show downloads popup:', error);
         }
+    }
+    
+    // Helper: format bytes into human-readable size
+    formatFileSize(bytes) {
+        if (!bytes || bytes <= 0) return '';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let size = bytes;
+        let unit = 0;
+        while (size >= 1024 && unit < units.length - 1) {
+            size /= 1024;
+            unit++;
+        }
+        return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+    }
+    
+    // Helper: classify file type for preview styling
+    getFileTypeForPreview(fileName = '') {
+        const name = fileName.toLowerCase();
+        if (name.match(/\.(png|jpe?g|gif|webp|heic|heif|tiff?)$/)) return 'type-image';
+        if (name.match(/\.(mp4|mov|m4v|webm|avi|mkv)$/)) return 'type-video';
+        if (name.match(/\.(mp3|wav|aac|flac|ogg)$/)) return 'type-audio';
+        if (name.match(/\.(pdf)$/)) return 'type-pdf';
+        if (name.match(/\.(zip|rar|7z|tar|gz)$/)) return 'type-archive';
+        if (name.match(/\.(docx?|pages)$/)) return 'type-doc';
+        if (name.match(/\.(pptx?|key)$/)) return 'type-slides';
+        if (name.match(/\.(xlsx?|numbers|csv)$/)) return 'type-sheet';
+        return 'type-generic';
+    }
+    
+    // Helper: return small icon markup for file type preview
+    getFileTypeIcon(fileType) {
+        switch (fileType) {
+            case 'type-image':
+                return '<i class="fas fa-image"></i>';
+            case 'type-video':
+                return '<i class="fas fa-film"></i>';
+            case 'type-audio':
+                return '<i class="fas fa-music"></i>';
+            case 'type-pdf':
+                return '<i class="fas fa-file-pdf"></i>';
+            case 'type-archive':
+                return '<i class="fas fa-file-archive"></i>';
+            case 'type-doc':
+                return '<i class="fas fa-file-alt"></i>';
+            case 'type-slides':
+                return '<i class="fas fa-file-powerpoint"></i>';
+            case 'type-sheet':
+                return '<i class="fas fa-file-excel"></i>';
+            default:
+                return '<i class="fas fa-file"></i>';
+        }
+    }
+    
+    // Helper: convert path to file:// URL for previews
+    pathToFileUrl(filePath) {
+        if (!filePath) return '';
+        try {
+            let normalized = filePath.replace(/\\/g, '/');
+            // Avoid double-encoding slashes
+            return 'file://' + encodeURI(normalized);
+        } catch (e) {
+            return '';
+        }
+    }
+    
+    // Helper: markup for thumbnail preview (actual content where possible)
+    getFilePreviewMarkup(filePath, fileType, fileName) {
+        if (fileType === 'type-image') {
+            const fileUrl = this.pathToFileUrl(filePath);
+            const safeAlt = this.escapeHtml(fileName || '');
+            if (fileUrl) {
+                return `
+                    <div class="downloads-popup-thumbnail-inner image">
+                        <img src="${this.escapeHtml(fileUrl)}" alt="${safeAlt}" loading="lazy">
+                    </div>
+                `;
+            }
+        }
+        
+        // Fallback to icon-based thumbnail
+        return `
+            <div class="downloads-popup-thumbnail-inner">
+                <span class="downloads-popup-thumbnail-icon">
+                    ${this.getFileTypeIcon(fileType)}
+                </span>
+            </div>
+        `;
     }
     
     // Handle downloads popup actions
@@ -11777,17 +11976,64 @@ class AxisBrowser {
         
         // Drag state
         let drag = null;
+        let isDragging = false; // Global flag to prevent multiple drags
+        
+        // Force cleanup - emergency reset
+        const forceCleanup = () => {
+            if (drag) {
+                if (drag.element) {
+                    drag.element.classList.remove('smooth-dragging');
+                    drag.element.style.transform = '';
+                    drag.element.style.opacity = '';
+                    drag.element.style.pointerEvents = '';
+                    drag.element.style.transition = '';
+                }
+                
+                if (drag.positions) {
+                    drag.positions.forEach(pos => {
+                        if (pos && pos.el) {
+                            pos.el.classList.remove('drag-sliding');
+                            pos.el.style.transform = '';
+                            pos.el.style.transition = '';
+                        }
+                    });
+                }
+                
+                removePreviewBox();
+            }
+            
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('mouseleave', onMouseLeave);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            
+            drag = null;
+            isDragging = false;
+        };
         
         // Initialize drag
         const initDrag = (element, type, mouseX, mouseY, container) => {
-            // Get all draggable siblings
+            if (!element || !container || isDragging) return null;
+            
+            // Ensure element is still in DOM
+            if (!element.parentElement || element.parentElement !== container) {
+                return null;
+            }
+            
+            // Get all draggable siblings (tabs and tab groups)
             const siblings = Array.from(container.children).filter(el => 
                 el.classList.contains('tab') || el.classList.contains('tab-group')
             );
             
             const dragIndex = siblings.indexOf(element);
-            if (dragIndex === -1) return null;
-                
+            if (dragIndex === -1) {
+                return null;
+            }
+            
+            // Force a reflow to ensure accurate positions
+            void element.offsetHeight;
+            
             // Store original positions for ALL elements
             const positions = siblings.map((el, i) => {
                 const rect = el.getBoundingClientRect();
@@ -11795,130 +12041,89 @@ class AxisBrowser {
                     el,
                     index: i,
                     top: rect.top,
+                    bottom: rect.bottom,
                     height: rect.height,
-                    center: rect.top + rect.height / 2
+                    center: rect.top + rect.height / 2,
+                    originalIndex: i
                 };
             });
             
-            const draggedPos = positions[dragIndex];
-            const elementRect = element.getBoundingClientRect();
+            if (positions.length === 0) return null;
             
-            const dragState = {
+            const draggedPos = positions[dragIndex];
+            if (!draggedPos) return null;
+            
+            const mouseOffsetFromCenter = mouseY - draggedPos.center;
+            
+            return {
                 active: true,
                 element,
                 type,
                 container,
                 startX: mouseX,
                 startY: mouseY,
+                mouseOffsetFromCenter,
                 dragIndex,
                 currentTarget: dragIndex,
                 positions,
                 draggedHeight: draggedPos.height,
-                draggedOriginalTop: draggedPos.top,
-                draggedOriginalLeft: elementRect.left,
-                draggedOriginalWidth: elementRect.width,
                 isHorizontalDrag: false,
                 previewBox: null,
                 previewStartX: null,
                 previewStartY: null,
-                raf: null,
-                screenshotPromise: null // Cache screenshot capture promise
+                screenshotPromise: null,
+                lastUpdateTime: performance.now()
             };
-            
-            // Start capturing screenshot immediately when drag starts (for tabs)
-            if (type === 'tab') {
-                const tabId = parseInt(element.dataset.tabId, 10);
-                const tab = this.tabs.get(tabId);
-                let webview = tab?.webview;
-                if (!webview) {
-                    webview = document.querySelector(`webview[data-tab-id="${tabId}"]`);
-                }
-                if (webview && webview.capturePage) {
-                    // Start capture immediately - don't wait
-                    dragState.screenshotPromise = webview.capturePage().then((image) => {
-                        try {
-                            return image.toDataURL();
-                        } catch (error) {
-                            console.error('Error processing screenshot:', error);
-                            return null;
-                        }
-                    }).catch((error) => {
-                        console.error('Error capturing webview:', error);
-                        return null;
-                    });
-                }
-            }
-            
-            return dragState;
         };
-                
+        
         // Calculate target position based on mouse Y
         const getTargetIndex = (mouseY) => {
-            if (!drag) return drag.dragIndex;
+            if (!drag || !drag.positions || drag.positions.length === 0) {
+                return drag ? drag.dragIndex : 0;
+            }
             
-            const offset = mouseY - drag.startY;
-            const draggedNewCenter = drag.draggedOriginalTop + drag.draggedHeight / 2 + offset;
+            const positions = drag.positions;
+            const dragIndex = drag.dragIndex;
+            const draggedCenter = mouseY - drag.mouseOffsetFromCenter;
             
-            // Use previous target to calculate current element positions (for smooth transitions)
-            const prevTarget = drag.currentTarget;
-            const draggedTotalHeight = drag.draggedHeight + GAP;
+            // Validate drag index
+            if (dragIndex < 0 || dragIndex >= positions.length) {
+                return dragIndex;
+            }
             
-            // Calculate where each element currently is (accounting for previous shifts)
-            const currentCenters = drag.positions.map((pos, i) => {
-                if (i === drag.dragIndex) {
-                    // Dragged element follows mouse
-                    return draggedNewCenter;
-                }
-                
-                // Calculate shift based on previous target
-                let shift = 0;
-                if (prevTarget < drag.dragIndex) {
-                    // Was dragging UP: elements from prevTarget to (dragIndex-1) are shifted DOWN
-                    if (i >= prevTarget && i < drag.dragIndex) {
-                        shift = draggedTotalHeight;
-                    }
-                } else if (prevTarget > drag.dragIndex) {
-                    // Was dragging DOWN: elements from (dragIndex+1) to prevTarget are shifted UP
-                    if (i > drag.dragIndex && i <= prevTarget) {
-                        shift = -draggedTotalHeight;
-                    }
-                }
-                
-                return pos.center + shift;
-            });
+            let target = dragIndex;
             
-            // Find insertion point by comparing dragged center with other element centers
-            let target = drag.dragIndex;
-                            
-            // Check elements above (earlier in list)
-            for (let i = drag.dragIndex - 1; i >= 0; i--) {
-                if (draggedNewCenter < currentCenters[i]) {
-                        target = i;
+            // Check upward movement
+            for (let i = dragIndex - 1; i >= 0; i--) {
+                if (i >= positions.length || !positions[i]) break;
+                if (draggedCenter < positions[i].center) {
+                    target = i;
                 } else {
-                    break; // Found the right position
+                    break;
                 }
             }
             
-            // Check elements below (later in list)
-            for (let i = drag.dragIndex + 1; i < drag.positions.length; i++) {
-                if (draggedNewCenter > currentCenters[i]) {
-                    target = i + 1;
-                } else {
-                    break; // Found the right position
+            // Check downward movement
+            if (target === dragIndex) {
+                for (let i = dragIndex + 1; i < positions.length; i++) {
+                    if (!positions[i]) break;
+                    if (draggedCenter > positions[i].center) {
+                        target = i;
+                    } else {
+                        break;
+                    }
                 }
             }
             
             // Clamp target to valid range
-            return Math.max(0, Math.min(target, drag.positions.length - 1));
+            return Math.max(0, Math.min(target, positions.length - 1));
         };
-                
+        
         // Create preview box for horizontal drag
         const createPreviewBox = (element, type) => {
-            if (drag.previewBox) return drag.previewBox;
-                
-            // Get tab info and webview
+            if (!drag || drag.previewBox) return drag?.previewBox;
+            
             let title = 'New Tab';
-            let faviconUrl = '';
             let webview = null;
             
             if (type === 'tab') {
@@ -11926,32 +12131,21 @@ class AxisBrowser {
                 const tab = this.tabs.get(tabId);
                 if (tab) {
                     title = tab.title || 'New Tab';
-                    faviconUrl = tab.favicon || this.getFaviconUrl(tab.url || '');
                     webview = tab.webview;
                 }
-                
-                // Try to get favicon from element
-                const faviconEl = element.querySelector('.tab-favicon');
-                if (faviconEl && faviconEl.src) {
-                    faviconUrl = faviconEl.src;
-                }
-                
-                // Try to find webview by tabId if not in tab object
                 if (!webview) {
                     webview = document.querySelector(`webview[data-tab-id="${tabId}"]`);
                 }
             }
             
-            // Create preview box immediately (synchronously)
             const previewBox = document.createElement('div');
             previewBox.className = 'tab-preview-box';
             
             const webviewContainer = document.createElement('div');
             webviewContainer.className = 'tab-preview-webview-container';
             
-            // Minimal placeholder (will be replaced by screenshot when ready)
             const placeholder = document.createElement('div');
-            placeholder.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: center; color: rgba(255, 255, 255, 0.3); font-size: 24px;';
+            placeholder.style.cssText = 'display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.3); font-size: 24px; width: 100%; height: 100%;';
             placeholder.innerHTML = '<i class="fas fa-globe"></i>';
             webviewContainer.appendChild(placeholder);
             
@@ -11959,158 +12153,26 @@ class AxisBrowser {
             document.body.appendChild(previewBox);
             drag.previewBox = previewBox;
             
-            // Update with screenshot asynchronously (non-blocking)
-            const updateScreenshot = async () => {
-                let screenshotDataUrl = null;
-                
-                // Try to get screenshot from cached promise (captured when drag started)
-                if (drag.screenshotPromise) {
-                    try {
-                        screenshotDataUrl = await drag.screenshotPromise;
-                    } catch (error) {
-                        // If cached promise failed, try capturing now
+            // Try to capture screenshot
+            if (webview && webview.capturePage) {
+                webview.capturePage().then(image => {
+                    if (placeholder.parentNode && drag && drag.previewBox) {
+                        placeholder.remove();
+                        const img = document.createElement('img');
+                        img.className = 'tab-preview-screenshot';
+                        img.src = image.toDataURL();
+                        img.alt = title;
+                        webviewContainer.appendChild(img);
                     }
-                }
-                
-                // If no cached screenshot, try capturing now
-                if (!screenshotDataUrl && webview && webview.capturePage) {
-                    try {
-                        const image = await webview.capturePage();
-                        screenshotDataUrl = image.toDataURL();
-                    } catch (error) {
-                        console.error('Error capturing webview:', error);
-                    }
-                }
-                
-                // Update preview with screenshot if available
-                if (screenshotDataUrl && placeholder.parentNode) {
-                    placeholder.remove();
-                    const previewImg = document.createElement('img');
-                    previewImg.className = 'tab-preview-screenshot';
-                    previewImg.src = screenshotDataUrl;
-                    previewImg.alt = title;
-                    webviewContainer.appendChild(previewImg);
-                }
-            };
-            
-            // Start updating screenshot in background (non-blocking)
-            updateScreenshot().catch(() => {
-                // Ignore errors - placeholder is already shown
-            });
-            
-            // Make preview box draggable
-            let previewDragging = false;
-            let previewDragStartX = 0;
-            let previewDragStartY = 0;
-            let previewBoxStartLeft = 0;
-            let previewBoxStartTop = 0;
-            
-            previewBox.addEventListener('mousedown', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                previewDragging = true;
-                previewBox.classList.add('dragging');
-                previewDragStartX = e.clientX;
-                previewDragStartY = e.clientY;
-                previewBoxStartLeft = parseFloat(previewBox.style.left) || 0;
-                previewBoxStartTop = parseFloat(previewBox.style.top) || 0;
-                
-                const onPreviewMove = (me) => {
-                    if (!previewDragging) return;
-                    const offsetX = me.clientX - previewDragStartX;
-                    const offsetY = me.clientY - previewDragStartY;
-                    
-                    const boxWidth = 240;
-                    const boxHeight = 180;
-                    const padding = 20;
-                    
-                    let left = previewBoxStartLeft + offsetX;
-                    let top = previewBoxStartTop + offsetY;
-                    
-                    left = Math.max(padding, Math.min(left, window.innerWidth - boxWidth - padding));
-                    top = Math.max(padding, Math.min(top, window.innerHeight - boxHeight - padding));
-                    
-                    previewBox.style.left = `${left}px`;
-                    previewBox.style.top = `${top}px`;
-                    
-                    // Update drag state for sidebar detection
-                    if (drag && drag.previewStartX !== undefined) {
-                        drag.previewStartX = left + boxWidth / 2;
-                        drag.previewStartY = top + boxHeight / 2;
-                    }
-                    
-                    // Check if preview box is now in sidebar - restore tab
-                    checkAndRestorePreview();
-                };
-                
-                const checkAndRestorePreview = () => {
-                    if (drag && drag.isHorizontalDrag && drag.previewBox && isPreviewBoxInSidebar()) {
-                        drag.isHorizontalDrag = false;
-                        drag.previewStartX = null;
-                        drag.previewStartY = null;
-                        previewBox.style.opacity = '0';
-                        previewBox.style.transform = 'scale(0.8)';
-                        setTimeout(() => {
-                            removePreviewBox();
-                        }, 300);
-                        if (drag.element) {
-                            drag.element.style.opacity = '';
-                            drag.element.style.pointerEvents = '';
-                        }
-                    }
-                };
-                
-                // Periodically check if preview box is in sidebar (in case it's dragged there)
-                let sidebarCheckInterval = setInterval(() => {
-                    if (!previewDragging || !drag || !drag.isHorizontalDrag) {
-                        clearInterval(sidebarCheckInterval);
-                        return;
-                    }
-                    checkAndRestorePreview();
-                }, 100);
-                
-                const onPreviewUp = () => {
-                    previewDragging = false;
-                    previewBox.classList.remove('dragging');
-                    clearInterval(sidebarCheckInterval);
-                    document.removeEventListener('mousemove', onPreviewMove);
-                    document.removeEventListener('mouseup', onPreviewUp);
-                    
-                    // When mouse is released, smoothly fade out preview and restore tab
-                    if (drag && drag.isHorizontalDrag) {
-                        drag.isHorizontalDrag = false;
-                        drag.previewStartX = null;
-                        drag.previewStartY = null;
-                        
-                        // Restore tab immediately (but keep it visible)
-                        if (drag.element) {
-                            drag.element.style.opacity = '';
-                            drag.element.style.pointerEvents = '';
-                            drag.element.style.transform = ''; // Reset transform to restore position
-                        }
-                        
-                        // Fade out preview smoothly
-                        previewBox.style.opacity = '0';
-                        previewBox.style.transform = 'scale(0.8)';
-                        setTimeout(() => {
-                            removePreviewBox();
-                            // Finish the drag to clean up (won't reorder since currentTarget === dragIndex)
-                            finishDrag();
-                        }, 300);
-                    }
-                };
-                
-                document.addEventListener('mousemove', onPreviewMove);
-                document.addEventListener('mouseup', onPreviewUp);
-            });
+                }).catch(() => {});
+            }
             
             return previewBox;
         };
         
         // Remove preview box
         const removePreviewBox = () => {
-            if (drag.previewBox) {
+            if (drag && drag.previewBox) {
                 drag.previewBox.remove();
                 drag.previewBox = null;
             }
@@ -12120,38 +12182,55 @@ class AxisBrowser {
         const isInSidebarArea = (mouseX) => {
             const sidebar = document.getElementById('sidebar');
             if (!sidebar) return false;
-            const sidebarRect = sidebar.getBoundingClientRect();
-            return mouseX >= sidebarRect.left && mouseX <= sidebarRect.right;
+            const rect = sidebar.getBoundingClientRect();
+            return mouseX >= rect.left && mouseX <= rect.right;
         };
         
-        // Check if preview box overlaps with sidebar area
+        // Check if preview box overlaps with sidebar
         const isPreviewBoxInSidebar = () => {
-            if (!drag.previewBox) return false;
+            if (!drag || !drag.previewBox) return false;
             const sidebar = document.getElementById('sidebar');
             if (!sidebar) return false;
             
             const previewRect = drag.previewBox.getBoundingClientRect();
             const sidebarRect = sidebar.getBoundingClientRect();
-            
-            // Check if preview box center or any significant part overlaps with sidebar
-            const previewCenterX = previewRect.left + previewRect.width / 2;
-            return previewCenterX >= sidebarRect.left && previewCenterX <= sidebarRect.right;
+            const centerX = previewRect.left + previewRect.width / 2;
+            return centerX >= sidebarRect.left && centerX <= sidebarRect.right;
         };
-                
-        // Update visuals
+        
+        // Update drag visuals
         const updateVisuals = (mouseX, mouseY) => {
-            if (!drag || !drag.active) return;
+            if (!drag || !drag.active || !drag.element) {
+                return;
+            }
+            
+            // Throttle updates for performance (max 60fps)
+            const now = performance.now();
+            if (now - drag.lastUpdateTime < 16) {
+                return;
+            }
+            drag.lastUpdateTime = now;
+            
+            // Ensure element still exists in DOM
+            if (!drag.element.parentElement || drag.element.parentElement !== drag.container) {
+                finishDrag();
+                return;
+            }
+            
+            // Ensure container still exists
+            if (!drag.container.parentElement) {
+                finishDrag();
+                return;
+            }
             
             const offsetX = mouseX - drag.startX;
             const offsetY = mouseY - drag.startY;
             const absOffsetX = Math.abs(offsetX);
             const absOffsetY = Math.abs(offsetY);
             
-            // Determine if this is a horizontal drag (only for tabs, not tab groups)
-            const horizontalThreshold = 30; // pixels
-            const isHorizontal = drag.type === 'tab' && absOffsetX > horizontalThreshold && absOffsetX > absOffsetY;
-            
-            // Check if mouse is in sidebar area
+            // Check for horizontal drag (tabs only)
+            const horizontalThreshold = 50;
+            const isHorizontal = drag.type === 'tab' && absOffsetX > horizontalThreshold && absOffsetX > absOffsetY * 1.5;
             const inSidebar = isInSidebarArea(mouseX);
             
             if (isHorizontal && !inSidebar) {
@@ -12160,165 +12239,166 @@ class AxisBrowser {
                     drag.isHorizontalDrag = true;
                     drag.element.style.opacity = '0';
                     drag.element.style.pointerEvents = 'none';
-                    // Create preview box immediately (synchronously - no await)
                     createPreviewBox(drag.element, drag.type);
-                    
-                    // Store initial preview position for dragging
-                    if (!drag.previewStartX) drag.previewStartX = mouseX;
-                    if (!drag.previewStartY) drag.previewStartY = mouseY;
+                    drag.previewStartX = mouseX;
+                    drag.previewStartY = mouseY;
                 }
                 
-                // Update preview box position (draggable)
                 if (drag.previewBox) {
-                    const previewBox = drag.previewBox;
                     const boxWidth = 240;
                     const boxHeight = 180;
+                    let left = mouseX - boxWidth / 2;
+                    let top = mouseY - boxHeight / 2;
                     
-                    // Calculate position based on drag offset
-                    const previewOffsetX = mouseX - (drag.previewStartX || drag.startX);
-                    const previewOffsetY = mouseY - (drag.previewStartY || drag.startY);
-                    
-                    // Initial position centered on cursor when first shown
-                    let baseLeft = (drag.previewStartX || drag.startX) - boxWidth / 2;
-                    let baseTop = (drag.previewStartY || drag.startY) - boxHeight / 2;
-                    
-                    // Add drag offset
-                    let left = baseLeft + previewOffsetX;
-                    let top = baseTop + previewOffsetY;
-                    
-                    // Keep box within viewport bounds
                     const padding = 20;
                     left = Math.max(padding, Math.min(left, window.innerWidth - boxWidth - padding));
                     top = Math.max(padding, Math.min(top, window.innerHeight - boxHeight - padding));
                     
-                    previewBox.style.left = `${left}px`;
-                    previewBox.style.top = `${top}px`;
-                    previewBox.style.opacity = '1';
-                    previewBox.style.transform = 'scale(1)';
-                    previewBox.style.cursor = 'move';
+                    drag.previewBox.style.left = `${left}px`;
+                    drag.previewBox.style.top = `${top}px`;
+                    drag.previewBox.style.opacity = '1';
+                    drag.previewBox.style.transform = 'scale(1)';
                 }
             } else {
-                // Vertical drag or back in sidebar - check if we should restore tab
+                // Vertical drag or back in sidebar
                 if (drag.isHorizontalDrag) {
-                    // Check if preview box is in sidebar area - restore tab
-                    const previewInSidebar = isPreviewBoxInSidebar() || inSidebar;
-                    if (previewInSidebar) {
+                    if (isPreviewBoxInSidebar() || inSidebar) {
                         drag.isHorizontalDrag = false;
-                        drag.previewStartX = null;
-                        drag.previewStartY = null;
-                        // Smoothly fade out preview box
                         if (drag.previewBox) {
                             drag.previewBox.style.opacity = '0';
-                            drag.previewBox.style.transform = 'scale(0.8)';
-                            setTimeout(() => {
-                                removePreviewBox();
-                            }, 300); // Wait for transition to complete
+                            drag.previewBox.style.transform = 'scale(0.9)';
+                            setTimeout(() => removePreviewBox(), 150);
                         }
                         drag.element.style.opacity = '';
                         drag.element.style.pointerEvents = '';
                     } else {
-                        // Still horizontal drag but mouse moved vertically - keep preview visible
-                        // Just update preview position if needed (only if not being dragged independently)
-                        if (drag.previewBox && !drag.previewBox.classList.contains('dragging')) {
-                            const previewBox = drag.previewBox;
+                        // Still horizontal, update preview position
+                        if (drag.previewBox) {
                             const boxWidth = 240;
                             const boxHeight = 180;
-                            
-                            const previewOffsetX = mouseX - (drag.previewStartX || drag.startX);
-                            const previewOffsetY = mouseY - (drag.previewStartY || drag.startY);
-                            
-                            let baseLeft = (drag.previewStartX || drag.startX) - boxWidth / 2;
-                            let baseTop = (drag.previewStartY || drag.startY) - boxHeight / 2;
-                            
-                            let left = baseLeft + previewOffsetX;
-                            let top = baseTop + previewOffsetY;
-                            
+                            let left = mouseX - boxWidth / 2;
+                            let top = mouseY - boxHeight / 2;
                             const padding = 20;
                             left = Math.max(padding, Math.min(left, window.innerWidth - boxWidth - padding));
                             top = Math.max(padding, Math.min(top, window.innerHeight - boxHeight - padding));
-                            
-                            previewBox.style.left = `${left}px`;
-                            previewBox.style.top = `${top}px`;
+                            drag.previewBox.style.left = `${left}px`;
+                            drag.previewBox.style.top = `${top}px`;
                         }
-                        return; // Don't do vertical drag logic when preview is active
+                        return;
                     }
                 }
                 
-                // Move dragged element vertically
+                // Move dragged element (direct 1:1 tracking)
                 drag.element.style.transform = `translateY(${offsetY}px)`;
-            
-            // Calculate target
-            const target = getTargetIndex(mouseY);
-            drag.currentTarget = target;
-            
-            // Calculate displacement for each sibling
-            const draggedTotalHeight = drag.draggedHeight + GAP;
-            
-                // First pass: ensure all elements have the drag-sliding class
-            drag.positions.forEach((pos, i) => {
-                if (i === drag.dragIndex) return;
-                const el = pos.el;
-                if (!el.classList.contains('drag-sliding')) {
-                    el.classList.add('drag-sliding');
-                }
-                });
                 
-                // Force a reflow to ensure classes are recognized
-                if (drag.positions.length > 0) {
-                    void drag.positions[0].el.offsetHeight;
-                }
+                // Calculate target position
+                const target = getTargetIndex(mouseY);
+                const dragIndex = drag.dragIndex;
+                const draggedTotalHeight = drag.draggedHeight + GAP;
                 
-                // Second pass: update transforms (now transitions will work)
-                drag.positions.forEach((pos, i) => {
-                    if (i === drag.dragIndex) return;
+                // Move other elements smoothly
+                for (let i = 0; i < drag.positions.length; i++) {
+                    if (i === dragIndex) continue;
+                    
+                    const pos = drag.positions[i];
+                    if (!pos || !pos.el) continue;
+                    
+                    // Skip if element was removed from DOM
+                    if (!pos.el.parentElement || pos.el.parentElement !== drag.container) {
+                        continue;
+                    }
                     
                     const el = pos.el;
-                let shift = 0;
-                
-                if (target < drag.dragIndex) {
-                    // Dragging UP: elements from target to (dragIndex-1) move DOWN
-                    if (i >= target && i < drag.dragIndex) {
-                        shift = draggedTotalHeight;
+                    let shift = 0;
+                    
+                    if (target < dragIndex) {
+                        // Moving up: elements from target to dragIndex-1 move down
+                        if (i >= target && i < dragIndex) {
+                            shift = draggedTotalHeight;
+                        }
+                    } else if (target > dragIndex) {
+                        // Moving down: elements from dragIndex+1 to target move up
+                        if (i > dragIndex && i <= target) {
+                            shift = -draggedTotalHeight;
+                        }
                     }
-                } else if (target > drag.dragIndex) {
-                    // Dragging DOWN: elements from (dragIndex+1) to target move UP
-                    if (i > drag.dragIndex && i <= target) {
-                        shift = -draggedTotalHeight;
-                    }
+                    
+                    el.style.transform = `translateY(${shift}px)`;
                 }
                 
-                    // Always set transform - CSS transition will animate the change smoothly
-                el.style.transform = `translateY(${shift}px)`;
-            });
+                // Update target (no visual indicators)
+                if (target !== drag.currentTarget && target >= 0 && target < drag.positions.length) {
+                    drag.currentTarget = target;
+                }
             }
-            };
-
+        };
+        
         // Finish drag
         const finishDrag = () => {
-            if (!drag || !drag.active) return;
+            if (!drag || !drag.active) {
+                forceCleanup();
+                return;
+            }
             
             const { element, type, container, dragIndex, currentTarget, positions } = drag;
             
-            // Cancel any pending animation frame
-            if (drag.raf) {
-                cancelAnimationFrame(drag.raf);
-                drag.raf = null;
-            }
+            // Mark as not dragging immediately
+            isDragging = false;
+            drag.active = false;
             
-            // Remove preview box if it exists
+            // Remove preview box
             removePreviewBox();
             
-            // Reset visuals immediately
+            // Remove event listeners
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('mouseleave', onMouseLeave);
+            
+            // Reset cursor
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            
+            // Validate element still exists
+            if (!element || !element.parentElement) {
+                forceCleanup();
+                return;
+            }
+            
+            // Reset dragged element
             element.classList.remove('smooth-dragging');
+            element.style.transition = 'transform 0.15s ease-out';
             element.style.transform = '';
-            element.style.scale = '';
             element.style.opacity = '';
             element.style.pointerEvents = '';
             
-            positions.forEach(p => {
-                p.el.classList.remove('drag-sliding');
-                p.el.style.transform = '';
-            });
+            const cleanupTransition = () => {
+                if (element && element.parentElement) {
+                    element.style.transition = '';
+                    element.style.scale = '';
+                }
+            };
+            setTimeout(cleanupTransition, 150);
+            
+            // Reset all siblings
+            if (positions && positions.length > 0) {
+                for (let i = 0; i < positions.length; i++) {
+                    const pos = positions[i];
+                    if (!pos || !pos.el) continue;
+                    
+                    const el = pos.el;
+                    // Only reset if element still exists in DOM
+                    if (el.parentElement) {
+                        el.classList.remove('drag-sliding');
+                        el.style.transition = 'transform 0.15s ease-out';
+                        el.style.transform = '';
+                        setTimeout(() => {
+                            if (el.parentElement) {
+                                el.style.transition = '';
+                            }
+                        }, 150);
+                    }
+                }
+            }
                 
             // Reorder if position changed
             if (currentTarget !== dragIndex && currentTarget >= 0) {
@@ -12344,12 +12424,10 @@ class AxisBrowser {
                 
                 // Insert element at new position
                 if (insertAt >= remaining.length) {
-                    // Insert at end
                     const last = remaining[remaining.length - 1];
                     if (last) {
                         last.insertAdjacentElement('afterend', element);
-                        } else {
-                        // No remaining elements, check for separator
+                    } else {
                         const sep = container.querySelector('.tabs-separator');
                         if (sep) {
                             sep.insertAdjacentElement('afterend', element);
@@ -12358,17 +12436,15 @@ class AxisBrowser {
                         }
                     }
                 } else {
-                    // Insert before the element at insertAt
                     container.insertBefore(element, remaining[insertAt]);
-                            }
+                }
                 
                 // Handle pinning for tabs in main container
                 if (type === 'tab' && container.classList.contains('tabs-container')) {
-                    // Use requestAnimationFrame to ensure DOM is updated
                     requestAnimationFrame(() => {
-                    this.updateTabPinState(element);
+                        this.updateTabPinState(element);
                     });
-                        }
+                }
                 
                 // If tab was reordered inside a tab group, update the tab group's tabIds
                 if (type === 'tab' && container.classList.contains('tab-group-content')) {
@@ -12377,7 +12453,6 @@ class AxisBrowser {
                         const tabGroupId = parseInt(tabGroupEl.dataset.tabGroupId, 10);
                         const tabGroup = this.tabGroups.get(tabGroupId);
                         if (tabGroup) {
-                            // Get new order of tab IDs from DOM
                             const newTabIds = Array.from(container.querySelectorAll('.tab'))
                                 .map(t => parseInt(t.dataset.tabId, 10))
                                 .filter(id => !isNaN(id));
@@ -12389,89 +12464,140 @@ class AxisBrowser {
                 
                 // Save state
                 requestAnimationFrame(() => {
-                this.savePinnedTabs();
-                if (this.saveTabGroups) {
-                    this.saveTabGroups();
-                }
+                    this.savePinnedTabs();
+                    if (this.saveTabGroups) {
+                        this.saveTabGroups();
+                    }
                 });
             }
             
             // Restore pointer events on tab group inputs
-            if (type === 'tab-group') {
+            if (type === 'tab-group' && element) {
                 const input = element.querySelector('.tab-group-name-input');
                 if (input) {
                     input.style.pointerEvents = '';
                 }
             }
             
-            // Cleanup
+            // Final cleanup
             drag = null;
+        };
+        
+        // Handle mouse leaving window
+        const onMouseLeave = (e) => {
+            // Only finish drag if mouse actually left the window
+            if (e.target === document.body || e.target === document.documentElement) {
+                if (drag && drag.active) {
+                    finishDrag();
+                }
+            }
         };
         
         // Mouse handlers
         const onMove = (e) => {
-            if (!drag || !drag.active) return;
-                    e.preventDefault();
+            if (!drag || !drag.active) {
+                // Clean up if drag is somehow inactive
+                forceCleanup();
+                return;
+            }
+            
+            // Validate drag state
+            if (!drag.element || !drag.element.parentElement) {
+                finishDrag();
+                return;
+            }
+            
+            e.preventDefault();
             e.stopPropagation();
             
-            // Use requestAnimationFrame for smooth updates
-            if (drag.raf) cancelAnimationFrame(drag.raf);
-            drag.raf = requestAnimationFrame(() => {
+            // Update visuals immediately
+            try {
                 updateVisuals(e.clientX, e.clientY);
-            });
-            };
+            } catch (error) {
+                console.error('Error updating drag visuals:', error);
+                finishDrag();
+            }
+        };
 
         const onUp = (e) => {
-            // Prevent right-click or other buttons from finishing drag
+            // Only handle left mouse button
             if (e && e.button !== 0) return;
             
+            // Remove event listeners
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-            finishDrag();
+            document.removeEventListener('mouseleave', onMouseLeave);
+            
+            // Finish the drag
+            if (drag && drag.active) {
+                finishDrag();
+            } else {
+                // Force cleanup if drag state is inconsistent
+                forceCleanup();
+            }
         };
         
         // Start drag
         const startDrag = (element, type, e) => {
             // Don't start if drag is already in progress
-            if (drag && drag.active) return false;
+            if (isDragging || (drag && drag.active)) {
+                return false;
+            }
             
-            if (e.target.closest('.tab-close') || 
-                e.target.closest('.tab-group-delete') || 
-                e.target.closest('input:not([readonly])')) {
+            // Additional safety checks
+            if (!element || !element.parentElement) {
                 return false;
             }
             
             const container = element.parentElement;
             if (!container) return false;
             
-            drag = initDrag(element, type, e.clientX, e.clientY, container);
-            if (!drag) return false;
-            
-            element.classList.add('smooth-dragging');
-            document.body.style.cursor = 'grabbing';
-            document.body.style.userSelect = 'none';
-            
-            // Pre-add drag-sliding class to all siblings for smooth transitions
-            drag.positions.forEach((pos, i) => {
-                if (i !== drag.dragIndex) {
-                    const el = pos.el;
-                    el.classList.add('drag-sliding');
-                    // Initialize transform to 0 to ensure smooth transitions
-                    el.style.transform = 'translateY(0px)';
-                }
-            });
-            
-            // Force a reflow to ensure classes and initial transforms are recognized
-            if (drag.positions.length > 0 && drag.positions[0].el) {
-                void drag.positions[0].el.offsetHeight;
+            // Ensure element is still in the container
+            if (!container.contains(element)) {
+                return false;
             }
             
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
-            
-            return true;
+            try {
+                // Initialize drag state
+                drag = initDrag(element, type, e.clientX, e.clientY, container);
+                if (!drag) {
+                    return false;
+                }
+                
+                // Mark as dragging
+                isDragging = true;
+                
+                // Mark element as being dragged
+                element.classList.add('smooth-dragging');
+                document.body.style.cursor = 'grabbing';
+                document.body.style.userSelect = 'none';
+                
+                // Add sliding class to all siblings for smooth CSS transitions
+                for (let i = 0; i < drag.positions.length; i++) {
+                    if (i === drag.dragIndex) continue;
+                    const pos = drag.positions[i];
+                    if (!pos || !pos.el) continue;
+                    
+                    const el = pos.el;
+                    // Only add if element still exists
+                    if (el.parentElement && el.parentElement === container) {
+                        el.classList.add('drag-sliding');
+                        // Ensure transitions are enabled
+                        el.style.transition = 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)';
+                    }
+                }
+                
+                // Add event listeners
+                document.addEventListener('mousemove', onMove, { passive: false });
+                document.addEventListener('mouseup', onUp);
+                document.addEventListener('mouseleave', onMouseLeave);
+                
+                return true;
+            } catch (error) {
+                console.error('Error starting drag:', error);
+                forceCleanup();
+                return false;
+            }
         };
                 
         // Update pin state after drag
@@ -12504,51 +12630,100 @@ class AxisBrowser {
         
         // Setup tab for dragging
         const setupTabDrag = (tab) => {
-            if (tab._dragSetup) return;
+            if (!tab || tab._dragSetup) return;
             tab._dragSetup = true;
             tab.draggable = false;
             
             let startPos = null;
             let dragging = false;
+            let moveHandler = null;
+            let upHandler = null;
 
-            tab.addEventListener('mousedown', (e) => {
-                if (e.button !== 0 || e.target.closest('.tab-close')) return;
+            const handleMouseDown = (e) => {
+                // Only left mouse button
+                if (e.button !== 0) return;
                 
-                // Prevent text selection during drag
+                // Don't start if already dragging
+                if (isDragging) return;
+                
+                // Don't drag if clicking close button or other interactive elements
+                if (e.target.closest('.tab-close') || 
+                    e.target.closest('input') ||
+                    e.target.closest('button')) {
+                    return;
+                }
+                
+                // Ensure tab still exists
+                if (!tab.parentElement) return;
+                
+                // Prevent default to avoid text selection
                 e.preventDefault();
+                e.stopPropagation();
                 
                 startPos = { x: e.clientX, y: e.clientY };
                 dragging = false;
                 
-                const moveHandler = (me) => {
-                    if (dragging) return;
-                    const d = Math.hypot(me.clientX - startPos.x, me.clientY - startPos.y);
-                    if (d > 5) {
+                moveHandler = (me) => {
+                    if (dragging || !startPos) return;
+                    
+                    // Check if tab still exists
+                    if (!tab.parentElement) {
+                        cleanup();
+                        return;
+                    }
+                    
+                    const dx = me.clientX - startPos.x;
+                    const dy = me.clientY - startPos.y;
+                    const distance = Math.hypot(dx, dy);
+                    
+                    // Start drag after 2px movement
+                    if (distance > 2) {
                         dragging = true;
-                        document.removeEventListener('mousemove', moveHandler);
-                        document.removeEventListener('mouseup', upHandler);
-                        startDrag(tab, 'tab', me);
+                        cleanup();
+                        
+                        // Start the drag with current mouse position
+                        if (startDrag(tab, 'tab', me)) {
+                            // Drag started successfully
+                        } else {
+                            // Drag failed, reset
+                            dragging = false;
+                            startPos = null;
+                        }
                     }
                 };
                 
-                const upHandler = () => {
-                    document.removeEventListener('mousemove', moveHandler);
-                    document.removeEventListener('mouseup', upHandler);
+                upHandler = (ue) => {
+                    cleanup();
+                    
                     if (!dragging) {
+                        // Was just a click, not a drag
                         startPos = null;
                     }
                 };
                 
+                const cleanup = () => {
+                    if (moveHandler) {
+                        document.removeEventListener('mousemove', moveHandler);
+                    }
+                    if (upHandler) {
+                        document.removeEventListener('mouseup', upHandler);
+                    }
+                    moveHandler = null;
+                    upHandler = null;
+                };
+                
                 document.addEventListener('mousemove', moveHandler, { passive: false });
                 document.addEventListener('mouseup', upHandler);
-            });
+            };
+            
+            tab.addEventListener('mousedown', handleMouseDown, { passive: false });
         };
         
         this.makeTabDraggable = setupTabDrag;
         
         // Setup tab group for dragging
         const setupTabGroupDrag = (tabGroup) => {
-            if (tabGroup._dragSetup) return;
+            if (!tabGroup || tabGroup._dragSetup) return;
             tabGroup._dragSetup = true;
             tabGroup.draggable = false;
             
@@ -12557,49 +12732,98 @@ class AxisBrowser {
             
             let startPos = null;
             let dragging = false;
+            let moveHandler = null;
+            let upHandler = null;
             
-            header.addEventListener('mousedown', (e) => {
-                if (e.button !== 0 || e.target.closest('.tab-group-delete')) return;
+            const handleMouseDown = (e) => {
+                // Only left mouse button
+                if (e.button !== 0) return;
                 
+                // Don't start if already dragging
+                if (isDragging) return;
+                
+                // Don't drag if clicking delete button or other interactive elements
+                if (e.target.closest('.tab-group-delete') ||
+                    e.target.closest('button')) {
+                    return;
+                }
+                
+                // Don't drag if clicking on the name input (unless it's readonly)
                 const input = tabGroup.querySelector('.tab-group-name-input');
-                if (input && !input.readOnly && e.target.closest('.tab-group-name-input')) return;
+                if (input && !input.readOnly && e.target.closest('.tab-group-name-input')) {
+                    return;
+                }
                 
-                // Prevent text selection during drag
+                // Ensure tab group still exists
+                if (!tabGroup.parentElement) return;
+                
+                // Prevent default to avoid text selection
                 e.preventDefault();
+                e.stopPropagation();
                 
                 startPos = { x: e.clientX, y: e.clientY };
                 dragging = false;
                 
-                const moveHandler = (me) => {
-                    if (dragging) return;
-                    const d = Math.hypot(me.clientX - startPos.x, me.clientY - startPos.y);
-                    if (d > 5) {
+                moveHandler = (me) => {
+                    if (dragging || !startPos) return;
+                    
+                    // Check if tab group still exists
+                    if (!tabGroup.parentElement) {
+                        cleanup();
+                        return;
+                    }
+                    
+                    const dx = me.clientX - startPos.x;
+                    const dy = me.clientY - startPos.y;
+                    const distance = Math.hypot(dx, dy);
+                    
+                    // Start drag after 2px movement
+                    if (distance > 2) {
                         dragging = true;
-                        document.removeEventListener('mousemove', moveHandler);
-                        document.removeEventListener('mouseup', upHandler);
+                        cleanup();
                         
-                        // Blur input
-                        const input = tabGroup.querySelector('.tab-group-name-input');
+                        // Blur input if it exists
                         if (input) {
                             input.blur();
                             input.style.pointerEvents = 'none';
                         }
                         
-                        startDrag(tabGroup, 'tab-group', me);
+                        // Start the drag with current mouse position
+                        if (startDrag(tabGroup, 'tab-group', me)) {
+                            // Drag started successfully
+                        } else {
+                            // Drag failed, reset
+                            dragging = false;
+                            startPos = null;
+                        }
                     }
                 };
                 
-                const upHandler = () => {
-                    document.removeEventListener('mousemove', moveHandler);
-                    document.removeEventListener('mouseup', upHandler);
+                upHandler = (ue) => {
+                    cleanup();
+                    
                     if (!dragging) {
+                        // Was just a click, not a drag
                         startPos = null;
                     }
                 };
                 
+                const cleanup = () => {
+                    if (moveHandler) {
+                        document.removeEventListener('mousemove', moveHandler);
+                    }
+                    if (upHandler) {
+                        document.removeEventListener('mouseup', upHandler);
+                    }
+                    moveHandler = null;
+                    upHandler = null;
+                };
+                
                 document.addEventListener('mousemove', moveHandler, { passive: false });
                 document.addEventListener('mouseup', upHandler);
-            });
+            };
+            
+            header.addEventListener('mousedown', handleMouseDown, { passive: false });
         };
 
         this.makeTabGroupSmoothDraggable = setupTabGroupDrag;
@@ -12930,39 +13154,22 @@ class AxisBrowser {
         const spotlightSearch = document.getElementById('spotlight-search');
         const suggestionsContainer = document.getElementById('spotlight-suggestions');
         
-        // Remove closing class if present
-        spotlightSearch.classList.remove('closing');
+        // Remove closing and opening classes if present
+        spotlightSearch.classList.remove('closing', 'opening');
         
-        // Expand suggestions immediately (before fade) to prevent roll-out effect
         if (suggestionsContainer) {
-            suggestionsContainer.style.maxHeight = '300px';
-            suggestionsContainer.style.padding = '8px 4px';
+            suggestionsContainer.style.maxHeight = '280px';
+            suggestionsContainer.style.padding = '6px 6px';
         }
         
-        // Remove hidden class and add opening class for animation
+        // Remove hidden class - appears instantly
         spotlightSearch.classList.remove('hidden');
-        
-        // Use requestAnimationFrame to ensure smooth animation start
-        requestAnimationFrame(() => {
-            spotlightSearch.classList.add('opening');
-        });
         
         // Immediately show default suggestions (2 tabs + 3 search/history)
         this.updateSpotlightSuggestions('');
         
-        // Remove opening class after animation completes to allow normal state
-        setTimeout(() => {
-            spotlightSearch.classList.remove('opening');
-            
-            // Reset inline styles after fade completes to allow CSS transitions for future changes
-            if (suggestionsContainer) {
-                suggestionsContainer.style.maxHeight = '';
-                suggestionsContainer.style.padding = '';
-            }
-        }, 300);
-        
-        // Focus the input after animation
-        setTimeout(() => {
+        // Focus the input immediately
+        requestAnimationFrame(() => {
             const input = document.getElementById('spotlight-input');
             if (input && typeof input.focus === 'function') {
                 try {
@@ -12971,7 +13178,7 @@ class AxisBrowser {
                     // Ignore focus errors (element might not be focusable)
                 }
             }
-        }, 300);
+        });
     }
 
     closeSpotlightSearch() {
@@ -12983,8 +13190,8 @@ class AxisBrowser {
         
         // Keep suggestions at full height during fade-out to prevent roll-in effect
         if (suggestionsContainer && suggestionsContainer.classList.contains('show')) {
-            suggestionsContainer.style.maxHeight = '300px';
-            suggestionsContainer.style.padding = '8px 4px';
+            suggestionsContainer.style.maxHeight = '280px';
+            suggestionsContainer.style.padding = '6px 6px';
         }
         
         // Use requestAnimationFrame to ensure smooth animation start
@@ -13004,18 +13211,17 @@ class AxisBrowser {
             suggestionsContainer.classList.add('hiding');
         }
         
-        // Hide after animation completes
+        // Hide after animation completes (shorter for snappier feel)
         setTimeout(() => {
             spotlightSearch.classList.add('hidden');
             spotlightSearch.classList.remove('closing');
             
-            // Reset inline styles after fade completes
             if (suggestionsContainer) {
                 suggestionsContainer.style.maxHeight = '';
                 suggestionsContainer.style.padding = '';
                 suggestionsContainer.classList.remove('hiding');
             }
-        }, 300);
+        }, 200);
         
         this.spotlightSelectedIndex = -1; // Reset selection
         // Clear search engine selection
@@ -13110,18 +13316,13 @@ class AxisBrowser {
         // Always show suggestions container when spotlight is open (always 5 suggestions)
             suggestionsContainer.classList.remove('hiding');
             
-            // Show loading state only for typed queries
             if (query.length > 0) {
                 suggestionsContainer.classList.add('loading', 'show');
-                
-                setTimeout(() => {
-                    this.updateSuggestionsContent(suggestionsContainer, suggestions);
-                }, 200);
+                this.updateSuggestionsContent(suggestionsContainer, suggestions);
             } else {
-                // For empty query, show immediately without loading
                 suggestionsContainer.classList.add('show');
                 this.updateSuggestionsContent(suggestionsContainer, suggestions);
-        }
+            }
     }
 
     updateSuggestionsContent(suggestionsContainer, suggestions) {
@@ -14900,8 +15101,10 @@ class AxisBrowser {
         
         // Make URL bar clickable and editable
         if (el.urlBarDisplay && el.urlBarInput) {
-            // Click on display to edit
-            el.urlBarDisplay.addEventListener('click', () => {
+            // Click on display or center area to edit
+            const urlBarCenter = document.querySelector('.url-bar-center');
+            
+            const enterEditMode = () => {
                 const webview = this.getActiveWebview();
                 if (!webview) return;
                 
@@ -14909,7 +15112,7 @@ class AxisBrowser {
                     const currentUrl = webview.getURL();
                     if (currentUrl && !currentUrl.startsWith('axis://') && !currentUrl.startsWith('axis:note://')) {
                         el.urlBarDisplay.style.display = 'none';
-                        el.urlBarInput.style.display = 'block';
+                        el.urlBarInput.style.display = 'flex';
                         el.urlBarInput.value = currentUrl;
                         el.urlBarInput.select();
                         el.urlBarInput.focus();
@@ -14917,13 +15120,25 @@ class AxisBrowser {
                 } catch (e) {
                     console.error('Error getting URL:', e);
                 }
-            });
+            };
+            
+            el.urlBarDisplay.addEventListener('click', enterEditMode);
+            
+            // Also allow clicking on the center area background
+            if (urlBarCenter) {
+                urlBarCenter.addEventListener('click', (e) => {
+                    // Only trigger if clicking directly on center, not on buttons
+                    if (e.target === urlBarCenter || e.target === el.urlBarDisplay) {
+                        enterEditMode();
+                    }
+                });
+            }
             
             // Handle input events
             if (el.urlBarInput) {
                 el.urlBarInput.addEventListener('blur', () => {
                     el.urlBarInput.style.display = 'none';
-                    el.urlBarDisplay.style.display = 'block';
+                    el.urlBarDisplay.style.display = 'flex';
                 });
                 
                 el.urlBarInput.addEventListener('keydown', (e) => {
@@ -15076,8 +15291,33 @@ class AxisBrowser {
             }
         }
         
+        // Settings page (axis://settings) loads as data URL – use app theme for URL bar, not page theme
+        const tab = this.tabs.get(this.currentTab);
+        if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+            this.applyAppThemeToUrlBar();
+            return;
+        }
         // Extract theme color from website
         this.extractUrlBarTheme(webview);
+    }
+    
+    // Apply app theme to URL bar (for axis://settings and other internal pages)
+    applyAppThemeToUrlBar() {
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar) return;
+        const themeColor = this.settings?.themeColor || '#1a1a1a';
+        const gradientColor = this.settings?.gradientColor || '#2a2a2a';
+        const gradientEnabled = this.settings?.gradientEnabled && gradientColor;
+        const gradientDirection = this.settings?.gradientDirection || '135deg';
+        const bgColor = gradientEnabled
+            ? `linear-gradient(${gradientDirection}, ${themeColor}, ${gradientColor})`
+            : themeColor;
+        urlBar.classList.add('dark-mode');
+        urlBar.style.setProperty('--url-bar-bg', bgColor);
+        urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.14)');
+        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
+        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.16)');
     }
     
     // Extract website theme color and apply to URL bar
