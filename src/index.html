@@ -27,7 +27,7 @@
             <aside id="sidebar">
                 <div id="sidebar-resize-handle" class="resize-handle"></div>
             <div class="sidebar-section tabs-section">
-                    <div class="tabs-container vertical">
+                    <div id="tabs-container" class="tabs-container vertical">
                         <!-- Pinned tabs will be added above the separator -->
                         <!-- Separator between pinned and unpinned tabs -->
                         <div id="tabs-separator" class="tabs-separator">
@@ -142,16 +142,20 @@
                         </div>
                         <!-- AI Chat Panel (inside webview container) -->
                         <div id="ai-chat-panel" class="ai-chat-panel hidden">
+                            <div id="ai-chat-resize-handle" class="ai-chat-resize-handle" title="Drag to resize"></div>
                             <div class="ai-chat-header">
-                                <div class="ai-chat-title">
-                                    <i class="fas fa-sparkles"></i>
-                                    <span>Chat</span>
-                                </div>
                                 <button id="ai-chat-close" class="ai-chat-close-btn" title="Close Chat">
                                     <i class="fas fa-times"></i>
                                 </button>
                             </div>
                             <div class="ai-chat-messages" id="ai-chat-messages"></div>
+                            <div id="ai-chat-quote-bar" class="ai-chat-quote-bar hidden">
+                                <i class="fas fa-quote-right ai-chat-quote-icon"></i>
+                                <div class="ai-chat-quote-text" id="ai-chat-quote-text"></div>
+                                <button type="button" id="ai-chat-quote-dismiss" class="ai-chat-quote-dismiss" title="Remove quote">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
                             <div class="ai-chat-input-container">
                                 <textarea 
                                     id="ai-chat-input" 
@@ -363,8 +367,9 @@
 
     <!-- AI Text Selection Button -->
     <div id="ai-selection-button" class="ai-selection-button hidden">
-        <button class="ai-button" title="Ask AI about selection">
-            <i class="fas fa-sparkles"></i>
+        <button class="ai-button" title="Quote selection and ask in Chat">
+            <span class="ai-button-text">Ask</span>
+            <i class="fas fa-quote-right ai-button-icon"></i>
         </button>
     </div>
 
