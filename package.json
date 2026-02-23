@@ -1,16 +1,17 @@
 {
   "name": "axis",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "A minimalistic, customizable, and beautiful browser built on Electron",
   "main": "src/main.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
-    "build": "electron-builder",
-    "dist": "electron-builder --publish=never"
+    "start": "npx electron .",
+    "dev": "npx electron . --dev",
+    "build": "npx electron-builder",
+    "dist": "npx electron-builder --publish=never"
   },
   "overrides": {
-    "tar": "^7.5.7"
+    "tar": "^7.5.8",
+    "ajv": "^8.18.0"
   },
   "keywords": [
     "browser",
@@ -21,10 +22,10 @@
   "author": "Axis Browser Team",
   "license": "SEE LICENSE IN LICENSE.md",
   "devDependencies": {
-    "electron": "^35.7.5",
+    "electron": "^33.4.11",
     "electron-builder": "^26.4.0",
     "lodash": "^4.17.23",
-    "tar": "^7.5.7"
+    "tar": "^7.5.8"
   },
   "dependencies": {
     "electron-store": "^8.1.0"
