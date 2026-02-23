@@ -89,24 +89,17 @@ const unregisterShortcuts = () => {
 
 // Apply consolidated Chromium/Electron performance flags as early as possible
 (function applyPerformanceFlags() {
-  // GPU + rasterization
   app.commandLine.appendSwitch('ignore-gpu-blocklist');
   app.commandLine.appendSwitch('enable-gpu-rasterization');
   app.commandLine.appendSwitch('enable-zero-copy');
   app.commandLine.appendSwitch('enable-oop-rasterization');
   app.commandLine.appendSwitch('enable-accelerated-2d-canvas');
+  app.commandLine.appendSwitch('enable-partial-raster');
+  app.commandLine.appendSwitch('enable-lcd-text');
 
-  // Reduce background throttling (helps benchmarks and snappiness)
   app.commandLine.appendSwitch('disable-background-timer-throttling');
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-
-  // Improve scroll performance and prevent content unloading
-  app.commandLine.appendSwitch('enable-gpu-rasterization');
-  app.commandLine.appendSwitch('enable-oop-rasterization');
-  app.commandLine.appendSwitch('enable-partial-raster');
-  app.commandLine.appendSwitch('enable-lcd-text');
-  app.commandLine.appendSwitch('enable-zero-copy');
   
   // Prevent viewport-based content unloading
   app.commandLine.appendSwitch('disable-features', 'LazyFrameLoading,LazyImageLoading,DeferredImageDecoding');
@@ -1100,22 +1093,36 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
       click: () => {
         event.sender.send('tab-context-menu-action', 'change-icon');
       }
-    },
-    {
-      label: 'Close Tab',
-      click: () => {
-        event.sender.send('tab-context-menu-action', 'close');
-      }
     }
   ];
-  
+
+  const tabGroups = info.tabGroups || [];
+  if (tabGroups.length > 0) {
+    template.push({
+      label: 'Add to Tab Group',
+      submenu: tabGroups.map((g) => ({
+        label: g.name,
+        click: () => {
+          event.sender.send('tab-context-menu-action', 'add-to-tab-group', { tabGroupId: g.id });
+        }
+      }))
+    });
+  }
+
+  template.push({
+    label: 'Close Tab',
+    click: () => {
+      event.sender.send('tab-context-menu-action', 'close');
+    }
+  });
+
   const menu = Menu.buildFromTemplate(template);
   const window = BrowserWindow.fromWebContents(event.sender);
-  
+
   menu.popup({
     window: window
   });
-  
+
   return true;
 });
 
