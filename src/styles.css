@@ -4,6 +4,24 @@ html, body {
     color-interpolation-filters: sRGB;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    image-rendering: auto;
+}
+
+/* Subtle grain overlay to eliminate gradient banding */
+#app::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 99999;
+    opacity: 0.025;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 180px 180px;
 }
 
 /* CSS Variables for custom colors - Enhanced */
@@ -21,6 +39,7 @@ html, body {
     --button-text: #ccc;
     --button-text-hover: #fff;
     --sidebar-background: rgba(17, 17, 17, 0.3);
+    --sidebar-slide-out-background: rgba(28, 28, 28, 0.98);
     --url-bar-background: #111;
     --url-bar-focus-background: #1a1a1a;
     --url-bar-text: #fff;
@@ -38,11 +57,11 @@ html, body {
     --icon-hover: #fff;
     --border-color: rgba(255, 255, 255, 0.1);
     --border-color-light: rgba(255, 255, 255, 0.2);
-    --primary-gradient: linear-gradient(135deg, #667eea 0%, #6d7eed 25%, #727ef0 50%, #747df3 75%, #764ba2 100%);
-    --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f08ef8 25%, #f089f5 50%, #f284f2 75%, #f5576c 100%);
-    --success-gradient: linear-gradient(135deg, #4facfe 0%, #4fb0fe 25%, #52b4fe 50%, #55b8fe 75%, #00f2fe 100%);
-    --warning-gradient: linear-gradient(135deg, #43e97b 0%, #44eb80 25%, #45ed85 50%, #46ef8a 75%, #38f9d7 100%);
-    --error-gradient: linear-gradient(135deg, #fa709a 0%, #fb6d96 25%, #fc6a92 50%, #fd678e 75%, #fee140 100%);
+    --primary-gradient: linear-gradient(135deg, #667eea 0%, #6a7cec 8%, #6d7aed 16%, #7078ef 24%, #7376f0 32%, #7574f1 40%, #7671f0 48%, #766dee 56%, #7568e4 64%, #7462d9 72%, #735cce 80%, #7256c3 84%, #7151b8 88%, #7050b4 90%, #764ba2 100%);
+    --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f08ff9 8%, #f08cf7 16%, #f088f4 20%, #f184f1 28%, #f27fee 36%, #f37aeb 44%, #f475e6 52%, #f46fde 60%, #f469d3 64%, #f464c6 68%, #f45fb8 72%, #f45aaa 76%, #f5579e 82%, #f55790 88%, #f5576c 100%);
+    --success-gradient: linear-gradient(135deg, #4facfe 0%, #4daffe 8%, #4cb2fe 16%, #4ab6fe 24%, #48bafe 32%, #46befe 40%, #44c2fe 48%, #42c6fe 56%, #3ecafe 64%, #3ad0fe 72%, #34d6fe 80%, #2cdcfe 88%, #1ee4fe 94%, #00f2fe 100%);
+    --warning-gradient: linear-gradient(135deg, #43e97b 0%, #43ea80 8%, #43eb85 16%, #43ec8a 24%, #42ed90 32%, #42ee96 40%, #41ef9c 48%, #40f0a4 56%, #3ef1ac 64%, #3cf2b5 72%, #3af4bf 80%, #38f5ca 88%, #38f8d2 94%, #38f9d7 100%);
+    --error-gradient: linear-gradient(135deg, #fa709a 0%, #fa7098 8%, #fb6f94 16%, #fb6f90 24%, #fc6e8c 32%, #fc6e88 40%, #fd6d84 48%, #fd6d7f 56%, #fe6d7a 64%, #fe7974 68%, #fe876c 72%, #fe9664 76%, #fea65a 80%, #feb84e 86%, #fecb44 92%, #fee140 100%);
     --glass-bg: rgba(255, 255, 255, 0.1);
     --glass-border: rgba(255, 255, 255, 0.2);
     --shadow-light: 0 4px 20px rgba(0, 0, 0, 0.1);
@@ -187,9 +206,11 @@ body.theme-switching *::after {
     height: 100%;
     background: linear-gradient(90deg, 
         transparent 0%, 
-        transparent 20%,
+        transparent 15%,
+        rgba(255, 255, 255, 0.05) 25%,
         var(--animation-shimmer) 50%, 
-        transparent 80%,
+        rgba(255, 255, 255, 0.05) 75%,
+        transparent 85%,
         transparent 100%);
     animation: loadingShimmer 1.5s ease-in-out infinite;
 }
@@ -235,11 +256,15 @@ body.theme-switching *::after {
     height: 100%;
     background: linear-gradient(90deg, 
         transparent 0%, 
-        transparent 20%,
-        rgba(255, 255, 255, 0.6) 40%,
+        transparent 15%,
+        rgba(255, 255, 255, 0.1) 25%,
+        rgba(255, 255, 255, 0.35) 35%,
+        rgba(255, 255, 255, 0.7) 45%,
         rgba(255, 255, 255, 0.9) 50%,
-        rgba(255, 255, 255, 0.6) 60%,
-        transparent 80%,
+        rgba(255, 255, 255, 0.7) 55%,
+        rgba(255, 255, 255, 0.35) 65%,
+        rgba(255, 255, 255, 0.1) 75%,
+        transparent 85%,
         transparent 100%);
     transform: translateX(-100%);
     will-change: transform;
@@ -255,11 +280,15 @@ body.theme-switching *::after {
     height: 100%;
     background: linear-gradient(90deg, 
         transparent 0%, 
-        transparent 30%,
-        rgba(255, 255, 255, 0.15) 45%,
+        transparent 25%,
+        rgba(255, 255, 255, 0.05) 35%,
+        rgba(255, 255, 255, 0.12) 42%,
+        rgba(255, 255, 255, 0.2) 47%,
         rgba(255, 255, 255, 0.25) 50%,
-        rgba(255, 255, 255, 0.15) 55%,
-        transparent 70%,
+        rgba(255, 255, 255, 0.2) 53%,
+        rgba(255, 255, 255, 0.12) 58%,
+        rgba(255, 255, 255, 0.05) 65%,
+        transparent 75%,
         transparent 100%);
     transform: translateX(-100%);
     will-change: transform;
@@ -538,7 +567,52 @@ body.theme-switching *::after {
     right: 0;
 }
 
-/* Sidebar slide-out state */
+/* Sidebar slide-out: keyframe animation so slide is visible (element has size from frame 0) */
+@keyframes sidebarSlideInLeft {
+    from {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes sidebarSlideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes sidebarSlideOutLeft {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+}
+
+@keyframes sidebarSlideOutRight {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}
+
+/* Sidebar slide-out state - opaque so content is visible when revealed */
 #sidebar.slide-out {
     width: 300px !important;
     opacity: 1 !important;
@@ -554,12 +628,30 @@ body.theme-switching *::after {
     display: flex !important;
     flex-direction: column !important;
     gap: 8px !important;
-    background: var(--sidebar-background) !important;
-    backdrop-filter: blur(80px) saturate(200%) !important;
-    -webkit-backdrop-filter: blur(80px) saturate(200%) !important;
+    background: var(--sidebar-slide-out-background, rgba(28, 28, 28, 0.98)) !important;
+    backdrop-filter: blur(40px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(40px) saturate(150%) !important;
     border-radius: 0 !important;
     min-width: 200px !important;
     max-width: 500px !important;
+    animation: sidebarSlideInLeft 0.28s cubic-bezier(0.32, 0.72, 0, 1) forwards !important;
+}
+
+#sidebar.sidebar-right.slide-out {
+    animation-name: sidebarSlideInRight !important;
+}
+
+/* Closing: run slide-out animation, then JS removes .slide-out */
+#sidebar.slide-out.slide-out-closing {
+    animation: sidebarSlideOutLeft 0.22s cubic-bezier(0.32, 0.72, 0, 1) forwards !important;
+}
+
+#sidebar.sidebar-right.slide-out.slide-out-closing {
+    animation-name: sidebarSlideOutRight !important;
+}
+
+body.light-theme #sidebar.slide-out {
+    background: var(--sidebar-slide-out-background, rgba(252, 252, 252, 0.98)) !important;
 }
 
 /* Sidebar Resize Handle */
@@ -643,7 +735,8 @@ body.resizing * {
     pointer-events: none !important;
 }
 
-body.resizing .resize-handle {
+body.resizing .resize-handle,
+body.resizing .ai-chat-resize-handle {
     pointer-events: auto !important;
 }
 
@@ -1258,6 +1351,43 @@ body.resizing .resize-handle {
     flex-direction: column;
 }
 
+/* Drop indicator – thin line showing exact drop position (tabs-container has padding 8px 10px) */
+.tab-drag-drop-indicator {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    height: 1px;
+    border-radius: 0;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: none;
+    pointer-events: none;
+    z-index: 999;
+    opacity: 0;
+    transition: none;
+}
+
+.tabs-container .tab-drag-drop-indicator {
+    left: 10px;
+    right: 10px;
+}
+
+.tab-group-content .tab-drag-drop-indicator {
+    left: 8px;
+    right: 8px;
+}
+
+.tab-drag-drop-indicator.visible {
+    opacity: 1;
+}
+
+/* Placeholder keeps layout stable while tab is picked up (position: fixed) */
+.tab-drag-placeholder {
+    flex-shrink: 0;
+    width: 100%;
+    pointer-events: none;
+    visibility: hidden;
+}
+
 /* Separator between pinned and unpinned tabs */
 .tabs-separator {
     height: 10px;
@@ -1470,19 +1600,16 @@ body.light-theme .clear-unpinned-btn:active {
 }
 
 /* Smooth in-place drag system for tabs */
+/* Dragged tab: slide only, no levitate – same look as other tabs */
 .tab.smooth-dragging {
-    z-index: 1000 !important;
+    z-index: 1 !important;
     position: relative !important;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.15) !important;
-    background: rgba(60, 60, 60, 0.98) !important;
+    box-shadow: none !important;
     cursor: grabbing !important;
     user-select: none !important;
     will-change: transform !important;
-    /* Direct tracking - no transition on transform */
-    transition: box-shadow 0.15s ease, background 0.15s ease, scale 0.15s ease !important;
-    scale: 1.03;
+    transition: none !important;
     opacity: 1 !important;
-    border-radius: 12px !important;
 }
 
 .tab.smooth-dragging * {
@@ -1491,7 +1618,7 @@ body.light-theme .clear-unpinned-btn:active {
 
 /* Tabs being displaced - smooth CSS transition */
 .tab.drag-sliding {
-    transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1) !important;
+    transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
     will-change: transform !important;
     pointer-events: none !important;
 }
@@ -1499,43 +1626,42 @@ body.light-theme .clear-unpinned-btn:active {
 .tab.drag-sliding:hover,
 .tab.drag-sliding:active,
 .tab.drag-sliding:focus {
-    /* Prevent any hover effects during drag */
     background: inherit !important;
-    transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1) !important;
+    transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
 }
 
 /* Smooth in-place drag system for tab groups */
 .tab-group.smooth-dragging {
     z-index: 1000 !important;
     position: relative !important;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.15) !important;
-    background: rgba(60, 60, 60, 0.98) !important;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.12) !important;
+    background: rgba(50, 50, 50, 0.98) !important;
     cursor: grabbing !important;
     user-select: none !important;
     will-change: transform !important;
-    /* Direct tracking - no transition on transform */
-    transition: box-shadow 0.15s ease, background 0.15s ease, scale 0.15s ease !important;
-    scale: 1.02;
-    border-radius: 12px !important;
+    transition: box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease !important;
+    border-radius: 10px !important;
 }
 
 .tab-group.smooth-dragging * {
     pointer-events: none !important;
 }
 
-/* Base tab group style – compact pill similar to tabs */
+/* Base tab group style – matches single tab row height and outline */
 .tab-group {
     width: 100%;
-    min-height: 30px;
-    padding: 6px 11px;
+    min-height: 32px;
+    height: auto;
+    padding: 0;
     border-radius: 10px;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
     cursor: pointer;
-    background: rgba(255, 255, 255, 0.02);
+    background: transparent;
     box-sizing: border-box;
-    transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease;
+    transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease;
 }
 
 .tab-group:hover {
@@ -1543,16 +1669,14 @@ body.light-theme .clear-unpinned-btn:active {
 }
 
 .tab-group.active {
-    background: radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.12) 0%, transparent 50%),
-                rgba(255, 255, 255, 0.06);
-    box-shadow:
-        0 0 0 1px rgba(255, 255, 255, 0.08),
-        0 4px 14px rgba(0, 0, 0, 0.4);
+    background: radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.06) 25%, transparent 55%),
+                rgba(255, 255, 255, 0.04);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 /* Tab groups being displaced - smooth CSS transition */
 .tab-group.drag-sliding {
-    transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1) !important;
+    transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
     will-change: transform !important;
     pointer-events: none !important;
 }
@@ -1560,8 +1684,7 @@ body.light-theme .clear-unpinned-btn:active {
 .tab-group.drag-sliding:hover,
 .tab-group.drag-sliding:active,
 .tab-group.drag-sliding:focus {
-    /* Prevent any hover effects during drag */
-    transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1) !important;
+    transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
 }
 
 /* Tab preview box for horizontal dragging */
@@ -1931,7 +2054,7 @@ body.light-theme .clear-unpinned-btn:active {
 }
 
 .tab.active {
-    background: radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.12) 0%, transparent 50%),
+    background: radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.09) 15%, rgba(255, 255, 255, 0.06) 25%, rgba(255, 255, 255, 0.03) 35%, rgba(255, 255, 255, 0.01) 45%, transparent 55%),
                 rgba(255, 255, 255, 0.06);
     box-shadow:
         0 0 0 1px rgba(255, 255, 255, 0.08),
@@ -2027,12 +2150,16 @@ body.light-theme .clear-unpinned-btn:active {
 }
 
 .webview-container {
+    --chat-panel-bg: rgba(22, 22, 22, 0.98);
+    --chat-panel-border: rgba(255, 255, 255, 0.06);
+    --chat-panel-text: rgba(255, 255, 255, 0.95);
+    --chat-panel-text-muted: rgba(255, 255, 255, 0.5);
     width: 100%;
     height: 100%;
     overflow: hidden;
     position: relative;
     background: transparent;
-    border-radius: 0 4px 4px 0; /* Match macOS window: sharp left (sidebar), rounded right */
+    border-radius: 0 2px 2px 0; /* Match macOS window: sharp left (sidebar), slightly rounded right */
     margin: 0;
     margin-left: -1px; /* Bring webview closer to sidebar */
     box-shadow: none;
@@ -2059,7 +2186,7 @@ body.light-theme .clear-unpinned-btn:active {
     right: 0;
     bottom: 0;
     pointer-events: none;
-    border-radius: 0 4px 4px 0; /* Match macOS window: sharp left (sidebar), rounded right */
+    border-radius: 0 2px 2px 0; /* Match macOS window: sharp left (sidebar), slightly rounded right */
     overflow: hidden;
 }
 
@@ -2072,7 +2199,7 @@ body.light-theme .clear-unpinned-btn:active {
     min-width: 0;
     flex-shrink: 1;
     position: relative;
-    border-radius: 0 0 4px 0; /* Only round bottom-right corner to match macOS window */
+    border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window */
     max-width: 100%;
     max-height: 100%;
     outline: none;
@@ -2111,7 +2238,7 @@ webview::before {
     background: rgba(255, 255, 255, 0.25);
     backdrop-filter: blur(40px) saturate(200%);
     -webkit-backdrop-filter: blur(40px) saturate(200%);
-    border-radius: 0 0 4px 0; /* Only round bottom-right corner to match macOS window */
+    border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window */
     pointer-events: none;
     z-index: 1000;
     opacity: 0;
@@ -2145,7 +2272,7 @@ webview:not(.inactive)[style*="opacity:1"]::before {
     justify-content: center;
     z-index: 2;
     background: transparent;
-    border-radius: 0 0 4px 0; /* Only round bottom-right corner to match macOS window */
+    border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window */
     animation: emptyStateFadeIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
     pointer-events: auto;
     overflow: hidden;
@@ -2934,6 +3061,7 @@ body.light-theme {
     --button-text: #666;
     --button-text-hover: #333;
     --sidebar-background: #fff;
+    --sidebar-slide-out-background: rgba(252, 252, 252, 0.98);
     --url-bar-background: #f8f8f8;
     --url-bar-text: #333;
     --url-bar-text-muted: #666;
@@ -4616,51 +4744,16 @@ body.light-theme .shortcut-desc {
     width: 100vw;
     height: 100vh;
     z-index: 2000;
-    opacity: 0;
-    visibility: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
+    opacity: 0;
+    visibility: hidden;
 }
 
 .spotlight-search:not(.hidden) {
     opacity: 1;
     visibility: visible;
-}
-
-.spotlight-search.opening {
-    opacity: 1;
-    visibility: visible;
-    /* No animation - instant appearance */
-}
-
-.spotlight-search:not(.hidden):not(.opening):not(.closing) {
-    opacity: 1;
-    visibility: visible;
-}
-
-.spotlight-search.closing {
-    opacity: 1;
-    visibility: visible;
-    animation: spotlightFadeOut 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes spotlightFadeIn {
-    0% {
-        opacity: 0;
-        visibility: visible;
-        transform: scale(0.98);
-    }
-    100% {
-        opacity: 1;
-        visibility: visible;
-        transform: scale(1);
-    }
-}
-
-@keyframes spotlightFadeOut {
-    0% { opacity: 1; visibility: visible; }
-    100% { opacity: 0; visibility: hidden; }
 }
 
 /* Backdrop: no dimming, just for click-to-close */
@@ -4694,20 +4787,6 @@ body.light-theme .shortcut-desc {
     -webkit-backdrop-filter: blur(32px) saturate(120%);
     opacity: 1;
     transform: translateY(0);
-}
-
-.spotlight-search.opening .spotlight-content {
-    opacity: 1;
-    transform: translateY(0);
-}
-
-.spotlight-search.closing .spotlight-content {
-    animation: spotlightContentFadeOut 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes spotlightContentFadeOut {
-    0% { opacity: 1; transform: translateY(0); }
-    100% { opacity: 0; transform: translateY(-4px); }
 }
 
 /* Search engine border colors for spotlight */
@@ -4780,25 +4859,28 @@ body.light-theme .shortcut-desc {
     border-bottom: none;
     height: 56px;
     z-index: 1;
+    display: flex;
+    align-items: center;
 }
 
 .spotlight-input-container::after {
     content: '';
     position: absolute;
     bottom: 0;
-    left: 16px;
-    right: 16px;
+    left: 18px;
+    right: 18px;
     height: 1px;
     background: rgba(255, 255, 255, 0.06);
 }
 
 .spotlight-input-container input {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     height: 52px;
     background: transparent;
     border: none;
     border-radius: 0;
-    padding: 0 0 0 36px;
+    padding: 0 0 0 38px;
     padding-right: 180px;
     color: rgba(255, 255, 255, 0.95) !important;
     font-size: 17px;
@@ -4823,11 +4905,16 @@ body.light-theme .shortcut-desc {
 
 .spotlight-search-icon {
     position: absolute;
-    left: 16px;
+    left: 18px;
     top: 50%;
     transform: translateY(-50%);
     color: rgba(255, 255, 255, 0.5);
     font-size: 15px;
+    width: 15px;
+    height: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     pointer-events: none;
     z-index: 1;
 }
@@ -4835,7 +4922,7 @@ body.light-theme .shortcut-desc {
 /* Spotlight search engine pill */
 #spotlight-search-engine-pill {
     position: absolute;
-    left: 44px;
+    left: 48px;
     top: 50%;
     transform: translateY(-50%);
     z-index: 10;
@@ -4849,7 +4936,7 @@ body.light-theme .shortcut-desc {
 /* Spotlight search engine suggestion */
 #spotlight-search-engine-suggestion {
     position: absolute;
-    right: 20px;
+    right: 18px;
     top: 50%;
     transform: translateY(-50%) translateX(10px);
     z-index: 10;
@@ -4888,26 +4975,11 @@ body.light-theme .shortcut-desc {
     z-index: 10;
     opacity: 0;
     visibility: hidden;
-    transition: max-height 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                visibility 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                padding 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    padding: 0 4px;
+    padding: 0 14px;
     will-change: opacity;
     /* Disable browser scroll hints */
     scrollbar-width: none;
     -ms-overflow-style: none;
-}
-
-.spotlight-search.hidden .spotlight-suggestions.show,
-.spotlight-search.closing .spotlight-suggestions.show {
-    max-height: 280px !important;
-    padding: 6px 6px !important;
-    transition: opacity 0.15s ease, visibility 0.15s ease !important;
-}
-
-.spotlight-search:not(.hidden):not(.closing) .spotlight-suggestions.show {
-    transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 
 .spotlight-suggestions::-webkit-scrollbar {
@@ -4923,7 +4995,7 @@ body.light-theme .shortcut-desc {
     max-height: 280px;
     opacity: 1;
     visibility: visible;
-    padding: 6px 6px;
+    padding: 10px 14px;
     overflow-y: auto;
 }
 
@@ -4931,19 +5003,19 @@ body.light-theme .shortcut-desc {
     max-height: 0;
     opacity: 0;
     visibility: hidden;
-    padding: 0 4px;
+    padding: 0 14px;
     overflow: hidden;
 }
 
 .spotlight-suggestion-item {
     display: flex;
     align-items: center;
-    padding: 8px 12px;
-    margin: 2px 6px;
+    padding: 10px 14px;
+    margin: 2px 0;
     background: transparent;
-    border-radius: 6px;
+    border-radius: 8px;
     cursor: pointer;
-    transition: background 0.12s ease;
+    transition: none;
     position: relative;
     border-bottom: none;
 }
@@ -4962,9 +5034,10 @@ body.light-theme .shortcut-desc {
 }
 
 .spotlight-suggestion-icon {
-    width: 18px;
-    height: 18px;
-    margin-right: 10px;
+    width: 24px;
+    min-width: 24px;
+    height: 24px;
+    margin-right: 12px;
     color: rgba(255, 255, 255, 0.7);
     font-size: 14px;
     flex-shrink: 0;
@@ -4975,9 +5048,9 @@ body.light-theme .shortcut-desc {
 }
 
 .spotlight-favicon {
-    width: 18px;
-    height: 18px;
-    border-radius: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
     object-fit: contain;
     display: block;
 }
@@ -4988,6 +5061,7 @@ body.light-theme .shortcut-desc {
 
 .spotlight-suggestion-text {
     flex: 1;
+    min-width: 0;
     color: rgba(255, 255, 255, 0.95);
     font-size: 14px;
     font-weight: 400;
@@ -5005,7 +5079,7 @@ body.light-theme .shortcut-desc {
     align-items: center;
     gap: 6px;
     font-weight: 500;
-    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: none;
 }
 
 .spotlight-suggestion-item:hover .spotlight-suggestion-action {
@@ -5029,10 +5103,7 @@ body.light-theme .shortcut-desc {
     align-items: center;
     justify-content: center;
     font-size: 11px;
-    transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-                background 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-                color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-                transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: none;
     flex-shrink: 0;
     transform: scale(0.9);
 }
@@ -5050,7 +5121,6 @@ body.light-theme .shortcut-desc {
 
 .spotlight-dismiss-btn:active {
     transform: scale(0.95);
-    transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .spotlight-suggestion-item.dismissing {
@@ -5209,7 +5279,7 @@ body.light-theme .shortcut-desc {
 }
 
 /* Professional Tab Animations */
-.tab {
+.tab:not(.drag-sliding):not(.smooth-dragging) {
     transition: none !important;
     position: relative;
     will-change: transform;
@@ -5217,10 +5287,10 @@ body.light-theme .shortcut-desc {
     transform: translateZ(0);
 }
 
-.tab:hover,
-.tab:hover *,
-.tab:hover::before,
-.tab:hover::after {
+.tab:not(.drag-sliding):not(.smooth-dragging):hover,
+.tab:not(.drag-sliding):not(.smooth-dragging):hover *,
+.tab:not(.drag-sliding):not(.smooth-dragging):hover::before,
+.tab:not(.drag-sliding):not(.smooth-dragging):hover::after {
     transition: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
@@ -5236,11 +5306,15 @@ body.light-theme .shortcut-desc {
     height: 100%;
     background: linear-gradient(90deg, 
         transparent 0%,
-        transparent 20%,
-        rgba(255, 255, 255, 0.05) 40%,
+        transparent 15%,
+        rgba(255, 255, 255, 0.02) 28%,
+        rgba(255, 255, 255, 0.05) 38%,
+        rgba(255, 255, 255, 0.08) 45%,
         rgba(255, 255, 255, 0.1) 50%,
-        rgba(255, 255, 255, 0.05) 60%,
-        transparent 80%,
+        rgba(255, 255, 255, 0.08) 55%,
+        rgba(255, 255, 255, 0.05) 62%,
+        rgba(255, 255, 255, 0.02) 72%,
+        transparent 85%,
         transparent 100%);
     transition: none !important;
     z-index: 1;
@@ -5276,7 +5350,7 @@ body.light-theme .shortcut-desc {
 }
 
 .tab:hover:not(.active) .tab-favicon {
-    transform: scale(1.05);
+    transform: none;
     transition: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
@@ -5324,15 +5398,15 @@ body.light-theme .shortcut-desc {
     transform: none;
 }
 
-/* Ensure inactive tabs are transparent - override conflicting rules */
-.tab:not(.active):not(:hover):not(.pinned):not(.dragging) {
+/* Ensure inactive tabs are transparent - override conflicting rules (exclude drag-sliding so sibling shift works) */
+.tab:not(.active):not(:hover):not(.pinned):not(.dragging):not(.drag-sliding) {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
     transform: none !important;
 }
 
-.tab.pinned:not(.active):not(:hover) {
+.tab.pinned:not(.active):not(:hover):not(.drag-sliding) {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
@@ -5411,30 +5485,24 @@ body.light-theme .shortcut-desc {
     box-shadow: none;
 }
 
-/* Tab Group Styles - Matching tabs exactly with color highlighting */
+/* Tab Group Styles - Same row height as tabs, thin border */
 .tab-group {
     width: 100%;
-    min-height: 34px;
+    min-height: 32px;
     background: transparent;
     border-radius: 10px;
     cursor: pointer;
     position: relative;
-    border: 2px solid;
-    border-color: rgba(255, 107, 107, 0.3);
+    border: 1px solid rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.35);
     box-shadow: none;
     box-sizing: border-box;
     overflow: visible;
     flex-shrink: 0;
     user-select: none;
-    margin: 1px 0;
+    margin: 2px 0;
     display: flex;
     flex-direction: column;
-    transition: background 0.2s ease;
-}
-
-/* Color surrounding the tab group - subtle border with background tint */
-.tab-group {
-    border-color: rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.3);
+    transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 /* Remove the old color indicator */
@@ -5442,24 +5510,27 @@ body.light-theme .shortcut-desc {
     display: none;
 }
 
-/* Simple hover effect - just a slight grey background */
+/* Hover: subtle background and slightly stronger border */
 .tab-group:hover:not(.active) {
     background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.5);
 }
 
-/* Tab group always has color border */
-.tab-group:not(:hover) {
+.tab-group:not(:hover):not(.active) {
     background: transparent !important;
     box-shadow: none !important;
 }
 
-.tab-group .tab-content {
-    height: 34px;
-    min-height: 34px;
+/* Header row matches single tab height (32px) */
+.tab-group > .tab-content {
+    height: 32px;
+    min-height: 32px;
     flex-shrink: 0;
-    padding: 10px 16px;
+    padding: 0 12px 0 14px;
     position: relative;
     z-index: 1;
+    display: flex;
+    align-items: center;
 }
 
 /* Ensure tab group tab-content doesn't shift when input is focused */
@@ -5524,41 +5595,40 @@ body.light-theme .shortcut-desc {
 }
 
 
-/* Professional tab group drag animations */
+/* Drag-over outline - thin, same dimensions as group */
 .tab-group::before {
     content: '';
     position: absolute;
-    left: -2px;
-    right: -2px;
-    top: -2px;
-    bottom: -2px;
+    left: -1px;
+    right: -1px;
+    top: -1px;
+    bottom: -1px;
     background: transparent;
-    border: 2px solid transparent;
-    border-radius: 12px;
+    border: 1px solid transparent;
+    border-radius: 10px;
     pointer-events: none;
     opacity: 0;
-    transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-                border-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 0 0 0 transparent;
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: none;
     z-index: 0;
 }
 
-/* Remove outline when tab group is open (not dragging) */
 .tab-group:not(.drag-over-tab-group)::before {
     opacity: 0 !important;
     border-color: transparent !important;
 }
 
 .tab-group.drag-over-tab-group {
-    background: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.6);
 }
 
 .tab-group.drag-over-tab-group::before {
-    border-color: var(--tab-group-color, rgba(255, 255, 255, 0.6));
+    border-color: rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.7);
     opacity: 1;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15),
-                0 4px 16px rgba(255, 255, 255, 0.25);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .tab-group.drag-over-tab-group .tab-group-icon {
@@ -5583,11 +5653,12 @@ body.light-theme .shortcut-desc {
 .tab-group-content {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: max-height 0.28s cubic-bezier(0.32, 0.72, 0.38, 1),
+                opacity 0.22s ease-out,
+                padding 0.25s ease-out,
+                visibility 0.2s step-end;
     opacity: 0;
-    padding: 0 10px;
+    padding: 0 12px;
     display: none;
     flex-direction: column;
     gap: 2px;
@@ -5603,56 +5674,51 @@ body.light-theme .shortcut-desc {
 
 .tab-group-content.open {
     opacity: 1;
-    padding: 4px 10px 6px 10px;
+    padding: 4px 12px 8px 12px;
     visibility: visible;
     display: flex;
-    transition: max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: max-height 0.28s cubic-bezier(0.32, 0.72, 0.38, 1),
+                opacity 0.22s ease-out,
+                padding 0.25s ease-out,
+                visibility 0s step-start;
 }
 
 .tab-group.toggling .tab-group-content {
     pointer-events: none;
 }
 
+/* Tabs inside group - same 32px row height as standalone tabs */
 .tab-group .tab {
     margin: 0;
+    min-height: 32px;
+    height: 32px;
     transform: none;
-    border-radius: 10px;
+    border-radius: 8px;
     background: transparent;
     opacity: 1;
     visibility: visible;
-    display: block;
+    display: block !important;
     position: relative;
     border: none;
     box-shadow: none;
-    outline: 1px solid transparent;
+    outline: none;
     box-sizing: border-box;
     overflow: hidden;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .tab-group .tab:hover:not(.active) {
     transform: none;
-    box-shadow: 0 4px 12px var(--animation-shadow-light);
-    background: var(--animation-overlay-hover);
-    border: none;
-    transition: none !important;
-    transition-duration: 0s !important;
-    transition-delay: 0s !important;
-    animation: none !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    background: rgba(255, 255, 255, 0.06);
 }
 
-
-.tab-group .tab-content {
+.tab-group .tab .tab-content {
+    height: 32px !important;
+    min-height: 32px !important;
     opacity: 1 !important;
     visibility: visible !important;
     display: flex !important;
-}
-
-.tab-group .tab {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
 }
 
 .tab-group .tab.active {
@@ -5866,8 +5932,8 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 
 /* Removed duplicate url-icon hover animation */
 
-/* Inactive tabs should be transparent - override any conflicting rules */
-.tab:not(.active):not(:hover) {
+/* Inactive tabs should be transparent - override any conflicting rules (exclude drag-sliding so sibling shift works) */
+.tab:not(.active):not(:hover):not(.drag-sliding) {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
@@ -5887,7 +5953,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 .webview-container {
     position: relative;
     overflow: hidden;
-    border-radius: 10px;
+    border-radius: 6px;
 }
 
 .webview-container::before {
@@ -5903,15 +5969,19 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     opacity: 0;
     transition: opacity 0.3s ease;
     pointer-events: none;
-    border-radius: 10px;
+    border-radius: 6px;
 }
 
 .webview-container.loading::before {
     background: linear-gradient(90deg, 
-        rgba(26, 26, 26, 0.5) 0%, 
-        rgba(30, 30, 30, 0.5) 25%,
+        rgba(26, 26, 26, 0.5) 0%,
+        rgba(27, 27, 27, 0.5) 10%,
+        rgba(29, 29, 29, 0.5) 20%, 
+        rgba(32, 32, 32, 0.5) 35%,
         rgba(36, 36, 36, 0.5) 50%, 
-        rgba(30, 30, 30, 0.5) 75%,
+        rgba(32, 32, 32, 0.5) 65%,
+        rgba(29, 29, 29, 0.5) 80%,
+        rgba(27, 27, 27, 0.5) 90%,
         rgba(26, 26, 26, 0.5) 100%);
     animation: subtleShimmer 2s ease-in-out infinite;
 }
@@ -6369,7 +6439,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     bottom: 0;
     background: transparent;
     overflow: hidden; /* Clip webview content to rounded corners */
-    border-radius: 0 0 4px 0; /* Only round bottom-right corner to match macOS window */
+    border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window */
 }
 
 #single-view {
@@ -6933,39 +7003,39 @@ body.light-theme .btn-primary {
 }
 
 .downloads-popup-thumbnail.type-image .downloads-popup-thumbnail-inner {
-    background: linear-gradient(135deg, #4ecdc4, #556270);
+    background: linear-gradient(135deg, #4ecdc4 0%, #52c7b0 30%, #53a08a 60%, #556270 100%);
 }
 
 .downloads-popup-thumbnail.type-video .downloads-popup-thumbnail-inner {
-    background: linear-gradient(135deg, #ff6b6b, #c44dff);
+    background: linear-gradient(135deg, #ff6b6b 0%, #f06090 30%, #d950c0 60%, #c44dff 100%);
 }
 
 .downloads-popup-thumbnail.type-audio .downloads-popup-thumbnail-inner {
-    background: linear-gradient(135deg, #f8e71c, #f5a623);
+    background: linear-gradient(135deg, #f8e71c 0%, #f7df1f 30%, #f6c921 60%, #f5a623 100%);
 }
 
 .downloads-popup-thumbnail.type-pdf .downloads-popup-thumbnail-inner {
-    background: linear-gradient(135deg, #ff5c5c, #d4145a);
+    background: linear-gradient(135deg, #ff5c5c 0%, #f04e60 30%, #e03a6a 60%, #d4145a 100%);
 }
 
 .downloads-popup-thumbnail.type-archive .downloads-popup-thumbnail-inner {
-    background: linear-gradient(135deg, #f0932b, #eb4d4b);
+    background: linear-gradient(135deg, #f0932b 0%, #ee8234 30%, #ec6940 60%, #eb4d4b 100%);
 }
 
 .downloads-popup-thumbnail.type-doc .downloads-popup-thumbnail-inner {
-    background: linear-gradient(135deg, #4a90e2, #007aff);
+    background: linear-gradient(135deg, #4a90e2 0%, #3d8be8 30%, #2284f2 60%, #007aff 100%);
 }
 
 .downloads-popup-thumbnail.type-slides .downloads-popup-thumbnail-inner {
-    background: linear-gradient(135deg, #f5a623, #f76b1c);
+    background: linear-gradient(135deg, #f5a623 0%, #f69920 30%, #f6831e 60%, #f76b1c 100%);
 }
 
 .downloads-popup-thumbnail.type-sheet .downloads-popup-thumbnail-inner {
-    background: linear-gradient(135deg, #7ed321, #2ecc71);
+    background: linear-gradient(135deg, #7ed321 0%, #65cf29 30%, #47cb52 60%, #2ecc71 100%);
 }
 
 .downloads-popup-thumbnail.type-generic .downloads-popup-thumbnail-inner {
-    background: linear-gradient(135deg, #9b9b9b, #4a4a4a);
+    background: linear-gradient(135deg, #9b9b9b 0%, #8a8a8a 30%, #696969 60%, #4a4a4a 100%);
 }
 
 .downloads-popup-info {
@@ -7790,64 +7860,65 @@ body.light-theme .color-option.selected {
 }
 
 .ai-button {
-    width: 28px;
-    height: 28px;
-    border-radius: 14px;
-    border: none;
-    background: rgba(30, 30, 30, 0.95);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    color: var(--text-color);
-    cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3),
-                0 2px 4px rgba(0, 0, 0, 0.2),
-                0 0 0 1px rgba(255, 255, 255, 0.1);
+    gap: 8px;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(28, 28, 28, 0.96);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    color: rgba(255, 255, 255, 0.92);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25),
+                0 0 0 1px rgba(255, 255, 255, 0.06);
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: visible;
+    pointer-events: auto;
 }
 
 body.light-theme .ai-button {
-    background: rgba(250, 250, 250, 0.95);
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15),
-                0 2px 4px rgba(0, 0, 0, 0.1),
-                0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-
-.ai-button::before {
-    content: '';
-    position: absolute;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--text-color);
-    opacity: 0.15;
-    z-index: 0;
+    background: rgba(252, 252, 252, 0.96);
+    border-color: rgba(0, 0, 0, 0.1);
+    color: rgba(0, 0, 0, 0.88);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08),
+                0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 
 .ai-button:hover {
-    transform: scale(1.05);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4),
-                0 4px 8px rgba(0, 0, 0, 0.3),
-                0 0 0 1px rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
+    background: rgba(38, 38, 38, 0.98);
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3),
+                0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
-.ai-button:hover::before {
-    opacity: 0.2;
+body.light-theme .ai-button:hover {
+    background: rgba(255, 255, 255, 0.98);
+    border-color: rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12),
+                0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 
 .ai-button:active {
-    transform: scale(0.98);
+    transform: translateY(0);
     transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.ai-button i {
-    position: relative;
-    z-index: 1;
+.ai-button-text {
+    line-height: 1;
+}
+
+.ai-button-icon {
+    font-size: 11px;
+    opacity: 0.9;
 }
 
 /* AI Floating Popup - Native macOS Style */
@@ -8100,18 +8171,19 @@ body:not(.light-theme) .ai-response-content {
     }
 }
 
-/* AI Chat Panel - neutral black/grey, no navy */
+/* AI Chat Panel - matches site/URL bar theme */
 .ai-chat-panel {
     position: absolute;
     right: 0;
     top: 0;
     bottom: 0;
-    width: 400px;
+    width: var(--chat-panel-width, 400px);
+    min-width: 280px;
     max-width: 90%;
-    background: rgba(22, 22, 22, 0.98);
+    background: var(--chat-panel-bg, rgba(22, 22, 22, 0.98));
     backdrop-filter: blur(40px) saturate(100%);
     -webkit-backdrop-filter: blur(40px) saturate(100%);
-    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    border-left: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.06));
     z-index: 1000;
     display: flex;
     flex-direction: column;
@@ -8132,45 +8204,66 @@ body:not(.light-theme) .ai-response-content {
     pointer-events: auto;
 }
 
-.ai-chat-header {
-    padding: 14px 18px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
-    background: rgba(28, 28, 28, 0.98);
-    pointer-events: auto;
+/* Chat panel resize handle - matches sidebar resizer look and behavior */
+.ai-chat-resize-handle {
+    position: absolute;
+    left: -6px;
+    top: 0;
+    bottom: 0;
+    width: 12px;
+    cursor: col-resize;
+    z-index: 10;
     -webkit-app-region: no-drag;
 }
 
-.ai-chat-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: rgba(255, 255, 255, 0.95);
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+.ai-chat-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 5px;
+    width: 2px;
+    background: transparent;
+    border-radius: 1px;
+    transition: background 0.1s ease, width 0.1s ease;
 }
 
-.ai-chat-title i {
-    color: rgba(255, 255, 255, 0.75);
-    font-size: 15px;
+.ai-chat-resize-handle:hover::after {
+    background: rgba(255, 255, 255, 0.2);
+    width: 3px;
+    left: 4.5px;
+}
+
+.ai-chat-resize-handle:active::after {
+    background: rgba(255, 255, 255, 0.3);
+    width: 3px;
+    left: 4.5px;
+}
+
+.ai-chat-header {
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-shrink: 0;
+    background: transparent;
+    pointer-events: auto;
+    -webkit-app-region: no-drag;
+    min-height: 0;
 }
 
 .ai-chat-close-btn {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
     border: none;
     background: transparent;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--chat-panel-text-muted, rgba(255, 255, 255, 0.45));
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: 11px;
     transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
     pointer-events: auto;
     -webkit-app-region: no-drag;
@@ -8181,7 +8274,7 @@ body:not(.light-theme) .ai-response-content {
 
 .ai-chat-close-btn:hover {
     background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.95);
+    color: var(--chat-panel-text, rgba(255, 255, 255, 0.95));
     transform: scale(1.04);
 }
 
@@ -8261,8 +8354,8 @@ body:not(.light-theme) .ai-response-content {
 
 .ai-chat-message.user .ai-chat-message-content {
     background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--chat-panel-text, rgba(255, 255, 255, 0.98));
+    border: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.08));
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
@@ -8270,10 +8363,40 @@ body:not(.light-theme) .ai-response-content {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
+/* User message with quote: content wrapper as column */
+.ai-chat-message.user .ai-chat-message-content:has(.ai-chat-message-quote) {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 12px 0;
+    overflow: hidden;
+}
+
+.ai-chat-message-quote {
+    padding: 10px 12px;
+    margin: 0;
+    background: rgba(0, 0, 0, 0.25);
+    border-left: 3px solid rgba(255, 255, 255, 0.35);
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--chat-panel-text, rgba(255, 255, 255, 0.88));
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.ai-chat-message-body {
+    padding: 0 16px 12px;
+    font-size: 14px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
 .ai-chat-message.assistant .ai-chat-message-content {
     background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.92);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--chat-panel-text, rgba(255, 255, 255, 0.92));
+    border: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.06));
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 }
 
@@ -8283,7 +8406,7 @@ body:not(.light-theme) .ai-response-content {
 
 .ai-chat-message-time {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.32);
+    color: var(--chat-panel-text-muted, rgba(255, 255, 255, 0.32));
     padding: 0 4px;
     font-weight: 400;
     letter-spacing: 0.02em;
@@ -8312,30 +8435,89 @@ body:not(.light-theme) .ai-response-content {
     100% { transform: rotate(360deg); }
 }
 
-.ai-chat-input-container {
-    padding: 12px 16px 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    display: flex;
-    align-items: flex-end;
-    gap: 0;
+/* Quote bar above input: shows quoted selection with dismiss */
+.ai-chat-quote-bar {
     flex-shrink: 0;
-    background: rgba(26, 26, 26, 0.98);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px 10px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border-top: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.05));
+    border-bottom: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.05));
     pointer-events: auto;
     -webkit-app-region: no-drag;
 }
 
-/* Single bar: input and send fixed same height, no grow on focus/click */
+.ai-chat-quote-bar.hidden {
+    display: none;
+}
+
+.ai-chat-quote-icon {
+    flex-shrink: 0;
+    font-size: 13px;
+    color: var(--chat-panel-text-muted, rgba(255, 255, 255, 0.5));
+}
+
+.ai-chat-quote-text {
+    flex: 1;
+    font-size: 13px;
+    color: var(--chat-panel-text, rgba(255, 255, 255, 0.85));
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ai-chat-quote-dismiss {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--chat-panel-text-muted, rgba(255, 255, 255, 0.45));
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    transition: background 0.2s ease, color 0.2s ease;
+    outline: none;
+}
+
+.ai-chat-quote-dismiss:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.ai-chat-input-container {
+    padding: 12px 14px 14px;
+    border-top: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.05));
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    background: rgba(0, 0, 0, 0.15);
+    pointer-events: auto;
+    -webkit-app-region: no-drag;
+}
+
+/* Input and send as separate, rounded elements */
 .ai-chat-input {
     flex: 1;
-    height: 44px;
-    min-height: 44px;
-    max-height: 44px;
-    padding: 10px 14px 10px 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-right: none;
-    border-radius: 12px 0 0 12px;
+    height: 40px;
+    min-height: 40px;
+    max-height: 120px;
+    padding: 10px 14px;
+    border: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.08));
+    border-radius: 14px;
     background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.95);
+    color: var(--chat-panel-text, rgba(255, 255, 255, 0.95));
     font-size: 14px;
     font-family: inherit;
     resize: none;
@@ -8349,17 +8531,11 @@ body:not(.light-theme) .ai-response-content {
 }
 
 .ai-chat-input::-webkit-scrollbar {
-    width: 4px;
-}
-
-.ai-chat-input::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 2px;
+    display: none;
 }
 
 .ai-chat-input {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+    scrollbar-width: none;
     -ms-overflow-style: none;
 }
 
@@ -8369,27 +8545,25 @@ body:not(.light-theme) .ai-response-content {
 }
 
 .ai-chat-input::placeholder {
-    color: rgba(255, 255, 255, 0.38);
+    color: var(--chat-panel-text-muted, rgba(255, 255, 255, 0.38));
 }
 
 .ai-chat-send-btn {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    min-height: 44px;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
     flex-shrink: 0;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 0 12px 12px 0;
-    border-left: none;
+    border: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.08));
+    border-radius: 14px;
     background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.9);
+    color: var(--chat-panel-text, rgba(255, 255, 255, 0.9));
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
-    transition: background 0.2s ease, color 0.2s ease;
-    flex-shrink: 0;
+    font-size: 13px;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
     pointer-events: auto;
     -webkit-app-region: no-drag;
     outline: none;
@@ -8410,15 +8584,29 @@ body:not(.light-theme) .ai-response-content {
     background: rgba(255, 255, 255, 0.04);
 }
 
-/* Chat panel overlays on top, no need to adjust content area */
-#content-area.chat-open {
-    /* No padding adjustment - chat overlays on top */
+/* When chat is open, shrink web content area so chat doesn't overlap */
+#content-area.chat-open .webview-container {
+    --chat-panel-width: 400px;
+}
+#content-area.chat-open .webview-container #webviews-container,
+#content-area.chat-open .webview-container #webview {
+    right: var(--chat-panel-width, 400px);
 }
 
 @media (max-width: 600px) {
     .ai-chat-panel {
-        width: 100vw;
+        width: 100vw !important;
+        min-width: 100vw;
         max-width: 100vw;
+    }
+    
+    .ai-chat-resize-handle {
+        display: none;
+    }
+    
+    #content-area.chat-open .webview-container #webviews-container,
+    #content-area.chat-open .webview-container #webview {
+        right: 0 !important;
     }
     
     #content-area.chat-open {
@@ -8445,7 +8633,7 @@ body:not(.light-theme) .ai-response-content {
     -webkit-backdrop-filter: none;
     border-bottom: 1px solid var(--url-bar-border, transparent);
     transition: background 0.4s ease, border-color 0.4s ease, opacity 0.3s ease, transform 0.3s ease;
-    border-radius: 0 4px 0 0; /* Only round top-right corner to match macOS window */
+    border-radius: 0 2px 0 0; /* Only round top-right corner to match macOS window */
     overflow: visible;
 }
 
@@ -8662,13 +8850,13 @@ body:not(.light-theme) .ai-response-content {
     color: var(--url-bar-text-muted, rgba(0, 0, 0, 0.4));
 }
 
+/* Match spotlight search selection: neutral highlight, not blue */
 .url-bar-input::selection {
-    background: rgba(0, 122, 255, 0.25);
+    background: rgba(0, 0, 0, 0.12);
 }
 
-/* Dark mode selection */
 .webview-url-bar.dark-mode .url-bar-input::selection {
-    background: rgba(64, 156, 255, 0.35);
+    background: rgba(255, 255, 255, 0.2);
 }
 
 /* When input is visible, hide the display */
@@ -8709,15 +8897,23 @@ body:not(.light-theme) .ai-response-content {
     background: var(--url-bar-btn-hover, rgba(0, 0, 0, 0.04));
     border: 1px solid var(--url-bar-border, rgba(0, 0, 0, 0.08));
     border-radius: 6px;
-    color: var(--url-bar-text, rgba(0, 0, 0, 0.85));
+    color: var(--url-bar-text-muted, rgba(255, 255, 255, 0.6));
     font-size: 12px;
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s ease, transform 0.15s ease, border-color 0.2s ease;
+    transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease, border-color 0.2s ease;
 }
 
 .url-bar-chat-btn:hover {
-    background: var(--url-bar-btn-hover, rgba(0, 0, 0, 0.08));
+    background: rgba(255, 255, 255, 0.14);
+    color: var(--url-bar-text, rgba(255, 255, 255, 0.95));
+    box-shadow: 0 0 14px rgba(255, 255, 255, 0.12);
+}
+
+.webview-url-bar:not(.dark-mode) .url-bar-chat-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--url-bar-text, rgba(0, 0, 0, 0.9));
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 
 .url-bar-chat-btn:active {
@@ -8741,13 +8937,13 @@ body:not(.light-theme) .ai-response-content {
     bottom: 0;
     transition: top 0.3s ease;
     overflow: hidden; /* Clip webview content to rounded corners */
-    border-radius: 0 0 4px 0; /* Only round bottom-right corner to match macOS window - no top rounding since it's below URL bar */
+    border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window - no top rounding since it's below URL bar */
     background: transparent;
 }
 
 .webview-container:has(.webview-url-bar.hidden) #webviews-container {
     top: 0;
-    border-radius: 0 4px 4px 0; /* When URL bar is hidden, round top-right too to match macOS window */
+    border-radius: 0 2px 2px 0; /* When URL bar is hidden, round top-right too to match macOS window */
 }
 
 /* Also adjust main webview */
