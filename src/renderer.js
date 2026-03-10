@@ -18,6 +18,7 @@ class AxisBrowser {
             'bing',
             'duckduckgo',
             'yahoo',
+            'yandex',
             'wikipedia',
             'reddit',
             'github',
@@ -34,6 +35,7 @@ class AxisBrowser {
             'bing': 'bing',
             'duckduckgo': 'duckduckgo',
             'yahoo': 'yahoo',
+            'yandex': 'yandex',
             'wikipedia': 'wikipedia',
             'reddit': 'reddit',
             'github': 'github',
@@ -47,6 +49,7 @@ class AxisBrowser {
         this.isBenchmarking = false; // suppress non-critical work on Speedometer
         this.isWebviewLoading = false; // Track if webview is currently loading
         this.spotlightSelectedIndex = -1; // Track selected suggestion index
+        this.NEWTAB_URL = 'axis://newtab'; // Custom new tab page (replaces spotlight)
         this.contextMenuTabGroupId = null; // Track which tab group context menu is open
         this.themeCache = new Map(); // Cache theme colors per domain for instant theme switching
         this.currentLibraryItems = []; // Store library items for preview navigation
@@ -59,6 +62,8 @@ class AxisBrowser {
         this.pipVideoIndex = 0; // Index of video element in webview
         this.pipWebview = null; // Reference to the webview with video
         this.pipLeaveCheckInterval = null; // Interval to detect native "back to tab" (PiP closed)
+        
+        this.isIncognitoWindow = (window.location.hash === '#incognito');
         
         // Cache frequently accessed DOM elements for performance
         this.cacheDOMElements();
@@ -86,18 +91,18 @@ class AxisBrowser {
             sidebar: document.getElementById('sidebar'),
             tabsContainer: document.getElementById('tabs-container'),
             tabsSeparator: document.getElementById('tabs-separator'),
+            sidebarNewTabBtn: document.getElementById('sidebar-new-tab-btn'),
             webview: document.getElementById('webview'),
-            settingsBtnFooter: document.getElementById('settings-btn-footer'),
             closeSettings: document.getElementById('close-settings'),
             downloadsBtnFooter: document.getElementById('downloads-btn-footer'),
+            sidebarPlusBtn: document.getElementById('sidebar-plus-btn'),
+            sidebarPlusMenu: document.getElementById('sidebar-plus-menu'),
             closeDownloads: document.getElementById('close-downloads'),
             refreshDownloads: document.getElementById('refresh-downloads'),
             closeSecurity: document.getElementById('close-security'),
             viewCertificate: document.getElementById('view-certificate'),
             securitySettings: document.getElementById('security-settings'),
             securityPanel: document.getElementById('security-panel'),
-            spotlightInput: document.getElementById('spotlight-input'),
-            spotlightSearch: document.getElementById('spotlight-search'),
             searchClose: document.getElementById('search-close'),
             emptyState: document.getElementById('empty-state'),
             emptyStateBtn: document.getElementById('empty-state-new-tab'),
@@ -125,28 +130,34 @@ class AxisBrowser {
         // Load settings first and apply theme immediately
         await this.loadSettings();
         
-        // ALWAYS apply theme on startup - either custom or default
-        // Apply theme with multiple fallback strategies to ensure it works
+        if (this.isIncognitoWindow) {
+            document.body.classList.add('incognito-window');
+            document.getElementById('incognito-indicator')?.classList.remove('hidden');
+        }
+        
+        // ALWAYS apply theme on startup (incognito: always black, unchangable)
         const applyThemeNow = () => {
             try {
                 if (document.body) {
-                    // Apply custom theme colors if they exist
+                    if (this.isIncognitoWindow) {
+                        this.resetToBlackTheme();
+                        return;
+                    }
                     if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
                         this.applyCustomThemeFromSettings();
                     } else {
-                        // Apply default black theme if no custom colors
                         this.resetToBlackTheme();
                     }
                 } else {
-                    // If body doesn't exist yet, wait for it
                     requestAnimationFrame(applyThemeNow);
                 }
             } catch (error) {
                 console.error('Error applying theme on init:', error);
-                // Retry after a short delay
                 setTimeout(() => {
                     try {
-                        if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+                        if (this.isIncognitoWindow) {
+                            this.resetToBlackTheme();
+                        } else if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
                             this.applyCustomThemeFromSettings();
                         } else {
                             this.resetToBlackTheme();
@@ -158,28 +169,28 @@ class AxisBrowser {
             }
         };
         
-        // Try to apply immediately
         applyThemeNow();
         
-        // Also try after a short delay as backup
         setTimeout(() => {
-            if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+            if (this.isIncognitoWindow) {
+                this.resetToBlackTheme();
+            } else if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
                 this.applyCustomThemeFromSettings();
             }
         }, 50);
         
         this.applySidebarPosition(); // Apply saved sidebar position
         this.setupEventListeners();
-        this.setupWebview();
+        this.setupNewTabPage();
         this.setupTabSearch();
         this.setupLoadingScreen();
         this.setupSidebarResize();
         
-        // Load pinned tabs from saved state
-        await this.loadPinnedTabs();
-        
-        // Load tab groups from saved state
-        await this.loadTabGroups();
+        // Load pinned tabs and tab groups (skip in incognito – start fresh)
+        if (!this.isIncognitoWindow) {
+            await this.loadPinnedTabs();
+            await this.loadTabGroups();
+        }
 
         // Defer non-critical work to idle time to improve first interaction latency
         this.runWhenIdle(() => {
@@ -303,7 +314,6 @@ class AxisBrowser {
         this.setupAIChat();
 
         // Settings - use cached elements
-        el.settingsBtnFooter?.addEventListener('click', () => this.toggleSettings());
         el.closeSettings?.addEventListener('click', () => this.toggleSettings());
 
         // Custom color picker
@@ -335,6 +345,27 @@ class AxisBrowser {
             this.showDownloadsPopup();
         });
         
+        // Sidebar plus button - toggle New tab / New tab group menu
+        el.sidebarPlusBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleSidebarPlusMenu();
+        });
+        document.getElementById('sidebar-plus-new-tab')?.addEventListener('click', () => {
+            this.hideSidebarPlusMenu();
+            this.createNewTab();
+        });
+        document.getElementById('sidebar-plus-new-tab-group')?.addEventListener('click', () => {
+            this.hideSidebarPlusMenu();
+            this.showTabGroupColorPicker((color) => {
+                this.createNewTabGroup(color);
+                this.hideTabGroupColorPicker();
+            });
+        });
+        document.getElementById('sidebar-plus-incognito')?.addEventListener('click', () => {
+            this.hideSidebarPlusMenu();
+            window.electronAPI.openIncognitoWindow();
+        });
+        
         el.closeDownloads?.addEventListener('click', () => this.toggleDownloads());
         
         // Listen for downloads popup actions
@@ -353,9 +384,10 @@ class AxisBrowser {
             this.clearUnpinnedTabs();
         });
 
-        // Empty state new tab buttons - use cached elements
-        el.emptyStateBtn?.addEventListener('click', () => this.showSpotlightSearch());
-        el.emptyStateBtnEmpty?.addEventListener('click', () => this.showSpotlightSearch());
+        // Empty state new tab buttons - open custom new tab page
+        el.emptyStateBtn?.addEventListener('click', () => this.createNewTab());
+        el.emptyStateBtnEmpty?.addEventListener('click', () => this.createNewTab());
+        el.sidebarNewTabBtn?.addEventListener('click', () => this.createNewTab());
 
         // Security panel - use cached elements
         el.closeSecurity?.addEventListener('click', () => this.toggleSecurity());
@@ -366,122 +398,6 @@ class AxisBrowser {
                 this.toggleSecurity();
             }
         });
-
-        // Spotlight search functionality - use cached element with throttling
-        if (el.spotlightInput) {
-            el.spotlightInput.addEventListener('keydown', (e) => {
-                // Handle Tab key for search engine word matching
-                if (e.key === 'Tab' && !e.shiftKey) {
-                    const value = el.spotlightInput.value.trim().toLowerCase();
-                    const firstWord = value.split(/\s+/)[0]; // Get first word
-                    
-                    // Find matching word that starts with the typed text
-                    if (this.searchEngineWords) {
-                        const matchingWord = this.searchEngineWords.find(word => 
-                            word.startsWith(firstWord) && firstWord.length > 0
-                        );
-                        
-                        if (matchingWord && this.searchEngineWordMap[matchingWord]) {
-                        e.preventDefault();
-                            const engine = this.searchEngineWordMap[matchingWord];
-                        this.hideSpotlightSearchEngineSuggestion();
-                        this.selectSpotlightSearchEngine(engine, el.spotlightInput);
-                            // Remove the word from input
-                            const remaining = value.substring(firstWord.length).trim();
-                        if (el.spotlightInput) {
-                            el.spotlightInput.value = remaining;
-                            if (typeof el.spotlightInput.focus === 'function') {
-                                try {
-                                    el.spotlightInput.focus();
-                                } catch (e) {
-                                    // Ignore focus errors
-                                }
-                            }
-                        }
-                        }
-                    }
-                } else if (e.key === 'Backspace') {
-                    // Only clear search engine if input becomes empty
-                    const value = el.spotlightInput.value;
-                    if (!value || value.trim() === '') {
-                        this.clearSpotlightSearchEngine();
-                    }
-                } else if (e.key === 'Enter') {
-                e.preventDefault();
-                // If a suggestion is selected, click it; otherwise perform search
-                if (this.spotlightSelectedIndex >= 0) {
-                    const suggestions = document.querySelectorAll('.spotlight-suggestion-item');
-                    if (suggestions[this.spotlightSelectedIndex]) {
-                        suggestions[this.spotlightSelectedIndex].click();
-                    }
-                } else {
-                    this.performSpotlightSearch();
-                }
-            } else if (e.key === 'Escape') {
-                this.closeSpotlightSearch();
-            } else if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                this.navigateSuggestions(1);
-            } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                this.navigateSuggestions(-1);
-            }
-        });
-
-            // Throttle input for better performance
-            const throttledUpdateSuggestions = this.throttle((value) => {
-                this.updateSpotlightSuggestions(value);
-                this.spotlightSelectedIndex = -1;
-            }, 50);
-            
-            el.spotlightInput.addEventListener('input', (e) => {
-                const value = e.target.value.trim();
-                
-                // Only show/hide suggestion if no engine is selected
-                // If engine is selected, keep it visible while typing
-                if (!this.selectedSearchEngine) {
-                    if (!value) {
-                        this.hideSpotlightSearchEngineSuggestion();
-                        throttledUpdateSuggestions(value);
-                        return;
-                    }
-                    
-                    const valueLower = value.toLowerCase();
-                    const firstWord = valueLower.split(/\s+/)[0]; // Get first word
-                    const hasSpace = value.includes(' ');
-                    
-                    // Show suggestion if typing the beginning of a full word (no spaces, no selected engine)
-                    if (!hasSpace && this.searchEngineWords) {
-                        // Find matching word that starts with the typed text
-                        const matchingWord = this.searchEngineWords.find(word => 
-                            word.startsWith(firstWord) && firstWord.length > 0
-                        );
-                        
-                        if (matchingWord && this.searchEngineWordMap[matchingWord]) {
-                            this.showSpotlightSearchEngineSuggestion(this.searchEngineWordMap[matchingWord]);
-                        } else {
-                            // Hide suggestion if no match
-                            this.hideSpotlightSearchEngineSuggestion();
-                        }
-                    } else {
-                        // Hide suggestion if user starts typing something else
-                        this.hideSpotlightSearchEngineSuggestion();
-                    }
-                }
-                
-                throttledUpdateSuggestions(value);
-            });
-        }
-
-        // Close spotlight when clicking background or backdrop - use cached element
-        el.spotlightSearch?.addEventListener('click', (e) => {
-            if (e.target.id === 'spotlight-search' || e.target.classList.contains('spotlight-backdrop')) {
-                this.closeSpotlightSearch();
-            }
-        });
-
-
-        // Keyboard shortcuts - now handled through settings panel
 
         // Backdrop click closes any open modal - use cached elements
         if (el.modalBackdrop) {
@@ -500,7 +416,6 @@ class AxisBrowser {
         });
 
         document.getElementById('duplicate-tab-option').addEventListener('click', () => {
-            console.log('Duplicate tab option clicked!');
             // Close the context menu immediately
             this.hideTabContextMenu();
             // Then duplicate the tab
@@ -529,7 +444,10 @@ class AxisBrowser {
         window.electronAPI.onSidebarContextMenuAction((action) => {
             switch (action) {
                 case 'new-tab':
-            this.showSpotlightSearch();
+                    this.createNewTab();
+                    break;
+                case 'new-incognito-tab':
+                    window.electronAPI.openIncognitoWindow();
                     break;
                 case 'new-tab-group':
             this.showTabGroupColorPicker((color) => {
@@ -572,7 +490,7 @@ class AxisBrowser {
                     break;
                 case 'search-selection':
                     if (data && data.selectionText) {
-                        this.showSpotlightSearch(data.selectionText);
+                        this.createNewTab();
                     }
                     break;
                 case 'open-link-new-tab':
@@ -761,6 +679,25 @@ class AxisBrowser {
             if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
                 e.preventDefault();
                 this.selectAll();
+                return;
+            }
+            
+            // Prevent the Tab key from triggering any custom app behavior
+            // when pressed outside editable fields. We want Tab to behave
+            // normally ONLY inside text inputs / textareas / contenteditable.
+            if (e.key === 'Tab') {
+                const target = e.target;
+                const tag = target && target.tagName;
+                const isEditable =
+                    tag === 'INPUT' ||
+                    tag === 'TEXTAREA' ||
+                    (target && target.isContentEditable);
+
+                if (!isEditable) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
             }
             
             // Escape key to close all popups
@@ -876,9 +813,13 @@ class AxisBrowser {
             if (e.target.closest('.context-menu') || e.target.id === 'context-menu-backdrop') {
                 return;
             }
+            if (e.target.closest('#sidebar-plus-btn') || e.target.closest('#sidebar-plus-menu')) {
+                return;
+            }
             
             // Close all context menus smoothly
             this.hideWebpageContextMenu();
+            this.hideSidebarPlusMenu();
             
             if (!e.target.closest('.tab') && !e.target.closest('.tab-group')) {
                 this.hideTabContextMenu();
@@ -942,7 +883,7 @@ class AxisBrowser {
         document.getElementById('webpage-search-selection')?.addEventListener('click', () => {
             const ctx = this.webviewContextInfo || {};
             if (ctx.selectionText) {
-                this.showSpotlightSearch(ctx.selectionText);
+                this.createNewTab();
             }
             this.hideWebpageContextMenu();
         });
@@ -1043,6 +984,18 @@ class AxisBrowser {
         window.electronAPI.onBrowserShortcut((action) => {
             this.executeBrowserShortcut(action);
         });
+        
+        // Listen for URL open from settings window (navigate in main window)
+        window.electronAPI.onOpenUrlInBrowser?.((url) => {
+            if (url) this.createNewTab(url);
+        });
+        
+        // Listen for settings updates from settings window (refresh theme)
+        window.electronAPI.onSettingsUpdated?.(async () => {
+            this.applyCustomThemeFromSettings();
+            await this.loadSettings();
+            this.applySidebarPosition();
+        });
     }
     
     // Copy the current tab's URL to clipboard
@@ -1082,7 +1035,7 @@ class AxisBrowser {
                 if (this.currentTab) this.closeTab(this.currentTab);
                 break;
             case 'spotlight-search':
-                this.showSpotlightSearch();
+                this.createNewTab();
                 break;
             case 'toggle-sidebar':
                 this.toggleSidebar();
@@ -1099,6 +1052,7 @@ class AxisBrowser {
                 }
                 break;
             case 'pin-tab':
+                if (this.isIncognitoWindow) break;
                 if (this.currentTab) {
                     const el = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
                     if (el) this.togglePinTab(this.currentTab, el, null);
@@ -1114,8 +1068,7 @@ class AxisBrowser {
                 this.performTabUndo();
                 break;
             case 'history':
-                this.toggleSettings();
-                this.switchSettingsTab('history');
+                window.electronAPI?.openSettingsWindow?.('history');
                 break;
             case 'downloads':
                 this.toggleDownloads();
@@ -1229,7 +1182,6 @@ class AxisBrowser {
             webview.__loadingTimeout = setTimeout(() => {
                 if (this.loadingBarTabId !== tabId) return;
                 if (webview && webview.isLoading) {
-                    console.log('Page taking too long to load, forcing stop');
                     try {
                         webview.stop();
                     } catch (e) {
@@ -1269,25 +1221,17 @@ class AxisBrowser {
         webview.__eventHandlers.domReady = domReadyHandler;
         webview.addEventListener('dom-ready', domReadyHandler);
         
-        // Inject performance optimizations on DOM ready as well
+        // Light dom-ready pass: eager-load lazy images (single run, no timeouts)
         const domReadyOptimizeHandler = () => {
             try {
                 webview.executeJavaScript(`
                     (function() {
-                        // Immediately disable all lazy loading
-                        const disableLazy = () => {
-                            document.querySelectorAll('img[loading="lazy"], img[data-src], img[data-lazy-src]').forEach(img => {
-                                img.loading = 'eager';
-                                if (img.dataset.src) img.src = img.dataset.src;
-                                if (img.dataset.lazySrc) img.src = img.dataset.lazySrc;
-                            });
-                            document.querySelectorAll('iframe[loading="lazy"]').forEach(iframe => {
-                                iframe.loading = 'eager';
-                            });
-                        };
-                        disableLazy();
-                        setTimeout(disableLazy, 50);
-                        setTimeout(disableLazy, 200);
+                        document.querySelectorAll('img[loading="lazy"], img[data-src], img[data-lazy-src]').forEach(function(img) {
+                            img.loading = 'eager';
+                            if (img.dataset.src) img.src = img.dataset.src;
+                            if (img.dataset.lazySrc) img.src = img.dataset.lazySrc;
+                        });
+                        document.querySelectorAll('iframe[loading="lazy"]').forEach(function(f) { f.loading = 'eager'; });
                     })();
                 `).catch(() => {});
             } catch (e) {}
@@ -1311,8 +1255,8 @@ class AxisBrowser {
             if (tab) {
                 const currentUrl = webview.getURL();
                 const currentTitle = webview.getTitle();
-                // Don't overwrite settings or note URLs with webview URL
-                if (currentUrl && currentUrl !== 'about:blank' && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://') && !tab.isSettings) {
+                // Don't overwrite special/internal URLs with webview URL
+                if (currentUrl && currentUrl !== 'about:blank' && tab.url !== 'axis://settings' && tab.url !== this.NEWTAB_URL && !tab.url.startsWith('axis:note://') && !tab.isSettings) {
                     tab.url = currentUrl;
                 }
                 if (currentTitle) {
@@ -1349,150 +1293,19 @@ class AxisBrowser {
             // Auto-tinting disabled - using custom theme colors instead
             // this.extractAndApplyWebpageColors(webview);
             
-            // Inject aggressive performance optimizations to prevent content unloading
+            // Lightweight: disable lazy loading once (no observers or intervals to avoid slowing pages)
             try {
                 webview.executeJavaScript(`
                     (function() {
-                        // Function to disable lazy loading and force eager loading
-                        function disableLazyLoading() {
-                            // Disable lazy loading for images and iframes
-                            const images = document.querySelectorAll('img[loading="lazy"], img[data-lazy], img[data-src]');
-                            images.forEach(img => {
-                                img.loading = 'eager';
-                                img.removeAttribute('loading');
-                                if (img.dataset.src && (!img.src || img.src === '' || img.src === 'data:,') && !img.complete) {
-                                    img.src = img.dataset.src;
-                                    img.removeAttribute('data-src');
-                                }
-                                if (img.dataset.lazySrc && (!img.src || img.src === '')) {
-                                    img.src = img.dataset.lazySrc;
-                                    img.removeAttribute('data-lazy-src');
-                                }
-                            });
-                            
-                            const iframes = document.querySelectorAll('iframe[loading="lazy"], iframe[data-lazy]');
-                            iframes.forEach(iframe => {
-                                iframe.loading = 'eager';
-                                iframe.removeAttribute('loading');
-                            });
-                            
-                            // Force load all images immediately
-                            document.querySelectorAll('img').forEach(img => {
-                                if (img.dataset.src && (!img.src || img.src === '')) {
-                                    img.src = img.dataset.src;
-                                }
-                                if (img.dataset.lazySrc && (!img.src || img.src === '')) {
-                                    img.src = img.dataset.lazySrc;
-                                }
-                            });
-                        }
-                        
-                        // Run immediately and aggressively
-                        disableLazyLoading();
-                        
-                        // Force immediate load of all visible and near-visible content
-                        setTimeout(() => {
-                            disableLazyLoading();
-                            // Preload all images in viewport and beyond
-                            const allImages = document.querySelectorAll('img');
-                            allImages.forEach(img => {
-                                if (img.dataset.src) {
-                                    img.src = img.dataset.src;
-                                    img.removeAttribute('data-src');
-                                }
-                                if (img.dataset.lazySrc) {
-                                    img.src = img.dataset.lazySrc;
-                                    img.removeAttribute('data-lazy-src');
-                                }
-                            });
-                        }, 100);
-                        
-                        // Watch for new content and disable lazy loading immediately
-                        const observer = new MutationObserver((mutations) => {
-                            let shouldDisable = false;
-                            mutations.forEach(mutation => {
-                                if (mutation.addedNodes.length > 0) {
-                                    shouldDisable = true;
-                                }
-                            });
-                            if (shouldDisable) {
-                                disableLazyLoading();
-                            }
+                        document.querySelectorAll('img[loading="lazy"], img[data-src], img[data-lazy-src]').forEach(function(img) {
+                            img.loading = 'eager';
+                            if (img.dataset.src && !img.src) img.src = img.dataset.src;
+                            if (img.dataset.lazySrc && !img.src) img.src = img.dataset.lazySrc;
                         });
-                        
-                        observer.observe(document.body || document.documentElement, {
-                            childList: true,
-                            subtree: true,
-                            attributes: true,
-                            attributeFilter: ['loading', 'data-src', 'data-lazy-src']
-                        });
-                        
-                        // Aggressive preloading - load everything within 500px of viewport
-                        const intersectionObserver = new IntersectionObserver((entries) => {
-                            entries.forEach(entry => {
-                                if (entry.isIntersecting || entry.boundingClientRect.top < window.innerHeight + 500) {
-                                    const img = entry.target;
-                                    if (img.dataset.src && (!img.src || img.src === '')) {
-                                        img.src = img.dataset.src;
-                                        img.removeAttribute('data-src');
-                                    }
-                                    if (img.dataset.lazySrc && (!img.src || img.src === '')) {
-                                        img.src = img.dataset.lazySrc;
-                                        img.removeAttribute('data-lazy-src');
-                                    }
-                                }
-                            });
-                        }, { 
-                            rootMargin: '500px 0px 500px 0px',
-                            threshold: [0, 0.1, 0.5, 1]
-                        });
-                        
-                        // Observe all images
-                        document.querySelectorAll('img').forEach(img => {
-                            intersectionObserver.observe(img);
-                        });
-                        
-                        // Keep all rendered content in memory - prevent unloading
-                        function keepContentInMemory() {
-                            // Force browser to keep all elements rendered
-                            const allElements = document.querySelectorAll('*');
-                            allElements.forEach(el => {
-                                // Touch elements to keep them in memory
-                                if (el.offsetHeight > 0 || el.offsetWidth > 0) {
-                                    el.style.willChange = 'auto';
-                                    // Force layout calculation
-                                    void el.offsetHeight;
-                                }
-                            });
-                        }
-                        
-                        // Run immediately and periodically
-                        keepContentInMemory();
-                        if ('requestIdleCallback' in window) {
-                            requestIdleCallback(keepContentInMemory, { timeout: 500 });
-                            setInterval(() => {
-                                requestIdleCallback(keepContentInMemory, { timeout: 500 });
-                            }, 5000);
-                        } else {
-                            setTimeout(keepContentInMemory, 500);
-                            setInterval(keepContentInMemory, 5000);
-                        }
-                        
-                        // Prevent scroll-based unloading by keeping scroll position stable
-                        let lastScrollTop = window.pageYOffset || document.documentElement.scrollTop;
-                        window.addEventListener('scroll', () => {
-                            const currentScrollTop = window.pageYOffset || document.documentElement.scrollTop;
-                            // If scrolling up, preload content above
-                            if (currentScrollTop < lastScrollTop) {
-                                disableLazyLoading();
-                            }
-                            lastScrollTop = currentScrollTop;
-                        }, { passive: true });
+                        document.querySelectorAll('iframe[loading="lazy"]').forEach(function(f) { f.loading = 'eager'; });
                     })();
-                `).catch(() => {}); // Ignore errors
-            } catch (e) {
-                // Ignore injection errors
-            }
+                `).catch(() => {});
+            } catch (e) {}
         };
         webview.__eventHandlers.didFinishLoad = didFinishLoadHandler;
         webview.addEventListener('did-finish-load', didFinishLoadHandler);
@@ -1578,16 +1391,14 @@ class AxisBrowser {
             if (event.errorCode === -2) {
                     webview.reload();
             } else if (event.errorCode === -3) {
-                console.log('Navigation aborted');
             } else if (event.errorCode === -105) {
-                console.log('DNS resolution failed, trying alternative approach...');
                 const currentUrl = event.url || webview.getURL() || 'https://www.google.com';
                 this.handleDNSFailure(currentUrl, webview);
             } else if (isActiveTab()) {
                 this.showErrorPage(event.errorDescription, webview);
             }
 
-            if (tab && event.validatedURL) {
+            if (tab && event.validatedURL && tab.url !== this.NEWTAB_URL) {
                 tab.url = event.validatedURL;
             }
         };
@@ -1742,8 +1553,7 @@ class AxisBrowser {
                 let lastSidebarPos = null;
                 let lastSearchEngine = null;
                 
-                // Poll for changes every 100ms and save immediately
-                // Store interval on webview for cleanup
+                // Poll for changes every 500ms when settings tab is open (reduces CPU)
                 webview.__settingsPollInterval = setInterval(async () => {
                     if (!isActiveTab() || webview.isDestroyed?.()) {
                         if (webview.__settingsPollInterval) {
@@ -1770,19 +1580,17 @@ class AxisBrowser {
                             lastSidebarPos = currentValues.sidebarPosition;
                             await browser.saveSetting('sidebarPosition', currentValues.sidebarPosition);
                             browser.applySidebarPosition();
-                            console.log('✓ Saved sidebarPosition:', currentValues.sidebarPosition);
                         }
                         
                         // Check and save search engine
                         if (currentValues.searchEngine !== null && currentValues.searchEngine !== lastSearchEngine) {
                             lastSearchEngine = currentValues.searchEngine;
                             await browser.saveSetting('searchEngine', currentValues.searchEngine);
-                            console.log('✓ Saved searchEngine:', currentValues.searchEngine);
                         }
                     } catch (e) {
                         // Ignore errors
                     }
-                }, 100);
+                }, 500);
                 
                 // Clean up on navigation
                 webview.addEventListener('did-navigate', () => {
@@ -1795,13 +1603,7 @@ class AxisBrowser {
         });
     }
         
-    setupWebview() {
-        // This function is kept for backward compatibility but is no longer used
-        // Webviews are now created per-tab in createTabWebview
-    }
-
     handleDNSFailure(url, targetWebview = null) {
-        console.log('Handling DNS failure for:', url);
         
         const webview = targetWebview || this.getActiveWebview();
         if (!webview) return;
@@ -1814,7 +1616,6 @@ class AxisBrowser {
         
         // Prevent infinite retry loops
         if (this.dnsRetryCount >= 3) {
-            console.log('Max DNS retries reached, falling back to Google');
             webview.src = 'https://www.google.com';
             return;
         }
@@ -1825,7 +1626,6 @@ class AxisBrowser {
         const searchQuery = url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
         const fallbackUrl = this.getSearchUrl(searchQuery);
         
-        console.log(`DNS retry ${this.dnsRetryCount}/3, trying:`, fallbackUrl);
         
         const sanitizedFallbackUrl = this.sanitizeUrl(fallbackUrl);
         webview.src = sanitizedFallbackUrl || 'https://www.google.com';
@@ -1897,10 +1697,6 @@ class AxisBrowser {
             </html>
         `;
         webview.src = `data:text/html,${encodeURIComponent(errorHtml)}`;
-    }
-
-    checkNetworkAndLoad() {
-        // This function is no longer needed - webviews are created per tab
     }
 
     showErrorPage(message, targetWebview = null) {
@@ -2064,18 +1860,10 @@ class AxisBrowser {
                     '/src/renderer.js'
                 ];
                 
-                cache.addAll(resourcesToCache).catch(err => {
-                    console.log('Cache preload failed:', err);
-                });
+                cache.addAll(resourcesToCache).catch(() => {});
             });
         }
     }
-
-    // Removed broken preloading methods that were slowing things down
-
-    // Removed broken tab webview methods - using single webview approach
-
-    // Removed broken performance monitoring that was slowing things down
 
 
 
@@ -2261,7 +2049,7 @@ class AxisBrowser {
     }
 
     applyCustomThemeFromSettings() {
-        // Ensure settings exist
+        if (this.isIncognitoWindow) return;
         if (!this.settings) {
             this.settings = {};
         }
@@ -2945,10 +2733,21 @@ class AxisBrowser {
     }
     
     resetToBlackTheme() {
-        // If the user has a custom theme configured, never force the app
-        // back to the default black theme. Instead, just re‑apply their
-        // custom theme so there is no flashing when this method is called
-        // from various fallback/error paths.
+        // Incognito: always true black theme, unchangable
+        if (this.isIncognitoWindow) {
+            const colors = {
+                primary: '#000000',
+                secondary: '#0a0a0a',
+                accent: '#111111',
+                text: '#ffffff',
+                textSecondary: '#b0b0b0',
+                textMuted: '#707070',
+                border: 'rgba(255, 255, 255, 0.1)',
+                borderLight: 'rgba(255, 255, 255, 0.15)'
+            };
+            this.applyCustomTheme(colors);
+            return;
+        }
         if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
             this.applyCustomThemeFromSettings();
             return;
@@ -3022,33 +2821,38 @@ class AxisBrowser {
         const gradientEnabled = this.settings?.gradientEnabled !== false && colors.gradientColor;
         const gradientDirection = this.settings?.gradientDirection || '135deg';
         
+        // Incognito: force solid black, no transparency
+        const forceOpaqueBlack = this.isIncognitoWindow;
+        if (forceOpaqueBlack) {
+            style.setProperty('--background-color', '#000000');
+            style.setProperty('--sidebar-background', '#000000');
+            style.setProperty('--sidebar-slide-out-background', '#000000');
+        }
         // Core theme colors - batch update
-        if (gradientEnabled) {
+        if (!forceOpaqueBlack && gradientEnabled) {
             const gradient = this.smoothGradient(gradientDirection, darkerPrimary, colors.gradientColor);
             style.setProperty('--background-color', gradient);
-        } else {
-        style.setProperty('--background-color', darkerPrimary);
+        } else if (!forceOpaqueBlack) {
+            style.setProperty('--background-color', darkerPrimary);
         }
         style.setProperty('--text-color', colors.text);
         style.setProperty('--text-color-secondary', textSecondary);
         style.setProperty('--text-color-muted', colors.textMuted || colors.text);
-        // Use a glassy, semi-transparent version of the primary color for app surfaces.
-        // More transparent to allow frosted glass effect to show through
+        // Use a glassy, semi-transparent version of the primary color for app surfaces (skip in incognito)
         let glassSidebarBg;
-        if (gradientEnabled) {
+        let sidebarSlideOutBg;
+        if (forceOpaqueBlack) {
+            glassSidebarBg = '#000000';
+            sidebarSlideOutBg = '#000000';
+        } else if (gradientEnabled) {
             const primaryRgba = this.hexToRgba(darkerPrimary, 0.4);
             const gradientRgba = this.hexToRgba(colors.gradientColor, 0.4);
             glassSidebarBg = this.smoothGradient(gradientDirection, primaryRgba, gradientRgba);
-        } else {
-            glassSidebarBg = this.hexToRgba(darkerPrimary, 0.4) || `rgba(20, 20, 20, 0.4)`;
-        }
-        // Opaque version for sidebar slide-out (same theme, fully visible)
-        let sidebarSlideOutBg;
-        if (gradientEnabled) {
             const primaryOpaque = this.hexToRgba(darkerPrimary, 0.98);
             const gradientOpaque = this.hexToRgba(colors.gradientColor, 0.98);
             sidebarSlideOutBg = this.smoothGradient(gradientDirection, primaryOpaque, gradientOpaque);
         } else {
+            glassSidebarBg = this.hexToRgba(darkerPrimary, 0.4) || `rgba(20, 20, 20, 0.4)`;
             sidebarSlideOutBg = this.hexToRgba(darkerPrimary, 0.98) || `rgba(28, 28, 28, 0.98)`;
         }
         // Popups use subtle dominant color (primary color, even if gradient)
@@ -3317,7 +3121,7 @@ class AxisBrowser {
         webview.dataset.tabId = String(tabId);
         webview.setAttribute('allowpopups', '');
         webview.setAttribute('webpreferences', 'contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false');
-        webview.setAttribute('partition', 'persist:main');
+        webview.setAttribute('partition', this.isIncognitoWindow ? 'incognito' : 'persist:main');
         webview.setAttribute('useragent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         webview.setAttribute('autosize', 'true');
         webview.style.cssText = `
@@ -3356,12 +3160,13 @@ class AxisBrowser {
         tabElement.className = 'tab';
         tabElement.dataset.tabId = tabId;
         
-        // Create tab object first to check for custom icon
+        // Create tab object first to check for custom icon / favicon
         const tab = {
             id: tabId,
-            url: url || 'about:blank',
+            url: url || this.NEWTAB_URL,
             title: 'New Tab',
-            favicon: null,
+            // Use a simple search icon for the default new tab favicon
+            favicon: url ? null : 'data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><g fill=\"none\" stroke=\"%23ffffff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"7\" cy=\"7\" r=\"4.25\"/><path d=\"M10.25 10.25L13 13\"/></g></svg>',
             customIcon: null,
             customIconType: null,
             pinned: false,
@@ -3396,31 +3201,35 @@ class AxisBrowser {
         const separator = this.elements.tabsSeparator;
         const tabData = {
             id: tabId,
-            url: url || null,
+            url: url ? url : this.NEWTAB_URL,
             title: 'New Tab',
-            favicon: null, // Cache favicon URL
+            favicon: tab.favicon,
             canGoBack: false,
             canGoForward: false,
             history: url ? [url] : [],
             historyIndex: url ? 0 : -1,
-            pinned: false, // New tabs are unpinned by default
+            pinned: false,
             webview: null,
             isMuted: false,
             isPlayingAudio: false
         };
         
-        // Create webview for this tab
         const webview = this.createTabWebview(tabId);
         if (webview) {
             tabData.webview = webview;
+            // Start loading immediately for real URLs so the webview isn't stuck on about:blank
+            if (url && url !== this.NEWTAB_URL && url !== 'axis://settings' && !url.startsWith('axis:note://')) {
+                const sanitized = this.sanitizeUrl(url);
+                if (sanitized) webview.src = sanitized;
+            }
         }
         
-        // Store tab data first
         this.tabs.set(tabId, tabData);
         
-        // Insert tab below separator (unpinned section)
+        // Insert tab below separator, after the "+ New Tab" button
         if (separator && separator.parentNode === tabsContainer) {
-            tabsContainer.insertBefore(tabElement, separator.nextSibling);
+            const unpinnedRef = this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn.nextSibling : separator.nextSibling;
+            tabsContainer.insertBefore(tabElement, unpinnedRef);
         } else {
             tabsContainer.appendChild(tabElement);
         }
@@ -3431,14 +3240,9 @@ class AxisBrowser {
         // Switch to new tab
         this.switchToTab(tabId);
 
-        // Hide empty state now that we have a tab
         this.updateEmptyState();
 
-        // Navigate to google.com for new tabs without URL
-        if (!url) {
-            this.navigate('https://www.google.com');
-        } else {
-        // Navigate if URL provided
+        if (url) {
             this.navigate(url);
         }
         this.updateTabFavicon(tabId, tabElement);
@@ -3585,14 +3389,13 @@ class AxisBrowser {
         if (!tabId || !this.tabs.has(tabId)) {
             // If trying to switch to invalid tab and we have no current tab
             if (this.tabs.size === 0) {
-                    // No tabs left, show empty state and reset to black theme
                     this.currentTab = null;
                     this.resetToBlackTheme();
+                    this.updateNewTabPageVisibility(false);
                     this.updateEmptyState();
                     this.updateUrlBar();
                     this.updateNavigationButtons();
                 }
-            // Don't automatically switch to first tab - user must click a tab
             return;
         }
 
@@ -3657,22 +3460,7 @@ class AxisBrowser {
             if (tab.webview) {
                 const webview = tab.webview;
                 
-                // CRITICAL: Make webview visible instantly (synchronous)
-                webview.style.opacity = '1';
-                webview.style.visibility = 'visible';
-                webview.style.pointerEvents = 'auto';
-                webview.style.zIndex = '2';
-                webview.classList.remove('inactive');
-                
-                // Update cached webview reference
-                this.elements.webview = webview;
-                
-                // CRITICAL: Apply cached theme instantly for this tab's URL
-                if (tab.url && tab.url !== 'about:blank' && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://')) {
-                    this.applyCachedTheme(tab.url);
-                }
-                
-                // Get current URL from webview (may throw or return empty when inactive - avoid reloading pinned tabs)
+                // Get current URL from webview first (may throw when inactive)
                 let currentSrc = null;
                 try {
                     currentSrc = webview.getURL();
@@ -3692,50 +3480,72 @@ class AxisBrowser {
                     }
                 };
 
-                // Load content if needed - check special URLs first
-                if (tab.url && tab.url === 'axis://settings' || tab.isSettings) {
+                // If tab says new-tab but webview has navigated to a real page (e.g. user searched from new tab), sync tab.url so we show the page, not the overlay
+                const isWebviewRealPage = currentSrc && currentSrc !== 'about:blank' && currentSrc.trim() !== '' && currentSrc !== this.NEWTAB_URL && !currentSrc.startsWith('axis:');
+                if (tab.url === this.NEWTAB_URL && isWebviewRealPage) {
+                    tab.url = currentSrc;
+                    this.tabs.set(tabId, tab);
+                }
+
+                // Set webview.src BEFORE making visible so the load starts and content paints correctly
+                if (tab.url === this.NEWTAB_URL) {
+                    // No webview load for new tab page
+                } else if (tab.url && (tab.url === 'axis://settings' || tab.isSettings)) {
                     if (!tab.isSettings) {
                         tab.isSettings = true;
                         tab.url = 'axis://settings';
                         this.tabs.set(tabId, tab);
                     }
-                    // Set webview background immediately to prevent flash
                     if (webview) {
                         webview.style.setProperty('background', 'rgba(40, 40, 40, 0.95)', 'important');
                     }
                     if (currentSrc === 'about:blank' || !currentSrc) {
                         this.loadSettingsInWebview();
                     }
-                    // Don't reset theme - keep the user's theme while showing settings
                 } else if (tab.url && tab.url.startsWith('axis:note://')) {
                     const noteId = tab.url.replace('axis:note://', '');
                     if (!currentSrc || currentSrc === 'about:blank' || !currentSrc.includes('axis:note://')) {
                         this.loadNoteInWebview(noteId);
                     }
-                    // Don't reset theme - keep the user's theme while showing notes
                 } else if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
                     const sanitizedTabUrl = this.sanitizeUrl(tab.url);
                     const webviewHasContent = currentSrc && currentSrc !== 'about:blank' && currentSrc.trim() !== '';
                     const samePage = urlsMatch(currentSrc, sanitizedTabUrl) || urlsMatch(currentSrc, tab.url);
                     if (!webviewHasContent || !samePage) {
                         webview.src = sanitizedTabUrl || 'https://www.google.com';
-                    } else {
-                        // Webview already has this page (e.g. switching back to pinned tab) - don't reload
-                        if (currentSrc && currentSrc !== tab.url) {
-                            tab.url = currentSrc;
-                            this.tabs.set(tabId, tab);
-                        }
-                    }
-                } else {
-                    if (tab.url !== 'axis://settings' && (!currentSrc || currentSrc === 'about:blank')) {
-                        webview.src = 'https://www.google.com';
-                        tab.url = 'https://www.google.com';
-                        if (!tab.history || tab.history.length === 0) {
-                            tab.history = ['https://www.google.com'];
-                            tab.historyIndex = 0;
-                        }
+                    } else if (currentSrc && currentSrc !== tab.url) {
+                        tab.url = currentSrc;
                         this.tabs.set(tabId, tab);
                     }
+                } else if (tab.url !== this.NEWTAB_URL && tab.url !== 'axis://settings' && (!currentSrc || currentSrc === 'about:blank')) {
+                    webview.src = 'https://www.google.com';
+                    tab.url = 'https://www.google.com';
+                    if (!tab.history || tab.history.length === 0) {
+                        tab.history = ['https://www.google.com'];
+                        tab.historyIndex = 0;
+                    }
+                    this.tabs.set(tabId, tab);
+                }
+                
+                // Now make webview visible so Chromium paints the content
+                if (tab.url === this.NEWTAB_URL) {
+                    webview.style.opacity = '1';
+                    webview.style.visibility = 'visible';
+                    webview.style.pointerEvents = 'none';
+                    webview.style.zIndex = '1';
+                    this.updateNewTabPageVisibility(true);
+                } else {
+                    webview.style.opacity = '1';
+                    webview.style.visibility = 'visible';
+                    webview.style.pointerEvents = 'auto';
+                    webview.style.zIndex = '2';
+                    webview.classList.remove('inactive');
+                    this.updateNewTabPageVisibility(false);
+                }
+                
+                this.elements.webview = webview;
+                if (tab.url && tab.url !== 'about:blank' && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://')) {
+                    this.applyCachedTheme(tab.url);
                 }
             }
         }
@@ -3782,6 +3592,323 @@ class AxisBrowser {
         });
     }
 
+    setupNewTabPage() {
+        const input = document.getElementById('new-tab-input');
+        const suggestionsContainer = document.getElementById('new-tab-suggestions');
+        const modeToggle = document.getElementById('new-tab-mode-toggle');
+        const askMessages = document.getElementById('new-tab-ask-messages');
+        const searchWrapper = document.getElementById('new-tab-search-wrapper');
+        if (!input || !suggestionsContainer || !modeToggle) return;
+
+        this.newTabMode = 'search';
+        const newTabPage = document.getElementById('new-tab-page');
+
+        const setMode = (mode) => {
+            this.newTabMode = mode;
+            modeToggle.querySelectorAll('.new-tab-mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+            if (newTabPage) {
+                newTabPage.classList.toggle('ask-mode', mode === 'ask');
+            }
+            if (mode === 'search') {
+                input.placeholder = 'Search or Enter URL...';
+                searchWrapper?.classList.remove('hidden');
+                suggestionsContainer.classList.remove('hidden');
+                searchWrapper?.classList.remove('ask-chat');
+                askMessages?.classList.add('hidden');
+                // Refresh suggestions based on current query so they slide back in
+                this.updateNewTabSuggestions(input.value.trim());
+                input.focus();
+            } else {
+                input.placeholder = 'Ask AI a question...';
+                searchWrapper?.classList.remove('hidden');
+                suggestionsContainer.classList.add('hidden');
+                // Keep chat collapsed until the first Ask message is sent
+                searchWrapper?.classList.remove('ask-chat');
+                askMessages?.classList.add('hidden');
+                input.focus();
+            }
+        };
+
+        modeToggle.querySelectorAll('.new-tab-mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.mode;
+                if (mode && mode !== this.newTabMode) {
+                    setMode(mode);
+                }
+            });
+        });
+
+        const throttledUpdate = this.throttle((value) => {
+            this.updateNewTabSuggestions(value);
+            this.spotlightSelectedIndex = -1;
+        }, 50);
+
+        input.addEventListener('input', (e) => throttledUpdate(e.target.value.trim()));
+        input.addEventListener('keydown', (e) => {
+            // Prevent Tab from causing any layout/focus changes on the New Tab page.
+            // We don't insert a tab character; we simply ignore the key.
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (this.newTabMode === 'ask') {
+                    this.sendNewTabAskMessage();
+                } else {
+                    const items = suggestionsContainer.querySelectorAll('.spotlight-suggestion-item');
+                    if (this.spotlightSelectedIndex >= 0 && items[this.spotlightSelectedIndex]) {
+                        items[this.spotlightSelectedIndex].click();
+                    } else {
+                        this.performSpotlightSearch();
+                    }
+                }
+            } else if (e.key === 'Escape') {
+                input.blur();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.navigateNewTabSuggestions(1, suggestionsContainer);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.navigateNewTabSuggestions(-1, suggestionsContainer);
+            }
+        });
+    }
+
+    navigateNewTabSuggestions(direction, container) {
+        const items = container?.querySelectorAll('.spotlight-suggestion-item');
+        if (!items?.length) return;
+        this.spotlightSelectedIndex = Math.max(-1, Math.min(this.spotlightSelectedIndex + direction, items.length - 1));
+        items.forEach((el, i) => el.classList.toggle('active', i === this.spotlightSelectedIndex));
+    }
+
+    async updateNewTabSuggestions(query) {
+        const container = document.getElementById('new-tab-suggestions');
+        if (!container) return;
+
+        // Do not show suggestions while in Ask mode
+        if (this.newTabMode === 'ask') {
+            container.innerHTML = '';
+            container.classList.remove('loading', 'new-tab-suggestions-closing');
+            this.spotlightSelectedIndex = -1;
+            return;
+        }
+
+        if (query.trim().length < 1) {
+            if (this._newTabSuggestionsCloseTimer) {
+                clearTimeout(this._newTabSuggestionsCloseTimer);
+                this._newTabSuggestionsCloseTimer = null;
+            }
+            if (container.children.length > 0) {
+                container.classList.add('new-tab-suggestions-closing');
+                this._newTabSuggestionsCloseTimer = setTimeout(() => {
+                    container.innerHTML = '';
+                    container.classList.remove('new-tab-suggestions-closing', 'loading');
+                    this.spotlightSelectedIndex = -1;
+                    this._newTabSuggestionsCloseTimer = null;
+                }, 320);
+            } else {
+                container.innerHTML = '';
+                container.classList.remove('loading');
+                this.spotlightSelectedIndex = -1;
+            }
+            return;
+        }
+        if (this._newTabSuggestionsCloseTimer) {
+            clearTimeout(this._newTabSuggestionsCloseTimer);
+            this._newTabSuggestionsCloseTimer = null;
+        }
+        container.classList.remove('new-tab-suggestions-closing');
+        container.classList.add('loading');
+        const suggestions = await this.generateAdvancedSuggestions(query);
+        this.updateNewTabSuggestionsContent(container, suggestions);
+    }
+
+    updateNewTabSuggestionsContent(container, suggestions) {
+        container.classList.remove('loading', 'new-tab-suggestions-closing');
+        container.innerHTML = '';
+        this.spotlightSelectedIndex = -1;
+
+        if (!suggestions || suggestions.length === 0) {
+            return;
+        }
+
+        let visible = suggestions.slice(0, 6);
+
+        const selectedEngine = this.selectedSearchEngine;
+        visible.forEach((s, i) => {
+            const el = document.createElement('div');
+            el.className = 'spotlight-suggestion-item';
+            el.setAttribute('data-index', i);
+            let faviconUrl = null;
+            if (s.isTab && s.tabId) {
+                const tab = this.tabs.get(s.tabId);
+                faviconUrl = tab?.favicon || (tab?.url ? this.getFaviconUrl(tab.url) : null);
+            } else if (s.url || s.isHistory || s.isUrl) {
+                faviconUrl = this.getFaviconUrl(s.url);
+            }
+            const iconHtml = faviconUrl
+                ? `<img src="${this.escapeHtml(faviconUrl)}" alt="" class="spotlight-favicon" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />`
+                : '';
+            const fallbackIconHtml = faviconUrl ? `<i class="${this.escapeHtml(s.icon)}" style="display:none;"></i>` : `<i class="${this.escapeHtml(s.icon)}"></i>`;
+            el.innerHTML = `
+                <div class="spotlight-suggestion-icon">${iconHtml}${fallbackIconHtml}</div>
+                <div class="spotlight-suggestion-text">${this.escapeHtml(s.text)}</div>
+                ${(s.isTab && s.tabId) ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
+            `;
+            el.addEventListener('click', () => this.performSuggestionAction(s, selectedEngine, true));
+            container.appendChild(el);
+        });
+    }
+
+    async sendNewTabAskMessage() {
+        if (this.newTabMode !== 'ask') return;
+
+        const input = document.getElementById('new-tab-input');
+        const messagesContainer = document.getElementById('new-tab-ask-messages');
+        const wrapper = document.getElementById('new-tab-search-wrapper');
+        if (!input || !messagesContainer || !wrapper) return;
+
+        const text = input.value.trim();
+        if (!text) return;
+
+        input.value = '';
+
+        // Turn the search wrapper into a chat container for this new tab
+        wrapper.classList.add('ask-chat');
+        messagesContainer.classList.remove('hidden');
+
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const userDiv = document.createElement('div');
+        userDiv.className = 'new-tab-ask-message user';
+        userDiv.innerHTML = `
+            <div class="new-tab-ask-bubble">${this.escapeHtml(text)}</div>
+            <div class="new-tab-ask-time">${this.escapeHtml(time)}</div>
+        `;
+        messagesContainer.appendChild(userDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        const loadingId = Date.now();
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'new-tab-ask-message assistant';
+        loadingDiv.dataset.messageId = String(loadingId);
+        loadingDiv.innerHTML = `
+            <div class="new-tab-ask-bubble">Thinking...</div>
+            <div class="new-tab-ask-time">${this.escapeHtml(time)}</div>
+        `;
+        messagesContainer.appendChild(loadingDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        try {
+            const response = await this.getChatAIResponse(text);
+            const updated = messagesContainer.querySelector(
+                ".new-tab-ask-message.assistant[data-message-id=\"" + loadingId + "\"]"
+            );
+            if (updated) {
+                const respTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                updated.innerHTML = `
+                    <div class="new-tab-ask-bubble">${this.escapeHtml(response)}</div>
+                    <div class="new-tab-ask-time">${this.escapeHtml(respTime)}</div>
+                `;
+            }
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        } catch (error) {
+            const updated = messagesContainer.querySelector(
+                ".new-tab-ask-message.assistant[data-message-id=\"" + loadingId + "\"]"
+            );
+            if (updated) {
+                const errTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const message = 'Error: ' + (error && error.message ? error.message : 'Something went wrong');
+                updated.innerHTML = `
+                    <div class="new-tab-ask-bubble">${this.escapeHtml(message)}</div>
+                    <div class="new-tab-ask-time">${this.escapeHtml(errTime)}</div>
+                `;
+            }
+        }
+    }
+
+    performSuggestionAction(suggestion, selectedEngine, isNewTabPage) {
+        if (suggestion.isTab) {
+            if (suggestion.tabId) {
+                this.switchToTab(suggestion.tabId);
+            } else if (suggestion.isPlaceholder) {
+                this.createNewTab();
+            }
+        } else if (suggestion.isAction) {
+            if (suggestion.text === 'New Tab') {
+                if (isNewTabPage) {
+                    document.getElementById('new-tab-input')?.focus();
+                } else {
+                    this.createNewTab();
+                }
+            } else if (suggestion.text === 'New Incognito Tab') {
+                this.createIncognitoTab();
+            } else if (suggestion.text === 'Open Settings') {
+                this.toggleSettings();
+            } else if (suggestion.text === 'New Note') {
+                this.openNoteAsTab();
+            }
+        } else if (suggestion.isNote && suggestion.noteId) {
+            this.openNoteAsTab(suggestion.noteId);
+        } else if (suggestion.isSearch) {
+            const url = this.getSearchUrl(suggestion.searchQuery, selectedEngine);
+            isNewTabPage ? this.navigate(url) : this.createNewTab(url);
+        } else if (suggestion.isHistory) {
+            const url = selectedEngine ? this.getSearchUrl(suggestion.text || suggestion.url, selectedEngine) : suggestion.url;
+            isNewTabPage ? this.navigate(url) : this.createNewTab(url);
+        } else if (suggestion.isCompletion) {
+            const url = this.getSearchUrl(suggestion.searchQuery, selectedEngine);
+            isNewTabPage ? this.navigate(url) : this.createNewTab(url);
+        } else if (suggestion.isUrl) {
+            const url = selectedEngine ? this.getSearchUrl(suggestion.text || suggestion.url, selectedEngine) : suggestion.url;
+            isNewTabPage ? this.navigate(url) : this.createNewTab(url);
+        } else {
+            const input = document.getElementById('new-tab-input');
+            if (input) input.value = suggestion.text;
+        }
+    }
+
+    updateNewTabPageVisibility(show) {
+        const newTabPage = document.getElementById('new-tab-page');
+        const urlBar = this.elements.webviewUrlBar;
+        if (newTabPage) {
+            if (show) {
+                newTabPage.classList.remove('hidden');
+                this.updateNewTabSuggestions('');
+                requestAnimationFrame(() => {
+                    document.getElementById('new-tab-input')?.focus();
+                });
+            } else {
+                newTabPage.classList.add('hidden');
+                // Restore webview interactivity (was pointer-events: none for overlay)
+                if (this.currentTab) {
+                    const tab = this.tabs.get(this.currentTab);
+                    if (tab?.webview) {
+                        tab.webview.style.pointerEvents = 'auto';
+                        tab.webview.style.zIndex = '2';
+                        this.elements.webview = tab.webview;
+                        this.updateUrlBar(tab.webview);
+                        this.updateNavigationButtons();
+                    }
+                }
+            }
+        }
+        if (urlBar) {
+            if (show) {
+                // When the new tab page is open, keep the URL bar visible
+                // but force it to use the app's dark theme so it doesn't flash white.
+                urlBar.classList.remove('hidden');
+                this.applyAppThemeToUrlBar();
+            } else {
+                urlBar.classList.remove('hidden');
+            }
+        }
+    }
+
     updateEmptyState() {
         const emptyState = document.getElementById('empty-state');
         if (!emptyState) return;
@@ -3789,7 +3916,7 @@ class AxisBrowser {
         const emptyContent = document.getElementById('empty-state-empty');
         
         if (this.tabs.size === 0 || this.currentTab === null) {
-            // Show empty state but keep content hidden (blank screen)
+            this.updateNewTabPageVisibility(false);
             emptyState.classList.remove('hidden');
             if (emptyContent) emptyContent.classList.add('hidden');
             
@@ -3797,6 +3924,11 @@ class AxisBrowser {
             const urlBar = this.elements?.webviewUrlBar;
             if (urlBar) {
                 urlBar.classList.add('hidden');
+            }
+
+            // When there are no tabs, keep the native window title as Axis Browser
+            if (window.electronAPI?.setWindowTitle) {
+                window.electronAPI.setWindowTitle('Axis Browser');
             }
             
             // Reapply theme to ensure background is visible when no tabs
@@ -4200,10 +4332,8 @@ class AxisBrowser {
             return;
         }
 
-        // Protect settings tabs - don't navigate away from settings
         const tab = this.tabs.get(this.currentTab);
         if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
-            // Don't navigate away from settings tab
             return;
         }
 
@@ -4214,10 +4344,22 @@ class AxisBrowser {
             return;
         }
 
+        const isNewTabUrl = sanitizedUrl === this.NEWTAB_URL;
+
         // Load URL in active webview
         const webview = this.getActiveWebview();
         if (webview) {
             webview.src = sanitizedUrl;
+
+            // Ensure the webview is fully interactive for real pages
+            if (!isNewTabUrl) {
+                webview.style.opacity = '1';
+                webview.style.visibility = 'visible';
+                webview.style.pointerEvents = 'auto';
+                webview.style.zIndex = '2';
+                this.elements.webview = webview;
+                this.updateNewTabPageVisibility(false);
+            }
         }
 
         // Update tab data and add to history
@@ -4238,9 +4380,11 @@ class AxisBrowser {
             }
             
             tab.url = url;
+            this.tabs.set(this.currentTab, tab);
         }
-        
-        // Update navigation buttons
+        if (url !== this.NEWTAB_URL) {
+            this.updateNewTabPageVisibility(false);
+        }
         this.updateNavigationButtons();
     }
 
@@ -4320,8 +4464,6 @@ class AxisBrowser {
         const webview = this.getActiveWebview();
         if (!webview) return;
         
-        // If webview is currently loading, stop it smoothly.
-        // We rely on did-stop-loading / did-finish-load events to update UI
         if (this.isWebviewLoading) {
             try {
                 webview.stop();
@@ -4330,8 +4472,31 @@ class AxisBrowser {
             }
             return;
         }
-
-        // Otherwise, start a normal reload
+        
+        // Ensure current tab's webview is visible (fixes stuck grey when URL is correct but not painting)
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        const tabHasRealUrl = tab && tab.url && tab.url !== 'about:blank' && tab.url !== this.NEWTAB_URL && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://');
+        if (tabHasRealUrl) {
+            webview.style.opacity = '1';
+            webview.style.visibility = 'visible';
+            webview.style.pointerEvents = 'auto';
+            webview.style.zIndex = '2';
+            webview.classList.remove('inactive');
+            this.updateNewTabPageVisibility(false);
+            let currentUrl = '';
+            try {
+                currentUrl = webview.getURL() || '';
+            } catch (e) {}
+            const isBlank = !currentUrl || currentUrl === 'about:blank';
+            if (isBlank) {
+                const sanitized = this.sanitizeUrl(tab.url);
+                if (sanitized) {
+                    webview.src = sanitized;
+                    return;
+                }
+            }
+        }
+        
         webview.reload();
     }
     
@@ -4391,11 +4556,6 @@ class AxisBrowser {
         }
     }
 
-    summarizeUrlBar() {
-        // Old URL bar removed - function kept for compatibility but does nothing
-        return;
-    }
-
     /**
      * Safely determine whether a URL belongs to a given registrable domain.
      *
@@ -4428,14 +4588,14 @@ class AxisBrowser {
         return hostname.endsWith(`.${domain}`);
     }
 
-    toggleUrlBarExpansion() {
-        // Old URL bar removed - function kept for compatibility but does nothing
-        return;
-    }
-
     updateTabTitle() {
         const webview = this.elements?.webview;
-        if (!webview) return;
+        if (!webview) {
+            if (window.electronAPI?.setWindowTitle) {
+                window.electronAPI.setWindowTitle('Axis Browser');
+            }
+            return;
+        }
         
         // Check if tab has a custom title (user-renamed)
         const tab = this.tabs.get(this.currentTab);
@@ -4481,82 +4641,26 @@ class AxisBrowser {
         // Also refresh favicon on title change as sites often inject icons late
         const activeTabEl = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
         if (activeTabEl) this.updateTabFavicon(this.currentTab, activeTabEl);
+
+        // Update native window title so macOS Dock shows the active tab name
+        if (window.electronAPI?.setWindowTitle) {
+            const windowTitle = title && title !== 'New Tab' ? title : 'Axis Browser';
+            window.electronAPI.setWindowTitle(windowTitle);
+        }
     }
 
     toggleSettings() {
-        // Open settings as a tab instead of a panel
-        this.openSettingsAsTab();
+        // Open native settings window
+        if (window.electronAPI?.openSettingsWindow) {
+            window.electronAPI.openSettingsWindow();
+        }
     }
 
     async openSettingsAsTab() {
-        // Check if settings tab already exists
-        let settingsTabId = null;
-        for (const [tabId, tab] of this.tabs.entries()) {
-            if (tab.url === 'axis://settings') {
-                settingsTabId = tabId;
-                break;
-            }
+        // Open native settings window instead of tab
+        if (window.electronAPI?.openSettingsWindow) {
+            window.electronAPI.openSettingsWindow();
         }
-
-        if (settingsTabId) {
-            // Switch to existing settings tab
-            this.switchToTab(settingsTabId);
-            return;
-        }
-
-        // Create a new tab for settings
-        const tabId = Date.now();
-        const settingsUrl = 'axis://settings';
-        
-        // Create tab element
-        const tabElement = document.createElement('div');
-        tabElement.className = 'tab';
-        tabElement.dataset.tabId = tabId;
-        
-        tabElement.innerHTML = `
-            <div class="tab-content">
-                <div class="tab-left">
-                    <i class="fas fa-cog tab-settings-icon"></i>
-                    <span class="tab-title">Settings</span>
-                </div>
-                <div class="tab-right">
-                    <button class="tab-close"><i class="fas fa-times"></i></button>
-                </div>
-            </div>
-        `;
-
-        const tabsContainer = this.elements.tabsContainer;
-        const separator = this.elements.tabsSeparator;
-        const tabData = {
-            id: tabId,
-            url: settingsUrl,
-            title: 'Settings',
-            canGoBack: false,
-            canGoForward: false,
-            history: [settingsUrl],
-            historyIndex: 0,
-            pinned: false,
-            isSettings: true
-        };
-        
-        this.tabs.set(tabId, tabData);
-        
-        // Insert tab below separator
-        if (separator && separator.parentNode === tabsContainer) {
-            tabsContainer.insertBefore(tabElement, separator.nextSibling);
-        } else {
-            tabsContainer.appendChild(tabElement);
-        }
-
-        // Set up tab event listeners
-        this.setupTabEventListeners(tabElement, tabId);
-
-        // Switch to new tab
-        this.switchToTab(tabId);
-        this.updateEmptyState();
-        
-        // Load settings content
-        this.loadSettingsInWebview();
     }
 
     async loadSettingsInWebview() {
@@ -5494,6 +5598,8 @@ class AxisBrowser {
                                 <option value="google" ${searchEngine === 'google' ? 'selected' : ''}>Google</option>
                                 <option value="bing" ${searchEngine === 'bing' ? 'selected' : ''}>Bing</option>
                                 <option value="duckduckgo" ${searchEngine === 'duckduckgo' ? 'selected' : ''}>DuckDuckGo</option>
+                                <option value="yahoo" ${searchEngine === 'yahoo' ? 'selected' : ''}>Yahoo</option>
+                                <option value="yandex" ${searchEngine === 'yandex' ? 'selected' : ''}>Yandex</option>
                             </select>
                         </div>
                     </div>
@@ -6530,9 +6636,10 @@ class AxisBrowser {
         
         this.tabs.set(tabId, tabData);
         
-        // Insert tab below separator
+        // Insert tab below separator, after "+ New Tab" button
         if (separator && separator.parentNode === tabsContainer) {
-            tabsContainer.insertBefore(tabElement, separator.nextSibling);
+            const unpinnedRef = this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn.nextSibling : separator.nextSibling;
+            tabsContainer.insertBefore(tabElement, unpinnedRef);
         } else {
             tabsContainer.appendChild(tabElement);
         }
@@ -6566,10 +6673,7 @@ class AxisBrowser {
                 const { key, value } = event.data;
                 // Save to persistent storage
                 await window.electronAPI.setSetting(key, value);
-                // Update local cache immediately
                 this.settings[key] = value;
-                console.log(`✓ Setting saved: ${key} = ${value}`);
-                
                 // Apply setting changes immediately
                 if (key === 'sidebarPosition') {
                     this.applySidebarPosition();
@@ -7878,6 +7982,7 @@ class AxisBrowser {
     }
 
     togglePinTab(tabId, tabElement, pinBtn) {
+        if (this.isIncognitoWindow) return;
         const tab = this.tabs.get(tabId);
         if (!tab) return;
         
@@ -7974,10 +8079,11 @@ class AxisBrowser {
             separator.style.display = 'none';
         }
         
-        // Insert unpinned tabs below separator (in order)
+        // Insert unpinned tabs below separator, after "+ New Tab" button (in order)
+        const unpinnedRef = this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn.nextSibling : separator.nextSibling;
         unpinnedTabs.forEach(tab => {
-            if (separator.nextSibling) {
-                tabsContainer.insertBefore(tab, separator.nextSibling);
+            if (unpinnedRef) {
+                tabsContainer.insertBefore(tab, unpinnedRef);
             } else {
                 tabsContainer.appendChild(tab);
             }
@@ -8234,15 +8340,11 @@ class AxisBrowser {
         return mainArea && mainArea.classList.contains('sidebar-right');
     }
 
-    // Nav menu removed - functionality moved to sidebar context menu
-
     setupSidebarSlideBack() {
         const hoverArea = document.getElementById('sidebar-hover-area');
         const sidebar = document.getElementById('sidebar');
         
         let slideBackTimeout;
-        
-        console.log('Setting up sidebar slide-back, hover area:', hoverArea);
         
         if (!hoverArea) {
             console.error('Hover area not found!');
@@ -8250,7 +8352,6 @@ class AxisBrowser {
         }
         
         hoverArea.addEventListener('mouseenter', () => {
-            console.log('Mouse entered hover area, sidebar hidden:', sidebar.classList.contains('hidden'));
             if (sidebar.classList.contains('hidden')) {
                 clearTimeout(slideBackTimeout);
                 sidebar.classList.add('slide-out');
@@ -8267,16 +8368,12 @@ class AxisBrowser {
                 if (sidebarBg) {
                     sidebar.style.background = sidebarBg;
                 }
-                
-                console.log('Sidebar slide-out triggered, classes:', sidebar.className);
             }
         });
         
-        // When mouse enters the sidebar, clear any pending slide-back
         sidebar.addEventListener('mouseenter', () => {
             if (sidebar.classList.contains('slide-out')) {
                 clearTimeout(slideBackTimeout);
-                console.log('Mouse entered sidebar, cleared slide-back timeout');
             }
         });
         
@@ -9003,10 +9100,10 @@ class AxisBrowser {
             if (contentArea) {
                 contentArea.classList.add('chat-open');
             }
-            // Focus input when opening
+            // Focus input after open animation finishes
             const chatInput = document.getElementById('ai-chat-input');
             if (chatInput) {
-                setTimeout(() => chatInput.focus(), 150);
+                setTimeout(() => chatInput.focus(), 420);
             }
         } else {
             chatPanel.classList.add('hidden');
@@ -9265,8 +9362,6 @@ class AxisBrowser {
         // Notifications disabled - do nothing
         return;
     }
-
-    // Removed setupSidebarResizing method
 
     showTabGroupColorPicker(callback) {
         const colorPicker = document.getElementById('tab-group-color-picker');
@@ -9620,10 +9715,11 @@ class AxisBrowser {
             const el = this.createTabGroupElement(tabGroup);
             tabsContainer.insertBefore(el, separator);
         });
+        const unpinnedRef = this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn.nextSibling : separator.nextSibling;
         unpinnedGroups.forEach(tabGroup => {
             const el = this.createTabGroupElement(tabGroup);
-            if (separator.nextSibling) {
-                tabsContainer.insertBefore(el, separator.nextSibling);
+            if (unpinnedRef) {
+                tabsContainer.insertBefore(el, unpinnedRef);
             } else {
                 tabsContainer.appendChild(el);
             }
@@ -10258,7 +10354,8 @@ class AxisBrowser {
             if (tab.pinned) {
                 tabsContainer.insertBefore(tabElement, separator);
             } else {
-                if (separator.nextSibling) tabsContainer.insertBefore(tabElement, separator.nextSibling);
+                const unpinnedRef = this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn.nextSibling : separator.nextSibling;
+                if (unpinnedRef) tabsContainer.insertBefore(tabElement, unpinnedRef);
                 else tabsContainer.appendChild(tabElement);
             }
             
@@ -10678,9 +10775,7 @@ class AxisBrowser {
             return;
         }
         
-        console.log('Setting up sidebar context menu');
         sidebar.addEventListener('contextmenu', (e) => {
-            console.log('Sidebar contextmenu event fired', e.target);
             
             // Only show menu if clicking on empty space (not on tabs, buttons, inputs, or resize handle)
             const target = e.target;
@@ -10693,18 +10788,7 @@ class AxisBrowser {
             const isResizeHandle = target.closest('#sidebar-resize-handle');
             const isContextMenu = target.closest('.context-menu');
             
-            console.log('Click checks:', {
-                target: target.tagName,
-                targetClasses: target.className,
-                isTab: !!isTab,
-                isTabGroup: !!isTabGroup,
-                isButton: !!isButton,
-                isInput: !!isInput,
-                isResizeHandle: !!isResizeHandle,
-                isContextMenu: !!isContextMenu
-            });
-            
-            // IMPORTANT: If clicking on a tab group, don't interfere - let tab group handler process it
+            // If clicking on a tab group, don't interfere - let tab group handler process it
             if (isTabGroup) {
                 // Don't prevent default or stop propagation - let tab group handler run
                 return;
@@ -10715,10 +10799,7 @@ class AxisBrowser {
             if (!isTab && !isButton && !isInput && !isResizeHandle && !isContextMenu) {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log('✓ Showing sidebar context menu');
                 this.showSidebarContextMenu(e);
-            } else {
-                console.log('✗ Blocked sidebar context menu');
             }
         }, true); // Use capture phase to catch it early
     }
@@ -10736,7 +10817,8 @@ class AxisBrowser {
         const tabInfo = {
             isPinned: tab?.pinned || false,
             isMuted: tab?.isMuted || false,
-            tabGroups: tabGroupsList
+            tabGroups: tabGroupsList,
+            isIncognito: this.isIncognitoWindow
         };
         this.contextMenuTabId = tabId;
         await window.electronAPI.showTabContextMenu(e.clientX, e.clientY, tabInfo);
@@ -10803,9 +10885,7 @@ class AxisBrowser {
                 this.showToast('Cannot duplicate: No valid URL');
                 return;
             }
-            
-            console.log('Duplicating tab with URL:', urlToDuplicate);
-            
+
             // Create a new tab with the URL
             const newTabId = this.createNewTab(urlToDuplicate);
             
@@ -10857,6 +10937,30 @@ class AxisBrowser {
     hideSidebarContextMenu() {
         // Native OS context menu closes automatically, no action needed
         // This function is kept for compatibility with existing code
+    }
+
+    toggleSidebarPlusMenu() {
+        const menu = this.elements?.sidebarPlusMenu;
+        if (!menu) return;
+        if (menu.classList.contains('hidden')) {
+            this.showSidebarPlusMenu();
+        } else {
+            this.hideSidebarPlusMenu();
+        }
+    }
+
+    showSidebarPlusMenu() {
+        const btn = this.elements?.sidebarPlusBtn;
+        const menu = this.elements?.sidebarPlusMenu;
+        if (!btn || !menu) return;
+        menu.classList.remove('hidden');
+        const rect = btn.getBoundingClientRect();
+        menu.style.left = `${rect.left}px`;
+        menu.style.top = `${rect.top - menu.offsetHeight - 4}px`;
+    }
+
+    hideSidebarPlusMenu() {
+        this.elements?.sidebarPlusMenu?.classList.add('hidden');
     }
 
     toggleSearch() {
@@ -10977,7 +11081,7 @@ class AxisBrowser {
                     selection.addRange(range);
                 }
             } catch (e) {
-                console.log('Select all failed:', e);
+                // Select all failed
             }
         `);
     }
@@ -11107,6 +11211,7 @@ class AxisBrowser {
     }
 
     async getHistory() {
+        if (this.isIncognitoWindow) return [];
         try {
             const history = await window.electronAPI.getHistory();
             return history.map(item => ({
@@ -12635,16 +12740,17 @@ class AxisBrowser {
 
                 const insertAt = Math.max(0, Math.min(currentTarget, remaining.length));
 
-                // Virtual slot: drop into empty unpinned section (e.g. only pinned tab moved below separator)
+                // Virtual slot: drop into empty unpinned section (after separator / "+ New Tab" button)
                 const sep = container.id === 'tabs-container' ? this.elements.tabsSeparator : container.querySelector('.tabs-separator');
-                if (drag.hasUnpinnedSlot && currentTarget === drag.siblings.length && sep) {
-                    sep.insertAdjacentElement('afterend', element);
+                const unpinnedAnchor = container.id === 'tabs-container' && this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn : sep;
+                if (drag.hasUnpinnedSlot && currentTarget === drag.siblings.length && unpinnedAnchor) {
+                    unpinnedAnchor.insertAdjacentElement('afterend', element);
                 } else if (insertAt >= remaining.length) {
                     const last = remaining[remaining.length - 1];
                     if (last) {
                         last.insertAdjacentElement('afterend', element);
-                    } else if (sep) {
-                        sep.insertAdjacentElement('afterend', element);
+                    } else if (unpinnedAnchor) {
+                        unpinnedAnchor.insertAdjacentElement('afterend', element);
                     } else {
                         container.appendChild(element);
                     }
@@ -13097,6 +13203,7 @@ class AxisBrowser {
     }
 
     async trackPageInHistory() {
+        if (this.isIncognitoWindow) return;
         try {
             const webview = this.getActiveWebview();
             if (!webview) return;
@@ -13294,12 +13401,6 @@ class AxisBrowser {
             this.hideFilePreview();
         }
         
-        // Close spotlight search
-        const spotlightSearch = document.getElementById('spotlight-search');
-        if (spotlightSearch && !spotlightSearch.classList.contains('hidden')) {
-            this.closeSpotlightSearch();
-        }
-        
         // Close color picker
         const colorPicker = document.getElementById('tab-group-color-picker');
         if (colorPicker && !colorPicker.classList.contains('hidden')) {
@@ -13343,57 +13444,11 @@ class AxisBrowser {
     }
 
     showSpotlightSearch() {
-        const spotlightSearch = document.getElementById('spotlight-search');
-        const suggestionsContainer = document.getElementById('spotlight-suggestions');
-        
-        if (suggestionsContainer) {
-            suggestionsContainer.style.maxHeight = '280px';
-            suggestionsContainer.style.padding = '6px 6px';
-        }
-        
-        // Remove hidden class - appears instantly
-        spotlightSearch.classList.remove('hidden');
-        
-        // Immediately show default suggestions (2 tabs + 3 search/history)
-        this.updateSpotlightSuggestions('');
-        
-        // Focus the input immediately
-        requestAnimationFrame(() => {
-            const input = document.getElementById('spotlight-input');
-            if (input && typeof input.focus === 'function') {
-                try {
-                    input.focus();
-                } catch (e) {
-                    // Ignore focus errors (element might not be focusable)
-                }
-            }
-        });
+        this.createNewTab();
     }
 
     closeSpotlightSearch() {
-        const spotlightSearch = document.getElementById('spotlight-search');
-        const suggestionsContainer = document.getElementById('spotlight-suggestions');
-
-        // Clear input and suggestions immediately
-        const spotlightInput = document.getElementById('spotlight-input');
-        
-        if (spotlightInput) {
-            spotlightInput.value = '';
-        }
-        
-        if (suggestionsContainer) {
-            suggestionsContainer.classList.remove('show', 'loading');
-            suggestionsContainer.classList.remove('hiding');
-            suggestionsContainer.style.maxHeight = '';
-            suggestionsContainer.style.padding = '';
-        }
-
-        // Hide instantly
-        spotlightSearch.classList.add('hidden');
-        
-        this.spotlightSelectedIndex = -1; // Reset selection
-        // Clear search engine selection
-        this.clearSpotlightSearchEngine();
+        // No-op: spotlight replaced by new tab page
     }
 
     navigateSuggestions(direction) {
@@ -13431,225 +13486,38 @@ class AxisBrowser {
     }
 
     performSpotlightSearch() {
-        const input = document.getElementById('spotlight-input');
-        const query = input.value.trim();
-        
+        const input = document.getElementById('new-tab-input') || document.getElementById('spotlight-input');
+        const query = input?.value?.trim();
+
         if (query) {
-            // Save selected search engine before closing (which clears it)
             const selectedEngine = this.selectedSearchEngine;
-            
-            // Close spotlight first
-            this.closeSpotlightSearch();
-            
-            // Track recent search
-            if (!this.settings.recentSearches) {
-                this.settings.recentSearches = [];
-            }
-            
-            // Add to recent searches (avoid duplicates)
+            if (!this.settings.recentSearches) this.settings.recentSearches = [];
             if (!this.settings.recentSearches.includes(query)) {
                 this.settings.recentSearches.unshift(query);
-                // Keep only last 10 searches
                 this.settings.recentSearches = this.settings.recentSearches.slice(0, 10);
                 this.saveSetting('recentSearches', this.settings.recentSearches);
             }
-            
+
             // Check for special axis:// URLs first
             if (query.toLowerCase() === 'axis://settings') {
                 this.toggleSettings();
                 return;
             }
             
-            // Determine if it's a URL or search query
             let searchUrl;
             if (this.isValidUrl(query)) {
                 searchUrl = query.startsWith('http') ? query : `https://${query}`;
             } else {
-                // Use selected search engine if available
                 searchUrl = this.getSearchUrl(query, selectedEngine);
             }
-            
-            // Create a new tab and navigate to the search URL
-            this.createNewTab(searchUrl);
-        }
-    }
 
-    async updateSpotlightSuggestions(query) {
-        const suggestionsContainer = document.getElementById('spotlight-suggestions');
-        if (!suggestionsContainer) return;
-        
-        // Always show exactly 5 suggestions
-        const suggestions = query.length < 1 ? this.getDefaultSuggestions() : await this.generateAdvancedSuggestions(query);
-        
-        // Always show suggestions container when spotlight is open (always 5 suggestions)
-            suggestionsContainer.classList.remove('hiding');
-            
-            if (query.length > 0) {
-                suggestionsContainer.classList.add('loading', 'show');
-                this.updateSuggestionsContent(suggestionsContainer, suggestions);
+            const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+            const onNewTabPage = tab && tab.url === this.NEWTAB_URL;
+            if (onNewTabPage) {
+                this.navigate(searchUrl);
             } else {
-                suggestionsContainer.classList.add('show');
-                this.updateSuggestionsContent(suggestionsContainer, suggestions);
+                this.createNewTab(searchUrl);
             }
-    }
-
-    updateSuggestionsContent(suggestionsContainer, suggestions) {
-        // Remove loading state
-        suggestionsContainer.classList.remove('loading');
-        
-        // Clear existing content
-        suggestionsContainer.innerHTML = '';
-        
-        // Reset selection when suggestions update
-        this.spotlightSelectedIndex = -1;
-        
-        // Always show exactly 5 suggestions - pad with defaults if needed
-        let visibleSuggestions = suggestions.slice(0, 5);
-        
-        // If we have fewer than 5, fill with default suggestions
-        if (visibleSuggestions.length < 5) {
-            const defaultSuggestions = this.getDefaultSuggestions();
-            const needed = 5 - visibleSuggestions.length;
-            
-            // Get unique suggestions that aren't already in the list
-            const existingTexts = new Set(visibleSuggestions.map(s => s.text));
-            const additional = defaultSuggestions
-                .filter(s => !existingTexts.has(s.text))
-                .slice(0, needed);
-            
-            visibleSuggestions = [...visibleSuggestions, ...additional];
-            
-            // If still not 5, add placeholder actions
-            if (visibleSuggestions.length < 5) {
-                const placeholders = [
-                    { text: 'New Tab', icon: 'fas fa-plus', isAction: true },
-                    { text: 'New Incognito Tab', icon: 'fas fa-mask', isAction: true },
-                    { text: 'Open Settings', icon: 'fas fa-cog', isAction: true },
-                    { text: 'New Note', icon: 'fas fa-sticky-note', isAction: true }
-                ];
-                
-                placeholders.forEach(placeholder => {
-                    if (visibleSuggestions.length < 5 && !existingTexts.has(placeholder.text)) {
-                        visibleSuggestions.push(placeholder);
-                    }
-                });
-            }
-        }
-        
-        // Ensure exactly 5
-        visibleSuggestions = visibleSuggestions.slice(0, 5);
-        
-        // Add new suggestions without resetting animations
-        visibleSuggestions.forEach((suggestion, index) => {
-            const suggestionEl = document.createElement('div');
-            suggestionEl.className = 'spotlight-suggestion-item';
-            suggestionEl.setAttribute('data-index', index);
-            
-            // Determine if we should show a favicon or icon
-            let faviconUrl = null;
-            if (suggestion.isTab && suggestion.tabId) {
-                // For tabs, use the cached favicon if available
-                const tab = this.tabs.get(suggestion.tabId);
-                if (tab && tab.favicon) {
-                    faviconUrl = tab.favicon;
-                } else if (tab && tab.url) {
-                    faviconUrl = this.getFaviconUrl(tab.url);
-                }
-            } else if (suggestion.url || suggestion.isHistory || suggestion.isUrl) {
-                faviconUrl = this.getFaviconUrl(suggestion.url);
-            }
-            
-            const iconHtml = faviconUrl 
-                ? `<img src="${this.escapeHtml(faviconUrl)}" alt="" class="spotlight-favicon" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';" />`
-                : '';
-            const fallbackIconHtml = faviconUrl 
-                ? `<i class="${this.escapeHtml(suggestion.icon)}" style="display: none;"></i>`
-                : `<i class="${this.escapeHtml(suggestion.icon)}"></i>`;
-            
-            suggestionEl.innerHTML = `
-                <div class="spotlight-suggestion-icon">
-                    ${iconHtml}
-                    ${fallbackIconHtml}
-                </div>
-                <div class="spotlight-suggestion-text">${this.escapeHtml(suggestion.text)}</div>
-                ${(suggestion.isTab && suggestion.tabId) ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
-            `;
-            
-            suggestionEl.addEventListener('click', () => {
-                // Save selected search engine before closing (which clears it)
-                const selectedEngine = this.selectedSearchEngine;
-                
-                // Do not close spotlight preemptively; only close when navigating
-                if (suggestion.isTab) {
-                    if (suggestion.tabId) {
-                    this.closeSpotlightSearch();
-                    this.switchToTab(suggestion.tabId);
-                    } else if (suggestion.isPlaceholder) {
-                        // Placeholder tab - create a new tab
-                        this.closeSpotlightSearch();
-                        this.createNewTab();
-                    }
-                } else if (suggestion.isAction) {
-                    if (suggestion.text === 'New Tab') {
-                        // Open spotlight, do not create a tab
-                        this.showSpotlightSearch();
-                        const inputEl = document.getElementById('spotlight-input');
-                        if (inputEl) inputEl.focus();
-                        return;
-                    } else if (suggestion.text === 'New Incognito Tab') {
-                        this.closeSpotlightSearch();
-                        this.createIncognitoTab();
-                    } else if (suggestion.text === 'Open Settings') {
-                        this.closeSpotlightSearch();
-                        this.toggleSettings();
-                    } else if (suggestion.text === 'New Note') {
-                        this.closeSpotlightSearch();
-                        this.openNoteAsTab();
-                    }
-                } else if (suggestion.isNote && suggestion.noteId) {
-                    this.closeSpotlightSearch();
-                    this.openNoteAsTab(suggestion.noteId);
-                } else if (suggestion.isSearch) {
-                    this.closeSpotlightSearch();
-                    // Use selected search engine if available
-                    const searchUrl = this.getSearchUrl(suggestion.searchQuery, selectedEngine);
-                    this.createNewTab(searchUrl);
-                } else if (suggestion.isHistory) {
-                    this.closeSpotlightSearch();
-                    // If search engine is selected, search the history item on that engine
-                    if (selectedEngine) {
-                        const searchUrl = this.getSearchUrl(suggestion.text || suggestion.url, selectedEngine);
-                        this.createNewTab(searchUrl);
-                    } else {
-                    this.createNewTab(suggestion.url);
-                    }
-                } else if (suggestion.isCompletion) {
-                    this.closeSpotlightSearch();
-                    // Use selected search engine if available
-                    const searchUrl = this.getSearchUrl(suggestion.searchQuery, selectedEngine);
-                    this.createNewTab(searchUrl);
-                } else if (suggestion.isUrl) {
-                    this.closeSpotlightSearch();
-                    // If search engine is selected, search the URL text on that engine
-                    if (selectedEngine) {
-                        const searchUrl = this.getSearchUrl(suggestion.text || suggestion.url, selectedEngine);
-                        this.createNewTab(searchUrl);
-                    } else {
-                    this.createNewTab(suggestion.url);
-                    }
-                } else {
-                    // Default search behavior requires Enter; keep spotlight open
-                    const input = document.getElementById('spotlight-input');
-                    if (input) input.value = suggestion.text;
-                }
-            });
-            
-            suggestionsContainer.appendChild(suggestionEl);
-        });
-        
-        // Ensure show class is present (it should already be added by updateSpotlightSuggestions)
-        if (!suggestionsContainer.classList.contains('show')) {
-            suggestionsContainer.classList.add('show');
         }
     }
 
@@ -14729,6 +14597,8 @@ class AxisBrowser {
                 return `https://www.youtube.com/results?search_query=${encodedQuery}`;
             case 'yahoo':
                 return `https://search.yahoo.com/search?p=${encodedQuery}`;
+            case 'yandex':
+                return `https://yandex.com/search/?text=${encodedQuery}`;
             case 'wikipedia':
                 return `https://en.wikipedia.org/wiki/Special:Search?search=${encodedQuery}`;
             case 'reddit':
@@ -14762,6 +14632,7 @@ class AxisBrowser {
                 'bing': 'Bing',
                 'duckduckgo': 'DuckDuckGo',
                 'yahoo': 'Yahoo!',
+                'yandex': 'Yandex',
                 'wikipedia': 'Wikipedia',
                 'reddit': 'Reddit',
                 'github': 'GitHub',
@@ -14792,7 +14663,6 @@ class AxisBrowser {
         if (pill) {
             pill.classList.add('hidden');
         }
-        // Old URL bar removed - search engine functionality moved to new URL bar
         this.hideSearchEngineSuggestion();
     }
 
@@ -14811,6 +14681,7 @@ class AxisBrowser {
             'bing': 'Bing',
             'duckduckgo': 'DuckDuckGo',
             'yahoo': 'Yahoo!',
+            'yandex': 'Yandex',
             'wikipedia': 'Wikipedia',
             'reddit': 'Reddit',
             'github': 'GitHub',
@@ -14838,125 +14709,6 @@ class AxisBrowser {
         return this.searchEngineWords.some(engineWord => 
             engineWord.startsWith(word) && word.length > 0
         );
-    }
-
-    // Spotlight search engine methods
-    selectSpotlightSearchEngine(engine, spotlightInput) {
-        this.selectedSearchEngine = engine;
-        const pill = document.getElementById('spotlight-search-engine-pill');
-        const pillName = document.getElementById('spotlight-search-engine-name');
-        const spotlightContent = document.querySelector('.spotlight-content');
-        
-        if (pill && pillName) {
-            const displayNames = {
-                'google': 'Google',
-                'youtube': 'YouTube',
-                'bing': 'Bing',
-                'duckduckgo': 'DuckDuckGo',
-                'yahoo': 'Yahoo!',
-                'wikipedia': 'Wikipedia',
-                'reddit': 'Reddit',
-                'github': 'GitHub',
-                'amazon': 'Amazon',
-                'twitter': 'Twitter',
-                'instagram': 'Instagram',
-                'facebook': 'Facebook'
-            };
-            const displayName = displayNames[engine] || engine.charAt(0).toUpperCase() + engine.slice(1);
-            pillName.textContent = displayName;
-            
-            // Remove all engine-specific classes
-            pill.className = 'search-engine-pill';
-            // Add engine-specific class for color coding
-            pill.classList.add(`search-engine-${engine}`);
-            pill.classList.remove('hidden');
-            
-            // Update spotlight content border color
-            if (spotlightContent) {
-                // Remove all engine border classes
-                spotlightContent.classList.remove(
-                    'has-engine-youtube', 'has-engine-google', 'has-engine-bing',
-                    'has-engine-duckduckgo', 'has-engine-yahoo', 'has-engine-wikipedia',
-                    'has-engine-reddit', 'has-engine-github', 'has-engine-amazon',
-                    'has-engine-twitter', 'has-engine-instagram', 'has-engine-facebook'
-                );
-                // Add current engine border class
-                spotlightContent.classList.add(`has-engine-${engine}`);
-            }
-            
-            // Calculate dynamic padding based on pill width
-            requestAnimationFrame(() => {
-                const pillWidth = pill.offsetWidth;
-                const gap = 8; // Tight gap between pill and typing start
-                const leftOffset = 48; // Align with spotlight pill position (space from search icon)
-                spotlightInput.style.paddingLeft = `${leftOffset + pillWidth + gap}px`;
-            });
-            
-            spotlightInput.classList.add('has-search-engine');
-            spotlightInput.placeholder = 'Search...';
-        }
-    }
-
-    clearSpotlightSearchEngine() {
-        this.selectedSearchEngine = null;
-        const pill = document.getElementById('spotlight-search-engine-pill');
-        const spotlightInput = document.getElementById('spotlight-input');
-        const spotlightContent = document.querySelector('.spotlight-content');
-        
-        if (pill) {
-            pill.classList.add('hidden');
-        }
-        if (spotlightInput) {
-            spotlightInput.classList.remove('has-search-engine');
-            spotlightInput.style.paddingLeft = ''; // Reset to default
-            spotlightInput.placeholder = 'Search or Enter URL...';
-        }
-        
-        // Remove all engine border classes from spotlight content
-        if (spotlightContent) {
-            spotlightContent.classList.remove(
-                'has-engine-youtube', 'has-engine-google', 'has-engine-bing',
-                'has-engine-duckduckgo', 'has-engine-yahoo', 'has-engine-wikipedia',
-                'has-engine-reddit', 'has-engine-github', 'has-engine-amazon',
-                'has-engine-twitter', 'has-engine-instagram', 'has-engine-facebook'
-            );
-        }
-        
-        this.hideSpotlightSearchEngineSuggestion();
-    }
-
-    showSpotlightSearchEngineSuggestion(engine) {
-        const suggestion = document.getElementById('spotlight-search-engine-suggestion');
-        const suggestionText = document.getElementById('spotlight-search-engine-suggestion-text');
-        
-        if (!suggestion || !suggestionText) {
-            return;
-        }
-        
-        const displayNames = {
-            'google': 'Google',
-            'youtube': 'YouTube',
-            'bing': 'Bing',
-            'duckduckgo': 'DuckDuckGo',
-            'yahoo': 'Yahoo!',
-            'wikipedia': 'Wikipedia',
-            'reddit': 'Reddit',
-            'github': 'GitHub',
-            'amazon': 'Amazon',
-            'twitter': 'Twitter',
-            'instagram': 'Instagram',
-            'facebook': 'Facebook'
-        };
-        const displayName = displayNames[engine] || engine.charAt(0).toUpperCase() + engine.slice(1);
-        suggestionText.textContent = `Search ${displayName}!`;
-        suggestion.classList.remove('hidden');
-    }
-
-    hideSpotlightSearchEngineSuggestion() {
-        const suggestion = document.getElementById('spotlight-search-engine-suggestion');
-        if (suggestion) {
-            suggestion.classList.add('hidden');
-        }
     }
 
     sanitizeUrl(input) {
@@ -15345,6 +15097,19 @@ class AxisBrowser {
         const el = this.elements;
         if (!el || !el.webviewUrlBar) return;
         
+        // New tab page: show URL bar but hide action buttons (copy, security, chat)
+        const currentTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (currentTab && currentTab.url === this.NEWTAB_URL) {
+            el.webviewUrlBar.classList.remove('hidden');
+            el.webviewUrlBar.classList.add('new-tab-page');
+            this.applyAppThemeToUrlBar();
+            if (el.urlBarInput) el.urlBarInput.value = '';
+            if (el.urlBarDisplay) el.urlBarDisplay.textContent = '';
+            if (el.urlBarBack) el.urlBarBack.disabled = true;
+            if (el.urlBarForward) el.urlBarForward.disabled = true;
+            return;
+        }
+        
         // Get webview if not provided
         if (!webview && this.currentTab) {
             const tab = this.tabs.get(this.currentTab);
@@ -15356,6 +15121,7 @@ class AxisBrowser {
         // Hide URL bar if no webview or no current tab
         if (!webview || !this.currentTab || !this.tabs.has(this.currentTab)) {
             el.webviewUrlBar.classList.add('hidden');
+            el.webviewUrlBar.classList.remove('new-tab-page');
             return;
         }
         
@@ -15382,11 +15148,12 @@ class AxisBrowser {
         // Hide URL bar only for confirmed special pages
         if (isSpecialPage) {
             el.webviewUrlBar.classList.add('hidden');
+            el.webviewUrlBar.classList.remove('new-tab-page');
             return;
         }
         
         // Show URL bar for regular websites (including about:blank during loading)
-        el.webviewUrlBar.classList.remove('hidden');
+        el.webviewUrlBar.classList.remove('hidden', 'new-tab-page');
         
         // Update security icon based on URL
         if (el.urlBarSecurity) {
