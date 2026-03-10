@@ -36,24 +36,48 @@
                                 <i class="fas fa-chevron-down clear-arrow"></i>
                             </button>
                         </div>
-                        <!-- Unpinned tabs will be added below the separator -->
+                        <div id="incognito-indicator" class="incognito-indicator hidden">
+                            <i class="fas fa-mask incognito-indicator-icon"></i>
+                            <span class="incognito-indicator-text">Incognito</span>
+                        </div>
+                        <button type="button" id="sidebar-new-tab-btn" class="sidebar-new-tab-btn" title="New Tab" draggable="false">
+                            <span class="sidebar-new-tab-btn-inner">
+                                <i class="fas fa-plus sidebar-new-tab-btn-icon" aria-hidden="true"></i>
+                                <span class="sidebar-new-tab-btn-label">New Tab</span>
+                            </span>
+                        </button>
+                        <!-- Unpinned tabs will be added below -->
                     </div>
                 </div>
 
             <div class="sidebar-section sidebar-footer">
                 <div class="quick-actions">
-                    <!-- Top-left corner: Settings button -->
                     <div class="corner-button top-left">
-                        <button id="settings-btn-footer" class="nav-btn" title="Settings">
-                            <i class="fas fa-cog"></i>
-                        </button>
-                    </div>
-                    <!-- Top-right corner: Downloads button -->
-                    <div class="corner-button top-right">
                         <button id="downloads-btn-footer" class="nav-btn" title="Downloads">
                             <i class="fas fa-download"></i>
                         </button>
                     </div>
+                    <div class="corner-button top-right">
+                        <button id="sidebar-plus-btn" class="nav-btn" title="New tab or group">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Sidebar plus dropdown (New tab / New tab group / Incognito) -->
+            <div id="sidebar-plus-menu" class="context-menu hidden">
+                <div class="context-menu-item" id="sidebar-plus-new-tab">
+                    <i class="fas fa-plus"></i>
+                    <span>New Tab</span>
+                </div>
+                <div class="context-menu-item" id="sidebar-plus-new-tab-group">
+                    <i class="fas fa-layer-group"></i>
+                    <span>New Tab Group</span>
+                </div>
+                <div class="context-menu-item" id="sidebar-plus-incognito">
+                    <i class="fas fa-mask"></i>
+                    <span>New Incognito Tab</span>
                 </div>
             </div>
             
@@ -124,6 +148,23 @@
                                  autosize="true"
                                  style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; opacity: 0; visibility: hidden; background: transparent;">
                         </webview>
+                        <!-- New Tab Page (replaces spotlight - custom local page when opening new tab) -->
+                        <div id="new-tab-page" class="new-tab-page hidden">
+                            <div class="new-tab-page-content">
+                                <div class="new-tab-mode-toggle" id="new-tab-mode-toggle">
+                                    <button type="button" class="new-tab-mode-btn active" data-mode="search">Search</button>
+                                    <button type="button" class="new-tab-mode-btn" data-mode="ask">Ask</button>
+                                </div>
+                                <div class="new-tab-search-wrapper" id="new-tab-search-wrapper">
+                                    <div class="new-tab-search-bar">
+                                        <i class="fas fa-search new-tab-search-icon"></i>
+                                        <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search, ask, or @-mention a tab" autocomplete="off">
+                                    </div>
+                                    <div class="new-tab-suggestions" id="new-tab-suggestions"></div>
+                                    <div class="new-tab-ask-messages hidden" id="new-tab-ask-messages"></div>
+                                </div>
+                            </div>
+                        </div>
                         <!-- Empty State Welcome Message -->
                         <div id="empty-state" class="empty-state">
                             <div id="empty-state-empty" class="empty-state-content">
@@ -686,27 +727,6 @@
                             Security Settings
                         </button>
                     </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Spotlight Search -->
-        <div id="spotlight-search" class="spotlight-search hidden">
-            <div class="spotlight-backdrop"></div>
-            <div class="spotlight-content">
-                <div class="spotlight-input-container">
-                    <i class="fas fa-search spotlight-search-icon"></i>
-                    <input type="text" id="spotlight-input" placeholder="Search or Enter URL..." autocomplete="off">
-                    <div id="spotlight-search-engine-pill" class="search-engine-pill hidden">
-                        <span id="spotlight-search-engine-name"></span>
-                    </div>
-                    <div id="spotlight-search-engine-suggestion" class="search-engine-suggestion hidden">
-                        <span id="spotlight-search-engine-suggestion-text"></span>
-                        <span class="tab-hint">Tab</span>
-                    </div>
-                </div>
-                <div class="spotlight-suggestions" id="spotlight-suggestions">
-                    <!-- Suggestions will be populated here -->
                 </div>
             </div>
         </div>
