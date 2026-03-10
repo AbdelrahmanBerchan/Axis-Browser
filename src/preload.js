@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
+  sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
+  openSettingsWindow: (tab) => ipcRenderer.invoke('open-settings-window', tab),
+  openUrlInBrowser: (url) => ipcRenderer.invoke('open-url-in-browser', url),
   
   // History management
   getHistory: () => ipcRenderer.invoke('get-history'),
@@ -36,6 +39,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onCloseTab: (callback) => ipcRenderer.on('close-tab', callback),
   onRequestQuit: (callback) => ipcRenderer.on('request-quit', callback),
   onBrowserShortcut: (callback) => ipcRenderer.on('browser-shortcut', (event, action) => callback(action)),
+  onOpenUrlInBrowser: (callback) => ipcRenderer.on('open-url-in-browser', (event, url) => callback(url)),
+  onSettingsUpdated: (callback) => ipcRenderer.on('settings-updated', callback),
+  onSwitchSettingsTab: (callback) => ipcRenderer.on('switch-settings-tab', (event, tab) => callback(tab)),
   onOpenPopupUrl: (callback) => ipcRenderer.on('open-popup-url', (event, url) => callback(url)),
   confirmQuit: () => ipcRenderer.send('confirm-quit'),
   cancelQuit: () => ipcRenderer.send('cancel-quit'),
@@ -51,6 +57,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Window controls
   setWindowButtonVisibility: (visible) => ipcRenderer.invoke('set-window-button-visibility', visible),
+  setWindowTitle: (title) => ipcRenderer.invoke('set-window-title', title),
   
   // Keyboard shortcuts
   getShortcuts: () => ipcRenderer.invoke('get-shortcuts'),
