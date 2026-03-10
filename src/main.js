@@ -15,6 +15,7 @@ const notesStore = new Store({ name: 'notes' });
 
 // Keep a global reference of the window object
 let mainWindow;
+let settingsWindow = null;
 let isQuitConfirmed = false;
 let isUserQuitting = false;
 
@@ -174,7 +175,7 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'Axis',
+    title: 'Axis Browser',
     icon: path.join(__dirname, 'Axis_logo.png'),
     webPreferences: {
       nodeIntegration: false,
@@ -377,14 +378,88 @@ function createWindow() {
   createMenu();
 }
 
+function openSettingsWindow(tab = null) {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus();
+    if (tab) {
+      settingsWindow.webContents.send('switch-settings-tab', tab);
+    }
+    return;
+  }
+  const windowOptions = {
+    width: 680,
+    height: 520,
+    minWidth: 520,
+    minHeight: 400,
+    title: 'Settings',
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
+    }
+  };
+  if (process.platform === 'darwin') {
+    windowOptions.backgroundColor = '#f5f5f7';
+  }
+  settingsWindow = new BrowserWindow(windowOptions);
+  const settingsPath = path.join(__dirname, 'settings.html');
+  settingsWindow.loadFile(settingsPath, { hash: tab || '' });
+  settingsWindow.once('ready-to-show', () => {
+    settingsWindow.show();
+  });
+  settingsWindow.on('closed', () => {
+    settingsWindow = null;
+  });
+}
+
 function createMenu() {
   // Use current shortcuts so menu accelerators always match user settings
   const shortcuts = getShortcuts();
   const closeTabShortcut = shortcuts['close-tab'] || 'CmdOrCtrl+W';
+  const settingsShortcut = shortcuts['settings'] || 'CmdOrCtrl+,';
 
-  const template = [
-    {
-      label: 'File',
+  const template = [];
+
+  // Axis (app) menu - first on macOS for native feel
+  if (process.platform === 'darwin') {
+    const appName = app.name || 'Axis';
+    template.push({
+      label: appName,
+      submenu: [
+        { role: 'about', label: `About ${appName}` },
+        { type: 'separator' },
+        {
+          label: 'Settings...',
+          accelerator: settingsShortcut,
+          click: () => openSettingsWindow()
+        },
+        { type: 'separator' },
+        { role: 'services', submenu: [] },
+        { type: 'separator' },
+        { role: 'hide', label: `Hide ${appName}` },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        {
+          label: `Quit ${appName}`,
+          accelerator: 'Cmd+Q',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed() && showNativeQuitDialog()) {
+              isQuitConfirmed = true;
+              isUserQuitting = true;
+              app.quit();
+            } else if (!mainWindow || mainWindow.isDestroyed()) {
+              app.quit();
+            }
+          }
+        }
+      ]
+    });
+  }
+
+  template.push({
+    label: 'File',
       submenu: [
         {
           label: 'New Tab',
@@ -441,7 +516,11 @@ function createMenu() {
         { type: 'separator' },
         { role: 'cut' },
         { role: 'copy' },
-        { role: 'paste' }
+        { role: 'paste' },
+        ...(process.platform !== 'darwin' ? [
+          { type: 'separator' },
+          { label: 'Settings...', accelerator: settingsShortcut, click: () => openSettingsWindow() }
+        ] : [])
       ]
     },
     {
@@ -465,14 +544,94 @@ function createMenu() {
         { role: 'close' }
       ]
     }
-  ];
+  );
 
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 }
 
+function createIncognitoWindow() {
+  // Create a new session for incognito mode
+  const incognitoSession = session.fromPartition('incognito');
+  
+  const incognitoWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    title: 'Axis - Incognito',
+    icon: path.join(__dirname, 'Axis_logo.png'),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      enableRemoteModule: false,
+      webviewTag: true,
+      preload: path.join(__dirname, 'preload.js'),
+      backgroundThrottling: false,
+      offscreen: false,
+      experimentalFeatures: true,
+      enableBlinkFeatures: 'CSSColorSchemeUARendering',
+      v8CacheOptions: 'code',
+      spellcheck: false,
+      session: incognitoSession,
+      partition: 'incognito'
+    },
+    titleBarStyle: 'hiddenInset',
+    frame: false,
+    show: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    vibrancy: 'under-window',
+    visualEffectState: 'active'
+  });
+
+  // Load the app with hash so renderer knows it's incognito (for indicator, theme lock, no history)
+  incognitoWindow.loadFile('src/index.html', { hash: 'incognito' });
+
+  incognitoWindow.once('ready-to-show', () => {
+    incognitoWindow.show();
+  });
+
+  incognitoWindow.on('closed', () => {
+    incognitoSession.clearStorageData();
+    incognitoSession.clearCache();
+    incognitoSession.clearAuthCache();
+    incognitoSession.clearHostResolverCache();
+  });
+
+  return incognitoWindow;
+}
+
+function updateDockMenu() {
+  if (process.platform !== 'darwin' || !app.dock) return;
+
+  const dockMenu = Menu.buildFromTemplate([
+    {
+      label: 'New Window',
+      click: () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+          createWindow();
+        } else {
+          createWindow();
+        }
+      }
+    },
+    {
+      label: 'New Incognito Window',
+      click: () => {
+        createIncognitoWindow();
+      }
+    }
+  ]);
+
+  app.dock.setMenu(dockMenu);
+}
+
 // App event handlers
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  updateDockMenu();
+});
 
 // Clean up global shortcuts on quit
 app.on('will-quit', () => {
@@ -527,6 +686,35 @@ app.on('activate', () => {
 });
 
 // IPC handlers
+ipcMain.handle('open-settings-window', (event, tab) => {
+  openSettingsWindow(tab || null);
+  return true;
+});
+
+ipcMain.handle('set-window-title', (event, title) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    const safeTitle = (title && typeof title === 'string' && title.trim().length > 0)
+      ? title.trim()
+      : 'Axis Browser';
+    win.setTitle(safeTitle);
+  }
+  return true;
+});
+
+ipcMain.on('settings-updated', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('settings-updated');
+  }
+});
+
+ipcMain.handle('open-url-in-browser', (event, url) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('open-url-in-browser', url);
+  }
+  return true;
+});
+
 ipcMain.handle('get-settings', () => {
   return store.store;
 });
@@ -778,65 +966,7 @@ ipcMain.handle('show-item-in-folder', async (event, filePath) => {
 
 // Incognito window
 ipcMain.handle('open-incognito-window', () => {
-  // Create a new session for incognito mode
-  const incognitoSession = session.fromPartition('incognito');
-  
-  const incognitoWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    title: 'Axis - Incognito',
-    icon: path.join(__dirname, 'Axis_logo.png'),
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      enableRemoteModule: false,
-      webviewTag: true,
-      preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: false,
-      offscreen: false,
-      experimentalFeatures: true,
-      enableBlinkFeatures: 'CSSColorSchemeUARendering',
-        v8CacheOptions: 'code',
-        spellcheck: false,
-      session: incognitoSession,
-      partition: 'incognito'
-    },
-    titleBarStyle: 'hiddenInset',
-    frame: false,
-    show: false,
-    transparent: true,
-    backgroundColor: '#00000000',
-    vibrancy: 'under-window',
-    visualEffectState: 'active'
-  });
-
-  // Load the app
-  incognitoWindow.loadFile('src/index.html');
-
-  // Show window when ready
-  incognitoWindow.once('ready-to-show', () => {
-    incognitoWindow.show();
-    // Show spotlight search in the incognito window
-    incognitoWindow.webContents.executeJavaScript(`
-      setTimeout(() => {
-        if (window.browser && window.browser.showSpotlightSearch) {
-          window.browser.showSpotlightSearch();
-        }
-      }, 1000);
-    `);
-  });
-
-  // Handle window closed - clear all incognito data
-  incognitoWindow.on('closed', () => {
-    // Clear all incognito session data when window closes
-    incognitoSession.clearStorageData();
-    incognitoSession.clearCache();
-    incognitoSession.clearAuthCache();
-    incognitoSession.clearHostResolverCache();
-  });
-
+  createIncognitoWindow();
   return true;
 });
 
@@ -887,6 +1017,12 @@ ipcMain.handle('show-sidebar-context-menu', async (event, x, y, isRight) => {
       label: 'New Tab',
       click: () => {
         event.sender.send('sidebar-context-menu-action', 'new-tab');
+      }
+    },
+    {
+      label: 'New Incognito Tab',
+      click: () => {
+        event.sender.send('sidebar-context-menu-action', 'new-incognito-tab');
       }
     },
     {
@@ -1075,13 +1211,17 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
       click: () => {
         event.sender.send('tab-context-menu-action', 'duplicate');
       }
-    },
-    {
+    }
+  ];
+  if (!info.isIncognito) {
+    template.push({
       label: info.isPinned ? 'Unpin Tab' : 'Pin Tab',
       click: () => {
         event.sender.send('tab-context-menu-action', 'toggle-pin');
       }
-    },
+    });
+  }
+  template.push(
     {
       label: info.isMuted ? 'Unmute Tab' : 'Mute Tab',
       click: () => {
@@ -1094,7 +1234,7 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
         event.sender.send('tab-context-menu-action', 'change-icon');
       }
     }
-  ];
+  );
 
   const tabGroups = info.tabGroups || [];
   if (tabGroups.length > 0) {
