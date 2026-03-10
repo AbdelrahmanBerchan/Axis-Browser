@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>Settings</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+            font-size: 13px;
+            color: #1d1d1f;
+            background: #f5f5f7;
+            min-height: 100vh;
+            display: flex;
+            -webkit-font-smoothing: antialiased;
+        }
+        @media (prefers-color-scheme: dark) {
+            body { color: #f5f5f7; background: #1e1e1e; }
+        }
+        
+        /* Source list sidebar - macOS style */
+        .sidebar {
+            width: 220px;
+            background: rgba(255,255,255,0.8);
+            border-right: 1px solid rgba(0,0,0,0.08);
+            padding: 12px 0;
+            flex-shrink: 0;
+        }
+        @media (prefers-color-scheme: dark) {
+            .sidebar { background: rgba(30,30,30,0.95); border-right-color: rgba(255,255,255,0.08); }
+        }
+        .sidebar-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 16px;
+            margin: 0 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            color: inherit;
+            font-size: 13px;
+        }
+        .sidebar-item:hover { background: rgba(0,0,0,0.05); }
+        @media (prefers-color-scheme: dark) {
+            .sidebar-item:hover { background: rgba(255,255,255,0.08); }
+        }
+        .sidebar-item.active {
+            background: rgba(0,122,255,0.15);
+            color: #007aff;
+        }
+        @media (prefers-color-scheme: dark) {
+            .sidebar-item.active { background: rgba(10,132,255,0.25); color: #0a84ff; }
+        }
+        .sidebar-item svg { width: 16px; height: 16px; opacity: 0.8; }
+        .sidebar-item.active svg { opacity: 1; }
+        
+        /* Main content */
+        .main {
+            flex: 1;
+            padding: 24px 32px;
+            overflow-y: auto;
+            display: flex;
+            justify-content: center;
+        }
+        .main-inner {
+            width: 100%;
+            max-width: 680px;
+        }
+        .pane { display: none; }
+        .pane.active { display: block; }
+        
+        .group {
+            margin-bottom: 24px;
+        }
+        .group-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #86868b;
+            margin-bottom: 8px;
+            padding: 0 4px;
+        }
+        @media (prefers-color-scheme: dark) {
+            .group-title { color: #98989d; }
+        }
+        .group-content {
+            background: #fff;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid rgba(0,0,0,0.06);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+        }
+        @media (prefers-color-scheme: dark) {
+            .group-content {
+                background: #2c2c2e;
+                border-color: rgba(255,255,255,0.08);
+                box-shadow: 0 12px 30px rgba(0,0,0,0.7);
+            }
+        }
+        .row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 18px;
+            min-height: 40px;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+        }
+        @media (prefers-color-scheme: dark) {
+            .row { border-bottom-color: rgba(255,255,255,0.06); }
+        }
+        .row:last-child { border-bottom: none; }
+        .row-label { flex: 1; }
+        .row-title { font-size: 13px; font-weight: 600; }
+        .row-desc { font-size: 11px; color: #86868b; margin-top: 2px; }
+        @media (prefers-color-scheme: dark) {
+            .row-desc { color: #98989d; }
+        }
+        
+        /* Native form controls */
+        select, input[type="text"], input[type="search"] {
+            -webkit-appearance: none;
+            appearance: none;
+            padding: 4px 24px 4px 8px;
+            font-size: 13px;
+            border: 1px solid rgba(0,0,0,0.2);
+            border-radius: 6px;
+            background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E") no-repeat right 8px center;
+            min-width: 120px;
+            color: inherit;
+        }
+        @media (prefers-color-scheme: dark) {
+            select, input[type="text"], input[type="search"] {
+                border-color: rgba(255,255,255,0.2);
+                background-color: #3a3a3c;
+            }
+        }
+        input[type="search"] {
+            background-image: none;
+            padding: 6px 12px;
+            min-width: 200px;
+        }
+        input[type="color"] {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 32px;
+            height: 24px;
+            padding: 2px;
+            border: 1px solid rgba(0,0,0,0.2);
+            border-radius: 6px;
+            cursor: pointer;
+            background: transparent;
+        }
+        @media (prefers-color-scheme: dark) {
+            input[type="color"] { border-color: rgba(255,255,255,0.2); }
+        }
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #007aff;
+        }
+        @media (prefers-color-scheme: dark) {
+            input[type="checkbox"] { accent-color: #0a84ff; }
+        }
+        button {
+            font-family: inherit;
+            font-size: 13px;
+            padding: 6px 14px;
+            border-radius: 6px;
+            border: 1px solid rgba(0,0,0,0.2);
+            background: #fff;
+            color: inherit;
+            cursor: pointer;
+        }
+        @media (prefers-color-scheme: dark) {
+            button { background: #3a3a3c; border-color: rgba(255,255,255,0.2); }
+        }
+        button:hover { background: rgba(0,0,0,0.05); }
+        @media (prefers-color-scheme: dark) {
+            button:hover { background: rgba(255,255,255,0.08); }
+        }
+        button.destructive { color: #ff3b30; }
+        @media (prefers-color-scheme: dark) {
+            button.destructive { color: #ff453a; }
+        }
+        
+        .row-controls { display: flex; gap: 12px; align-items: center; }
+        .shortcut-input {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+            padding: 4px 10px;
+            min-width: 100px;
+            text-align: center;
+        }
+        .theme-preview {
+            width: 80px;
+            height: 32px;
+            border-radius: 6px;
+            border: 1px solid rgba(0,0,0,0.15);
+        }
+        @media (prefers-color-scheme: dark) {
+            .theme-preview { border-color: rgba(255,255,255,0.15); }
+        }
+        .history-toolbar { display: flex; gap: 12px; margin-bottom: 16px; }
+        .history-list { display: flex; flex-direction: column; gap: 2px; }
+        .history-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .history-item:hover { background: rgba(0,0,0,0.05); }
+        @media (prefers-color-scheme: dark) {
+            .history-item:hover { background: rgba(255,255,255,0.06); }
+        }
+        .history-favicon { width: 16px; height: 16px; border-radius: 3px; flex-shrink: 0; }
+        .history-info { flex: 1; min-width: 0; overflow: hidden; }
+        .history-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .history-url { font-size: 11px; color: #86868b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        @media (prefers-color-scheme: dark) {
+            .history-url { color: #98989d; }
+        }
+        .history-time { font-size: 11px; color: #86868b; flex-shrink: 0; }
+        .history-delete {
+            padding: 4px 8px;
+            font-size: 11px;
+            opacity: 0.7;
+        }
+        .history-item:hover .history-delete { opacity: 1; }
+        .empty-state { text-align: center; padding: 40px 20px; color: #86868b; }
+        .shortcuts-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .shortcut-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+        }
+        @media (prefers-color-scheme: dark) {
+            .shortcut-row { border-bottom-color: rgba(255,255,255,0.06); }
+        }
+        .shortcut-row:last-child { border-bottom: none; }
+        .gradient-rows { display: none; }
+        .gradient-rows.visible { display: flex; flex-direction: column; }
+    </style>
+</head>
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-item active" data-section="customization">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+            <span>General</span>
+        </div>
+        <div class="sidebar-item" data-section="history">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7.1-7 7-7v2c4.97 0 9 4.03 9 9s-4.03 9-9 9-9-4.03-9-9H4l3.89-3.89.07-.14L11 12h3c0 3.87-3.13 7-7 7s-7-3.13-7-7 3.13-7 7-7V3z"/></svg>
+            <span>History</span>
+        </div>
+        <div class="sidebar-item" data-section="shortcuts">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 20H7v-2h10v2zm2-4H5V6h14v10zm-2-8H7V4h10v4z"/></svg>
+            <span>Shortcuts</span>
+        </div>
+    </nav>
+    
+    <main class="main">
+        <div class="main-inner">
+        <div class="pane active" id="customization-pane">
+            <div class="group">
+                <div class="group-title">Appearance</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Sidebar Position</div>
+                            <div class="row-desc">Choose where the sidebar appears</div>
+                        </div>
+                        <select id="sidebar-position">
+                            <option value="left">Left</option>
+                            <option value="right">Right</option>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Search Engine</div>
+                            <div class="row-desc">Default search engine</div>
+                        </div>
+                        <select id="search-engine">
+                            <option value="google">Google</option>
+                            <option value="bing">Bing</option>
+                            <option value="duckduckgo">DuckDuckGo</option>
+                            <option value="yahoo">Yahoo</option>
+                            <option value="yandex">Yandex</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="group">
+                <div class="group-title">Theme</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Theme Color</div>
+                            <div class="row-desc">Primary accent color</div>
+                        </div>
+                        <div class="row-controls">
+                            <input type="color" id="theme-color" value="#1a1a1a">
+                            <div class="theme-preview" id="theme-preview"></div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Enable Gradient</div>
+                            <div class="row-desc">Use gradient instead of solid color</div>
+                        </div>
+                        <input type="checkbox" id="gradient-enabled">
+                    </div>
+                    <div class="row gradient-rows" id="gradient-color-row">
+                        <div class="row-label">
+                            <div class="row-title">Gradient Color</div>
+                            <div class="row-desc">Second color for gradient</div>
+                        </div>
+                        <input type="color" id="gradient-color" value="#2a2a2a">
+                    </div>
+                    <div class="row gradient-rows" id="gradient-direction-row">
+                        <div class="row-label">
+                            <div class="row-title">Gradient Direction</div>
+                        </div>
+                        <select id="gradient-direction">
+                            <option value="to right">Right</option>
+                            <option value="to left">Left</option>
+                            <option value="to bottom">Bottom</option>
+                            <option value="to top">Top</option>
+                            <option value="135deg">Diagonal</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="pane" id="history-pane">
+            <div class="group">
+                <div class="group-title">Browsing History</div>
+                <div class="history-toolbar">
+                    <input type="search" id="history-search" placeholder="Search history...">
+                    <button id="clear-history" class="destructive">Clear All</button>
+                </div>
+                <div class="group-content">
+                    <div class="history-list" id="history-list"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="pane" id="shortcuts-pane">
+            <div class="group">
+                <div class="shortcuts-header">
+                    <div class="group-title">Keyboard Shortcuts</div>
+                    <button id="reset-shortcuts">Reset to Defaults</button>
+                </div>
+                <div class="group-content" id="shortcuts-list"></div>
+            </div>
+        </div>
+        </div>
+    </main>
+    
+    <script>
+        (async function() {
+            const THEME_KEYS = ['themeColor', 'gradientColor', 'gradientEnabled', 'gradientDirection'];
+            const SHORTCUT_ACTIONS = [
+                { action: 'spotlight-search', label: 'New Tab' },
+                { action: 'close-tab', label: 'Close Tab' },
+                { action: 'new-tab', label: 'New Window' },
+                { action: 'recover-tab', label: 'Recover Tab' },
+                { action: 'refresh', label: 'Refresh' },
+                { action: 'focus-url', label: 'Focus URL Bar' },
+                { action: 'find', label: 'Find in Page' },
+                { action: 'pin-tab', label: 'Pin Tab' },
+                { action: 'zoom-in', label: 'Zoom In' },
+                { action: 'zoom-out', label: 'Zoom Out' },
+                { action: 'reset-zoom', label: 'Reset Zoom' },
+                { action: 'toggle-sidebar', label: 'Toggle Sidebar' },
+                { action: 'history', label: 'History' },
+                { action: 'downloads', label: 'Downloads' },
+                { action: 'settings', label: 'Settings' },
+                { action: 'clear-history', label: 'Clear History' },
+                { action: 'clear-downloads', label: 'Clear Downloads' }
+            ];
+            
+            function escapeHtml(str) {
+                if (!str) return '';
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+            
+            function formatTimeAgo(timestamp) {
+                const now = new Date();
+                const time = new Date(timestamp);
+                const diffMs = now - time;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+                if (diffMins < 1) return 'Just now';
+                if (diffMins < 60) return diffMins + 'm ago';
+                if (diffHours < 24) return diffHours + 'h ago';
+                if (diffDays < 7) return diffDays + 'd ago';
+                return time.toLocaleDateString();
+            }
+            
+            function formatShortcut(s) {
+                if (!s) return '';
+                return s.replace(/Cmd/g, '⌘').replace(/Ctrl/g, '⌃').replace(/Alt/g, '⌥').replace(/Shift/g, '⇧').replace(/\+/g, ' + ');
+            }
+            
+            async function saveSetting(key, value, notifyTheme) {
+                if (typeof window.electronAPI === 'undefined') return;
+                await window.electronAPI.setSetting(key, value);
+                // Notify main window so it reloads settings and applies sidebar position / search engine / theme
+                if (notifyTheme && THEME_KEYS.includes(key)) {
+                    window.electronAPI.sendSettingsUpdated();
+                } else if (key === 'sidebarPosition' || key === 'searchEngine') {
+                    window.electronAPI.sendSettingsUpdated();
+                }
+            }
+            
+            // Load settings
+            let settings = {};
+            let shortcuts = {};
+            try {
+                settings = await window.electronAPI.getSettings() || {};
+                shortcuts = await window.electronAPI.getShortcuts() || {};
+            } catch (e) { console.error(e); }
+            
+            // Populate form
+            document.getElementById('sidebar-position').value = settings.sidebarPosition || 'left';
+            document.getElementById('search-engine').value = settings.searchEngine || 'google';
+            document.getElementById('theme-color').value = settings.themeColor || '#1a1a1a';
+            document.getElementById('gradient-color').value = settings.gradientColor || '#2a2a2a';
+            document.getElementById('gradient-enabled').checked = settings.gradientEnabled || false;
+            document.getElementById('gradient-direction').value = settings.gradientDirection || '135deg';
+            
+            const gradRows = document.querySelectorAll('.gradient-rows');
+            gradRows.forEach(r => r.classList.toggle('visible', settings.gradientEnabled));
+            
+            function updateThemePreview() {
+                const el = document.getElementById('theme-preview');
+                const theme = document.getElementById('theme-color').value;
+                const grad = document.getElementById('gradient-color').value;
+                const enabled = document.getElementById('gradient-enabled').checked;
+                const dir = document.getElementById('gradient-direction').value;
+                el.style.background = enabled ? `linear-gradient(${dir}, ${theme}, ${grad})` : theme;
+            }
+            updateThemePreview();
+            
+            // Sidebar nav
+            function switchSection(section) {
+                document.querySelectorAll('.sidebar-item').forEach(n => n.classList.remove('active'));
+                document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+                const item = document.querySelector(`.sidebar-item[data-section="${section}"]`);
+                const pane = document.getElementById(section + '-pane');
+                if (item) item.classList.add('active');
+                if (pane) pane.classList.add('active');
+            }
+            document.querySelectorAll('.sidebar-item').forEach(item => {
+                item.addEventListener('click', () => switchSection(item.dataset.section));
+            });
+            const hash = (location.hash || '').replace(/^#/, '');
+            if (hash) switchSection(hash);
+            window.electronAPI?.onSwitchSettingsTab?.(switchSection);
+            
+            // Change handlers
+            document.getElementById('sidebar-position').addEventListener('change', e => saveSetting('sidebarPosition', e.target.value, false));
+            document.getElementById('search-engine').addEventListener('change', e => saveSetting('searchEngine', e.target.value, false));
+            document.getElementById('theme-color').addEventListener('input', e => {
+                saveSetting('themeColor', e.target.value, true);
+                updateThemePreview();
+            });
+            document.getElementById('gradient-color').addEventListener('input', e => {
+                saveSetting('gradientColor', e.target.value, true);
+                updateThemePreview();
+            });
+            document.getElementById('gradient-enabled').addEventListener('change', e => {
+                const v = e.target.checked;
+                saveSetting('gradientEnabled', v, true);
+                gradRows.forEach(r => r.classList.toggle('visible', v));
+                updateThemePreview();
+            });
+            document.getElementById('gradient-direction').addEventListener('change', e => {
+                saveSetting('gradientDirection', e.target.value, true);
+                updateThemePreview();
+            });
+            
+            // History
+            async function populateHistory() {
+                const list = document.getElementById('history-list');
+                try {
+                    const history = await window.electronAPI.getHistory() || [];
+                    if (history.length === 0) {
+                        list.innerHTML = '<div class="empty-state">No history</div>';
+                        return;
+                    }
+                    list.innerHTML = history.map(item => `
+                        <div class="history-item" data-url="${escapeHtml(item.url)}">
+                            <img class="history-favicon" src="${escapeHtml(item.favicon || '')}" alt="" onerror="this.style.display='none'">
+                            <div class="history-info">
+                                <div class="history-title">${escapeHtml(item.title)}</div>
+                                <div class="history-url">${escapeHtml(item.url)}</div>
+                            </div>
+                            <div class="history-time">${escapeHtml(formatTimeAgo(item.timestamp))}</div>
+                            <button class="history-delete" data-id="${item.id}">Delete</button>
+                        </div>
+                    `).join('');
+                    list.querySelectorAll('.history-delete').forEach(btn => {
+                        btn.addEventListener('click', async (e) => {
+                            e.stopPropagation();
+                            await window.electronAPI.deleteHistoryItem(parseInt(btn.dataset.id, 10));
+                            populateHistory();
+                        });
+                    });
+                    list.querySelectorAll('.history-item').forEach(item => {
+                        item.addEventListener('click', (e) => {
+                            if (!e.target.closest('.history-delete') && item.dataset.url) {
+                                window.electronAPI?.openUrlInBrowser?.(item.dataset.url);
+                            }
+                        });
+                    });
+                } catch (e) {
+                    list.innerHTML = '<div class="empty-state">Failed to load</div>';
+                }
+            }
+            document.getElementById('history-search').addEventListener('input', (e) => {
+                const q = e.target.value.toLowerCase();
+                document.querySelectorAll('.history-item').forEach(item => {
+                    const t = item.querySelector('.history-title')?.textContent || '';
+                    const u = item.querySelector('.history-url')?.textContent || '';
+                    item.style.display = (t.toLowerCase().includes(q) || u.toLowerCase().includes(q)) ? 'flex' : 'none';
+                });
+            });
+            document.getElementById('clear-history').addEventListener('click', async () => {
+                if (confirm('Clear all history?')) {
+                    await window.electronAPI.clearHistory();
+                    populateHistory();
+                }
+            });
+            await populateHistory();
+            
+            // Shortcuts
+            let currentShortcuts = { ...shortcuts };
+            function renderShortcuts() {
+                const list = document.getElementById('shortcuts-list');
+                list.innerHTML = SHORTCUT_ACTIONS.map(({ action, label }) => `
+                    <div class="shortcut-row">
+                        <span>${escapeHtml(label)}</span>
+                        <input type="text" class="shortcut-input" readonly data-action="${escapeHtml(action)}" value="${escapeHtml(formatShortcut(currentShortcuts[action]))}">
+                    </div>
+                `).join('');
+                list.querySelectorAll('.shortcut-input').forEach(input => {
+                    input.addEventListener('focus', () => {
+                        window.electronAPI?.disableShortcuts?.();
+                        input.value = 'Press keys...';
+                        input.dataset.recording = '1';
+                    });
+                    input.addEventListener('blur', () => {
+                        window.electronAPI?.enableShortcuts?.();
+                        input.removeAttribute('data-recording');
+                        const a = input.dataset.action;
+                        if (input.value === 'Press keys...' && currentShortcuts[a]) {
+                            input.value = formatShortcut(currentShortcuts[a]);
+                        }
+                    });
+                    input.addEventListener('keydown', async (e) => {
+                        if (!input.dataset.recording) return;
+                        e.preventDefault();
+                        if (e.key === 'Escape') { input.blur(); return; }
+                        const isMac = navigator.platform.toUpperCase().includes('MAC');
+                        const parts = [];
+                        if (isMac && e.metaKey) parts.push('Cmd');
+                        else if (e.ctrlKey) parts.push('Ctrl');
+                        if (e.altKey) parts.push('Alt');
+                        if (e.shiftKey) parts.push('Shift');
+                        let key = e.key;
+                        if (key === ' ') key = 'Space';
+                        else if (key.length === 1) key = key.toUpperCase();
+                        if (['Control','Meta','Alt','Shift'].includes(key)) return;
+                        parts.push(key);
+                        const shortcut = parts.join('+');
+                        currentShortcuts[input.dataset.action] = shortcut;
+                        input.value = formatShortcut(shortcut);
+                        input.removeAttribute('data-recording');
+                        await window.electronAPI.setShortcuts(currentShortcuts);
+                        window.electronAPI?.enableShortcuts?.();
+                    });
+                });
+            }
+            renderShortcuts();
+            document.getElementById('reset-shortcuts').addEventListener('click', async () => {
+                if (confirm('Reset all shortcuts?')) {
+                    currentShortcuts = await window.electronAPI.resetShortcuts() || {};
+                    renderShortcuts();
+                }
+            });
+        })();
+    </script>
+</body>
+</html>
