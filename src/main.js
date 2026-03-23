@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const fs = require('fs');
@@ -32,14 +32,15 @@ const getDefaultShortcuts = () => {
     'focus-url': `${cmdOrCtrl}+L`,
     'pin-tab': `${cmdOrCtrl}+P`,
     'new-tab': `${cmdOrCtrl}+N`,
+    'duplicate-tab': `${cmdOrCtrl}+D`,
     'settings': `${cmdOrCtrl}+,`,
     'recover-tab': `${cmdOrCtrl}+Z`,
     'history': `${cmdOrCtrl}+Y`,
     'downloads': `${cmdOrCtrl}+J`,
+    'toggle-chat': `${cmdOrCtrl}+Shift+E`,
     'find': `${cmdOrCtrl}+F`,
     'copy-url': `${cmdOrCtrl}+Shift+C`,
     'clear-history': `${cmdOrCtrl}+Shift+H`,
-    'clear-downloads': `${cmdOrCtrl}+Shift+J`,
     'zoom-in': `${cmdOrCtrl}+=`,
     'zoom-out': `${cmdOrCtrl}+-`,
     'reset-zoom': `${cmdOrCtrl}+0`,
@@ -105,13 +106,12 @@ const unregisterShortcuts = () => {
   // Prevent viewport-based content unloading
   app.commandLine.appendSwitch('disable-features', 'LazyFrameLoading,LazyImageLoading,DeferredImageDecoding');
 
-  // Aggressive JavaScript/V8 performance optimizations for Speedometer
-  // Increased memory limits to prevent content unloading
-  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192 --max-semi-space-size=512 --no-expose-gc');
+  // V8 heap: balanced for performance and lower RAM (2048MB is enough for many tabs without reserving 8GB)
+  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=2048 --max-semi-space-size=64 --no-expose-gc');
   
-  // Increase renderer process memory limits
-  app.commandLine.appendSwitch('renderer-process-limit', '100');
-  app.commandLine.appendSwitch('max-active-webgl-contexts', '16');
+  // Fewer renderer processes and WebGL contexts to reduce memory use
+  app.commandLine.appendSwitch('renderer-process-limit', '25');
+  app.commandLine.appendSwitch('max-active-webgl-contexts', '8');
   app.commandLine.appendSwitch('disable-hang-monitor');
   app.commandLine.appendSwitch('disable-background-networking');
   app.commandLine.appendSwitch('disable-default-apps');
@@ -418,6 +418,18 @@ function createMenu() {
   const shortcuts = getShortcuts();
   const closeTabShortcut = shortcuts['close-tab'] || 'CmdOrCtrl+W';
   const settingsShortcut = shortcuts['settings'] || 'CmdOrCtrl+,';
+  const newTabShortcut = shortcuts['new-tab'] || 'CmdOrCtrl+N';
+  const refreshShortcut = shortcuts['refresh'] || 'CmdOrCtrl+R';
+  const toggleSidebarShortcut = shortcuts['toggle-sidebar'] || 'CmdOrCtrl+B';
+  const historyShortcut = shortcuts['history'] || 'CmdOrCtrl+Y';
+  const downloadsShortcut = shortcuts['downloads'] || 'CmdOrCtrl+J';
+  const toggleChatShortcut = shortcuts['toggle-chat'] || 'CmdOrCtrl+Shift+E';
+  const findShortcut = shortcuts['find'] || 'CmdOrCtrl+F';
+  const focusUrlShortcut = shortcuts['focus-url'] || 'CmdOrCtrl+L';
+  const recoverTabShortcut = shortcuts['recover-tab'] || 'CmdOrCtrl+Z';
+  const zoomInShortcut = shortcuts['zoom-in'] || 'CmdOrCtrl+=';
+  const zoomOutShortcut = shortcuts['zoom-out'] || 'CmdOrCtrl+-';
+  const resetZoomShortcut = shortcuts['reset-zoom'] || 'CmdOrCtrl+0';
 
   const template = [];
 
@@ -460,54 +472,93 @@ function createMenu() {
 
   template.push({
     label: 'File',
-      submenu: [
-        {
-          label: 'New Tab',
-          click: () => {
-            mainWindow.webContents.send('new-tab');
+    submenu: [
+      {
+        label: 'New Tab',
+        accelerator: newTabShortcut,
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('browser-shortcut', 'new-tab');
           }
-        },
-        {
-          label: 'Close Tab',
-          accelerator: closeTabShortcut,
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('close-tab');
+        }
+      },
+      {
+        label: 'New Window',
+        accelerator: process.platform === 'darwin' ? 'Cmd+Shift+N' : 'Ctrl+Shift+N',
+        click: () => {
+          createWindow();
+        }
+      },
+      {
+        label: 'New Incognito Window',
+        accelerator: process.platform === 'darwin' ? 'Cmd+Option+N' : 'Ctrl+Shift+P',
+        click: () => {
+          createIncognitoWindow();
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Close Tab',
+        accelerator: closeTabShortcut,
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('browser-shortcut', 'close-tab');
+          }
+        }
+      },
+      {
+        label: 'Reopen Closed Tab',
+        accelerator: recoverTabShortcut,
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('browser-shortcut', 'recover-tab');
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'History',
+        accelerator: historyShortcut,
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('browser-shortcut', 'history');
+          }
+        }
+      },
+      {
+        label: 'Downloads',
+        accelerator: downloadsShortcut,
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('browser-shortcut', 'downloads');
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Ctrl+Q',
+        click: () => {
+          if (process.platform === 'darwin') {
+            if (mainWindow && !mainWindow.isDestroyed() && showNativeQuitDialog()) {
+              isQuitConfirmed = true;
+              isUserQuitting = true; // so window close handler allows quit instead of hiding
+              app.quit();
+            } else if (!mainWindow || mainWindow.isDestroyed()) {
+              app.quit();
             }
-          }
-        },
-        {
-          label: 'New Window',
-          accelerator: 'CmdOrCtrl+N',
-          click: () => {
-            createWindow();
-          }
-        },
-        { type: 'separator' },
-        {
-          label: 'Quit',
-          accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Ctrl+Q',
-          click: () => {
-            if (process.platform === 'darwin') {
-              if (mainWindow && !mainWindow.isDestroyed() && showNativeQuitDialog()) {
-                isQuitConfirmed = true;
-                isUserQuitting = true; // so window close handler allows quit instead of hiding
-                app.quit();
-              } else if (!mainWindow || mainWindow.isDestroyed()) {
-                app.quit();
-              }
+          } else {
+            isUserQuitting = true;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('request-quit');
             } else {
-              isUserQuitting = true;
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('request-quit');
-              } else {
-                app.quit();
-              }
+              app.quit();
             }
           }
         }
-      ]
-    },
+      }
+    ]
+  },
     {
       label: 'Edit',
       submenu: [
@@ -526,13 +577,64 @@ function createMenu() {
     {
       label: 'View',
       submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
-        { role: 'toggleDevTools' },
+        {
+          label: 'Reload Page',
+          accelerator: refreshShortcut,
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('browser-shortcut', 'refresh');
+            }
+          }
+        },
+        { role: 'forceReload', label: 'Force Reload Window' },
+        { role: 'toggleDevTools', label: 'Toggle Developer Tools' },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        {
+          label: 'Actual Size',
+          accelerator: resetZoomShortcut,
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('browser-shortcut', 'reset-zoom');
+            }
+          }
+        },
+        {
+          label: 'Zoom In',
+          accelerator: zoomInShortcut,
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('browser-shortcut', 'zoom-in');
+            }
+          }
+        },
+        {
+          label: 'Zoom Out',
+          accelerator: zoomOutShortcut,
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('browser-shortcut', 'zoom-out');
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Toggle Sidebar',
+          accelerator: toggleSidebarShortcut,
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('browser-shortcut', 'toggle-sidebar');
+            }
+          }
+        },
+        {
+          label: 'Toggle Chat',
+          accelerator: toggleChatShortcut,
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('browser-shortcut', 'toggle-chat');
+            }
+          }
+        },
         { type: 'separator' },
         { role: 'togglefullscreen' }
       ]
@@ -1167,6 +1269,32 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
         event.sender.send('webpage-context-menu-action', 'search-selection', { selectionText: ctx.selectionText });
       }
     });
+
+    // Speech submenu (macOS-style) for selected text
+    if (ctx.speechEnabled !== false) {
+      template.push({
+        label: 'Speech',
+        enabled: !!ctx.selectionText && ctx.selectionText.trim().length > 0,
+        submenu: [
+          {
+            label: 'Start Speaking',
+            enabled: !ctx.isSpeaking,
+            click: () => {
+              event.sender.send('webpage-context-menu-action', 'speech-start', {
+                selectionText: ctx.selectionText
+              });
+            }
+          },
+          {
+            label: 'Stop Speaking',
+            enabled: !!ctx.isSpeaking,
+            click: () => {
+              event.sender.send('webpage-context-menu-action', 'speech-stop');
+            }
+          }
+        ]
+      });
+    }
   }
   
   template.push({ type: 'separator' });
@@ -1193,6 +1321,56 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
     window: window
   });
   
+  return true;
+});
+
+// URL bar input context menu
+ipcMain.handle('show-urlbar-context-menu', async (event, x, y, contextInfo) => {
+  const ctx = contextInfo || {};
+  const clipText = (clipboard.readText() || '').trim();
+  const canPasteAndGo = clipText.length > 0;
+  const template = [
+    {
+      label: 'Cut',
+      enabled: !!ctx.isEditable,
+      click: () => {
+        event.sender.send('urlbar-context-menu-action', 'cut');
+      }
+    },
+    {
+      label: 'Copy',
+      enabled: !!ctx.hasSelection,
+      click: () => {
+        event.sender.send('urlbar-context-menu-action', 'copy');
+      }
+    },
+    {
+      label: 'Paste',
+      enabled: canPasteAndGo,
+      click: () => {
+        event.sender.send('urlbar-context-menu-action', 'paste', { text: clipboard.readText() || '' });
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Paste and Go',
+      enabled: canPasteAndGo,
+      click: () => {
+        event.sender.send('urlbar-context-menu-action', 'paste-and-go', { text: clipboard.readText() || '' });
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Select All',
+      click: () => {
+        event.sender.send('urlbar-context-menu-action', 'select-all');
+      }
+    }
+  ];
+  
+  const menu = Menu.buildFromTemplate(template);
+  const window = BrowserWindow.fromWebContents(event.sender);
+  menu.popup({ window });
   return true;
 });
 
