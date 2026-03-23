@@ -551,14 +551,14 @@ body.theme-switching *::after {
 
 #sidebar.sidebar-right .resize-handle {
     right: auto;
-    left: -1px;
+    left: 0;
     top: 20px; /* Start just below the top */
     height: calc(100% - 40px); /* Just barely shorter than full height */
 }
 
-#sidebar.sidebar-right .resize-handle:hover,
-#sidebar.sidebar-right .resize-handle:active {
-    left: -1.5px;
+#sidebar.sidebar-right .resize-handle.visible:hover,
+#sidebar.sidebar-right .resize-handle.visible:active {
+    left: -0.5px;
 }
 
 /* Right-edge hover area for sidebar on right */
@@ -654,18 +654,18 @@ body.light-theme #sidebar.slide-out {
     background: var(--sidebar-slide-out-background, rgba(252, 252, 252, 0.98)) !important;
 }
 
-/* Sidebar Resize Handle */
+/* Sidebar Resize Handle – thin separator line */
 .resize-handle {
     position: absolute;
     top: 20px; /* Start just below the top */
-    right: -1px;
-    width: 2px;
+    right: 0;
+    width: 1px;
     height: calc(100% - 40px); /* Just barely shorter than full height */
     background: transparent;
     cursor: default; /* Default cursor when not visible */
     z-index: 1000;
     transition: background 0.15s ease, opacity 0.4s ease, width 0.15s ease, cursor 0.1s ease;
-    border-radius: 1px;
+    border-radius: 0;
     opacity: 0;
     pointer-events: auto; /* Keep pointer events enabled for hover detection */
     will-change: width, background;
@@ -701,8 +701,8 @@ body.light-theme #sidebar.slide-out {
 
 .resize-handle.visible:hover {
     background: rgba(255, 255, 255, 0.2);
-    width: 3px;
-    right: -1.5px;
+    width: 2px;
+    right: -0.5px;
     transition: background 0.1s ease, width 0.1s ease;
     cursor: col-resize;
 }
@@ -714,8 +714,8 @@ body.light-theme #sidebar.slide-out {
 
 .resize-handle.visible:active {
     background: rgba(255, 255, 255, 0.3);
-    width: 3px;
-    right: -1.5px;
+    width: 2px;
+    right: -0.5px;
     transition: background 0.05s ease, width 0.05s ease;
     cursor: col-resize;
 }
@@ -1190,16 +1190,16 @@ body.resizing .ai-chat-resize-handle {
     border-color: rgba(255, 255, 255, 0.15) !important;
 }
 
-/* Zoom Indicator */
+/* Zoom Indicator - below URL bar, compact black pill */
 .zoom-indicator {
     position: absolute;
-    top: 20px;
-    right: 20px;
+    top: 42px;
+    right: 16px;
     z-index: 1000;
     pointer-events: none;
     opacity: 0;
-    transform: translateY(-10px) scale(0.9);
-    transition: all 0.3s ease;
+    transform: translateY(-4px) scale(0.96);
+    transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .zoom-indicator.show {
@@ -1208,38 +1208,33 @@ body.resizing .ai-chat-resize-handle {
 }
 
 .zoom-content {
-    background: rgba(42, 42, 42, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 16px;
-    padding: 12px 20px;
+    background: #000;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 6px 12px;
     display: flex;
     align-items: center;
-    gap: 8px;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 8px 24px var(--animation-shadow-medium);
-    color: var(--text-color);
-    font-size: 14px;
+    gap: 6px;
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 12px;
     font-weight: 500;
-    min-width: 80px;
+    min-width: 0;
     justify-content: center;
 }
 
 .zoom-content i {
-    font-size: 16px;
-    color: rgba(255, 255, 255, 0.8);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.9);
 }
 
-.zoom-indicator.zoom-in .zoom-content i {
-    color: rgba(76, 175, 80, 0.9);
-}
-
+.zoom-indicator.zoom-in .zoom-content i,
 .zoom-indicator.zoom-out .zoom-content i {
-    color: rgba(255, 152, 0, 0.9);
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .zoom-percentage {
     font-weight: 600;
-    color: var(--text-color);
+    color: rgba(255, 255, 255, 0.95);
 }
 
 .url-bar-icons {
@@ -1408,14 +1403,14 @@ body.resizing .ai-chat-resize-handle {
     align-items: center;
 }
 
-/* The actual separator line */
+/* The actual separator line – thin so it doesn't dominate */
 .tabs-separator::before {
     content: '';
     position: absolute;
     top: 50%;
     left: 16px;
     right: 16px;
-    height: 1px;
+    height: 0.5px;
     background: var(--border-color-light);
     transform: translateY(-50%);
     z-index: 1;
@@ -1534,13 +1529,13 @@ body.light-theme .clear-unpinned-btn:active {
 /* Separator color change when dragging over pinned/unpinned sections */
 .tabs-separator.drag-over-pinned::before {
     background: rgba(255, 193, 7, 0.8);
-    height: 2px;
+    height: 1px;
     box-shadow: 0 0 8px rgba(255, 193, 7, 0.5);
 }
 
 .tabs-separator.drag-over-unpinned::before {
     background: rgba(100, 180, 255, 0.8);
-    height: 2px;
+    height: 1px;
     box-shadow: 0 0 8px rgba(100, 180, 255, 0.5);
 }
 
@@ -2324,6 +2319,8 @@ body.incognito-window {
     outline: none;
     -webkit-app-region: no-drag;
     box-shadow: none;
+    z-index: 0; /* Behind webviews-container (z-index: 2) - never blocks dynamic webviews */
+    pointer-events: none !important;
     /* Performance optimizations */
     transform: translateZ(0);
     will-change: transform;
@@ -5929,12 +5926,12 @@ body.light-theme .shortcut-desc {
     box-shadow: none !important;
 }
 
-/* Header row matches single tab height (32px) */
+/* Header row matches single tab height (32px) – tight padding so title reaches further */
 .tab-group > .tab-content {
     height: 32px;
     min-height: 32px;
     flex-shrink: 0;
-    padding: 0 12px 0 14px;
+    padding: 0 8px 0 10px;
     position: relative;
     z-index: 1;
     display: flex;
@@ -6061,12 +6058,11 @@ body.light-theme .shortcut-desc {
 .tab-group-content {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.28s cubic-bezier(0.32, 0.72, 0.38, 1),
-                opacity 0.22s ease-out,
-                padding 0.25s ease-out,
-                visibility 0.2s step-end;
+    transition: max-height 0.3s cubic-bezier(0.33, 1, 0.68, 1),
+                opacity 0.26s cubic-bezier(0.33, 1, 0.68, 1),
+                padding 0.3s cubic-bezier(0.33, 1, 0.68, 1);
     opacity: 0;
-    padding: 0 12px;
+    padding: 0 6px;
     display: none;
     flex-direction: column;
     gap: 2px;
@@ -6082,13 +6078,12 @@ body.light-theme .shortcut-desc {
 
 .tab-group-content.open {
     opacity: 1;
-    padding: 4px 12px 8px 12px;
+    padding: 2px 6px 6px 6px;
     visibility: visible;
     display: flex;
-    transition: max-height 0.28s cubic-bezier(0.32, 0.72, 0.38, 1),
-                opacity 0.22s ease-out,
-                padding 0.25s ease-out,
-                visibility 0s step-start;
+    transition: max-height 0.3s cubic-bezier(0.33, 1, 0.68, 1),
+                opacity 0.26s cubic-bezier(0.33, 1, 0.68, 1),
+                padding 0.3s cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 .tab-group.toggling .tab-group-content {
@@ -6124,6 +6119,7 @@ body.light-theme .shortcut-desc {
 .tab-group .tab .tab-content {
     height: 32px !important;
     min-height: 32px !important;
+    padding: 4px 6px !important;
     opacity: 1 !important;
     visibility: visible !important;
     display: flex !important;
@@ -6144,11 +6140,13 @@ body.light-theme .shortcut-desc {
 }
 
 /* Tabs inside tab groups show close button only on hover */
-.tab-group .tab:hover .tab-right {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateX(0);
-    width: auto;
+.tab-group .tab:hover .tab-right,
+.tab-group .tab.pinned:hover .tab-right,
+.tab-group .tab.closed:hover .tab-right {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transform: translateX(0) !important;
+    width: auto !important;
 }
 
 /* Active tabs in groups don't show buttons unless hovered */
@@ -6848,6 +6846,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     background: transparent;
     overflow: hidden; /* Clip webview content to rounded corners */
     border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window */
+    z-index: 2; /* Always above legacy #webview (z-index: 0) so dynamic webviews receive clicks */
 }
 
 #single-view {
@@ -7262,8 +7261,8 @@ body.light-theme .btn-primary {
     align-items: center;
     justify-content: flex-start;
     padding: 6px 10px;
-    margin: 0 2px;
-    border-radius: 6px;
+    margin: 0 6px;
+    border-radius: 10px;
     cursor: pointer;
     transition: background 0.15s ease;
     user-select: none;
@@ -7296,43 +7295,91 @@ body.light-theme .btn-primary {
 
 /* Legacy styles for backwards compatibility */
 .downloads-popup {
-    position: absolute;
-    background: rgba(40, 40, 40, 0.98);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    position: fixed;
+    background: #000;
+    backdrop-filter: blur(28px) saturate(220%);
+    -webkit-backdrop-filter: blur(28px) saturate(220%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+    box-shadow:
+        0 22px 60px rgba(0, 0, 0, 0.85),
+        0 0 0 1px rgba(255, 255, 255, 0.06);
     z-index: 1002;
     opacity: 0;
     visibility: hidden;
-    transform: scale(0.95) translateY(4px);
-    transition: opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1), 
-                visibility 0.15s cubic-bezier(0.16, 1, 0.3, 1),
-                transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    transform: scale(0.96) translateY(-8px);
+    transition: opacity 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+                visibility 0.22s,
+                transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
     overflow: hidden;
     will-change: opacity, transform;
-    padding: 4px;
+    padding: 8px 8px 0;
     box-sizing: border-box;
+    min-width: 320px;
+    max-width: 380px;
+}
+
+.downloads-popup-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 4px 6px;
+    gap: 8px;
+}
+
+.downloads-popup-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.96);
+}
+
+.downloads-popup-title i {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.downloads-popup-clear-btn {
+    border: none;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.downloads-popup-clear-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.96);
+}
+
+.downloads-popup-clear-btn:active {
+    background: rgba(255, 255, 255, 0.18);
 }
 
 .downloads-popup:not(.hidden) {
     opacity: 1;
     visibility: visible;
     transform: scale(1) translateY(0);
+    pointer-events: auto;
 }
 
 .downloads-popup.hidden {
+    display: block !important; /* allow transition; override global .hidden */
     opacity: 0;
     visibility: hidden;
-    transform: scale(0.95) translateY(4px);
+    transform: scale(0.96) translateY(-8px);
+    pointer-events: none;
 }
 
 .downloads-popup-list {
-    padding: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    max-height: 200px;
+    padding: 2px 2px 4px;
+    overflow: hidden;
+    max-height: 240px;
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -7359,10 +7406,10 @@ body.light-theme .btn-primary {
     display: flex;
     align-items: center;
     padding: 8px 12px;
-    margin: 0;
-    border-radius: 4px;
+    margin: 0 6px;
+    border-radius: 10px;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background 0.2s ease;
     gap: 10px;
     user-select: none;
     position: relative;
@@ -7501,29 +7548,34 @@ body.light-theme .btn-primary {
 
 /* Open Downloads footer row */
 .downloads-popup-footer {
+    width: calc(100% + 16px);
+    margin: 0 -8px 0 -8px;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 8px 12px;
-    margin: 4px 2px 2px;
-    border-radius: 6px;
+    gap: 5px;
+    padding: 5px 12px 8px;
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0 0 14px 14px;
     cursor: pointer;
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 13px;
-    transition: background 0.15s ease;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    font-weight: 500;
+    transition: background 0.12s ease, color 0.12s ease;
 }
 .downloads-popup-footer:hover {
-    background: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.95);
 }
 .downloads-popup-footer:active {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.1);
 }
 .downloads-popup-footer i {
-    font-size: 13px;
-    opacity: 0.9;
+    font-size: 10px;
+    opacity: 0.85;
 }
 
 .downloads-popup-item:hover {
@@ -7541,7 +7593,7 @@ body.light-theme .btn-primary {
     background: transparent;
     color: rgba(255, 255, 255, 0.5);
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -8579,7 +8631,7 @@ body:not(.light-theme) .ai-response-content {
     }
 }
 
-/* AI Chat Panel - matches site/URL bar theme */
+/* AI Chat Panel - always solid black */
 .ai-chat-panel {
     position: absolute;
     right: 0;
@@ -8588,7 +8640,8 @@ body:not(.light-theme) .ai-response-content {
     width: var(--chat-panel-width, 400px);
     min-width: 280px;
     max-width: 90%;
-    background: var(--chat-panel-bg, rgba(22, 22, 22, 0.98));
+    --chat-panel-bg: #000000;
+    background: #000000;
     backdrop-filter: blur(40px) saturate(100%);
     -webkit-backdrop-filter: blur(40px) saturate(100%);
     border-left: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.06));
@@ -8605,6 +8658,8 @@ body:not(.light-theme) .ai-response-content {
     -webkit-app-region: no-drag;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
+    border-radius: 0 2px 2px 0;
+    overflow: hidden;
 }
 
 /* Override global .hidden so panel can animate in/out (no display:none) */
@@ -9004,7 +9059,6 @@ body:not(.light-theme) .ai-response-content {
 /* When chat is open, shrink web content area so chat doesn't overlap */
 #content-area.chat-open .webview-container {
     --chat-panel-width: 400px;
-    overflow: visible; /* allow chat panel slide animation to be visible */
 }
 #content-area.chat-open .webview-container #webviews-container,
 #content-area.chat-open .webview-container #webview {
@@ -9115,6 +9169,19 @@ body:not(.light-theme) .ai-response-content {
 .url-bar-btn:disabled {
     opacity: 0.3;
     cursor: default;
+}
+
+#downloads-btn-footer.url-bar-downloads-btn {
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+}
+#downloads-btn-footer.url-bar-downloads-btn:hover:not(:disabled) {
+    background: var(--url-bar-btn-hover, rgba(0, 0, 0, 0.06));
+}
+#downloads-btn-footer.url-bar-downloads-btn:active:not(:disabled) {
+    transform: scale(0.92);
+}
+#downloads-btn-footer.url-bar-downloads-btn i {
+    font-size: 13px;
 }
 
 #url-bar-refresh i {
@@ -9369,6 +9436,7 @@ body:not(.light-theme) .ai-response-content {
     overflow: hidden; /* Clip webview content to rounded corners */
     border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window - no top rounding since it's below URL bar */
     background: transparent;
+    z-index: 2; /* Above legacy #webview - dynamic webviews must receive clicks */
 }
 
 .webview-container:has(.webview-url-bar.hidden) #webviews-container {
