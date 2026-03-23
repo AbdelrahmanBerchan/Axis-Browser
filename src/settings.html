@@ -246,6 +246,42 @@
         .shortcut-row:last-child { border-bottom: none; }
         .gradient-rows { display: none; }
         .gradient-rows.visible { display: flex; flex-direction: column; }
+        .settings-search-wrap {
+            margin-bottom: 16px;
+        }
+        .settings-search {
+            width: 100%;
+            -webkit-appearance: none;
+            appearance: none;
+            padding: 8px 12px;
+            font-size: 13px;
+            border: 1px solid rgba(0,0,0,0.15);
+            border-radius: 8px;
+            background: #fff;
+            color: inherit;
+            outline: none;
+        }
+        .settings-search:focus {
+            border-color: rgba(0,122,255,0.6);
+            box-shadow: 0 0 0 2px rgba(0,122,255,0.15);
+        }
+        @media (prefers-color-scheme: dark) {
+            .settings-search {
+                background: #3a3a3c;
+                border-color: rgba(255,255,255,0.16);
+            }
+            .settings-search:focus {
+                border-color: rgba(10,132,255,0.7);
+                box-shadow: 0 0 0 2px rgba(10,132,255,0.2);
+            }
+        }
+        .settings-search-empty {
+            display: none;
+            text-align: center;
+            padding: 18px 10px;
+            color: #86868b;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -266,6 +302,10 @@
     
     <main class="main">
         <div class="main-inner">
+        <div class="settings-search-wrap">
+            <input type="search" id="settings-search" class="settings-search" placeholder="Search settings...">
+        </div>
+        <div class="settings-search-empty" id="settings-search-empty">No matching settings</div>
         <div class="pane active" id="customization-pane">
             <div class="group">
                 <div class="group-title">Appearance</div>
@@ -292,6 +332,13 @@
                             <option value="yahoo">Yahoo</option>
                             <option value="yandex">Yandex</option>
                         </select>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Always show full URL</div>
+                            <div class="row-desc">Show the complete address in the URL bar instead of a shortened version</div>
+                        </div>
+                        <input type="checkbox" id="always-show-full-url">
                     </div>
                 </div>
             </div>
@@ -336,6 +383,41 @@
                     </div>
                 </div>
             </div>
+            <div class="group">
+                <div class="group-title">Speech</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Enable Speech Menu</div>
+                            <div class="row-desc">Show Start/Stop Speaking options when text is selected</div>
+                        </div>
+                        <input type="checkbox" id="speech-enabled">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Speech Rate</div>
+                            <div class="row-desc">How fast highlighted text is spoken</div>
+                        </div>
+                        <select id="speech-rate">
+                            <option value="0.8">Slow</option>
+                            <option value="1" selected>Normal</option>
+                            <option value="1.2">Fast</option>
+                            <option value="1.4">Very Fast</option>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Speech Pitch</div>
+                            <div class="row-desc">Voice tone for spoken text</div>
+                        </div>
+                        <select id="speech-pitch">
+                            <option value="0.8">Lower</option>
+                            <option value="1" selected>Normal</option>
+                            <option value="1.2">Higher</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <div class="pane" id="history-pane">
@@ -373,6 +455,7 @@
                 { action: 'recover-tab', label: 'Recover Tab' },
                 { action: 'refresh', label: 'Refresh' },
                 { action: 'focus-url', label: 'Focus URL Bar' },
+                { action: 'duplicate-tab', label: 'Duplicate Tab' },
                 { action: 'find', label: 'Find in Page' },
                 { action: 'pin-tab', label: 'Pin Tab' },
                 { action: 'zoom-in', label: 'Zoom In' },
@@ -381,9 +464,9 @@
                 { action: 'toggle-sidebar', label: 'Toggle Sidebar' },
                 { action: 'history', label: 'History' },
                 { action: 'downloads', label: 'Downloads' },
+                { action: 'toggle-chat', label: 'Open Chat' },
                 { action: 'settings', label: 'Settings' },
-                { action: 'clear-history', label: 'Clear History' },
-                { action: 'clear-downloads', label: 'Clear Downloads' }
+                { action: 'clear-history', label: 'Clear History' }
             ];
             
             function escapeHtml(str) {
@@ -418,7 +501,14 @@
                 // Notify main window so it reloads settings and applies sidebar position / search engine / theme
                 if (notifyTheme && THEME_KEYS.includes(key)) {
                     window.electronAPI.sendSettingsUpdated();
-                } else if (key === 'sidebarPosition' || key === 'searchEngine') {
+                } else if (
+                    key === 'sidebarPosition' ||
+                    key === 'searchEngine' ||
+                    key === 'alwaysShowFullUrl' ||
+                    key === 'speechEnabled' ||
+                    key === 'speechRate' ||
+                    key === 'speechPitch'
+                ) {
                     window.electronAPI.sendSettingsUpdated();
                 }
             }
@@ -434,6 +524,10 @@
             // Populate form
             document.getElementById('sidebar-position').value = settings.sidebarPosition || 'left';
             document.getElementById('search-engine').value = settings.searchEngine || 'google';
+            document.getElementById('always-show-full-url').checked = !!settings.alwaysShowFullUrl;
+            document.getElementById('speech-enabled').checked = settings.speechEnabled !== false;
+            document.getElementById('speech-rate').value = String(settings.speechRate || 1);
+            document.getElementById('speech-pitch').value = String(settings.speechPitch || 1);
             document.getElementById('theme-color').value = settings.themeColor || '#1a1a1a';
             document.getElementById('gradient-color').value = settings.gradientColor || '#2a2a2a';
             document.getElementById('gradient-enabled').checked = settings.gradientEnabled || false;
@@ -453,6 +547,7 @@
             updateThemePreview();
             
             // Sidebar nav
+            let activeSection = 'customization';
             function switchSection(section) {
                 document.querySelectorAll('.sidebar-item').forEach(n => n.classList.remove('active'));
                 document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
@@ -460,6 +555,7 @@
                 const pane = document.getElementById(section + '-pane');
                 if (item) item.classList.add('active');
                 if (pane) pane.classList.add('active');
+                activeSection = section;
             }
             document.querySelectorAll('.sidebar-item').forEach(item => {
                 item.addEventListener('click', () => switchSection(item.dataset.section));
@@ -467,10 +563,64 @@
             const hash = (location.hash || '').replace(/^#/, '');
             if (hash) switchSection(hash);
             window.electronAPI?.onSwitchSettingsTab?.(switchSection);
+
+            // Settings search (instant filter)
+            const settingsSearchInput = document.getElementById('settings-search');
+            const settingsSearchEmpty = document.getElementById('settings-search-empty');
+            function applySettingsSearch(query) {
+                const q = (query || '').trim().toLowerCase();
+                const panes = Array.from(document.querySelectorAll('.pane'));
+                if (!q) {
+                    panes.forEach(pane => {
+                        pane.style.display = '';
+                        pane.querySelectorAll('.group').forEach(group => { group.style.display = ''; });
+                        pane.querySelectorAll('.row, .shortcut-row').forEach(row => { row.style.display = ''; });
+                    });
+                    if (settingsSearchEmpty) settingsSearchEmpty.style.display = 'none';
+                    switchSection(activeSection || 'customization');
+                    return;
+                }
+
+                let hasAnyMatch = false;
+                panes.forEach(pane => {
+                    let paneHasMatch = false;
+                    const groups = Array.from(pane.querySelectorAll('.group'));
+                    if (groups.length === 0) {
+                        paneHasMatch = pane.textContent.toLowerCase().includes(q);
+                    } else {
+                        groups.forEach(group => {
+                            const rows = Array.from(group.querySelectorAll('.row, .shortcut-row'));
+                            let groupHasMatch = false;
+                            if (rows.length > 0) {
+                                rows.forEach(row => {
+                                    const rowHasMatch = row.textContent.toLowerCase().includes(q);
+                                    row.style.display = rowHasMatch ? '' : 'none';
+                                    if (rowHasMatch) groupHasMatch = true;
+                                });
+                            } else {
+                                groupHasMatch = group.textContent.toLowerCase().includes(q);
+                            }
+                            group.style.display = groupHasMatch ? '' : 'none';
+                            if (groupHasMatch) paneHasMatch = true;
+                        });
+                    }
+                    pane.style.display = paneHasMatch ? 'block' : 'none';
+                    if (paneHasMatch) hasAnyMatch = true;
+                });
+
+                // Clear section highlighting while searching
+                document.querySelectorAll('.sidebar-item').forEach(n => n.classList.remove('active'));
+                if (settingsSearchEmpty) settingsSearchEmpty.style.display = hasAnyMatch ? 'none' : 'block';
+            }
+            settingsSearchInput?.addEventListener('input', (e) => applySettingsSearch(e.target.value));
             
             // Change handlers
             document.getElementById('sidebar-position').addEventListener('change', e => saveSetting('sidebarPosition', e.target.value, false));
             document.getElementById('search-engine').addEventListener('change', e => saveSetting('searchEngine', e.target.value, false));
+            document.getElementById('always-show-full-url').addEventListener('change', e => saveSetting('alwaysShowFullUrl', e.target.checked, false));
+            document.getElementById('speech-enabled').addEventListener('change', e => saveSetting('speechEnabled', e.target.checked, false));
+            document.getElementById('speech-rate').addEventListener('change', e => saveSetting('speechRate', parseFloat(e.target.value), false));
+            document.getElementById('speech-pitch').addEventListener('change', e => saveSetting('speechPitch', parseFloat(e.target.value), false));
             document.getElementById('theme-color').addEventListener('input', e => {
                 saveSetting('themeColor', e.target.value, true);
                 updateThemePreview();
@@ -591,6 +741,8 @@
                         window.electronAPI?.enableShortcuts?.();
                     });
                 });
+                // Keep live filter applied after rerendering shortcut rows
+                applySettingsSearch(settingsSearchInput?.value || '');
             }
             renderShortcuts();
             document.getElementById('reset-shortcuts').addEventListener('click', async () => {
