@@ -79,6 +79,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showWebpageContextMenu: (x, y, contextInfo) => ipcRenderer.invoke('show-webpage-context-menu', x, y, contextInfo),
   onWebpageContextMenuAction: (callback) => ipcRenderer.on('webpage-context-menu-action', (event, action, data) => callback(action, data)),
   
+  // URL bar context menu
+  showUrlBarContextMenu: (x, y, contextInfo) => ipcRenderer.invoke('show-urlbar-context-menu', x, y, contextInfo),
+  onUrlBarContextMenuAction: (callback) => ipcRenderer.on('urlbar-context-menu-action', (event, action, data) => callback(action, data)),
+  
   // Tab context menu
   showTabContextMenu: (x, y, tabInfo) => ipcRenderer.invoke('show-tab-context-menu', x, y, tabInfo),
   onTabContextMenuAction: (callback) => ipcRenderer.on('tab-context-menu-action', (event, action, data) => callback(action, data)),
