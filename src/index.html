@@ -51,18 +51,6 @@
                 </div>
 
             <div class="sidebar-section sidebar-footer">
-                <div class="quick-actions">
-                    <div class="corner-button top-left">
-                        <button id="downloads-btn-footer" class="nav-btn" title="Downloads">
-                            <i class="fas fa-download"></i>
-                        </button>
-                    </div>
-                    <div class="corner-button top-right">
-                        <button id="sidebar-plus-btn" class="nav-btn" title="New tab or group">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                    </div>
-                </div>
             </div>
             
             <!-- Sidebar plus dropdown (New tab / New tab group / Incognito) -->
@@ -81,12 +69,15 @@
                 </div>
             </div>
             
-            <!-- Downloads Popup (Custom Native Style with Arrow) -->
-            <div id="downloads-popup" class="downloads-popup-native hidden">
-                <div class="downloads-popup-arrow"></div>
-                <div id="downloads-popup-list" class="downloads-popup-list-native">
+            <!-- Downloads Popup - in-app high quality panel -->
+            <div id="downloads-popup" class="downloads-popup hidden">
+                <div id="downloads-popup-list" class="downloads-popup-list">
                     <!-- Download items will be populated here -->
                 </div>
+                <button id="downloads-popup-open-folder" class="downloads-popup-footer" title="Open Downloads folder">
+                    <i class="fas fa-folder-open"></i>
+                    <span>Open Downloads</span>
+                </button>
             </div>
             </aside>
 
@@ -98,6 +89,9 @@
                         <!-- Themed URL Bar -->
                         <div id="webview-url-bar" class="webview-url-bar">
                             <div class="url-bar-left">
+                                <button class="url-bar-btn url-bar-downloads-btn" id="downloads-btn-footer" title="Downloads">
+                                    <i class="far fa-circle-down"></i>
+                                </button>
                                 <button class="url-bar-btn" id="url-bar-back" title="Go Back" disabled>
                                     <i class="fas fa-chevron-left"></i>
                                 </button>
@@ -136,9 +130,7 @@
                                 <span class="zoom-percentage">100%</span>
                             </div>
                         </div>
-                        <!-- Webviews will be created dynamically for each tab -->
-                        <div id="webviews-container"></div>
-                        <!-- Keep the main webview for backward compatibility during transition -->
+                        <!-- Legacy webview: placed first, z-index:0 in CSS - never blocks dynamic webviews -->
                         <webview id="webview" 
                                  src="about:blank" 
                                  allowpopups 
@@ -146,8 +138,10 @@
                                  partition="persist:main"
                                  useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                                  autosize="true"
-                                 style="will-change: transform; transform: translateZ(0); backface-visibility: hidden; opacity: 0; visibility: hidden; background: transparent;">
+                                 style="opacity:0;visibility:hidden;pointer-events:none;">
                         </webview>
+                        <!-- Dynamic webviews for each tab - must be after legacy so they stack on top -->
+                        <div id="webviews-container"></div>
                         <!-- New Tab Page (replaces spotlight - custom local page when opening new tab) -->
                         <div id="new-tab-page" class="new-tab-page hidden">
                             <div class="new-tab-page-content">
@@ -575,10 +569,6 @@
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + Shift + H</span>
                             <span class="shortcut-desc">Clear History</span>
-                        </div>
-                        <div class="shortcut-item">
-                            <span class="shortcut-key">⌘ + Shift + J</span>
-                            <span class="shortcut-desc">Clear Downloads</span>
                         </div>
                     </div>
                     
