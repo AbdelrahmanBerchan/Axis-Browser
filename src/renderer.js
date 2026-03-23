@@ -10,7 +10,7 @@ class AxisBrowser {
         this.settings = {};
         this.selectedSearchEngine = null; // Track selected search engine shortcut
         this.closedTabs = []; // Store recently closed tabs for recovery
-        this.tabUndoStack = []; // Undo stack for close tab / add to group / remove from group (max 20)
+        this.tabUndoStack = []; // Undo stack for close tab / add to group / remove from group (max 15, kept smaller for RAM)
         // Search engine full word mapping (no shortcuts, only full words)
         this.searchEngineWords = [
             'google',
@@ -339,7 +339,7 @@ class AxisBrowser {
         // History - now handled through settings panel
 
         // Library panel - use cached elements
-        // Downloads button - show native OS downloads popup
+        // Downloads button - open in-app downloads popup
         el.downloadsBtnFooter?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.showDownloadsPopup();
@@ -492,6 +492,14 @@ class AxisBrowser {
                     if (data && data.selectionText) {
                         this.createNewTab();
                     }
+                    break;
+                case 'speech-start':
+                    if (data && data.selectionText) {
+                        this.startSpeakingSelection(data.selectionText);
+                    }
+                    break;
+                case 'speech-stop':
+                    this.stopSpeakingSelection();
                     break;
                 case 'open-link-new-tab':
                     if (data && data.linkURL) {
@@ -985,6 +993,32 @@ class AxisBrowser {
             this.executeBrowserShortcut(action);
         });
         
+        // URL bar native context menu actions
+        window.electronAPI.onUrlBarContextMenuAction?.((action, data) => {
+            const input = this.elements?.urlBarInput || document.getElementById('url-bar-input');
+            if (!input) return;
+            switch (action) {
+                case 'cut':
+                    input.focus();
+                    document.execCommand('cut');
+                    break;
+                case 'copy':
+                    input.focus();
+                    document.execCommand('copy');
+                    break;
+                case 'paste':
+                    this.insertTextInInput(input, data?.text || '');
+                    break;
+                case 'select-all':
+                    input.focus();
+                    input.select();
+                    break;
+                case 'paste-and-go':
+                    this.pasteAndGoUrlBar(data?.text || '');
+                    break;
+            }
+        });
+        
         // Listen for URL open from settings window (navigate in main window)
         window.electronAPI.onOpenUrlInBrowser?.((url) => {
             if (url) this.createNewTab(url);
@@ -1061,6 +1095,9 @@ class AxisBrowser {
             case 'new-tab':
                 this.createNewTab();
                 break;
+            case 'duplicate-tab':
+                this.duplicateCurrentTab();
+                break;
             case 'settings':
                 this.toggleSettings();
                 break;
@@ -1071,7 +1108,10 @@ class AxisBrowser {
                 window.electronAPI?.openSettingsWindow?.('history');
                 break;
             case 'downloads':
-                this.toggleDownloads();
+                this.showDownloadsPopup();
+                break;
+            case 'toggle-chat':
+                this.toggleAIChat();
                 break;
             case 'find':
                 this.toggleSearch();
@@ -1081,9 +1121,6 @@ class AxisBrowser {
                 break;
             case 'clear-history':
                 this.clearAllHistory();
-                break;
-            case 'clear-downloads':
-                this.clearAllDownloads();
                 break;
             case 'zoom-in':
                 this.zoomIn();
@@ -1107,6 +1144,28 @@ class AxisBrowser {
                 this.switchToTabByIndex(tabIndex);
                 break;
         }
+    }
+
+    insertTextInInput(input, text) {
+        if (!input) return;
+        const pasteText = text || '';
+        input.focus();
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? input.value.length;
+        input.value = input.value.slice(0, start) + pasteText + input.value.slice(end);
+        const caret = start + pasteText.length;
+        input.selectionStart = caret;
+        input.selectionEnd = caret;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    pasteAndGoUrlBar(textFromMenu = '') {
+        const text = (textFromMenu || '').trim();
+        if (!text) return;
+        if (this.elements?.urlBarInput) {
+            this.elements.urlBarInput.value = text;
+        }
+        this.navigate(text);
     }
 
     setupWebviewEventListeners(webview, tabId) {
@@ -3237,6 +3296,8 @@ class AxisBrowser {
         // Set up tab event listeners
         this.setupTabEventListeners(tabElement, tabId);
 
+        // Only reset new tab page when opening a brand-new tab (not when returning to an existing one)
+        this._resetNewTabPageOnShow = !url || url === this.NEWTAB_URL;
         // Switch to new tab
         this.switchToTab(tabId);
 
@@ -3246,12 +3307,11 @@ class AxisBrowser {
             this.navigate(url);
         }
         this.updateTabFavicon(tabId, tabElement);
-        
-        // Save pinned tabs state
+        this.updateTabTooltip(tabId);
+
         this.savePinnedTabs();
-        
-        // Re-render tab groups in case tab organization changed
         this.renderTabGroups();
+        return tabId;
     }
 
     updatePinnedTabClosedState(tabId) {
@@ -3399,6 +3459,14 @@ class AxisBrowser {
             return;
         }
 
+        // Save new-tab-page state for the tab we're leaving (so each new tab keeps its own content)
+        if (this.currentTab && this.currentTab !== tabId && this.tabs.has(this.currentTab)) {
+            const prevTab = this.tabs.get(this.currentTab);
+            if (prevTab && prevTab.url === this.NEWTAB_URL) {
+                this.saveNewTabPageStateToTab(this.currentTab);
+            }
+        }
+
         // INSTANT tab switching - all critical updates happen synchronously
         const activeTab = document.querySelector(`[data-tab-id="${tabId}"]`);
         const tab = this.tabs.get(tabId);
@@ -3412,7 +3480,8 @@ class AxisBrowser {
                 prevTab.webview.style.pointerEvents = 'none';
                 prevTab.webview.style.zIndex = '0';
                 prevTab.webview.classList.add('inactive');
-                
+                // Clear will-change on inactive webview to reduce compositor/RAM use
+                prevTab.webview.style.willChange = '';
                 // Check if previous tab has a playing video and show PIP
                 this.checkAndShowPIP(this.currentTab, prevTab.webview);
             }
@@ -3427,9 +3496,10 @@ class AxisBrowser {
             this.hidePIP();
         }
         
-        // CRITICAL: Update current tab immediately
+        // CRITICAL: Update current tab immediately (must be before updateEmptyState so empty state hides)
         this.currentTab = tabId;
-        
+        this.updateEmptyState();
+
         // CRITICAL: Add active to new tab instantly
         if (activeTab) {
             activeTab.classList.add('active');
@@ -3459,7 +3529,14 @@ class AxisBrowser {
             
             if (tab.webview) {
                 const webview = tab.webview;
-                
+                // Ensure legacy static #webview never blocks interaction (it sits after webviews-container in DOM)
+                const legacyWebview = document.getElementById('webview');
+                if (legacyWebview && legacyWebview !== webview) {
+                    legacyWebview.style.pointerEvents = 'none';
+                    legacyWebview.style.opacity = '0';
+                    legacyWebview.style.visibility = 'hidden';
+                }
+
                 // Get current URL from webview first (may throw when inactive)
                 let currentSrc = null;
                 try {
@@ -3540,6 +3617,7 @@ class AxisBrowser {
                     webview.style.pointerEvents = 'auto';
                     webview.style.zIndex = '2';
                     webview.classList.remove('inactive');
+                    webview.style.willChange = 'transform'; // Only active webview keeps will-change (saves RAM)
                     this.updateNewTabPageVisibility(false);
                 }
                 
@@ -3872,13 +3950,117 @@ class AxisBrowser {
         }
     }
 
+    /** Reset new tab page to a fresh state so each new tab is independent (no leftover input/suggestions/mode). */
+    resetNewTabPageState() {
+        const input = document.getElementById('new-tab-input');
+        const suggestionsContainer = document.getElementById('new-tab-suggestions');
+        const modeToggle = document.getElementById('new-tab-mode-toggle');
+        const newTabPage = document.getElementById('new-tab-page');
+        const searchWrapper = document.getElementById('new-tab-search-wrapper');
+        const askMessages = document.getElementById('new-tab-ask-messages');
+        if (input) input.value = '';
+        this.newTabMode = 'search';
+        this.spotlightSelectedIndex = -1;
+        if (modeToggle) {
+            modeToggle.querySelectorAll('.new-tab-mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === 'search');
+            });
+        }
+        if (newTabPage) {
+            newTabPage.classList.remove('ask-mode');
+        }
+        if (input) input.placeholder = 'Search or Enter URL...';
+        if (searchWrapper) {
+            searchWrapper.classList.remove('hidden', 'ask-chat');
+        }
+        if (suggestionsContainer) {
+            suggestionsContainer.classList.remove('hidden');
+            suggestionsContainer.innerHTML = '';
+            suggestionsContainer.classList.remove('loading', 'new-tab-suggestions-closing');
+        }
+        if (askMessages) {
+            askMessages.innerHTML = '';
+            askMessages.classList.add('hidden');
+        }
+        this.updateNewTabSuggestions('');
+    }
+
+    /** Save current new-tab-page UI state to a tab (so we can restore when switching back). */
+    saveNewTabPageStateToTab(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab || tab.url !== this.NEWTAB_URL) return;
+        const input = document.getElementById('new-tab-input');
+        const askMessages = document.getElementById('new-tab-ask-messages');
+        const inputValue = input ? input.value : '';
+        const askMessagesHtml = askMessages ? askMessages.innerHTML : '';
+        tab.newTabPageState = {
+            inputValue,
+            mode: this.newTabMode || 'search',
+            askMessagesHtml
+        };
+        this.tabs.set(tabId, tab);
+    }
+
+    /** Restore a tab's new-tab-page state into the shared UI. */
+    restoreNewTabPageStateFromTab(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab || !tab.newTabPageState) return;
+        const state = tab.newTabPageState;
+        const input = document.getElementById('new-tab-input');
+        const suggestionsContainer = document.getElementById('new-tab-suggestions');
+        const modeToggle = document.getElementById('new-tab-mode-toggle');
+        const newTabPage = document.getElementById('new-tab-page');
+        const searchWrapper = document.getElementById('new-tab-search-wrapper');
+        const askMessages = document.getElementById('new-tab-ask-messages');
+        if (input) input.value = state.inputValue || '';
+        this.newTabMode = state.mode || 'search';
+        this.spotlightSelectedIndex = -1;
+        if (modeToggle) {
+            modeToggle.querySelectorAll('.new-tab-mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === this.newTabMode);
+            });
+        }
+        if (newTabPage) {
+            newTabPage.classList.toggle('ask-mode', this.newTabMode === 'ask');
+        }
+        if (input) {
+            input.placeholder = this.newTabMode === 'ask' ? 'Ask AI a question...' : 'Search or Enter URL...';
+        }
+        if (searchWrapper) {
+            searchWrapper.classList.remove('hidden');
+            searchWrapper.classList.toggle('ask-chat', this.newTabMode === 'ask' && state.askMessagesHtml && state.askMessagesHtml.trim().length > 0);
+        }
+        if (suggestionsContainer) {
+            suggestionsContainer.classList.remove('hidden');
+            suggestionsContainer.classList.remove('loading', 'new-tab-suggestions-closing');
+            if (this.newTabMode === 'search') {
+                this.updateNewTabSuggestions(state.inputValue || '');
+            } else {
+                suggestionsContainer.innerHTML = '';
+                suggestionsContainer.classList.add('hidden');
+            }
+        }
+        if (askMessages) {
+            askMessages.innerHTML = state.askMessagesHtml || '';
+            askMessages.classList.toggle('hidden', !state.askMessagesHtml || state.askMessagesHtml.trim().length === 0);
+        }
+    }
+
     updateNewTabPageVisibility(show) {
         const newTabPage = document.getElementById('new-tab-page');
         const urlBar = this.elements.webviewUrlBar;
         if (newTabPage) {
             if (show) {
+                if (this._resetNewTabPageOnShow) {
+                    this.resetNewTabPageState();
+                    this._resetNewTabPageOnShow = false;
+                } else if (this.currentTab && this.tabs.has(this.currentTab)) {
+                    const tab = this.tabs.get(this.currentTab);
+                    if (tab && tab.url === this.NEWTAB_URL) {
+                        this.restoreNewTabPageStateFromTab(this.currentTab);
+                    }
+                }
                 newTabPage.classList.remove('hidden');
-                this.updateNewTabSuggestions('');
                 requestAnimationFrame(() => {
                     document.getElementById('new-tab-input')?.focus();
                 });
@@ -4028,19 +4210,15 @@ class AxisBrowser {
             
             if (isInactive) {
                 // Completely remove inactive pinned tabs
-                // Remove from tab groups if it's in one
+                // Remove from tab groups first (sync may move the tab element)
                 this.tabGroups.forEach((tabGroup, tabGroupId) => {
                     if (tabGroup.tabIds.includes(tabId)) {
                         this.removeTabFromTabGroup(tabId, tabGroupId);
                     }
                 });
-                
-                // Remove tab element from DOM
-                if (tabElement) {
-                    tabElement.remove();
-                }
-                
-                // Remove from tabs Map
+                // Re-query in case sync moved the element
+                const elToRemove = document.querySelector(`[data-tab-id="${tabId}"]`);
+                if (elToRemove) elToRemove.remove();
                 this.tabs.delete(tabId);
                 
                 // If this was the current tab, switch only to an unpinned tab; if none left, show empty state
@@ -4062,8 +4240,9 @@ class AxisBrowser {
                     }
                 }
                 
-                // Save pinned tabs after removal
+                // Save pinned tabs after removal and update separator immediately
                 this.savePinnedTabs();
+                this.updatePinnedSeparatorVisibility();
                 this.updateEmptyState();
                 return;
             }
@@ -4074,7 +4253,8 @@ class AxisBrowser {
                 try {
                     // Stop audio detection polling
                     this.stopAudioDetection(tab.webview);
-                    
+                    // Unload page so Chromium can release memory sooner
+                    try { tab.webview.src = 'about:blank'; } catch (_) {}
                     if (tab.webview.parentNode) {
                         tab.webview.parentNode.removeChild(tab.webview);
                     }
@@ -4113,6 +4293,7 @@ class AxisBrowser {
                 }
             }
             this.savePinnedTabs();
+            this.updatePinnedSeparatorVisibility();
             return;
         }
         
@@ -4141,10 +4322,10 @@ class AxisBrowser {
                     tabGroupId: tabGroupIdForUndo
                 }
             });
-            if (this.tabUndoStack.length > 20) this.tabUndoStack = this.tabUndoStack.slice(-20);
-            // Keep only the last 10 closed tabs
-            if (this.closedTabs.length > 10) {
-                this.closedTabs = this.closedTabs.slice(0, 10);
+            if (this.tabUndoStack.length > 15) this.tabUndoStack = this.tabUndoStack.slice(-15);
+            // Keep only the last 8 closed tabs (less RAM, recovery still works)
+            if (this.closedTabs.length > 8) {
+                this.closedTabs = this.closedTabs.slice(0, 8);
             }
         }
         
@@ -4165,7 +4346,8 @@ class AxisBrowser {
                     clearInterval(tab.webview.__settingsPollInterval);
                     tab.webview.__settingsPollInterval = null;
                 }
-                
+                // Unload page so Chromium can release memory sooner
+                try { tab.webview.src = 'about:blank'; } catch (_) {}
                 if (tab.webview.parentNode) {
                     tab.webview.parentNode.removeChild(tab.webview);
                 }
@@ -4376,7 +4558,14 @@ class AxisBrowser {
                 
                 // Add new URL to history
                 tab.history.push(url);
-                tab.historyIndex = tab.history.length - 1;
+                // Cap in-memory history per tab to limit RAM (back/forward still works)
+                const maxHistory = 50;
+                if (tab.history.length > maxHistory) {
+                    tab.history = tab.history.slice(-maxHistory);
+                    tab.historyIndex = tab.history.length - 1;
+                } else {
+                    tab.historyIndex = tab.history.length - 1;
+                }
             }
             
             tab.url = url;
@@ -4610,6 +4799,7 @@ class AxisBrowser {
                 if (titleElement && titleElement.textContent !== title) {
                     titleElement.textContent = title;
                 }
+                this.updateTabTooltip(this.currentTab);
             }
             
             // Ensure tab data has the custom title
@@ -4631,6 +4821,7 @@ class AxisBrowser {
             if (titleElement && titleElement.textContent !== title) {
             titleElement.textContent = title;
             }
+            this.updateTabTooltip(this.currentTab);
         }
 
         // Update tab data
@@ -4647,6 +4838,23 @@ class AxisBrowser {
             const windowTitle = title && title !== 'New Tab' ? title : 'Axis Browser';
             window.electronAPI.setWindowTitle(windowTitle);
         }
+    }
+
+    updateTabTooltip(tabId) {
+        const tab = this.tabs.get(tabId);
+        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+        if (!tab || !tabElement) return;
+        let fullUrl = tab.url || '';
+        try {
+            if (tab.webview && typeof tab.webview.getURL === 'function') {
+                const current = tab.webview.getURL();
+                if (current && current !== 'about:blank') fullUrl = current;
+            }
+        } catch (_) {
+            // ignore inaccessible webview URL
+        }
+        const fullTitle = tab.customTitle || tab.title || 'New Tab';
+        tabElement.title = fullUrl ? `${fullTitle}\n${fullUrl}` : fullTitle;
     }
 
     toggleSettings() {
@@ -5842,6 +6050,10 @@ class AxisBrowser {
                                 <span class="shortcut-desc">Open Downloads</span>
                                 <input type="text" class="shortcut-input" readonly data-action="downloads">
                             </div>
+                            <div class="shortcut-item editable" data-action="toggle-chat">
+                                <span class="shortcut-desc">Open Chat</span>
+                                <input type="text" class="shortcut-input" readonly data-action="toggle-chat">
+                            </div>
                             <div class="shortcut-item editable" data-action="settings">
                                 <span class="shortcut-desc">Open Settings</span>
                                 <input type="text" class="shortcut-input" readonly data-action="settings">
@@ -5853,10 +6065,6 @@ class AxisBrowser {
                             <div class="shortcut-item editable" data-action="clear-history">
                                 <span class="shortcut-desc">Clear History</span>
                                 <input type="text" class="shortcut-input" readonly data-action="clear-history">
-                            </div>
-                            <div class="shortcut-item editable" data-action="clear-downloads">
-                                <span class="shortcut-desc">Clear Downloads</span>
-                                <input type="text" class="shortcut-input" readonly data-action="clear-downloads">
                             </div>
                         </div>
                     </div>
@@ -8070,14 +8278,8 @@ class AxisBrowser {
             tabsContainer.insertBefore(tab, separator);
         });
         
-        // Show/hide separator based on pinned tabs or tab groups
-        const hasPinnedTabs = pinnedTabs.length > 0;
-        const hasTabGroups = this.tabGroups.size > 0;
-        if (hasPinnedTabs || hasTabGroups) {
-            separator.style.display = 'block';
-        } else {
-            separator.style.display = 'none';
-        }
+        // Show/hide separator based on actual DOM content above it (tabs or tab groups)
+        this.updatePinnedSeparatorVisibility();
         
         // Insert unpinned tabs below separator, after "+ New Tab" button (in order)
         const unpinnedRef = this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn.nextSibling : separator.nextSibling;
@@ -8130,6 +8332,26 @@ class AxisBrowser {
                 el.addEventListener('transitionend', cleanup);
             }
         });
+    }
+    
+    // Recompute whether the pinned/unpinned separator should be visible based on current DOM
+    updatePinnedSeparatorVisibility() {
+        const tabsContainer = this.elements.tabsContainer;
+        const separator = this.elements.tabsSeparator;
+        if (!tabsContainer || !separator) return;
+        
+        const children = Array.from(tabsContainer.children);
+        const sepIndex = children.indexOf(separator);
+        if (sepIndex <= 0) {
+            separator.style.display = 'none';
+            return;
+        }
+        
+        const hasPinnedDom = children
+            .slice(0, sepIndex)
+            .some(el => el.classList.contains('tab') || el.classList.contains('tab-group'));
+        
+        separator.style.display = hasPinnedDom ? 'block' : 'none';
     }
     
     savePinnedTabs() {
@@ -8411,6 +8633,16 @@ class AxisBrowser {
                 !hoverArea.contains(e.target)) {
                 closeSlideOut();
             }
+        });
+
+        // Close downloads popup when clicking outside
+        document.addEventListener('click', (e) => {
+            const popup = document.getElementById('downloads-popup');
+            const btn = this.elements?.downloadsBtnFooter;
+            if (!popup || popup.classList.contains('hidden')) return;
+            if (popup.contains(e.target)) return;
+            if (btn && btn.contains(e.target)) return;
+            this.hideDownloadsPopup();
         });
     }
 
@@ -9698,32 +9930,7 @@ class AxisBrowser {
     }
 
     renderTabGroups() {
-        const tabsContainer = this.elements.tabsContainer;
-        const separator = this.elements.tabsSeparator;
-        if (!tabsContainer || !separator) return;
-
-        // Remove existing tab group elements
-        const existingTabGroups = tabsContainer.querySelectorAll('.tab-group');
-        existingTabGroups.forEach(tabGroup => tabGroup.remove());
-
-        // Get all tab groups sorted by order; split by pinned (above separator) vs unpinned (below)
-        const all = Array.from(this.tabGroups.values()).sort((a, b) => (a.order || 0) - (b.order || 0));
-        const pinnedGroups = all.filter(g => g.pinned !== false);
-        const unpinnedGroups = all.filter(g => g.pinned === false);
-
-        pinnedGroups.forEach(tabGroup => {
-            const el = this.createTabGroupElement(tabGroup);
-            tabsContainer.insertBefore(el, separator);
-        });
-        const unpinnedRef = this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn.nextSibling : separator.nextSibling;
-        unpinnedGroups.forEach(tabGroup => {
-            const el = this.createTabGroupElement(tabGroup);
-            if (unpinnedRef) {
-                tabsContainer.insertBefore(el, unpinnedRef);
-            } else {
-                tabsContainer.appendChild(el);
-            }
-        });
+        this.syncSidebarFromTabGroups();
     }
 
     createTabGroupElement(tabGroup) {
@@ -9731,143 +9938,30 @@ class AxisBrowser {
         tabGroupElement.className = 'tab-group';
         tabGroupElement.dataset.tabGroupId = tabGroup.id;
         if (tabGroup.pinned !== false) tabGroupElement.classList.add('pinned');
-        
-        // Apply color - convert hex to RGB for CSS variables
+
         const color = tabGroup.color || '#FF6B6B';
         const rgb = this.hexToRgb(color);
-        if (rgb) {
-            tabGroupElement.style.setProperty('--tab-group-color-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
-        }
+        if (rgb) tabGroupElement.style.setProperty('--tab-group-color-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
         tabGroupElement.style.setProperty('--tab-group-color', color);
         tabGroupElement.dataset.color = color;
-        
-        const isOpen = tabGroup.open !== false; // Default to open
-        
-        // Get tab group tabs (show all tabs in group; pinned groups show pinned tabs, unpinned show unpinned)
-        const groupPinned = tabGroup.pinned !== false;
-        const tabGroupTabs = tabGroup.tabIds
-            .map(tabId => {
-                const tab = this.tabs.get(tabId);
-                const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
-                return { tab, tabElement, tabId };
-            })
-            .filter(item => item.tab && (groupPinned ? item.tab.pinned : !item.tab.pinned));
 
         tabGroupElement.innerHTML = `
             <div class="tab-content">
                 <div class="tab-left">
-                    ${tabGroup.iconType === 'emoji' 
-                        ? `<span class="tab-favicon tab-group-icon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">${tabGroup.icon || '📁'}</span>`
+                    ${tabGroup.iconType === 'emoji'
+                        ? `<span class="tab-favicon tab-group-icon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;">${tabGroup.icon || '📁'}</span>`
                         : `<i class="fas ${tabGroup.icon || 'fa-layer-group'} tab-favicon tab-group-icon"></i>`
                     }
                     <input type="text" class="tab-group-name-input tab-title" value="${this.escapeHtml(tabGroup.name)}" placeholder="Tab Group name" readonly>
                 </div>
                 <div class="tab-right">
-                    <button class="tab-group-delete tab-close" title="Delete Tab Group">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    <button class="tab-group-delete tab-close" title="Delete Tab Group"><i class="fas fa-times"></i></button>
                 </div>
             </div>
-            <div class="tab-group-content ${isOpen && tabGroupTabs.length > 0 ? 'open' : ''}">
-            </div>
+            <div class="tab-group-content"></div>
         `;
 
-        // Set up tab group event listeners
         this.setupTabGroupEventListeners(tabGroupElement, tabGroup);
-
-        // Add tab elements to tab group content
-        const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
-        
-        tabGroupTabs.forEach(({ tabElement, tabId }) => {
-            if (tabElement && tabGroupContent) {
-                // Only add if not already in a tab group
-                if (!tabElement.closest('.tab-group')) {
-                    // Reset any inline styles that might cause rendering issues
-                    tabElement.style.transform = '';
-                    tabElement.style.position = '';
-                    tabElement.style.top = '';
-                    tabElement.style.left = '';
-                    tabElement.style.width = '';
-                    tabElement.style.height = '';
-                    tabElement.style.margin = '';
-                    tabElement.style.padding = '';
-                    tabElement.style.opacity = '';
-                    tabElement.style.visibility = '';
-                    tabElement.style.display = '';
-                    
-                    // Reset tab-content styles
-                    const tabContent = tabElement.querySelector('.tab-content');
-                    if (tabContent) {
-                        tabContent.style.transform = '';
-                        tabContent.style.position = '';
-                        tabContent.style.top = '';
-                        tabContent.style.left = '';
-                        tabContent.style.width = '';
-                        tabContent.style.height = '';
-                        tabContent.style.margin = '';
-                        tabContent.style.padding = '';
-                        tabContent.style.opacity = '';
-                        tabContent.style.visibility = '';
-                        tabContent.style.display = '';
-                    }
-                    
-                    if (groupPinned) tabElement.classList.add('pinned'); else tabElement.classList.remove('pinned');
-                    tabGroupContent.appendChild(tabElement);
-                    // Force a reflow to ensure styles are applied
-                    void tabElement.offsetHeight;
-                    // Ensure event listeners are set up
-                    this.setupTabEventListeners(tabElement, tabId);
-                }
-            } else if (tabGroupContent && !tabElement) {
-                // Tab element doesn't exist, create it
-                const tab = this.tabs.get(tabId);
-                if (tab) {
-                    const newTabElement = document.createElement('div');
-                    newTabElement.className = 'tab' + (groupPinned ? ' pinned' : '');
-                    newTabElement.dataset.tabId = tabId;
-                    newTabElement.innerHTML = `
-                        <div class="tab-content">
-                            <div class="tab-left">
-                                ${tab.customIcon ? `<i class="fas ${tab.customIcon} tab-favicon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: rgba(255, 255, 255, 0.7);"></i>` : `<img class="tab-favicon" src="" alt="" onerror="this.style.visibility='hidden'">`}
-                                <span class="tab-audio-indicator" style="display: none;"><i class="fas fa-volume-up"></i></span>
-                                <span class="tab-title">${this.escapeHtml(tab.title || 'New Tab')}</span>
-                            </div>
-                            <div class="tab-right">
-                                <button class="tab-close"><i class="fas fa-times"></i></button>
-                            </div>
-                        </div>
-                    `;
-                    tabGroupContent.appendChild(newTabElement);
-                    this.setupTabEventListeners(newTabElement, tabId);
-                    this.updateTabFavicon(tabId, newTabElement);
-                }
-            }
-        });
-        
-        // Set initial state if tab group is open AND has tabs (after tabs are added)
-        if (isOpen && tabGroupTabs.length > 0) {
-            // Use requestAnimationFrame for proper DOM synchronization
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    tabGroupContent.style.display = 'flex';
-                    tabGroupContent.style.visibility = 'visible';
-                    tabGroupContent.style.maxHeight = 'none';
-                    const height = tabGroupContent.scrollHeight;
-                    tabGroupContent.style.maxHeight = height + 'px';
-                    tabGroupContent.style.opacity = '1';
-                    tabGroupContent.classList.add('open');
-                });
-            });
-        } else {
-            // Ensure empty tab groups have no expansion
-            tabGroupContent.style.display = 'none';
-            tabGroupContent.style.visibility = 'hidden';
-            tabGroupContent.style.maxHeight = '0px';
-            tabGroupContent.style.padding = '0';
-            tabGroupContent.style.opacity = '0';
-            tabGroupContent.classList.remove('open');
-        }
-
         return tabGroupElement;
     }
 
@@ -10050,55 +10144,49 @@ class AxisBrowser {
                 return;
             }
             
-            // Opening: measure height, then animate
+            // Opening: measure full content height + buffer so we never clip (no snap at end)
             tabGroupContent.style.display = 'flex';
             tabGroupContent.style.visibility = 'visible';
             tabGroupContent.style.maxHeight = 'none';
             tabGroupContent.style.transition = 'none';
-            
-            // Force reflow to get accurate height
-            const height = tabGroupContent.offsetHeight;
-                
-            // Reset and animate
-            tabGroupContent.style.maxHeight = '0px';
-            tabGroupContent.style.opacity = '0';
-            tabGroupContent.style.transition = 'max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-                
+            requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
-                tabGroupContent.classList.add('open');
-                tabGroupContent.style.maxHeight = height + 'px';
-                tabGroupContent.style.opacity = '1';
-                        
-                // After animation, allow full expansion
+                    const raw = tabGroupContent.scrollHeight;
+                    const height = raw + 48;
+                    tabGroupContent.style.maxHeight = '0px';
+                    tabGroupContent.style.opacity = '0';
+                    tabGroupContent.style.transition = 'max-height 0.3s cubic-bezier(0.33, 1, 0.68, 1), opacity 0.26s cubic-bezier(0.33, 1, 0.68, 1), padding 0.3s cubic-bezier(0.33, 1, 0.68, 1)';
+                    requestAnimationFrame(() => {
+                        tabGroupContent.classList.add('open');
+                        tabGroupContent.style.maxHeight = height + 'px';
+                        tabGroupContent.style.opacity = '1';
                         setTimeout(() => {
-                    tabGroupContent.style.transition = 'none';
-                    tabGroupContent.style.maxHeight = '9999px';
-                    tabGroupElement.classList.remove('toggling');
-                            setTimeout(() => {
-                        tabGroupContent.style.transition = '';
-                            }, 50);
-                        }, 400);
+                            tabGroupContent.style.transition = 'none';
+                            tabGroupContent.style.maxHeight = '9999px';
+                            tabGroupElement.classList.remove('toggling');
+                            tabGroupContent.style.transition = '';
+                        }, 320);
+                        });
+                });
             });
         } else {
-            // Closing: get current height, then animate to 0
+            // Closing: collapse only (no fade) – tabs stay visible until clipped by shrinking height
             const currentHeight = tabGroupContent.scrollHeight;
+            tabGroupContent.style.display = 'flex';
+            tabGroupContent.style.visibility = 'visible';
             tabGroupContent.style.maxHeight = currentHeight + 'px';
             tabGroupContent.style.opacity = '1';
-            tabGroupContent.style.transition = 'max-height 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), padding 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-            
+            tabGroupContent.style.transition = 'max-height 0.3s linear';
             requestAnimationFrame(() => {
-                tabGroupContent.classList.remove('open');
                 tabGroupContent.style.maxHeight = '0px';
-                tabGroupContent.style.opacity = '0';
-                    
-                // Clean up after animation
-                    setTimeout(() => {
+                setTimeout(() => {
+                    tabGroupContent.classList.remove('open');
                     tabGroupContent.style.display = 'none';
                     tabGroupContent.style.visibility = 'hidden';
                     tabGroupContent.style.maxHeight = '';
                     tabGroupContent.style.transition = '';
                     tabGroupElement.classList.remove('toggling');
-                    }, 380);
+                }, 320);
             });
         }
         
@@ -10108,34 +10196,21 @@ class AxisBrowser {
     addTabToTabGroup(tabId, tabGroupId, skipUndo = false, insertIndex = undefined) {
         const tab = this.tabs.get(tabId);
         const tabGroup = this.tabGroups.get(tabGroupId);
-        
         if (!tab || !tabGroup) return;
-        
+
         if (!skipUndo) {
             this.tabUndoStack.push({ type: 'add_to_group', tabId, tabGroupId });
-            if (this.tabUndoStack.length > 20) this.tabUndoStack = this.tabUndoStack.slice(-20);
+            if (this.tabUndoStack.length > 15) this.tabUndoStack = this.tabUndoStack.slice(-15);
         }
-        // Only add pinned tabs to tab groups
-        if (!tab.pinned) {
-            // Auto-pin the tab
-            const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
-            if (tabElement) {
-                this.togglePinTab(tabId, tabElement, null);
-            }
-        }
-        
-        // Remove tab from any other tab group (optimized - only check if needed)
+
         for (const [id, tg] of this.tabGroups) {
             if (id !== tabGroupId && tg.tabIds.includes(tabId)) {
-                tg.tabIds = tg.tabIds.filter(tgid => tgid !== tabId);
+                tg.tabIds = tg.tabIds.filter(tid => tid !== tabId);
                 this.tabGroups.set(id, tg);
-                // Save the other group's state
-                this.saveTabGroups();
-                break; // Tab can only be in one tab group at a time
+                break;
             }
         }
-        
-        // Add to this tab group if not already there
+
         if (!tabGroup.tabIds.includes(tabId)) {
             if (insertIndex !== undefined && insertIndex >= 0 && insertIndex <= tabGroup.tabIds.length) {
                 tabGroup.tabIds.splice(insertIndex, 0, tabId);
@@ -10144,290 +10219,58 @@ class AxisBrowser {
             }
             this.tabGroups.set(tabGroupId, tabGroup);
         }
-        
+
         tab.tabGroupId = tabGroupId;
         tab.pinned = tabGroup.pinned !== false;
         this.tabs.set(tabId, tab);
-        
-        // Update tab group UI directly without full re-render for better performance
-        const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
-        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
-        
-        if (!tabGroupElement || !tabElement) return;
-        
-        const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
-        if (!tabGroupContent) {
-            // Fallback: just remove from main container
-            if (tabElement.parentNode && !tabElement.closest('.tab-group')) {
-                tabElement.remove();
-            }
-            return;
-        }
-        
-        // Ensure tab group content is fully opened and stable before adding tabs
-        const ensureTabGroupContentReady = () => {
-            // Remove any transition/animation states
-            tabGroupElement.classList.remove('toggling');
-            
-            // Force content to be fully opened immediately (no animation)
-            tabGroupContent.style.display = 'flex';
-            tabGroupContent.style.visibility = 'visible';
-            tabGroupContent.style.opacity = '1';
-            tabGroupContent.style.maxHeight = 'none';
-            tabGroupContent.style.transition = 'none';
-            tabGroupContent.style.padding = '8px 16px 12px 16px';
-            tabGroupContent.classList.add('open');
-            
-            // Force a reflow to ensure layout is calculated
-            void tabGroupContent.offsetHeight;
-        };
-        
-        // Batch DOM operations
-        requestAnimationFrame(() => {
-            // Ensure tab group is open and in stable state
-            if (!tabGroup.open) {
-                tabGroup.open = true;
-                this.tabGroups.set(tabGroupId, tabGroup);
-            }
-            
-            // Force content to be ready (fully opened, no transitions)
-            ensureTabGroupContentReady();
-            
-            // Wait one more frame to ensure layout is completely stable
-            requestAnimationFrame(() => {
-                // Remove tab from wherever it currently is (main container or another tab group)
-                if (tabElement.parentNode) {
-                    // Check if it's in a tab group content
-                    const currentParent = tabElement.parentNode;
-                    if (currentParent.classList && currentParent.classList.contains('tab-group-content')) {
-                        // Remove from current tab group
-                        const currentTabGroupElement = currentParent.closest('.tab-group');
-                        if (currentTabGroupElement) {
-                            const currentTabGroupId = parseInt(currentTabGroupElement.dataset.tabGroupId, 10);
-                            if (currentTabGroupId && currentTabGroupId !== tabGroupId) {
-                                // Remove from the other tab group's data
-                                const currentTabGroup = this.tabGroups.get(currentTabGroupId);
-                                if (currentTabGroup) {
-                                    currentTabGroup.tabIds = currentTabGroup.tabIds.filter(id => id !== tabId);
-                                    this.tabGroups.set(currentTabGroupId, currentTabGroup);
-                                }
-                            }
-                        }
-                    }
-                tabElement.remove();
-            }
-            
-                // Completely reset all inline styles on tab element
-                tabElement.style.cssText = '';
-                tabElement.style.display = 'block';
-                tabElement.style.position = 'relative';
-                tabElement.style.margin = '0';
-                tabElement.style.width = '100%';
-                tabElement.style.boxSizing = 'border-box';
-                
-                // Completely reset tab-content styles
-                const tabContent = tabElement.querySelector('.tab-content');
-                if (tabContent) {
-                    tabContent.style.cssText = '';
-                    tabContent.style.display = 'flex';
-                    tabContent.style.position = 'relative';
-                    tabContent.style.height = '32px';
-                    tabContent.style.minHeight = '32px';
-                }
-                
-                if (tabGroup.pinned !== false) tabElement.classList.add('pinned'); else tabElement.classList.remove('pinned');
-                tabElement.classList.remove('dragging', 'active');
-                
-                // Force reflows to ensure styles are applied
-                void tabElement.offsetHeight;
-                void tabGroupContent.offsetHeight;
-                
-                // Always add tab to tab group content (even if it was there before, we've removed it)
-                // This ensures it's properly added even if it was previously in this or another tab group
-                if (tabElement.parentNode !== tabGroupContent) {
-                    if (insertIndex !== undefined && insertIndex >= 0 && insertIndex < tabGroupContent.children.length) {
-                        tabGroupContent.insertBefore(tabElement, tabGroupContent.children[insertIndex]);
-                    } else {
-                        tabGroupContent.appendChild(tabElement);
-                    }
-                }
-                
-                // Force another reflow after adding to DOM
-                requestAnimationFrame(() => {
-                    void tabElement.offsetHeight;
-                    void tabGroupContent.offsetHeight;
-                    
-                    // Re-enable transitions after tab is properly added
-                    tabGroupContent.style.transition = '';
-                    
-                    // Always re-setup event listeners to ensure they're fresh
-                this.setupTabEventListeners(tabElement, tabId);
-                this.updateTabFavicon(tabId, tabElement);
-                if (this.makeTabDraggable) {
-                    this.makeTabDraggable(tabElement);
-                }
-                });
-            
-                // Remove empty state if present
-                const tabGroupEmpty = tabGroupContent.querySelector('.tab-group-empty');
-                if (tabGroupEmpty) {
-                    tabGroupEmpty.remove();
-            }
-            });
-        });
-        
-        this.saveTabGroups();
+
+        this.syncSidebarFromTabGroups();
     }
 
     removeTabFromTabGroup(tabId, tabGroupId, skipUndo = false) {
         const tabGroup = this.tabGroups.get(tabGroupId);
         if (!tabGroup) return;
-        
+
         const indexInGroup = tabGroup.tabIds.indexOf(tabId);
         if (!skipUndo && indexInGroup !== -1) {
             this.tabUndoStack.push({ type: 'remove_from_group', tabId, tabGroupId, indexInGroup });
-            if (this.tabUndoStack.length > 20) this.tabUndoStack = this.tabUndoStack.slice(-20);
+            if (this.tabUndoStack.length > 15) this.tabUndoStack = this.tabUndoStack.slice(-15);
         }
-        // Remove tab from group's tabIds array
+
         tabGroup.tabIds = tabGroup.tabIds.filter(id => id !== tabId);
+        if (tabGroup.tabIds.length === 0) {
+            tabGroup.open = false;
+        }
         this.tabGroups.set(tabGroupId, tabGroup);
-        
-        // Clear tabGroupId from tab data
+
         const tab = this.tabs.get(tabId);
         if (tab) {
             tab.tabGroupId = undefined;
             this.tabs.set(tabId, tab);
         }
-        
-        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
-        const tabsContainer = this.elements.tabsContainer;
-        const separator = this.elements.tabsSeparator;
-        const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
-        
-        if (!tabElement || !tabsContainer || !separator || !tabGroupElement) return;
-        
-        // Clean up any drag-related classes and styles on tab group first
-        tabGroupElement.classList.remove('dragging', 'drag-over-tab-group', 'drag-over-tab-group-top', 'drag-over-tab-group-bottom');
-        
-        // Store original styles to restore later
-        const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
-        const originalTabGroupTransition = tabGroupElement.style.transition;
-        const originalTabGroupPointerEvents = tabGroupElement.style.pointerEvents;
-        const originalTabGroupTransform = tabGroupElement.style.transform;
-        const originalTabGroupFilter = tabGroupElement.style.filter;
-        const originalTabGroupOpacity = tabGroupElement.style.opacity;
-        const originalTabTransition = tabElement.style.transition;
-        
-        // Temporarily disable transitions and reset any transform/filter/opacity that might be stuck
-        tabGroupElement.style.transition = 'none';
-        tabGroupElement.style.pointerEvents = 'none';
-        tabGroupElement.style.transform = '';
-        tabGroupElement.style.filter = '';
-        tabGroupElement.style.opacity = '';
-        tabElement.style.transition = 'none';
-        
-        // Batch all DOM updates in a single frame
-        requestAnimationFrame(() => {
-            // Remove tab from tab group content
-            tabElement.remove();
-            
-            // Completely reset tab element styles and state
-            tabElement.style.cssText = '';
-            tabElement.style.display = 'block';
-            tabElement.style.position = 'relative';
-            tabElement.style.margin = '0';
-            tabElement.style.width = '100%';
-            tabElement.style.boxSizing = 'border-box';
-            
-            // Reset tab-content styles
-            const tabContentEl = tabElement.querySelector('.tab-content');
-            if (tabContentEl) {
-                tabContentEl.style.cssText = '';
-                tabContentEl.style.display = 'flex';
-                tabContentEl.style.position = 'relative';
-                tabContentEl.style.height = '32px';
-                tabContentEl.style.minHeight = '32px';
-            }
-            
-            if (tab.pinned) tabElement.classList.add('pinned'); else tabElement.classList.remove('pinned');
-            tabElement.classList.remove('dragging', 'active');
-            if (tab.pinned) {
-                tabsContainer.insertBefore(tabElement, separator);
-            } else {
-                const unpinnedRef = this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn.nextSibling : separator.nextSibling;
-                if (unpinnedRef) tabsContainer.insertBefore(tabElement, unpinnedRef);
-                else tabsContainer.appendChild(tabElement);
-            }
-            
-            // Re-setup event listeners to ensure they're fresh
-            this.setupTabEventListeners(tabElement, tabId);
-            
-            if (this.makeTabDraggable) {
-                this.makeTabDraggable(tabElement);
-            }
-            
-            // Remove any empty state message if it exists
-            const tabGroupEmpty = tabGroupContent?.querySelector('.tab-group-empty');
-            if (tabGroupEmpty) {
-                tabGroupEmpty.remove();
-            }
-            
-            // If tab group was open but is now empty, close it completely
-            if (tabGroup.open && tabGroup.tabIds.length === 0) {
-                tabGroup.open = false;
-                this.tabGroups.set(tabGroup.id, tabGroup);
-                tabGroupContent.classList.remove('open');
-                tabGroupContent.style.display = 'none';
-                tabGroupContent.style.visibility = 'hidden';
-                tabGroupContent.style.maxHeight = '0px';
-                tabGroupContent.style.padding = '0';
-                tabGroupContent.style.opacity = '0';
-            }
-            
-            // Restore styles immediately (no need for double RAF)
-            tabGroupElement.style.transition = originalTabGroupTransition || '';
-            tabGroupElement.style.pointerEvents = originalTabGroupPointerEvents || '';
-            tabGroupElement.style.transform = originalTabGroupTransform || '';
-            tabGroupElement.style.filter = originalTabGroupFilter || '';
-            tabGroupElement.style.opacity = originalTabGroupOpacity || '';
-            tabElement.style.transition = originalTabTransition || '';
-            
-            // Ensure all drag classes are removed
-            tabGroupElement.classList.remove('dragging', 'drag-over-tab-group', 'drag-over-tab-group-top', 'drag-over-tab-group-bottom');
-            
-            // Force a reflow to ensure everything is properly laid out
-            void tabElement.offsetHeight;
-        });
-        
-        this.saveTabGroups();
+
+        this.syncSidebarFromTabGroups();
     }
 
     deleteTabGroup(tabGroupId) {
         const tabGroup = this.tabGroups.get(tabGroupId);
         if (!tabGroup) return;
-        
-        // Move all tabs back to main container and clean up tab data
+
         tabGroup.tabIds.forEach(tabId => {
             const tab = this.tabs.get(tabId);
-            const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
-            const tabsContainer = this.elements.tabsContainer;
-            const separator = this.elements.tabsSeparator;
             if (tab) {
                 tab.tabGroupId = undefined;
+                tab.pinned = tabGroup.pinned !== false;
                 this.tabs.set(tabId, tab);
             }
-            if (tabElement && tabsContainer && separator) {
-                tabElement.remove();
-                tabsContainer.insertBefore(tabElement, separator);
-            }
         });
-        
-        // Remove tab group
+
         this.tabGroups.delete(tabGroupId);
-        
-        // Save before rendering to ensure state consistency
-        this.saveTabGroups();
-        this.renderTabGroups();
+
+        const groupEl = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
+        if (groupEl && groupEl.parentNode) groupEl.remove();
+
+        this.syncSidebarFromTabGroups();
     }
 
     saveTabGroups() {
@@ -10450,14 +10293,15 @@ class AxisBrowser {
                 id: tabGroup.id,
                 name: tabGroup.name,
                 tabIds: tabGroup.tabIds,
-                tabs: tabs, // Save tab data so we can recreate tabs on load
+                tabs,
                 open: tabGroup.open,
                 order: tabGroup.order,
                 color: tabGroup.color || '#FF6B6B',
-                pinned: tabGroup.pinned !== false
+                pinned: tabGroup.pinned !== false,
+                icon: tabGroup.icon || null,
+                iconType: tabGroup.iconType || null
             };
         });
-        
         this.saveSetting('tabGroups', tabGroupsArray);
     }
 
@@ -10465,85 +10309,219 @@ class AxisBrowser {
         try {
             const tabGroupsData = this.settings.tabGroups || [];
             if (!Array.isArray(tabGroupsData)) return;
-            
-            // First, load all tab groups
-            tabGroupsData.forEach(tabGroupData => {
-                this.tabGroups.set(tabGroupData.id, {
+
+            this.tabGroups.clear();
+            tabGroupsData.forEach((tabGroupData, index) => {
+                const group = {
                     id: tabGroupData.id,
-                    name: tabGroupData.name || `Tab Group ${tabGroupData.id}`,
-                    tabIds: tabGroupData.tabIds || [],
-                    open: tabGroupData.open !== false, // Default to open
-                    order: tabGroupData.order || 0,
+                    name: tabGroupData.name || `Tab Group ${index + 1}`,
+                    tabIds: Array.isArray(tabGroupData.tabIds) ? tabGroupData.tabIds.slice() : [],
+                    open: tabGroupData.open !== false,
+                    order: typeof tabGroupData.order === 'number' ? tabGroupData.order : index,
                     color: tabGroupData.color || '#FF6B6B',
-                    pinned: tabGroupData.pinned !== false, // Default true for backward compat
-                    tabs: tabGroupData.tabs || [] // Store tab data for tabs in this group
-                });
-            });
-            
-            const tabsContainer = this.elements.tabsContainer;
-            const separator = this.elements.tabsSeparator;
-            tabGroupsData.forEach(tabGroupData => {
-                if (!tabGroupData.tabIds || !Array.isArray(tabGroupData.tabIds)) return;
-                
-                tabGroupData.tabIds.forEach(tabId => {
-                    // Check if tab already exists
-                    if (this.tabs.has(tabId)) return;
-                    
-                    // Try to find tab data from the tab group's saved tabs
-                    const savedTabData = tabGroupData.tabs?.find(t => t.id === tabId);
-                    
-                    if (savedTabData && tabsContainer && separator) {
-                        // Create the tab element
-                        const tabElement = document.createElement('div');
-                        tabElement.className = 'tab pinned';
-                        tabElement.dataset.tabId = tabId;
-                        
-                        tabElement.innerHTML = `
-                            <div class="tab-content">
-                                <div class="tab-left">
-                                    ${tab.customIcon ? `<i class="fas ${tab.customIcon} tab-favicon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: rgba(255, 255, 255, 0.7);"></i>` : `<img class="tab-favicon" src="" alt="" onerror="this.style.visibility='hidden'">`}
-                                    <span class="tab-audio-indicator" style="display: none;"><i class="fas fa-volume-up"></i></span>
-                                    <span class="tab-title">${this.escapeHtml(savedTabData.title || 'New Tab')}</span>
-                                </div>
-                                <div class="tab-right">
-                                    <button class="tab-close"><i class="fas fa-times"></i></button>
-                                </div>
-                            </div>
-                        `;
-                        
-                        // Store tab data
-                        this.tabs.set(tabId, {
-                            id: tabId,
-                            url: savedTabData.url || null,
-                            title: savedTabData.title || 'New Tab',
-                            favicon: savedTabData.favicon || null,
-                            canGoBack: false,
-                            canGoForward: false,
-                            history: savedTabData.url ? [savedTabData.url] : [],
-                            historyIndex: savedTabData.url ? 0 : -1,
-                            pinned: true,
-                            webview: null // No webview initially - tab is closed
-                        });
-                        
-                        // Mark as closed since it has no webview
-                        tabElement.classList.add('closed');
-                        
-                        // Set up event listeners
-                        this.setupTabEventListeners(tabElement, tabId);
-                        
-                        // Update favicon
-                        this.updateTabFavicon(tabId, tabElement);
-                        
-                        // Update closed state
-                        this.updatePinnedTabClosedState(tabId);
+                    pinned: tabGroupData.pinned !== false,
+                    icon: tabGroupData.icon || null,
+                    iconType: tabGroupData.iconType || null
+                };
+                this.tabGroups.set(group.id, group);
+
+                const savedTabs = Array.isArray(tabGroupData.tabs) ? tabGroupData.tabs : [];
+                group.tabIds.forEach(tabId => {
+                    if (this.tabs.has(tabId)) {
+                        const tab = this.tabs.get(tabId);
+                        tab.tabGroupId = group.id;
+                        tab.pinned = group.pinned;
+                        this.tabs.set(tabId, tab);
+                        return;
                     }
+                    const saved = savedTabs.find(t => t && t.id === tabId);
+                    this.tabs.set(tabId, {
+                        id: tabId,
+                        url: saved?.url || null,
+                        title: saved?.title || 'New Tab',
+                        favicon: saved?.favicon || null,
+                        canGoBack: false,
+                        canGoForward: false,
+                        history: saved?.url ? [saved.url] : [],
+                        historyIndex: saved?.url ? 0 : -1,
+                        pinned: group.pinned,
+                        tabGroupId: group.id,
+                        webview: null
+                    });
                 });
             });
-            
-            this.renderTabGroups();
+
+            this.syncSidebarFromTabGroups();
         } catch (error) {
             console.error('Error loading tab groups:', error);
         }
+    }
+
+    getOrCreateTabElement(tabId) {
+        const existing = document.querySelector(`[data-tab-id="${tabId}"]`);
+        if (existing) return existing;
+        const tab = this.tabs.get(tabId);
+        if (!tab) return null;
+        const tabElement = document.createElement('div');
+        tabElement.className = 'tab' + (tab.pinned ? ' pinned' : '');
+        tabElement.dataset.tabId = tabId;
+        const iconHtml = tab.customIcon
+            ? (tab.customIconType === 'emoji'
+                ? `<span class="tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;">${tab.customIcon || ''}</span>`
+                : `<i class="fas ${tab.customIcon} tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;color:rgba(255,255,255,0.7);"></i>`)
+            : '<img class="tab-favicon" src="" alt="" onerror="this.style.visibility=\'hidden\'">';
+        tabElement.innerHTML = `
+            <div class="tab-content">
+                <div class="tab-left">${iconHtml}
+                    <span class="tab-audio-indicator" style="display:none;"><i class="fas fa-volume-up"></i></span>
+                    <span class="tab-title">${this.escapeHtml(tab.title || 'New Tab')}</span>
+                </div>
+                <div class="tab-right"><button class="tab-close"><i class="fas fa-times"></i></button></div>
+            </div>
+        `;
+        if (!tab.webview) tabElement.classList.add('closed');
+        this.setupTabEventListeners(tabElement, tabId);
+        this.updateTabFavicon(tabId, tabElement);
+        if (tab.pinned) this.updatePinnedTabClosedState(tabId);
+        return tabElement;
+    }
+
+    syncSidebarFromTabGroups() {
+        const container = this.elements.tabsContainer;
+        const separator = this.elements.tabsSeparator;
+        const newTabBtn = this.elements.sidebarNewTabBtn;
+        if (!container || !separator) return;
+
+        // Remove any group elements whose group was deleted (e.g. after deleteTabGroup)
+        container.querySelectorAll('.tab-group').forEach(groupEl => {
+            const gid = groupEl.dataset.tabGroupId;
+            if (gid != null && !this.tabGroups.has(Number(gid)) && !this.tabGroups.has(gid)) {
+                groupEl.remove();
+            }
+        });
+
+        const loosePinnedIds = Array.from(this.tabs.keys()).filter(id => {
+            const t = this.tabs.get(id);
+            return t && !t.tabGroupId && t.pinned;
+        });
+        const looseUnpinnedIds = Array.from(this.tabs.keys()).filter(id => {
+            const t = this.tabs.get(id);
+            return t && !t.tabGroupId && !t.pinned;
+        });
+
+        const pinnedGroups = Array.from(this.tabGroups.values())
+            .filter(g => g.pinned !== false)
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        const unpinnedGroups = Array.from(this.tabGroups.values())
+            .filter(g => g.pinned === false)
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+        // Build order from state only: loose tabs first, then groups in order
+        const pinnedOrder = [
+            ...loosePinnedIds.map(id => ({ type: 'tab', id })),
+            ...pinnedGroups.map(g => ({ type: 'group', id: g.id }))
+        ];
+        const unpinnedOrder = [
+            ...unpinnedGroups.map(g => ({ type: 'group', id: g.id })),
+            ...looseUnpinnedIds.map(id => ({ type: 'tab', id }))
+        ];
+
+        const pinnedNodes = [];
+        pinnedOrder.forEach(item => {
+            if (item.type === 'tab') {
+                const el = this.getOrCreateTabElement(item.id);
+                if (el) pinnedNodes.push(el);
+            } else {
+                const g = this.tabGroups.get(Number(item.id)) || this.tabGroups.get(item.id);
+                if (g) {
+                    const groupEl = this.getOrCreateGroupElement(g);
+                    if (groupEl) pinnedNodes.push(groupEl);
+                }
+            }
+        });
+
+        const unpinnedNodes = [];
+        unpinnedOrder.forEach(item => {
+            if (item.type === 'tab') {
+                const el = this.getOrCreateTabElement(item.id);
+                if (el) unpinnedNodes.push(el);
+            } else {
+                const g = this.tabGroups.get(Number(item.id)) || this.tabGroups.get(item.id);
+                if (g) {
+                    const groupEl = this.getOrCreateGroupElement(g);
+                    if (groupEl) unpinnedNodes.push(groupEl);
+                }
+            }
+        });
+
+        [].concat(pinnedNodes, unpinnedNodes).forEach(node => {
+            if (node.parentNode) node.remove();
+        });
+
+        let ref = separator;
+        pinnedNodes.forEach(node => {
+            container.insertBefore(node, ref);
+            ref = node;
+        });
+
+        const afterNewTab = newTabBtn ? newTabBtn.nextSibling : separator.nextSibling;
+        ref = afterNewTab || null;
+        unpinnedNodes.forEach(node => {
+            if (ref) container.insertBefore(node, ref);
+            else container.appendChild(node);
+            ref = node;
+        });
+        
+        // Separator visibility is based on actual DOM content above it
+        this.updatePinnedSeparatorVisibility();
+        this.saveTabGroups();
+    }
+
+    getOrCreateGroupElement(group) {
+        let el = document.querySelector(`[data-tab-group-id="${group.id}"]`);
+        const content = el ? el.querySelector('.tab-group-content') : null;
+        const existingTabEls = content ? Array.from(content.querySelectorAll('.tab')) : [];
+
+        const ensureContentOrder = (container) => {
+            if (!container) return;
+            const groupIdSet = new Set(group.tabIds);
+            Array.from(container.children).forEach(child => {
+                if (child.classList && child.classList.contains('tab')) {
+                    const id = parseInt(child.dataset.tabId, 10);
+                    if (!isNaN(id) && !groupIdSet.has(id)) child.remove();
+                }
+            });
+            group.tabIds.forEach(tabId => {
+                const tab = this.tabs.get(tabId);
+                if (tab) {
+                    tab.pinned = group.pinned !== false;
+                    this.tabs.set(tabId, tab);
+                }
+                let tabEl = existingTabEls.find(t => parseInt(t.dataset.tabId, 10) === tabId);
+                if (!tabEl) tabEl = this.getOrCreateTabElement(tabId);
+                if (tabEl && tabEl.parentNode !== container) {
+                    tabEl.classList.toggle('pinned', group.pinned !== false);
+                    container.appendChild(tabEl);
+                    if (this.makeTabDraggable) this.makeTabDraggable(tabEl);
+                } else if (tabEl && tabEl.parentNode === container) {
+                    tabEl.classList.toggle('pinned', group.pinned !== false);
+                }
+            });
+            const isOpen = group.open && group.tabIds.length > 0;
+            container.classList.toggle('open', isOpen);
+            container.style.display = group.tabIds.length ? 'flex' : 'none';
+            container.style.maxHeight = isOpen ? '9999px' : '0';
+            container.style.opacity = isOpen ? '1' : '0';
+        };
+
+        if (el && content) {
+            ensureContentOrder(content);
+            return el;
+        }
+        el = this.createTabGroupElement(group);
+        const newContent = el.querySelector('.tab-group-content');
+        if (newContent) ensureContentOrder(newContent);
+        return el;
     }
 
     async showTabGroupContextMenu(e, tabGroupId) {
@@ -10657,12 +10635,12 @@ class AxisBrowser {
     }
 
     deleteCurrentTabGroup() {
-        if (this.contextMenuTabGroupId) {
-            const tabGroup = this.tabGroups.get(this.contextMenuTabGroupId);
-            if (tabGroup && confirm(`Delete tab group "${tabGroup.name}"? Tabs will be moved back to the sidebar.`)) {
-                this.deleteTabGroup(this.contextMenuTabGroupId);
-            }
-        }
+        const id = this.contextMenuTabGroupId;
+        if (id == null) return;
+        const tabGroup = this.tabGroups.get(Number(id)) || this.tabGroups.get(id);
+        if (!tabGroup) return;
+        if (!confirm(`Delete tab group "${tabGroup.name}"? Tabs will be moved back to the sidebar.`)) return;
+        this.deleteTabGroup(tabGroup.id);
     }
 
     duplicateCurrentTabGroup() {
@@ -10734,35 +10712,16 @@ class AxisBrowser {
         // Set the new tab IDs
         newTabGroup.tabIds = newTabIds;
 
-        // Add new tab group
         this.tabGroups.set(newTabGroupId, newTabGroup);
-        
-        // Move duplicated tabs into the new tab group
         newTabIds.forEach(tabId => {
             const tab = this.tabs.get(tabId);
             if (tab) {
-                // Remove from sidebar first
-                const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
-                if (tabElement) {
-                    tabElement.remove();
-                }
-                
                 tab.pinned = newTabGroup.pinned !== false;
                 tab.tabGroupId = newTabGroupId;
-                // Ensure tab is properly added to the group's tabIds (should already be done, but double-check)
-                if (!newTabGroup.tabIds.includes(tabId)) {
-                    newTabGroup.tabIds.push(tabId);
-                }
                 this.tabs.set(tabId, tab);
             }
         });
-        
-        // Update the tab group with potentially modified tabIds
-        this.tabGroups.set(newTabGroupId, newTabGroup);
-
-        // Render tab groups and save
-        this.renderTabGroups();
-        this.saveTabGroups();
+        this.syncSidebarFromTabGroups();
         
         // Show notification
         this.showNotification('Tab group duplicated', 'success');
@@ -11033,9 +10992,11 @@ class AxisBrowser {
         const ctx = this.webviewContextInfo || {};
         const webview = this.getActiveWebview();
         
-        // Check if webview can go back/forward
+        // Check if webview can go back/forward and whether speech is currently playing
         let canGoBack = false;
         let canGoForward = false;
+        let isSpeaking = false;
+        const speechEnabled = this.settings?.speechEnabled !== false;
         if (webview) {
             try {
                 canGoBack = webview.canGoBack();
@@ -11043,13 +11004,29 @@ class AxisBrowser {
             } catch (e) {
                 // Ignore errors
             }
+            try {
+                // Query page speech state so we can grey out Stop Speaking when idle
+                isSpeaking = speechEnabled ? await webview.executeJavaScript(`
+                    (function() {
+                        try {
+                            return !!(window.speechSynthesis && window.speechSynthesis.speaking);
+                        } catch (e) {
+                            return false;
+                        }
+                    })();
+                `) : false;
+            } catch (e) {
+                isSpeaking = false;
+            }
         }
         
         // Prepare context info for native menu
         const contextInfo = {
             ...ctx,
             canGoBack,
-            canGoForward
+            canGoForward,
+            isSpeaking,
+            speechEnabled
         };
         
         // Show native OS context menu
@@ -11064,6 +11041,52 @@ class AxisBrowser {
         if (this.contextMenuBackdrop) {
             this.contextMenuBackdrop.style.display = 'none';
         }
+    }
+
+    // Text-to-speech for selected text inside the active webview
+    startSpeakingSelection(text) {
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+        if (this.settings?.speechEnabled === false) return;
+        const safeText = (text || '').trim();
+        if (!safeText) return;
+        const speechRate = Math.min(2, Math.max(0.1, Number(this.settings?.speechRate || 1)));
+        const speechPitch = Math.min(2, Math.max(0, Number(this.settings?.speechPitch || 1)));
+        const script = `
+            (function() {
+                try {
+                    if (!window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== 'function') {
+                        return;
+                    }
+                    // Stop any existing speech first
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(${JSON.stringify(safeText)});
+                    utterance.rate = ${speechRate};
+                    utterance.pitch = ${speechPitch};
+                    utterance.volume = 1;
+                    window.__axisCurrentUtterance = utterance;
+                    window.speechSynthesis.speak(utterance);
+                } catch (e) {
+                    // Ignore speech errors
+                }
+            })();
+        `;
+        webview.executeJavaScript(script).catch(() => {});
+    }
+
+    stopSpeakingSelection() {
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+        const script = `
+            try {
+                if (window.speechSynthesis) {
+                    window.speechSynthesis.cancel();
+                }
+            } catch (e) {
+                // Ignore
+            }
+        `;
+        webview.executeJavaScript(script).catch(() => {});
     }
 
     selectAll() {
@@ -11317,19 +11340,117 @@ class AxisBrowser {
         });
     }
 
-    // Show native macOS downloads menu (Electron Menu.popup)
+    // In-app downloads popup showing most recent files from Downloads folder
     async showDownloadsPopup() {
-        try {
-            const button = document.getElementById('downloads-btn-footer');
-            if (!button) {
-                await window.electronAPI.showDownloadsPopup();
-                return;
-            }
-            const rect = button.getBoundingClientRect();
-            await window.electronAPI.showDownloadsPopup(rect.left, rect.top, rect.width, rect.height);
-        } catch (error) {
-            console.error('Failed to show downloads popup:', error);
+        const popup = document.getElementById('downloads-popup');
+        const list = document.getElementById('downloads-popup-list');
+        const button = document.getElementById('downloads-btn-footer');
+        if (!popup || !list || !button) return;
+
+        // Toggle: if already visible, hide
+        if (!popup.classList.contains('hidden')) {
+            this.hideDownloadsPopup();
+            return;
         }
+
+        // Load recent files from system Downloads folder
+        let downloads = [];
+        try {
+            downloads = await window.electronAPI.getDownloadsFromFolder() || [];
+        } catch (error) {
+            console.error('Failed to load downloads:', error);
+        }
+
+        // Clear current items
+        list.innerHTML = '';
+
+        if (!downloads.length) {
+            const empty = document.createElement('div');
+            empty.className = 'downloads-popup-empty';
+            empty.innerHTML = `
+                <i class="far fa-circle-down"></i>
+                <p>No recent downloads</p>
+                <p>Your latest downloads will appear here.</p>
+            `;
+            list.appendChild(empty);
+        } else {
+            downloads.forEach((item) => {
+                const fileName = item.name || item.path || 'File';
+                const fileType = this.getFileTypeForPreview(fileName);
+
+                const row = document.createElement('div');
+                row.className = 'downloads-popup-item';
+                row.innerHTML = `
+                    <div class="downloads-popup-thumbnail ${this.escapeHtml(fileType)}">
+                        ${this.getFilePreviewMarkup(item.path, fileType, fileName)}
+                    </div>
+                    <div class="downloads-popup-info">
+                        <div class="downloads-popup-name" title="${this.escapeHtml(fileName)}">
+                            ${this.escapeHtml(fileName)}
+                        </div>
+                        <div class="downloads-popup-time">
+                            ${this.formatFileSize(item.size || 0)} • ${this.formatTimeAgo(item.mtime)}
+                        </div>
+                    </div>
+                    <button class="downloads-popup-show-folder" title="Show in Finder">
+                        <i class="fas fa-folder-open"></i>
+                    </button>
+                `;
+
+                // Open file on row click
+                row.addEventListener('click', () => {
+                    if (item.path) {
+                        window.electronAPI.openLibraryItem(item.path);
+                    }
+                });
+
+                // Reveal in Finder
+                const showFolderBtn = row.querySelector('.downloads-popup-show-folder');
+                showFolderBtn?.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (item.path) {
+                        window.electronAPI.showItemInFolder(item.path);
+                    }
+                });
+
+                list.appendChild(row);
+            });
+        }
+
+        // Position popup under the downloads button
+        const rect = button.getBoundingClientRect();
+        const margin = 8;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+        const popupWidth = Math.min(380, viewportWidth - margin * 2);
+
+        popup.style.width = `${popupWidth}px`;
+
+        let left = rect.left;
+        if (left + popupWidth + margin > viewportWidth) {
+            left = viewportWidth - popupWidth - margin;
+        }
+        if (left < margin) left = margin;
+
+        popup.style.left = `${left}px`;
+        popup.style.top = `${rect.bottom + margin}px`;
+
+        popup.classList.remove('hidden');
+
+        const openFolderBtn = document.getElementById('downloads-popup-open-folder');
+        openFolderBtn?.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+                await window.electronAPI.openDownloadsFolder();
+            } catch (error) {
+                console.error('Failed to open downloads folder:', error);
+            }
+        }, { once: true });
+    }
+
+    hideDownloadsPopup() {
+        const popup = document.getElementById('downloads-popup');
+        if (!popup) return;
+        popup.classList.add('hidden');
     }
     
     // Helper: format bytes into human-readable size
@@ -12759,6 +12880,19 @@ class AxisBrowser {
                 }
                 
                 if (type === 'tab' && container.classList.contains('tabs-container')) {
+                    const tabId = parseInt(element.dataset.tabId, 10);
+                    if (!isNaN(tabId)) {
+                        const tab = this.tabs.get(tabId);
+                        if (tab && tab.tabGroupId) {
+                            const prevGroup = this.tabGroups.get(tab.tabGroupId);
+                            if (prevGroup) {
+                                prevGroup.tabIds = prevGroup.tabIds.filter(id => id !== tabId);
+                                this.tabGroups.set(tab.tabGroupId, prevGroup);
+                            }
+                            tab.tabGroupId = undefined;
+                            this.tabs.set(tabId, tab);
+                        }
+                    }
                     requestAnimationFrame(() => {
                         this.updateTabPinState(element);
                     });
@@ -12775,6 +12909,24 @@ class AxisBrowser {
                             const newTabIds = Array.from(container.querySelectorAll('.tab'))
                                 .map(t => parseInt(t.dataset.tabId, 10))
                                 .filter(id => !isNaN(id));
+                            const oldIds = new Set(tabGroup.tabIds);
+                            newTabIds.forEach(tabId => {
+                                const tab = this.tabs.get(tabId);
+                                if (tab) {
+                                    tab.tabGroupId = tabGroupId;
+                                    tab.pinned = tabGroup.pinned !== false;
+                                    this.tabs.set(tabId, tab);
+                                }
+                            });
+                            oldIds.forEach(tabId => {
+                                if (!newTabIds.includes(tabId)) {
+                                    const tab = this.tabs.get(tabId);
+                                    if (tab && tab.tabGroupId === tabGroupId) {
+                                        tab.tabGroupId = undefined;
+                                        this.tabs.set(tabId, tab);
+                                    }
+                                }
+                            });
                             tabGroup.tabIds = newTabIds;
                             this.tabGroups.set(tabGroupId, tabGroup);
                         }
@@ -15061,6 +15213,16 @@ class AxisBrowser {
             }
 
             if (el.urlBarInput) {
+                el.urlBarInput.addEventListener('contextmenu', async (e) => {
+                    e.preventDefault();
+                    const input = e.currentTarget;
+                    const hasSelection = input.selectionStart != null && input.selectionEnd != null && input.selectionStart !== input.selectionEnd;
+                    await window.electronAPI?.showUrlBarContextMenu?.(e.clientX, e.clientY, {
+                        isEditable: true,
+                        hasSelection
+                    });
+                });
+
                 el.urlBarInput.addEventListener('blur', () => {
                     exitEditMode();
                 });
@@ -15184,55 +15346,62 @@ class AxisBrowser {
         
         // Format the URL display
         if (el.urlBarDisplay) {
-            
-            try {
-                const url = new URL(currentUrl);
-                let parts = [];
-                
-                // Domain (without www)
-                const domain = url.hostname.replace(/^www\./, '');
-                parts.push(`<span class="url-domain">${domain}</span>`);
-                
-                // Add page title or path
-                if (pageTitle && pageTitle.length > 0 && pageTitle !== domain) {
-                    // Clean up the title
-                    let title = pageTitle;
-                    // Remove domain from title if present
-                    title = title.replace(new RegExp(domain.split('.')[0], 'gi'), '').trim();
-                    // Remove common separators at start
-                    title = title.replace(/^[\s\-\|\/\:]+/, '').trim();
-                    
-                    if (title.length > 0) {
-                        // Truncate if too long
-                        if (title.length > 50) {
-                            title = title.substring(0, 47) + '...';
-                        }
-                        parts.push(`<span class="url-path">${title}</span>`);
-                    }
-                } else if (url.pathname && url.pathname !== '/') {
-                    // Use path if no good title
-                    const pathParts = url.pathname.split('/').filter(p => p.length > 0);
-                    if (pathParts.length > 0) {
-                        let pathDisplay = pathParts.slice(0, 2).map(p => {
-                            try {
-                                return decodeURIComponent(p).replace(/[-_]/g, ' ');
-                            } catch (e) {
-                                return p;
-                            }
-                        }).join(' / ');
-                        
-                        if (pathDisplay.length > 40) {
-                            pathDisplay = pathDisplay.substring(0, 37) + '...';
-                        }
-                        parts.push(`<span class="url-path">${pathDisplay}</span>`);
-                    }
-                }
-                
-                el.urlBarDisplay.innerHTML = parts.join('<span class="url-separator">/</span>');
-            } catch (e) {
+            const alwaysFull = !!this.settings?.alwaysShowFullUrl;
+            if (alwaysFull) {
+                // Show the full raw URL
                 el.urlBarDisplay.textContent = currentUrl || 'New Tab';
+            } else {
+                // Smart, shorter display (domain + title/path)
+                try {
+                    const url = new URL(currentUrl);
+                    let parts = [];
+                    
+                    // Domain (without www)
+                    const domain = url.hostname.replace(/^www\./, '');
+                    parts.push(`<span class="url-domain">${domain}</span>`);
+                    
+                    // Add page title or path
+                    if (pageTitle && pageTitle.length > 0 && pageTitle !== domain) {
+                        // Clean up the title
+                        let title = pageTitle;
+                        // Remove domain from title if present
+                        title = title.replace(new RegExp(domain.split('.')[0], 'gi'), '').trim();
+                        // Remove common separators at start
+                        title = title.replace(/^[\s\-\|\/\:]+/, '').trim();
+                        
+                        if (title.length > 0) {
+                            // Truncate if too long
+                            if (title.length > 50) {
+                                title = title.substring(0, 47) + '...';
+                            }
+                            parts.push(`<span class="url-path">${title}</span>`);
+                        }
+                    } else if (url.pathname && url.pathname !== '/') {
+                        // Use path if no good title
+                        const pathParts = url.pathname.split('/').filter(p => p.length > 0);
+                        if (pathParts.length > 0) {
+                            let pathDisplay = pathParts.slice(0, 2).map(p => {
+                                try {
+                                    return decodeURIComponent(p).replace(/[-_]/g, ' ');
+                                } catch (e) {
+                                    return p;
+                                }
+                            }).join(' / ');
+                            
+                            if (pathDisplay.length > 40) {
+                                pathDisplay = pathDisplay.substring(0, 37) + '...';
+                            }
+                            parts.push(`<span class="url-path">${pathDisplay}</span>`);
+                        }
+                    }
+                    
+                    el.urlBarDisplay.innerHTML = parts.join('<span class="url-separator">/</span>');
+                } catch (e) {
+                    el.urlBarDisplay.textContent = currentUrl || 'New Tab';
+                }
             }
         }
+        if (this.currentTab) this.updateTabTooltip(this.currentTab);
         
         // Settings page (axis://settings) loads as data URL – use app theme for URL bar, not page theme
         const tab = this.tabs.get(this.currentTab);
