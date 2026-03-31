@@ -129,6 +129,10 @@ class AxisBrowser {
     async init() {
         // Load settings first and apply theme immediately
         await this.loadSettings();
+
+        if (window.electronAPI?.platform === 'darwin') {
+            document.documentElement.classList.add('platform-darwin');
+        }
         
         if (this.isIncognitoWindow) {
             document.body.classList.add('incognito-window');
@@ -719,23 +723,45 @@ class AxisBrowser {
             this.hideSearch();
         });
 
-        document.getElementById('search-prev').addEventListener('click', () => {
+        const searchPrevBtn = document.getElementById('search-prev');
+        const searchNextBtn = document.getElementById('search-next');
+        searchPrevBtn.addEventListener('mousedown', (e) => e.preventDefault());
+        searchNextBtn.addEventListener('mousedown', (e) => e.preventDefault());
+        searchPrevBtn.addEventListener('click', (e) => {
+            e.preventDefault();
             this.searchPrevious();
         });
-
-        document.getElementById('search-next').addEventListener('click', () => {
+        searchNextBtn.addEventListener('click', (e) => {
+            e.preventDefault();
             this.searchNext();
         });
 
-        // Search input
+        // Search input — live find + keyboard navigation
         const searchInput = document.getElementById('search-input');
+        const runFind = (value) => {
+            this.performIncrementalFind(value);
+        };
         searchInput.addEventListener('input', (e) => {
-            this.performSearch(e.target.value);
+            runFind(e.target.value);
+        });
+        searchInput.addEventListener('compositionend', () => {
+            runFind(searchInput.value);
         });
 
         searchInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
+                e.preventDefault();
+                if (e.shiftKey) {
+                    this.searchPrevious();
+                } else {
+                    this.searchNext();
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
                 this.searchNext();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.searchPrevious();
             }
         });
 
@@ -1217,6 +1243,31 @@ class AxisBrowser {
                 webview.__loadingTimeout = null;
             }
         };
+
+        const tryBindLoadProgressFromWebContents = () => {
+            if (webview.__wcLoadProgressBound) return;
+            try {
+                const wc = webview.getWebContents && webview.getWebContents();
+                if (!wc || typeof wc.on !== 'function') return;
+                const onProgress = (...args) => {
+                    let p = null;
+                    if (args.length >= 2 && typeof args[1] === 'number') p = args[1];
+                    else if (typeof args[0] === 'number') p = args[0];
+                    if (p == null || Number.isNaN(p)) return;
+                    p = Math.max(0, Math.min(1, p));
+                    webview.__loadProgressMilestone = Math.max(webview.__loadProgressMilestone || 0, p);
+                    if (this.loadingBarTabId === tabId && isActiveTab()) {
+                        this.setUrlBarLoadProgress(webview.__loadProgressMilestone, tabId);
+                    }
+                };
+                wc.on('did-change-load-progress', onProgress);
+                webview.__wcLoadProgressBound = true;
+                webview.__wcLoadProgressHandler = onProgress;
+                webview.__wcLoadProgressWc = wc;
+            } catch (err) {
+                /* Older Chromium builds may omit this event */
+            }
+        };
         
         // Create named handler functions that can be removed
         const didStartLoadingHandler = () => {
@@ -1227,9 +1278,12 @@ class AxisBrowser {
             if (this.isBenchmarking) return;
             
             clearLoadingTimeout();
+            webview.__loadProgressMilestone = 0;
             this.isWebviewLoading = true;
             this.loadingBarTabId = tabId; // Remember which tab is showing the loading bar
             this.showLoadingIndicator();
+            this.bumpUrlBarLoadMilestone(webview, tabId, 0.05);
+            tryBindLoadProgressFromWebContents();
             this.updateNavigationButtons();
             this.updateRefreshButton(true); // Change reload button to X
             
@@ -1260,6 +1314,16 @@ class AxisBrowser {
         webview.__eventHandlers.didStartLoading = didStartLoadingHandler;
         webview.addEventListener('did-start-loading', didStartLoadingHandler);
 
+        const loadCommitHandler = (e) => {
+            if (!e || !e.isMainFrame) return;
+            webview.__loadProgressMilestone = Math.max(webview.__loadProgressMilestone || 0, 0.28);
+            if (this.loadingBarTabId === tabId && isActiveTab()) {
+                this.setUrlBarLoadProgress(webview.__loadProgressMilestone, tabId);
+            }
+        };
+        webview.__eventHandlers.loadCommit = loadCommitHandler;
+        webview.addEventListener('load-commit', loadCommitHandler);
+
         // Extract theme early on dom-ready (before all resources load)
         const domReadyHandler = () => {
             // Always try to set max listeners when dom is ready (WebContents should be available)
@@ -1268,6 +1332,14 @@ class AxisBrowser {
             
             // Also try after a short delay to ensure webview is fully attached
             setTimeout(trySetMaxListeners, 50);
+
+            tryBindLoadProgressFromWebContents();
+            if (!this.isBenchmarking) {
+                webview.__loadProgressMilestone = Math.max(webview.__loadProgressMilestone || 0, 0.58);
+                if (this.loadingBarTabId === tabId && isActiveTab()) {
+                    this.setUrlBarLoadProgress(webview.__loadProgressMilestone, tabId);
+                }
+            }
             
             if (!isActiveTab() || this.isBenchmarking) return;
             
@@ -1302,6 +1374,7 @@ class AxisBrowser {
             // Only hide loading when main frame finishes (avoid hiding on iframe/subframe load)
             const isMainFrame = event == null || event.isMainFrame !== false;
             if (isMainFrame && this.loadingBarTabId === tabId) {
+                this.bumpUrlBarLoadMilestone(webview, tabId, 1);
                 this.hideLoadingIndicator();
                 this.loadingBarTabId = null;
             }
@@ -1373,6 +1446,7 @@ class AxisBrowser {
             clearLoadingTimeout();
             // Always hide loading bar when this tab stops loading (even if user switched tabs)
             if (this.loadingBarTabId === tabId) {
+                this.bumpUrlBarLoadMilestone(webview, tabId, 1);
                 this.hideLoadingIndicator();
                 this.loadingBarTabId = null;
             }
@@ -3636,6 +3710,7 @@ class AxisBrowser {
             this.updateEmptyState();
             this.updateNavigationButtons();
             this.updateUrlBar();
+            this.updateTabTitle();
             // Update themed URL bar and loading bar to match the tab we switched to
             if (tab && tab.webview) {
                 this.updateUrlBar(tab.webview);
@@ -3645,6 +3720,12 @@ class AxisBrowser {
                     if (this.isWebviewLoading) {
                         this.loadingBarTabId = tabId;
                         this.showLoadingIndicator();
+                        const m = tab.webview.__loadProgressMilestone;
+                        if (m != null && m > 0) {
+                            this.setUrlBarLoadProgress(m, tabId);
+                        } else {
+                            this.bumpUrlBarLoadMilestone(tab.webview, tabId, 0.05);
+                        }
                     } else {
                         if (this.loadingBarTabId != null) {
                             this.hideLoadingIndicator();
@@ -4108,9 +4189,11 @@ class AxisBrowser {
                 urlBar.classList.add('hidden');
             }
 
-            // When there are no tabs, keep the native window title as Axis Browser
+            // When there are no tabs, set a neutral native title (Dock / window list)
             if (window.electronAPI?.setWindowTitle) {
-                window.electronAPI.setWindowTitle('Axis Browser');
+                window.electronAPI.setWindowTitle(
+                    this.isIncognitoWindow ? 'Axis — Incognito' : 'Axis Browser'
+                );
             }
             
             // Reapply theme to ensure background is visible when no tabs
@@ -4778,10 +4861,12 @@ class AxisBrowser {
     }
 
     updateTabTitle() {
-        const webview = this.elements?.webview;
+        const webview = this.getActiveWebview() || this.elements?.webview;
         if (!webview) {
             if (window.electronAPI?.setWindowTitle) {
-                window.electronAPI.setWindowTitle('Axis Browser');
+                window.electronAPI.setWindowTitle(
+                    this.isIncognitoWindow ? 'Axis — Incognito' : 'Axis Browser'
+                );
             }
             return;
         }
@@ -4835,7 +4920,12 @@ class AxisBrowser {
 
         // Update native window title so macOS Dock shows the active tab name
         if (window.electronAPI?.setWindowTitle) {
-            const windowTitle = title && title !== 'New Tab' ? title : 'Axis Browser';
+            const fallback = this.isIncognitoWindow ? 'Axis — Incognito' : 'Axis Browser';
+            const isPlaceholder =
+                !title ||
+                title === 'New Tab' ||
+                title === 'New Incognito Tab';
+            const windowTitle = isPlaceholder ? fallback : title;
             window.electronAPI.setWindowTitle(windowTitle);
         }
     }
@@ -8497,13 +8587,22 @@ class AxisBrowser {
     toggleSidebar() {
         const sidebar = document.getElementById('sidebar');
         if (!sidebar) return;
-        
-        // Remove slide-out class if present (when toggling from slide-out state)
-        sidebar.classList.remove('slide-out');
-        
+
+        const closing = !sidebar.classList.contains('hidden');
+        if (closing) {
+            const ae = document.activeElement;
+            if (ae && typeof ae.blur === 'function' && sidebar.contains(ae)) {
+                ae.blur();
+            }
+        }
+
+        /* Exit hover slide-over mode cleanly so fixed/keyframe state never leaks into the docked bar */
+        sidebar.classList.remove('slide-out', 'slide-out-closing');
+        sidebar.style.animation = '';
+        sidebar.style.background = '';
+
         sidebar.classList.toggle('hidden');
-        
-        // Toggle window button visibility (macOS traffic lights)
+
         const isHidden = sidebar.classList.contains('hidden');
         if (window.electronAPI && window.electronAPI.setWindowButtonVisibility) {
             window.electronAPI.setWindowButtonVisibility(!isHidden);
@@ -8534,6 +8633,13 @@ class AxisBrowser {
             if (positionText) positionText.textContent = 'Move Sidebar Left';
             if (contextText) contextText.textContent = 'Move Sidebar Left';
         }
+        this.syncMacOSTrafficLayout();
+    }
+
+    /** macOS: move window controls to top-right when sidebar is right (matches left layout mirrored). */
+    syncMacOSTrafficLayout() {
+        if (window.electronAPI?.platform !== 'darwin' || !window.electronAPI.setSidebarTrafficLayout) return;
+        window.electronAPI.setSidebarTrafficLayout(this.isSidebarRight()).catch(() => {});
     }
 
     applySidebarPosition() {
@@ -8555,6 +8661,7 @@ class AxisBrowser {
             if (positionText) positionText.textContent = 'Move Sidebar Right';
             if (contextText) contextText.textContent = 'Move Sidebar Right';
         }
+        this.syncMacOSTrafficLayout();
     }
 
     isSidebarRight() {
@@ -8565,68 +8672,123 @@ class AxisBrowser {
     setupSidebarSlideBack() {
         const hoverArea = document.getElementById('sidebar-hover-area');
         const sidebar = document.getElementById('sidebar');
-        
-        let slideBackTimeout;
-        
+
+        let slideBackTimeout = null;
+        let closeFallbackTimer = null;
+
         if (!hoverArea) {
             console.error('Hover area not found!');
             return;
         }
-        
-        hoverArea.addEventListener('mouseenter', () => {
-            if (sidebar.classList.contains('hidden')) {
-                clearTimeout(slideBackTimeout);
-                sidebar.classList.add('slide-out');
-                
-                // When sidebar slides out from hidden state, show macOS window buttons
-                if (window.electronAPI && window.electronAPI.setWindowButtonVisibility) {
-                    window.electronAPI.setWindowButtonVisibility(true);
-                }
-                
-                // Ensure sidebar uses the current theme color from CSS variable
-                // The CSS variable is already set by the theme system
-                const computedStyle = getComputedStyle(document.documentElement);
-                const sidebarBg = computedStyle.getPropertyValue('--sidebar-background').trim();
-                if (sidebarBg) {
-                    sidebar.style.background = sidebarBg;
-                }
+
+        const clearCloseFallback = () => {
+            if (closeFallbackTimer) {
+                clearTimeout(closeFallbackTimer);
+                closeFallbackTimer = null;
             }
-        });
-        
+        };
+
+        const finishSlideOutClose = () => {
+            clearCloseFallback();
+            /* Overlay already slid off; docked bar must snap with zero transition or
+               width/min-width/margin/visibility easing runs again and the webview reflows (twitch). */
+            sidebar.style.setProperty('transition', 'none', 'important');
+            sidebar.classList.remove('slide-out', 'slide-out-closing');
+            sidebar.style.removeProperty('animation');
+            sidebar.style.removeProperty('--sidebar-reveal-width');
+            sidebar.style.background = '';
+            sidebar.style.removeProperty('transform');
+            void sidebar.offsetHeight;
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    sidebar.style.removeProperty('transition');
+                });
+            });
+            if (sidebar.classList.contains('hidden') && window.electronAPI?.setWindowButtonVisibility) {
+                window.electronAPI.setWindowButtonVisibility(false);
+            }
+        };
+
+        const revealFromEdge = () => {
+            if (!sidebar.classList.contains('hidden')) return;
+
+            clearTimeout(slideBackTimeout);
+            slideBackTimeout = null;
+            clearCloseFallback();
+
+            /* Cancel close mid-flight: drop partial keyframes, then re-open cleanly */
+            if (sidebar.classList.contains('slide-out-closing')) {
+                sidebar.classList.remove('slide-out-closing');
+                sidebar.classList.remove('slide-out');
+                sidebar.style.animation = 'none';
+                void sidebar.offsetHeight;
+                sidebar.style.removeProperty('animation');
+            }
+
+            let w = parseInt(String(sidebar.style.width || '').trim(), 10);
+            if (!Number.isFinite(w) || w < 200) w = 300;
+            if (w > 500) w = 500;
+            sidebar.style.setProperty('--sidebar-reveal-width', `${w}px`);
+
+            sidebar.classList.add('slide-out');
+
+            if (window.electronAPI?.setWindowButtonVisibility) {
+                window.electronAPI.setWindowButtonVisibility(true);
+            }
+
+            const computedStyle = getComputedStyle(document.documentElement);
+            const sidebarBg = computedStyle.getPropertyValue('--sidebar-background').trim();
+            if (sidebarBg) {
+                sidebar.style.background = sidebarBg;
+            }
+        };
+
+        hoverArea.addEventListener('mouseenter', revealFromEdge);
+
         sidebar.addEventListener('mouseenter', () => {
             if (sidebar.classList.contains('slide-out')) {
                 clearTimeout(slideBackTimeout);
+                slideBackTimeout = null;
             }
         });
-        
+
         const closeSlideOut = () => {
             if (!sidebar.classList.contains('slide-out') || sidebar.classList.contains('slide-out-closing')) return;
-            const onAnimationEnd = () => {
+
+            const onAnimationEnd = (e) => {
+                if (e.target !== sidebar) return;
+                const name = e.animationName || '';
+                if (!name.includes('sidebarSlideOut')) return;
                 sidebar.removeEventListener('animationend', onAnimationEnd);
-                sidebar.classList.remove('slide-out', 'slide-out-closing');
-                if (sidebar.classList.contains('hidden') && window.electronAPI && window.electronAPI.setWindowButtonVisibility) {
-                    window.electronAPI.setWindowButtonVisibility(false);
-                }
+                clearCloseFallback();
+                finishSlideOutClose();
             };
+
             sidebar.addEventListener('animationend', onAnimationEnd);
+
+            clearCloseFallback();
+            closeFallbackTimer = setTimeout(() => {
+                sidebar.removeEventListener('animationend', onAnimationEnd);
+                if (sidebar.classList.contains('slide-out') || sidebar.classList.contains('slide-out-closing')) {
+                    finishSlideOutClose();
+                }
+            }, 450);
+
             sidebar.classList.add('slide-out-closing');
         };
 
-        // When mouse leaves the hover area, start slide-back timer
         hoverArea.addEventListener('mouseleave', () => {
             if (sidebar.classList.contains('hidden') && sidebar.classList.contains('slide-out')) {
-                slideBackTimeout = setTimeout(closeSlideOut, 300);
+                slideBackTimeout = setTimeout(closeSlideOut, 280);
             }
         });
 
-        // When mouse leaves the sidebar, start slide-back timer
         sidebar.addEventListener('mouseleave', () => {
             if (sidebar.classList.contains('hidden') && sidebar.classList.contains('slide-out')) {
-                slideBackTimeout = setTimeout(closeSlideOut, 300);
+                slideBackTimeout = setTimeout(closeSlideOut, 280);
             }
         });
 
-        // Also hide slide-out when clicking outside
         document.addEventListener('click', (e) => {
             if (sidebar.classList.contains('slide-out') &&
                 !sidebar.contains(e.target) &&
@@ -10924,9 +11086,12 @@ class AxisBrowser {
 
     toggleSearch() {
         const searchModal = document.getElementById('search-modal');
+        const searchInput = document.getElementById('search-input');
+        if (!searchModal || !searchInput) return;
         if (searchModal.classList.contains('hidden')) {
             searchModal.classList.remove('hidden');
-            document.getElementById('search-input').focus();
+            searchInput.focus();
+            searchInput.select();
         } else {
             this.hideSearch();
         }
@@ -10934,46 +11099,68 @@ class AxisBrowser {
 
     hideSearch() {
         const searchModal = document.getElementById('search-modal');
-        searchModal.classList.add('hidden');
-        document.getElementById('search-input').value = '';
+        const searchInput = document.getElementById('search-input');
+        if (searchModal) searchModal.classList.add('hidden');
+        if (searchInput) searchInput.value = '';
         this.clearSearch();
     }
 
-    performSearch(query) {
-        if (!query.trim()) {
-            this.clearSearch();
+    /** Live find while typing — clear prior search first so each keystroke updates immediately */
+    performIncrementalFind(rawQuery) {
+        const query = (rawQuery || '').trim();
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+
+        if (!query) {
+            try {
+                webview.stopFindInPage('clearSelection');
+            } catch (e) {
+                /* ignore */
+            }
             return;
         }
 
-        const webview = document.getElementById('webview');
-        webview.findInPage(query, {
-            forward: true,
-            matchCase: false,
-            findNext: false
-        });
+        try {
+            webview.stopFindInPage('clearSelection');
+            webview.findInPage(query, {
+                forward: true,
+                matchCase: false,
+                findNext: false
+            });
+        } catch (e) {
+            console.warn('findInPage:', e);
+        }
     }
 
     searchNext() {
-        const query = document.getElementById('search-input').value;
-        if (query.trim()) {
-            const webview = document.getElementById('webview');
+        const query = (document.getElementById('search-input')?.value || '').trim();
+        if (!query) return;
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+        try {
             webview.findInPage(query, {
                 forward: true,
                 matchCase: false,
                 findNext: true
             });
+        } catch (e) {
+            console.warn('findInPage next:', e);
         }
     }
 
     searchPrevious() {
-        const query = document.getElementById('search-input').value;
-        if (query.trim()) {
-            const webview = document.getElementById('webview');
+        const query = (document.getElementById('search-input')?.value || '').trim();
+        if (!query) return;
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+        try {
             webview.findInPage(query, {
                 forward: false,
                 matchCase: false,
                 findNext: true
             });
+        } catch (e) {
+            console.warn('findInPage previous:', e);
         }
     }
 
@@ -11374,6 +11561,10 @@ class AxisBrowser {
             `;
             list.appendChild(empty);
         } else {
+            const pathsForIcons = downloads.map((d) => d.path).filter(Boolean);
+            if (pathsForIcons.length && window.electronAPI?.cacheDragIcons) {
+                window.electronAPI.cacheDragIcons(pathsForIcons).catch(() => {});
+            }
             downloads.forEach((item) => {
                 const fileName = item.name || item.path || 'File';
                 const fileType = this.getFileTypeForPreview(fileName);
@@ -11382,7 +11573,7 @@ class AxisBrowser {
                 row.className = 'downloads-popup-item';
                 row.innerHTML = `
                     <div class="downloads-popup-thumbnail ${this.escapeHtml(fileType)}">
-                        ${this.getFilePreviewMarkup(item.path, fileType, fileName)}
+                        ${this.getDownloadPopupThumbnailLoadingMarkup()}
                     </div>
                     <div class="downloads-popup-info">
                         <div class="downloads-popup-name" title="${this.escapeHtml(fileName)}">
@@ -11397,7 +11588,15 @@ class AxisBrowser {
                     </button>
                 `;
 
-                // Open file on row click
+                row.draggable = true;
+                row.addEventListener('dragstart', (e) => {
+                    e.preventDefault();
+                    if (item.path && window.electronAPI?.startFileDrag) {
+                        window.electronAPI.startFileDrag(item.path);
+                    }
+                });
+
+                // Open file on row click (suppressed after a drag by the browser)
                 row.addEventListener('click', () => {
                     if (item.path) {
                         window.electronAPI.openLibraryItem(item.path);
@@ -11414,6 +11613,7 @@ class AxisBrowser {
                 });
 
                 list.appendChild(row);
+                this.loadDownloadPopupThumbnail(item.path, fileType, fileName, row);
             });
         }
 
@@ -11421,7 +11621,7 @@ class AxisBrowser {
         const rect = button.getBoundingClientRect();
         const margin = 8;
         const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-        const popupWidth = Math.min(380, viewportWidth - margin * 2);
+        const popupWidth = Math.min(340, viewportWidth - margin * 2);
 
         popup.style.width = `${popupWidth}px`;
 
@@ -11516,28 +11716,38 @@ class AxisBrowser {
         }
     }
     
-    // Helper: markup for thumbnail preview (actual content where possible)
-    getFilePreviewMarkup(filePath, fileType, fileName) {
+    getDownloadPopupThumbnailLoadingMarkup() {
+        return '<div class="downloads-popup-thumbnail-inner downloads-popup-thumbnail-loading"></div>';
+    }
+
+    applyDownloadPopupThumbnailFallback(innerEl, filePath, fileType, fileName) {
+        if (!innerEl) return;
         if (fileType === 'type-image') {
             const fileUrl = this.pathToFileUrl(filePath);
-            const safeAlt = this.escapeHtml(fileName || '');
             if (fileUrl) {
-                return `
-                    <div class="downloads-popup-thumbnail-inner image">
-                        <img src="${this.escapeHtml(fileUrl)}" alt="${safeAlt}" loading="lazy">
-                    </div>
-                `;
+                innerEl.className = 'downloads-popup-thumbnail-inner image';
+                innerEl.innerHTML = `<img src="${this.escapeHtml(fileUrl)}" alt="${this.escapeHtml(fileName || '')}" loading="lazy" draggable="false">`;
+                return;
             }
         }
-        
-        // Fallback to icon-based thumbnail
-        return `
-            <div class="downloads-popup-thumbnail-inner">
-                <span class="downloads-popup-thumbnail-icon">
-                    ${this.getFileTypeIcon(fileType)}
-                </span>
-            </div>
-        `;
+        innerEl.className = 'downloads-popup-thumbnail-inner';
+        innerEl.innerHTML = `<span class="downloads-popup-thumbnail-icon">${this.getFileTypeIcon(fileType)}</span>`;
+    }
+
+    async loadDownloadPopupThumbnail(filePath, fileType, fileName, rowEl) {
+        const inner = rowEl?.querySelector?.('.downloads-popup-thumbnail-inner');
+        if (!inner) return;
+        try {
+            const dataUrl = await window.electronAPI?.getFileThumbnailDataUrl?.(filePath, 128);
+            if (dataUrl && typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
+                inner.className = 'downloads-popup-thumbnail-inner image';
+                inner.innerHTML = `<img src="${this.escapeHtml(dataUrl)}" alt="${this.escapeHtml(fileName || '')}" draggable="false">`;
+                return;
+            }
+        } catch (e) {
+            /* fall through */
+        }
+        this.applyDownloadPopupThumbnailFallback(inner, filePath, fileType, fileName);
     }
     
     // Handle downloads popup actions
@@ -12096,12 +12306,9 @@ class AxisBrowser {
         indicator.classList.remove('hidden');
         indicator.classList.add('show', type);
         
-        // Hide after 4 seconds
         setTimeout(() => {
             indicator.classList.remove('show', type);
-            setTimeout(() => {
-                indicator.classList.add('hidden');
-            }, 300);
+            indicator.classList.add('hidden');
         }, 4000);
     }
 
@@ -12115,17 +12322,61 @@ class AxisBrowser {
         }, 200); // Start blur-in after 0.2 seconds for instant feel
     }
 
+    setUrlBarLoadProgress(fraction, tabId) {
+        if (this.loadingBarTabId == null || tabId !== this.loadingBarTabId) return;
+        if (this.currentTab !== tabId) return;
+        const fill = document.getElementById('loading-bar-fill');
+        const bar = document.getElementById('loading-bar');
+        if (!fill || !bar || !bar.classList.contains('loading')) return;
+        const clamped = Math.max(0, Math.min(1, Number(fraction) || 0));
+        fill.style.width = `${(clamped * 100).toFixed(2)}%`;
+    }
+
+    bumpUrlBarLoadMilestone(webview, tabId, atLeast) {
+        if (!webview || this.loadingBarTabId !== tabId) return;
+        const next = Math.max(webview.__loadProgressMilestone || 0, atLeast);
+        webview.__loadProgressMilestone = next;
+        if (this.currentTab === tabId) {
+            this.setUrlBarLoadProgress(next, tabId);
+        }
+    }
+
     showLoadingIndicator() {
         const loadingBar = document.getElementById('loading-bar');
+        const fill = document.getElementById('loading-bar-fill');
         if (loadingBar) {
+            if (fill) {
+                fill.classList.remove('loading-bar-fill--complete');
+                fill.style.transition = '';
+                fill.style.width = '0%';
+            }
             loadingBar.classList.add('loading');
         }
     }
 
     hideLoadingIndicator() {
         const loadingBar = document.getElementById('loading-bar');
-        if (loadingBar) {
+        const fill = document.getElementById('loading-bar-fill');
+        if (!loadingBar) return;
+        if (fill) {
+            fill.classList.add('loading-bar-fill--complete');
+            fill.style.width = '100%';
+        }
+        const done = () => {
             loadingBar.classList.remove('loading');
+            if (fill) {
+                fill.classList.remove('loading-bar-fill--complete');
+                fill.style.transition = 'none';
+                fill.style.width = '0%';
+                requestAnimationFrame(() => {
+                    fill.style.transition = '';
+                });
+            }
+        };
+        if (fill) {
+            setTimeout(done, 200);
+        } else {
+            done();
         }
     }
 
@@ -12225,6 +12476,9 @@ class AxisBrowser {
         const moveThrottle = 50; // Only check every 50ms
         
         sidebar.addEventListener('mousemove', (e) => {
+            if (sidebar.classList.contains('hidden') && !sidebar.classList.contains('slide-out')) {
+                return;
+            }
             const now = performance.now();
             if (now - lastMoveTime < moveThrottle) {
                 return; // Skip if too soon
@@ -12410,13 +12664,22 @@ class AxisBrowser {
         let isDragging = false;
         let lastMouseX = 0;
         let lastMouseY = 0;
+        let moveRaf = null;
+
+        const cancelMoveRaf = () => {
+            if (moveRaf != null) {
+                cancelAnimationFrame(moveRaf);
+                moveRaf = null;
+            }
+        };
 
         // Force cleanup - emergency reset
         const forceCleanup = () => {
+            cancelMoveRaf();
             if (drag) {
                 if (drag.element) {
                     drag.element.classList.remove('smooth-dragging');
-                    drag.element.style.transform = '';
+                    drag.element.style.removeProperty('transform');
                     drag.element.style.opacity = '';
                     drag.element.style.pointerEvents = '';
                 }
@@ -12425,7 +12688,7 @@ class AxisBrowser {
                     toClear.forEach(el => {
                         if (el && el !== drag.element) {
                             el.classList.remove('drag-sliding');
-                            el.style.transform = '';
+                            el.style.removeProperty('transform');
                             el.style.transition = '';
                         }
                     });
@@ -12433,7 +12696,7 @@ class AxisBrowser {
                 if (drag.container && drag.container.id === 'tabs-container') {
                     const sep = this.elements.tabsSeparator;
                     if (sep && sep.parentNode) {
-                        sep.style.transform = '';
+                        sep.style.removeProperty('transform');
                         sep.style.transition = '';
                     }
                 }
@@ -12501,7 +12764,15 @@ class AxisBrowser {
                     const children = Array.from(container.children);
                     const sepIdx = children.indexOf(sep);
                     if (sepIdx >= 0) firstUnpinnedIndex = siblings.findIndex(s => children.indexOf(s) > sepIdx);
-                    positions.push({ el: null, top: sepRect.bottom, height: 0, center: sepRect.bottom + 8 });
+                    // Virtual “end” slot must sit *below the last* tab/group in the list. Using separator Y here
+                    // made every midpoint vs. the last row wrong, so bottom drags targeted the wrong index and
+                    // finishDrag inserted after “+ New Tab” (top of unpinned) instead of after the last tab.
+                    const lastGeom = positions.length > 0 ? positions[positions.length - 1] : null;
+                    const virtualTop = (firstUnpinnedIndex < 0)
+                        ? sepRect.bottom
+                        : (lastGeom ? lastGeom.top + lastGeom.height : sepRect.bottom);
+                    const virtualGap = 8;
+                    positions.push({ el: null, top: virtualTop, height: 0, center: virtualTop + virtualGap });
                     hasUnpinnedSlot = true;
                 }
             }
@@ -12523,6 +12794,9 @@ class AxisBrowser {
                 mouseOffsetFromCenter: mouseY - draggedPos.center,
                 dragIndex,
                 currentTarget: dragIndex,
+                initialSiblingCount: siblings.length,
+                dropIndex: dragIndex,
+                dropVirtualEnd: false,
                 siblings,
                 positions,
                 draggedHeight: draggedPos.height,
@@ -12535,10 +12809,16 @@ class AxisBrowser {
                 separatorCenter,
                 firstUnpinnedIndex,
                 lastTarget: dragIndex,
+                smoothedSiblingShifts: new Map(),
+                smoothedSepShift: 0,
+                _slideSmoothLastT: 0,
             };
         };
 
         const SEPARATOR_HYSTERESIS_PX = 3;
+        // Sibling / separator slide easing (per second, higher = snappier). CSS transitions fight per-frame
+        // transform updates; exp-smoothing gives clean motion without fighting the pointer-driven drag row.
+        const DRAG_SLIDE_SMOOTH_PER_SEC = 38;
 
         // Target index from slot boundaries; use separator center at pinned/unpinned boundary to avoid glitch
         const getTargetIndex = (draggedCenter, positions, _dragIndex, opts) => {
@@ -12565,7 +12845,7 @@ class AxisBrowser {
             if (target == null || drag.separatorCenter == null || drag.firstUnpinnedIndex == null) return target;
             const sep = drag.separatorCenter;
             const fu = drag.firstUnpinnedIndex;
-            if (fu <= 0 || fu >= (drag.positions && drag.positions.length)) return target;
+            if (fu <= 0 || !drag.positions || fu >= drag.positions.length) return target;
             const last = drag.lastTarget;
             const inPinned = target < fu;
             const inUnpinned = target >= fu;
@@ -12680,13 +12960,16 @@ class AxisBrowser {
                     drag.previewStartX = mouseX;
                     drag.previewStartY = mouseY;
                     const siblingsToClear = getSiblings(drag.container);
-                    siblingsToClear.forEach((el, i) => {
-                        if (i !== drag.dragIndex && el && el.parentElement) el.style.transform = '';
+                    siblingsToClear.forEach((el) => {
+                        if (el !== drag.element && el && el.parentElement) el.style.removeProperty('transform');
                     });
+                    drag.smoothedSiblingShifts.clear();
+                    drag.smoothedSepShift = 0;
+                    drag._slideSmoothLastT = 0;
                     if (drag.container.id === 'tabs-container') {
                         const sep = this.elements.tabsSeparator;
                         if (sep && sep.parentNode) {
-                            sep.style.transform = '';
+                            sep.style.removeProperty('transform');
                             sep.style.transition = '';
                         }
                     }
@@ -12707,14 +12990,28 @@ class AxisBrowser {
             
             if (drag.isHorizontalDrag) {
                 if (isPreviewBoxInSidebar() || inSidebar) {
-                    drag.isHorizontalDrag = false;
-                    if (drag.previewBox) {
-                        drag.previewBox.style.opacity = '0';
-                        drag.previewBox.style.transform = 'scale(0.9)';
-                        setTimeout(() => removePreviewBox(), 150);
-                    }
+                    removePreviewBox();
                     drag.element.style.opacity = '';
                     drag.element.style.pointerEvents = '';
+                    const backToVertical = getSiblings(drag.container);
+                    for (const el of backToVertical) {
+                        if (el !== drag.element && el.parentElement === container) {
+                            el.style.removeProperty('transform');
+                            el.style.transition = '';
+                            if (!el.classList.contains('drag-sliding')) el.classList.add('drag-sliding');
+                        }
+                    }
+                    drag.smoothedSiblingShifts.clear();
+                    drag.smoothedSepShift = 0;
+                    drag._slideSmoothLastT = 0;
+                    if (drag.container.id === 'tabs-container') {
+                        const sep = this.elements.tabsSeparator;
+                        if (sep && sep.parentNode) {
+                            sep.style.removeProperty('transform');
+                            sep.style.transition = '';
+                        }
+                    }
+                    drag.isHorizontalDrag = false;
                 } else {
                     if (drag.previewBox) {
                         const boxWidth = 240, boxHeight = 180;
@@ -12729,8 +13026,8 @@ class AxisBrowser {
                 }
             }
             
-            // Slide: move tab with cursor (translateY only)
-            drag.element.style.transform = `translateY(${offsetY}px)`;
+            // Slide: compositor-friendly move (!important beats inactive-tab rules)
+            drag.element.style.setProperty('transform', `translate3d(0, ${offsetY}px, 0)`, 'important');
 
             // Target index from dragged visual center; use separator boundary when crossing pinned/unpinned
             const draggedCenter = mouseY - drag.mouseOffsetFromCenter;
@@ -12752,6 +13049,17 @@ class AxisBrowser {
                 finishDrag();
                 return;
             }
+            const posLen = drag.positions.length;
+            const lastEntry = posLen > 0 ? drag.positions[posLen - 1] : null;
+            const lastIsVirtual = !!(drag.hasUnpinnedSlot && lastEntry && lastEntry.el === null);
+            const dropVirtualEnd = !!(lastIsVirtual && safeTarget === posLen - 1);
+            let dropIndex = drag.dragIndex;
+            if (!dropVirtualEnd) {
+                dropIndex = numSiblings <= 0 ? 0 : Math.max(0, Math.min(safeTarget, numSiblings - 1));
+            }
+            drag.dropIndex = dropIndex;
+            drag.dropVirtualEnd = dropVirtualEnd;
+
             const effectiveTarget = numSiblings <= 0 ? 0 : Math.max(0, Math.min(safeTarget, numSiblings - 1));
             const gapStr = container.ownerDocument && container.ownerDocument.defaultView
                 ? container.ownerDocument.defaultView.getComputedStyle(container).gap || ''
@@ -12759,18 +13067,39 @@ class AxisBrowser {
             const gap = parseInt(String(gapStr).trim(), 10) || 4;
             const shiftHeight = drag.draggedHeight + gap;
 
-            // Always shift siblings so they move around the dragged item (works for active and inactive tabs)
+            const nowSmooth = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+            const dtSec = drag._slideSmoothLastT
+                ? Math.min(0.05, (nowSmooth - drag._slideSmoothLastT) / 1000)
+                : 1 / 60;
+            drag._slideSmoothLastT = nowSmooth;
+            const slideAlpha = 1 - Math.exp(-DRAG_SLIDE_SMOOTH_PER_SEC * dtSec);
+
+            const shiftMap = drag.smoothedSiblingShifts;
+            for (const key of shiftMap.keys()) {
+                if (!currentSiblings.includes(key)) shiftMap.delete(key);
+            }
+
+            // Shift siblings around the dragged item — eased toward target each frame (smooth, no CSS transition fight)
             for (let i = 0; i < numSiblings; i++) {
                 const el = currentSiblings[i];
                 if (!el || el === drag.element || el.parentElement !== container) continue;
                 if (!el.classList.contains('drag-sliding')) el.classList.add('drag-sliding');
-                let shift = 0;
-                if (effectiveTarget < currentDragIdx && i >= effectiveTarget && i < currentDragIdx) shift = shiftHeight;
-                else if (effectiveTarget > currentDragIdx && i > currentDragIdx && i <= effectiveTarget) shift = -shiftHeight;
-                if (shift === 0) {
+                let targetShift = 0;
+                if (effectiveTarget < currentDragIdx && i >= effectiveTarget && i < currentDragIdx) targetShift = shiftHeight;
+                else if (effectiveTarget > currentDragIdx && i > currentDragIdx && i <= effectiveTarget) targetShift = -shiftHeight;
+
+                let smooth = shiftMap.get(el);
+                if (smooth === undefined) smooth = 0;
+                smooth += (targetShift - smooth) * slideAlpha;
+                if (Math.abs(targetShift - smooth) < 0.4) smooth = targetShift;
+
+                if (Math.abs(smooth) < 0.08 && targetShift === 0) {
+                    shiftMap.delete(el);
                     el.style.removeProperty('transform');
                 } else {
-                    el.style.setProperty('transform', `translateY(${shift}px)`, 'important');
+                    shiftMap.set(el, smooth);
+                    const y = Math.round(smooth * 100) / 100;
+                    el.style.setProperty('transform', `translate3d(0, ${y}px, 0)`, 'important');
                 }
             }
             // Separator: same shift as first sibling after it in DOM
@@ -12779,18 +13108,28 @@ class AxisBrowser {
                 if (sep && sep.parentNode === container) {
                     const children = Array.from(container.children);
                     const sepIdx = children.indexOf(sep);
-                    let sepShift = 0;
+                    let sepTarget = 0;
                     for (let j = 0; j < numSiblings; j++) {
                         if (children.indexOf(currentSiblings[j]) > sepIdx) {
                             if (j !== currentDragIdx) {
-                                if (effectiveTarget < currentDragIdx && j >= effectiveTarget && j < currentDragIdx) sepShift = shiftHeight;
-                                else if (effectiveTarget > currentDragIdx && j > currentDragIdx && j <= effectiveTarget) sepShift = -shiftHeight;
+                                if (effectiveTarget < currentDragIdx && j >= effectiveTarget && j < currentDragIdx) sepTarget = shiftHeight;
+                                else if (effectiveTarget > currentDragIdx && j > currentDragIdx && j <= effectiveTarget) sepTarget = -shiftHeight;
                             }
                             break;
                         }
                     }
-                    sep.style.transition = 'transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1)';
-                    sep.style.transform = sepShift === 0 ? '' : `translateY(${sepShift}px)`;
+                    sep.style.transition = '';
+                    let sepSmooth = drag.smoothedSepShift;
+                    sepSmooth += (sepTarget - sepSmooth) * slideAlpha;
+                    if (Math.abs(sepTarget - sepSmooth) < 0.4) sepSmooth = sepTarget;
+                    drag.smoothedSepShift = sepSmooth;
+                    if (Math.abs(sepSmooth) < 0.08 && sepTarget === 0) {
+                        drag.smoothedSepShift = 0;
+                        sep.style.removeProperty('transform');
+                    } else {
+                        const sy = Math.round(sepSmooth * 100) / 100;
+                        sep.style.setProperty('transform', `translate3d(0, ${sy}px, 0)`, 'important');
+                    }
                 }
             }
         };
@@ -12802,7 +13141,12 @@ class AxisBrowser {
                 return;
             }
 
-            const { element, type, container, dragIndex, currentTarget } = drag;
+            cancelMoveRaf();
+
+            const { element, type, container, dragIndex } = drag;
+            const dropVirtualEnd = !!drag.dropVirtualEnd;
+            const dropIndex = drag.dropIndex != null ? drag.dropIndex : dragIndex;
+            const reorderNeeded = dropVirtualEnd || dropIndex !== dragIndex;
             const scrollLockToRestore = drag.scrollLock;
             isDragging = false;
             drag.active = false;
@@ -12831,25 +13175,25 @@ class AxisBrowser {
             for (const el of toClear) {
                 if (el && el.parentElement) {
                     el.classList.remove('drag-sliding');
-                    el.style.transform = '';
+                    el.style.removeProperty('transform');
                     el.style.transition = '';
                 }
             }
             if (container && container.id === 'tabs-container') {
                 const sep = this.elements.tabsSeparator;
                 if (sep && sep.parentNode) {
-                    sep.style.transform = '';
+                    sep.style.removeProperty('transform');
                     sep.style.transition = '';
                 }
             }
 
             element.classList.remove('smooth-dragging');
-            element.style.transform = '';
+            element.style.removeProperty('transform');
             element.style.opacity = '';
             element.style.pointerEvents = '';
 
-            // Reorder if position changed
-            if (currentTarget !== dragIndex && currentTarget >= 0) {
+            // Reorder if drop index changed (dropIndex is final index among n siblings; DOM insert matches visuals)
+            if (reorderNeeded) {
                 element.remove();
 
                 const remaining = Array.from(container.children).filter(el =>
@@ -12859,24 +13203,47 @@ class AxisBrowser {
                     !el.classList.contains('tab-drag-placeholder')
                 );
 
-                const insertAt = Math.max(0, Math.min(currentTarget, remaining.length));
-
-                // Virtual slot: drop into empty unpinned section (after separator / "+ New Tab" button)
                 const sep = container.id === 'tabs-container' ? this.elements.tabsSeparator : container.querySelector('.tabs-separator');
                 const unpinnedAnchor = container.id === 'tabs-container' && this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn : sep;
-                if (drag.hasUnpinnedSlot && currentTarget === drag.siblings.length && unpinnedAnchor) {
-                    unpinnedAnchor.insertAdjacentElement('afterend', element);
-                } else if (insertAt >= remaining.length) {
+
+                if (drag.hasUnpinnedSlot && dropVirtualEnd) {
+                    // Empty unpinned: only virtual target is “after + New Tab”. Otherwise virtual means “after last row”.
+                    if (drag.firstUnpinnedIndex < 0 && unpinnedAnchor) {
+                        unpinnedAnchor.insertAdjacentElement('afterend', element);
+                    } else if (remaining.length > 0) {
+                        remaining[remaining.length - 1].insertAdjacentElement('afterend', element);
+                    } else if (unpinnedAnchor) {
+                        unpinnedAnchor.insertAdjacentElement('afterend', element);
+                    } else if (sep) {
+                        sep.insertAdjacentElement('afterend', element);
+                    } else {
+                        container.appendChild(element);
+                    }
+                } else if (dropVirtualEnd) {
                     const last = remaining[remaining.length - 1];
                     if (last) {
                         last.insertAdjacentElement('afterend', element);
                     } else if (unpinnedAnchor) {
                         unpinnedAnchor.insertAdjacentElement('afterend', element);
+                    } else if (sep) {
+                        sep.insertAdjacentElement('afterend', element);
                     } else {
                         container.appendChild(element);
                     }
                 } else {
-                    container.insertBefore(element, remaining[insertAt]);
+                    const dest = Math.max(0, Math.min(dropIndex, remaining.length));
+                    if (dest < remaining.length) {
+                        container.insertBefore(element, remaining[dest]);
+                    } else {
+                        const last = remaining[remaining.length - 1];
+                        if (last) {
+                            last.insertAdjacentElement('afterend', element);
+                        } else if (unpinnedAnchor) {
+                            unpinnedAnchor.insertAdjacentElement('afterend', element);
+                        } else {
+                            container.appendChild(element);
+                        }
+                    }
                 }
                 
                 if (type === 'tab' && container.classList.contains('tabs-container')) {
@@ -12972,12 +13339,17 @@ class AxisBrowser {
             e.stopPropagation();
             lastMouseX = e.clientX;
             lastMouseY = e.clientY;
-            try {
-                updateVisuals(e.clientX, e.clientY);
-            } catch (err) {
-                console.error('Error updating drag visuals:', err);
-                finishDrag();
-            }
+            if (moveRaf != null) return;
+            moveRaf = requestAnimationFrame(() => {
+                moveRaf = null;
+                if (!drag || !drag.active) return;
+                try {
+                    updateVisuals(lastMouseX, lastMouseY);
+                } catch (err) {
+                    console.error('Error updating drag visuals:', err);
+                    finishDrag();
+                }
+            });
         };
 
         const onUp = (e) => {
@@ -14975,20 +15347,6 @@ class AxisBrowser {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
-    }
-
-    showLoadingIndicator() {
-        const indicator = document.getElementById('loading-bar');
-        if (indicator) {
-            indicator.classList.add('loading');
-        }
-    }
-
-    hideLoadingIndicator() {
-        const indicator = document.getElementById('loading-bar');
-        if (indicator) {
-            indicator.classList.remove('loading');
-        }
     }
 
     showQuitConfirmation() {
