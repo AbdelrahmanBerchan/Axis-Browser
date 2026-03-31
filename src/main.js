@@ -19,6 +19,32 @@ let settingsWindow = null;
 let isQuitConfirmed = false;
 let isUserQuitting = false;
 
+/** macOS frameless + hiddenInset: corner inset when sidebar is left; mirrors to top-right when sidebar is right. */
+const MACOS_TRAFFIC_LIGHT_INSET = 16;
+/**
+ * Cluster width for right placement: same math as left uses inset 16 — (x + cluster) ≈ width − 16.
+ */
+const MACOS_TRAFFIC_LIGHT_CLUSTER_WIDTH_RIGHT = 52;
+
+function positionMacTrafficLights(browserWindow, sidebarOnRight) {
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
+  const { width } = browserWindow.getBounds();
+  const inset = MACOS_TRAFFIC_LIGHT_INSET;
+  if (sidebarOnRight) {
+    const x = Math.max(8, Math.round(width - MACOS_TRAFFIC_LIGHT_CLUSTER_WIDTH_RIGHT - inset));
+    browserWindow.setWindowButtonPosition({ x, y: inset });
+  } else {
+    browserWindow.setWindowButtonPosition({ x: inset, y: inset });
+  }
+}
+
+function attachMacTrafficLightResize(browserWindow) {
+  if (process.platform !== 'darwin' || !browserWindow) return;
+  browserWindow.on('resize', () => {
+    positionMacTrafficLights(browserWindow, !!browserWindow.__axisSidebarRight);
+  });
+}
+
 // ========== Keyboard Shortcuts (Global Functions) ==========
 
 // Default keyboard shortcuts
@@ -73,6 +99,7 @@ const registerShortcuts = () => {
   const shortcuts = getShortcuts();
   
   Object.entries(shortcuts).forEach(([action, key]) => {
+    if (action === 'find') return;
     try {
       globalShortcut.register(key, () => {
         if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
@@ -220,14 +247,25 @@ function createWindow() {
     transparent: true,
     backgroundColor: '#00000000',
     vibrancy: 'under-window',
-    visualEffectState: 'active'
+    visualEffectState: 'active',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
+      : {})
   });
+
+  if (process.platform === 'darwin' && mainWindow) {
+    mainWindow.__axisSidebarRight = false;
+    attachMacTrafficLightResize(mainWindow);
+  }
 
   // Load the app
   mainWindow.loadFile('src/index.html');
 
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
+    if (process.platform === 'darwin' && mainWindow && !mainWindow.isDestroyed()) {
+      positionMacTrafficLights(mainWindow, !!mainWindow.__axisSidebarRight);
+    }
     mainWindow.show();
     // Show window controls by default (sidebar is visible)
     mainWindow.setWindowButtonVisibility(true);
@@ -470,9 +508,7 @@ function createMenu() {
     });
   }
 
-  template.push({
-    label: 'File',
-    submenu: [
+  const fileSubmenu = [
       {
         label: 'New Tab',
         accelerator: newTabShortcut,
@@ -482,21 +518,25 @@ function createMenu() {
           }
         }
       },
-      {
-        label: 'New Window',
-        accelerator: process.platform === 'darwin' ? 'Cmd+Shift+N' : 'Ctrl+Shift+N',
-        click: () => {
-          createWindow();
-        }
-      },
-      {
-        label: 'New Incognito Window',
-        accelerator: process.platform === 'darwin' ? 'Cmd+Option+N' : 'Ctrl+Shift+P',
-        click: () => {
-          createIncognitoWindow();
-        }
-      },
-      { type: 'separator' },
+      ...(process.platform === 'darwin'
+        ? []
+        : [
+            {
+              label: 'New Window',
+              accelerator: 'Ctrl+Shift+N',
+              click: () => {
+                createWindow();
+              }
+            },
+            {
+              label: 'New Incognito Window',
+              accelerator: 'Ctrl+Shift+P',
+              click: () => {
+                createIncognitoWindow();
+              }
+            },
+            { type: 'separator' }
+          ]),
       {
         label: 'Close Tab',
         accelerator: closeTabShortcut,
@@ -557,9 +597,14 @@ function createMenu() {
           }
         }
       }
-    ]
-  },
-    {
+  ];
+
+  template.push({
+    label: 'File',
+    submenu: fileSubmenu
+  });
+
+  template.push({
       label: 'Edit',
       submenu: [
         { role: 'undo' },
@@ -568,6 +613,16 @@ function createMenu() {
         { role: 'cut' },
         { role: 'copy' },
         { role: 'paste' },
+        { type: 'separator' },
+        {
+          label: 'Find in Page',
+          accelerator: findShortcut,
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('browser-shortcut', 'find');
+            }
+          }
+        },
         ...(process.platform !== 'darwin' ? [
           { type: 'separator' },
           { label: 'Settings...', accelerator: settingsShortcut, click: () => openSettingsWindow() }
@@ -642,8 +697,47 @@ function createMenu() {
     {
       label: 'Window',
       submenu: [
+        ...(process.platform === 'darwin'
+          ? [
+              {
+                label: 'New Window',
+                accelerator: 'Shift+Cmd+N',
+                click: () => createWindow()
+              },
+              {
+                label: 'New Incognito Window',
+                accelerator: 'Alt+Cmd+N',
+                click: () => createIncognitoWindow()
+              },
+              { type: 'separator' }
+            ]
+          : []),
         { role: 'minimize' },
-        { role: 'close' }
+        { role: 'zoom' },
+        ...(process.platform === 'darwin'
+          ? [{ type: 'separator' }, { role: 'front' }]
+          : []),
+        { type: 'separator' },
+        {
+          label: 'Close Window',
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow();
+            if (win && !win.isDestroyed()) {
+              win.close();
+            }
+          }
+        },
+        {
+          label: 'Close All',
+          accelerator: process.platform === 'darwin' ? 'Alt+Cmd+W' : 'Ctrl+Shift+W',
+          click: () => {
+            BrowserWindow.getAllWindows().forEach((w) => {
+              if (!w.isDestroyed()) {
+                w.close();
+              }
+            });
+          }
+        }
       ]
     }
   );
@@ -661,7 +755,7 @@ function createIncognitoWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'Axis - Incognito',
+    title: 'Axis — Incognito',
     icon: path.join(__dirname, 'Axis_logo.png'),
     webPreferences: {
       nodeIntegration: false,
@@ -674,9 +768,9 @@ function createIncognitoWindow() {
       experimentalFeatures: true,
       enableBlinkFeatures: 'CSSColorSchemeUARendering',
       v8CacheOptions: 'code',
-      spellcheck: false,
-      session: incognitoSession,
-      partition: 'incognito'
+      spellcheck: false
+      // Shell: default session (same as normal windows) so IPC e.g. set-window-title works
+      // reliably; private browsing stays in <webview partition="incognito"> (renderer).
     },
     titleBarStyle: 'hiddenInset',
     frame: false,
@@ -684,13 +778,24 @@ function createIncognitoWindow() {
     transparent: true,
     backgroundColor: '#00000000',
     vibrancy: 'under-window',
-    visualEffectState: 'active'
+    visualEffectState: 'active',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
+      : {})
   });
+
+  if (process.platform === 'darwin') {
+    incognitoWindow.__axisSidebarRight = false;
+    attachMacTrafficLightResize(incognitoWindow);
+  }
 
   // Load the app with hash so renderer knows it's incognito (for indicator, theme lock, no history)
   incognitoWindow.loadFile('src/index.html', { hash: 'incognito' });
 
   incognitoWindow.once('ready-to-show', () => {
+    if (process.platform === 'darwin' && !incognitoWindow.isDestroyed()) {
+      positionMacTrafficLights(incognitoWindow, !!incognitoWindow.__axisSidebarRight);
+    }
     incognitoWindow.show();
   });
 
@@ -1547,6 +1652,29 @@ ipcMain.handle('get-downloads-from-folder', async (event) => {
   }
 });
 
+// Real file previews (HEIC, PDF, video, etc.) via OS thumbnail APIs — not <img src=file://>
+ipcMain.handle('get-file-thumbnail-data-url', async (event, filePath, maxSize = 128) => {
+  try {
+    if (!filePath || typeof filePath !== 'string') return null;
+    const resolved = path.resolve(filePath);
+    const st = await fs.promises.stat(resolved).catch(() => null);
+    if (!st || !st.isFile()) return null;
+    const dim = Math.min(Math.max(64, Number(maxSize) || 128), 512);
+    const thumb = await nativeImage.createThumbnailFromPath(resolved, { width: dim, height: dim });
+    if (!thumb || thumb.isEmpty()) return null;
+
+    const dragScaled = scaleNativeImageToMax(thumb, DRAG_ICON_MAX_PX);
+    if (dragScaled && !dragScaled.isEmpty()) {
+      dragIconCache.set(filePath, dragScaled);
+      trimDragIconCache();
+    }
+
+    return thumb.toDataURL();
+  } catch (error) {
+    return null;
+  }
+});
+
 // Context menu for downloads items
 ipcMain.handle('show-downloads-item-context-menu', async (event, x, y, filePath) => {
   const template = [
@@ -1577,29 +1705,6 @@ ipcMain.handle('show-downloads-item-context-menu', async (event, x, y, filePath)
   return true;
 });
 
-// Native file drag support (e.g. drag download out to Finder/Desktop)
-ipcMain.handle('start-file-drag', async (event, filePath) => {
-  try {
-    if (!filePath) return false;
-    
-    let icon = nativeImage.createFromPath(filePath);
-    if (!icon || icon.isEmpty()) {
-      // Fallback to an empty image if we can't load a proper icon
-      icon = nativeImage.createEmpty();
-    }
-    
-    event.sender.startDrag({
-      file: filePath,
-      icon
-    });
-    
-    return true;
-  } catch (error) {
-    console.error('Failed to start file drag:', error);
-    return false;
-  }
-});
-
 // Open the user's Downloads folder in Finder
 ipcMain.handle('open-downloads-folder', async () => {
   const downloadsPath = path.join(os.homedir(), 'Downloads');
@@ -1626,6 +1731,152 @@ function getFallbackFileIcon() {
   } catch (e) {}
   return nativeImage.createEmpty();
 }
+
+/** Max longest side (px) for drag ghost — full-size file previews cover the entire screen */
+const DRAG_ICON_MAX_PX = 32;
+/** Drag ghost bitmaps (OS thumbnails when possible — matches downloads popup previews) */
+const dragIconCache = new Map();
+const DRAG_ICON_CACHE_MAX = 40;
+
+function trimDragIconCache() {
+  while (dragIconCache.size > DRAG_ICON_CACHE_MAX) {
+    const first = dragIconCache.keys().next().value;
+    dragIconCache.delete(first);
+  }
+}
+
+function scaleNativeImageToMax(icon, maxDim) {
+  if (!icon || icon.isEmpty()) return null;
+  const { width, height } = icon.getSize();
+  if (width <= 0 || height <= 0) return null;
+  if (width <= maxDim && height <= maxDim) return icon;
+  const scale = Math.min(maxDim / width, maxDim / height);
+  const w = Math.max(1, Math.round(width * scale));
+  const h = Math.max(1, Math.round(height * scale));
+  try {
+    return icon.resize({ width: w, height: h, quality: 'best' });
+  } catch (e) {
+    try {
+      return icon.resize({ width: w, height: h });
+    } catch (e2) {
+      return null;
+    }
+  }
+}
+
+/** Never empty — startDrag with an empty icon is skipped and looks like drag is broken */
+function getGuaranteedDragFallbackIcon() {
+  const dataUrl =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAOklEQVQ4T2NkYGD4z0ABYBzVMKoBBg0MBv8ZGP4zMPxnYPjPwPD/PwPDfwYGhv8MDP8ZGP4zMPxnYPgPALmJCm0bicgAAAAASUVORK5CYII=';
+  try {
+    const img = nativeImage.createFromDataURL(dataUrl);
+    if (img && !img.isEmpty()) {
+      const scaled = scaleNativeImageToMax(img, DRAG_ICON_MAX_PX);
+      if (scaled && !scaled.isEmpty()) return scaled;
+      try {
+        const r = img.resize({ width: 32, height: 32 });
+        if (r && !r.isEmpty()) return r;
+      } catch (e) {}
+      return img;
+    }
+  } catch (e) {}
+  try {
+    return nativeImage.createFromDataURL(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    );
+  } catch (e2) {
+    return nativeImage.createEmpty();
+  }
+}
+
+function getDragPreviewIconSync(filePath) {
+  const cached = dragIconCache.get(filePath);
+  if (cached && !cached.isEmpty()) return cached;
+
+  let icon = nativeImage.createFromPath(filePath);
+  if (icon && !icon.isEmpty()) {
+    const scaled = scaleNativeImageToMax(icon, DRAG_ICON_MAX_PX);
+    if (scaled && !scaled.isEmpty()) return scaled;
+  }
+
+  const fallback = getFallbackFileIcon();
+  if (fallback && !fallback.isEmpty()) {
+    const scaledFb = scaleNativeImageToMax(fallback, DRAG_ICON_MAX_PX);
+    if (scaledFb && !scaledFb.isEmpty()) return scaledFb;
+    try {
+      const r = fallback.resize({ width: 32, height: 32 });
+      if (r && !r.isEmpty()) return r;
+    } catch (e) {}
+    return fallback;
+  }
+
+  return getGuaranteedDragFallbackIcon();
+}
+
+ipcMain.handle('cache-drag-icons', async (event, paths) => {
+  if (!Array.isArray(paths)) return;
+
+  const storeForPath = (p, nativeImg) => {
+    if (!nativeImg || nativeImg.isEmpty()) return;
+    const scaled = scaleNativeImageToMax(nativeImg, DRAG_ICON_MAX_PX);
+    if (scaled && !scaled.isEmpty()) {
+      dragIconCache.set(p, scaled);
+      trimDragIconCache();
+    }
+  };
+
+  await Promise.all(
+    paths.map(async (p) => {
+      if (!p || typeof p !== 'string') return;
+      let resolved;
+      try {
+        resolved = path.resolve(p);
+        const st = await fs.promises.stat(resolved).catch(() => null);
+        if (!st || !st.isFile()) return;
+      } catch (e) {
+        return;
+      }
+
+      try {
+        const thumb = await nativeImage.createThumbnailFromPath(resolved, { width: 128, height: 128 });
+        if (thumb && !thumb.isEmpty()) {
+          storeForPath(p, thumb);
+          return;
+        }
+      } catch (e) {}
+
+      try {
+        const icon = await app.getFileIcon(p, { size: 'normal' });
+        if (icon && !icon.isEmpty()) {
+          storeForPath(p, icon);
+          return;
+        }
+      } catch (e) {}
+
+      try {
+        const fromFile = nativeImage.createFromPath(resolved);
+        if (fromFile && !fromFile.isEmpty()) storeForPath(p, fromFile);
+      } catch (e2) {}
+    })
+  );
+});
+
+// Native file drag (must run synchronously during HTML dragstart — use on/send, not handle/invoke)
+ipcMain.on('start-file-drag', (event, filePath) => {
+  try {
+    if (!filePath || typeof filePath !== 'string') return;
+
+    let icon = getDragPreviewIconSync(filePath);
+    if (!icon || icon.isEmpty()) icon = getGuaranteedDragFallbackIcon();
+
+    event.sender.startDrag({
+      file: filePath,
+      icon
+    });
+  } catch (error) {
+    console.error('Failed to start file drag:', error);
+  }
+});
 
 // Downloads popup - native macOS menu showing recent files from Downloads folder
 ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWidth, buttonHeight) => {
@@ -1885,5 +2136,14 @@ ipcMain.handle('set-window-button-visibility', (event, visible) => {
   if (mainWindow) {
     mainWindow.setWindowButtonVisibility(visible);
   }
+});
+
+// Mirror stoplights to top-right when sidebar is docked on the right (per-window; respects resize)
+ipcMain.handle('set-sidebar-traffic-layout', (event, sidebarOnRight) => {
+  if (process.platform !== 'darwin') return;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) return;
+  win.__axisSidebarRight = !!sidebarOnRight;
+  positionMacTrafficLights(win, win.__axisSidebarRight);
 });
 
