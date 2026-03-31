@@ -229,70 +229,33 @@ body.theme-switching *::after {
     display: none;
 }
 
-/* Loading Bar - Smooth and Elegant */
+/* Loading strip: simple line, smooth width (URL field bottom) */
 .loading-bar {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
-    height: 2px;
+    height: 1px;
     background: transparent;
     z-index: 10;
     opacity: 0;
     visibility: hidden;
-    transition: opacity 0.2s ease,
-                visibility 0.2s ease;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
     pointer-events: none;
     overflow: hidden;
-    border-radius: 0 0 4px 0;
+    border-radius: 0 0 5px 5px;
 }
 
-.loading-bar::before {
-    content: '';
+.loading-bar-fill {
     position: absolute;
     top: 0;
     left: 0;
-    width: 100%;
     height: 100%;
-    background: linear-gradient(90deg, 
-        transparent 0%, 
-        transparent 15%,
-        rgba(255, 255, 255, 0.1) 25%,
-        rgba(255, 255, 255, 0.35) 35%,
-        rgba(255, 255, 255, 0.7) 45%,
-        rgba(255, 255, 255, 0.9) 50%,
-        rgba(255, 255, 255, 0.7) 55%,
-        rgba(255, 255, 255, 0.35) 65%,
-        rgba(255, 255, 255, 0.1) 75%,
-        transparent 85%,
-        transparent 100%);
-    transform: translateX(-100%);
-    will-change: transform;
-    border-radius: 0 0 4px 0;
-}
-
-.loading-bar::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, 
-        transparent 0%, 
-        transparent 25%,
-        rgba(255, 255, 255, 0.05) 35%,
-        rgba(255, 255, 255, 0.12) 42%,
-        rgba(255, 255, 255, 0.2) 47%,
-        rgba(255, 255, 255, 0.25) 50%,
-        rgba(255, 255, 255, 0.2) 53%,
-        rgba(255, 255, 255, 0.12) 58%,
-        rgba(255, 255, 255, 0.05) 65%,
-        transparent 75%,
-        transparent 100%);
-    transform: translateX(-100%);
-    will-change: transform;
-    border-radius: 0 0 4px 0;
+    width: 0%;
+    border-radius: 0 0 5px 5px;
+    background: rgba(255, 255, 255, 0.55);
+    transition: width 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+    transform: translateZ(0);
 }
 
 .loading-bar.loading {
@@ -300,38 +263,8 @@ body.theme-switching *::after {
     visibility: visible;
 }
 
-.loading-bar.loading::before {
-    animation: loading-sweep 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-.loading-bar.loading::after {
-    animation: loading-glow 2.5s ease-in-out infinite;
-}
-
-.loading-bar:not(.loading)::before,
-.loading-bar:not(.loading)::after {
-    animation: none;
-    transform: translateX(-100%);
-}
-
-@keyframes loading-sweep {
-    0% {
-        transform: translateX(-100%);
-    }
-    100% {
-        transform: translateX(100%);
-    }
-}
-
-@keyframes loading-glow {
-    0%, 100% {
-        transform: translateX(-100%);
-        opacity: 0.4;
-    }
-    50% {
-        transform: translateX(0%);
-        opacity: 0.8;
-    }
+.loading-bar-fill.loading-bar-fill--complete {
+    transition: width 0.26s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* Enhanced drag areas for easier window dragging */
@@ -472,7 +405,7 @@ body.theme-switching *::after {
     cursor: not-allowed;
 }
 
-/* Sidebar */
+/* Sidebar — collapse animates width + opacity + margin only (no min/max-width transitions: avoids clamp glitches) */
 #sidebar {
     width: 300px;
     background: var(--sidebar-background);
@@ -481,7 +414,13 @@ body.theme-switching *::after {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    transition: width 0.3s ease, transform 0.3s ease, opacity 0.3s ease;
+    flex-shrink: 0;
+    visibility: visible;
+    opacity: 1;
+    transition: width 0.36s cubic-bezier(0.25, 0.9, 0.25, 1),
+                min-width 0.36s cubic-bezier(0.25, 0.9, 0.25, 1),
+                margin-right 0.36s cubic-bezier(0.25, 0.9, 0.25, 1),
+                opacity 0.36s cubic-bezier(0.25, 0.9, 0.25, 1);
     position: relative;
     min-width: 200px;
     max-width: 500px;
@@ -489,22 +428,37 @@ body.theme-switching *::after {
     -webkit-app-region: drag;
     z-index: 1000;
     margin-right: -8px; /* Bring sidebar closer to webview */
+    overflow-x: hidden;
 }
 
-/* Left-edge hover area for sidebar slide-out */
+@media (prefers-reduced-motion: reduce) {
+    #sidebar,
+    #sidebar.hidden {
+        transition: none !important;
+    }
+}
+
+/* Left-edge strip: only when sidebar is collapsed (hidden). Otherwise it sits on top of the
+   sidebar/webview seam and shows the grey hover highlight — must not be hit-testable. */
 #sidebar-hover-area {
     position: fixed;
     top: 0;
     left: 0;
     width: 20px;
     height: 100vh;
-    z-index: 999;
+    z-index: 1000;
     background: transparent;
-    pointer-events: auto;
-    transition: all 0.2s ease;
+    pointer-events: none;
+    visibility: hidden;
+    transition: width 0.2s ease, background 0.2s ease;
 }
 
-#sidebar-hover-area:hover {
+#app:has(#sidebar.hidden) #sidebar-hover-area {
+    pointer-events: auto;
+    visibility: visible;
+}
+
+#app:has(#sidebar.hidden) #sidebar-hover-area:hover {
     width: 30px;
     background: rgba(255, 255, 255, 0.05);
 }
@@ -521,11 +475,30 @@ body.theme-switching *::after {
     z-index: 1;
 }
 
+/* Override global .hidden (display:none) so width can animate */
 #sidebar.hidden {
-    width: 0;
+    display: flex !important;
+    flex-direction: column;
+    min-width: 0 !important;
+    width: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
     opacity: 0;
-    transform: translateX(-20px);
-    overflow: hidden;
+    overflow: hidden !important;
+    pointer-events: none !important;
+    /* Defer visibility until width/opacity finish — removes “invisible but still wide” + stray focus */
+    visibility: hidden;
+    transition: width 0.36s cubic-bezier(0.25, 0.9, 0.25, 1),
+                min-width 0.36s cubic-bezier(0.25, 0.9, 0.25, 1),
+                margin-right 0.36s cubic-bezier(0.25, 0.9, 0.25, 1),
+                opacity 0.36s cubic-bezier(0.25, 0.9, 0.25, 1),
+                visibility 0s linear 0.36s;
+}
+
+/* Edge peek overlay: docked collapse transitions must not run (they fight keyframes) */
+#sidebar.hidden.slide-out,
+#sidebar.hidden.slide-out.slide-out-closing {
+    transition: none !important;
 }
 
 /* Sidebar position: right */
@@ -536,10 +509,6 @@ body.theme-switching *::after {
 /* Sidebar on right side */
 #sidebar.sidebar-right {
     border-radius: 0;
-}
-
-#sidebar.sidebar-right.hidden {
-    transform: translateX(20px);
 }
 
 #sidebar.sidebar-right.slide-out {
@@ -613,10 +582,19 @@ body.theme-switching *::after {
 }
 
 /* Sidebar slide-out state - opaque so content is visible when revealed */
+#sidebar.slide-out,
+#sidebar.slide-out.slide-out-closing {
+    /* Match docked hidden (margin 0) so flex/webview don’t shift when overlay unmounts */
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+}
+
 #sidebar.slide-out {
-    width: 300px !important;
+    /* Match last docked width when possible (set via --sidebar-reveal-width in JS) */
+    width: var(--sidebar-reveal-width, 300px) !important;
     opacity: 1 !important;
-    transform: translateX(0) !important;
+    visibility: visible !important;
+    /* Do not set transform !important here — it overrides keyframe slide in/out */
     overflow: visible !important;
     position: fixed !important;
     top: 0 !important;
@@ -1190,7 +1168,7 @@ body.resizing .ai-chat-resize-handle {
     border-color: rgba(255, 255, 255, 0.15) !important;
 }
 
-/* Zoom Indicator - below URL bar, compact black pill */
+/* Zoom Indicator — same shell as Cmd+F; no enter/exit motion */
 .zoom-indicator {
     position: absolute;
     top: 42px;
@@ -1198,28 +1176,29 @@ body.resizing .ai-chat-resize-handle {
     z-index: 1000;
     pointer-events: none;
     opacity: 0;
-    transform: translateY(-4px) scale(0.96);
-    transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .zoom-indicator.show {
     opacity: 1;
-    transform: translateY(0) scale(1);
 }
 
 .zoom-content {
-    background: #000;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    padding: 6px 12px;
+    background: rgba(10, 10, 12, 0.86);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 12px;
+    padding: 8px 12px;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     color: rgba(255, 255, 255, 0.95);
     font-size: 12px;
     font-weight: 500;
     min-width: 0;
     justify-content: center;
+    backdrop-filter: blur(20px) saturate(165%);
+    -webkit-backdrop-filter: blur(20px) saturate(165%);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+    box-sizing: border-box;
 }
 
 .zoom-content i {
@@ -1675,7 +1654,7 @@ body.light-theme .clear-unpinned-btn:active {
 /* Smooth in-place drag system for tabs */
 /* Dragged tab: slide only, no levitate – same look as other tabs */
 .tab.smooth-dragging {
-    z-index: 1 !important;
+    z-index: 2 !important;
     position: relative !important;
     box-shadow: none !important;
     cursor: grabbing !important;
@@ -1683,15 +1662,24 @@ body.light-theme .clear-unpinned-btn:active {
     will-change: transform !important;
     transition: none !important;
     opacity: 1 !important;
+    backface-visibility: hidden !important;
+}
+
+/* Inactive row must stay visible while dragging (pointer leaves the hit target) */
+.tab.smooth-dragging:not(.active) {
+    background: var(--animation-overlay-hover) !important;
+    box-shadow: 0 4px 12px var(--animation-shadow-light) !important;
+    border: none !important;
+    outline: none !important;
 }
 
 .tab.smooth-dragging * {
     pointer-events: none !important;
 }
 
-/* Tabs being displaced - smooth CSS transition */
+/* Tabs being displaced — transform driven every frame in JS; CSS transition fights pointer */
 .tab.drag-sliding {
-    transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
+    transition: none !important;
     will-change: transform !important;
     pointer-events: none !important;
 }
@@ -1700,7 +1688,7 @@ body.light-theme .clear-unpinned-btn:active {
 .tab.drag-sliding:active,
 .tab.drag-sliding:focus {
     background: inherit !important;
-    transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
+    transition: none !important;
 }
 
 /* Smooth in-place drag system for tab groups */
@@ -1714,6 +1702,7 @@ body.light-theme .clear-unpinned-btn:active {
     will-change: transform !important;
     transition: box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease !important;
     border-radius: 10px !important;
+    backface-visibility: hidden !important;
 }
 
 .tab-group.smooth-dragging * {
@@ -1747,9 +1736,9 @@ body.light-theme .clear-unpinned-btn:active {
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-/* Tab groups being displaced - smooth CSS transition */
+/* Tab groups being displaced — same as tabs: JS owns transform */
 .tab-group.drag-sliding {
-    transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
+    transition: none !important;
     will-change: transform !important;
     pointer-events: none !important;
 }
@@ -1757,7 +1746,7 @@ body.light-theme .clear-unpinned-btn:active {
 .tab-group.drag-sliding:hover,
 .tab-group.drag-sliding:active,
 .tab-group.drag-sliding:focus {
-    transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
+    transition: none !important;
 }
 
 /* Tab preview box for horizontal dragging */
@@ -1868,7 +1857,7 @@ body.light-theme .clear-unpinned-btn:active {
 /* Remove old indicators - insertion line handles all drag indicators */
 
 /* Hover state - only for non-active tabs when actually hovering - EXACTLY LIKE FOLDERS */
-.tab:hover:not(.active) {
+.tab:hover:not(.active):not(.smooth-dragging) {
     transform: none;
     box-shadow: 0 4px 12px var(--animation-shadow-light);
     background: var(--animation-overlay-hover);
@@ -1879,17 +1868,17 @@ body.light-theme .clear-unpinned-btn:active {
     animation: none !important;
 }
 
-.tab:hover:not(.active)::before,
-.tab:hover:not(.active)::after {
+.tab:hover:not(.active):not(.smooth-dragging)::before,
+.tab:hover:not(.active):not(.smooth-dragging)::after {
     transition: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
     animation: none !important;
 }
 
-.tab:hover:not(.active) *,
-.tab:hover:not(.active) *::before,
-.tab:hover:not(.active) *::after {
+.tab:hover:not(.active):not(.smooth-dragging) *,
+.tab:hover:not(.active):not(.smooth-dragging) *::before,
+.tab:hover:not(.active):not(.smooth-dragging) *::after {
     transition: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
@@ -1904,7 +1893,7 @@ body.light-theme .clear-unpinned-btn:active {
 }
 
 /* Ensure inactive tabs without hover are transparent */
-.tab:not(.active):not(:hover) {
+.tab:not(.active):not(:hover):not(.smooth-dragging) {
     background: transparent !important;
     border: none !important;
     outline: 1px solid transparent !important;
@@ -2234,6 +2223,32 @@ body.incognito-window .sidebar-section {
 }
 body.incognito-window {
     background: #000000 !important;
+}
+
+/* Incognito: sidebar is pure #000 and z-index:1000. The global negative margins
+   (sidebar -8px, webview -1px) pull it ON TOP of the webview → a full-height black seam.
+   Cancel those margins so the seam is edge-to-edge, not stacked; keep radius + overflow
+   so the resize handle stays clipped at the corners. */
+body.incognito-window #main-area:not(.sidebar-right) #sidebar {
+    margin-right: 0;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+    overflow: hidden;
+}
+
+body.incognito-window #main-area:not(.sidebar-right) .webview-container {
+    margin-left: 0;
+}
+
+body.incognito-window #main-area.sidebar-right #sidebar {
+    margin-left: 0;
+    border-top-left-radius: 6px;
+    border-bottom-left-radius: 6px;
+    overflow: hidden;
+}
+
+body.incognito-window #main-area.sidebar-right .webview-container {
+    margin-right: 0;
 }
 
 /* Content Area */
@@ -4202,63 +4217,73 @@ body.light-theme .shortcut-desc {
     vertical-align: bottom;
 }
 
-/* Search Modal */
+/* Search Modal (Cmd+F) — sits just under themed URL bar; sizes match compact toolbar */
 .search-modal {
     position: fixed;
-    top: 20px;
-    right: 20px;
-    background: var(--tab-background);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 16px;
-    padding: 12px;
+    /* #content-area padding-top (8px) + .webview-url-bar height (36px) + small gap */
+    top: calc(8px + 36px + 6px);
+    right: 10px;
+    background: rgba(10, 10, 12, 0.86);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 12px;
+    padding: 8px 10px;
     z-index: 1003;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
-    min-width: 300px;
-    backdrop-filter: blur(10px);
+    min-width: 220px;
+    max-width: min(320px, calc(100vw - 24px));
+    backdrop-filter: blur(20px) saturate(165%);
+    -webkit-backdrop-filter: blur(20px) saturate(165%);
+    box-sizing: border-box;
 }
 
 .search-container {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 #search-input {
     flex: 1;
-    height: 32px;
+    min-width: 0;
+    height: 28px;
     background: #1a1a1a;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 16px;
-    padding: 0 12px;
+    border-radius: 10px;
+    padding: 0 10px;
     color: var(--text-color);
-    font-size: 14px;
+    font-size: 12px;
     outline: none;
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .search-controls {
     display: flex;
-    gap: 4px;
+    gap: 3px;
+    flex-shrink: 0;
 }
 
 .search-btn {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     border: none;
-    background: #444;
+    background: transparent;
     color: var(--text-color-secondary);
-    border-radius: 10px;
+    border-radius: 8px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
-    transition: all 0.2s ease;
+    font-size: 10px;
+    transition: color 0.15s ease, background 0.15s ease;
 }
 
 .search-btn:hover {
-    background: #555;
+    background: rgba(255, 255, 255, 0.08);
     color: var(--text-color);
+}
+
+.search-btn:active {
+    background: rgba(255, 255, 255, 0.12);
 }
 
 /* History Styles */
@@ -5727,7 +5752,7 @@ body.light-theme .shortcut-desc {
 }
 
 /* Hover state - EXACTLY LIKE FOLDERS */
-.tab:hover:not(.active) {
+.tab:hover:not(.active):not(.smooth-dragging) {
     transform: none;
     box-shadow: 0 4px 12px var(--animation-shadow-light);
     background: var(--animation-overlay-hover);
@@ -5738,15 +5763,15 @@ body.light-theme .shortcut-desc {
     animation: none !important;
 }
 
-.tab:hover:not(.active)::before,
-.tab:hover:not(.active)::after {
+.tab:hover:not(.active):not(.smooth-dragging)::before,
+.tab:hover:not(.active):not(.smooth-dragging)::after {
     transition: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
     animation: none !important;
 }
 
-.tab:hover:not(.active) .tab-title {
+.tab:hover:not(.active):not(.smooth-dragging) .tab-title {
     color: var(--text-color);
     transition: none !important;
     transition-duration: 0s !important;
@@ -5754,7 +5779,7 @@ body.light-theme .shortcut-desc {
     animation: none !important;
 }
 
-.tab:hover:not(.active) .tab-favicon {
+.tab:hover:not(.active):not(.smooth-dragging) .tab-favicon {
     transform: none;
     transition: none !important;
     transition-duration: 0s !important;
@@ -5804,14 +5829,14 @@ body.light-theme .shortcut-desc {
 }
 
 /* Ensure inactive tabs are transparent - override conflicting rules (exclude drag-sliding so sibling shift works) */
-.tab:not(.active):not(:hover):not(.pinned):not(.dragging):not(.drag-sliding) {
+.tab:not(.active):not(:hover):not(.pinned):not(.dragging):not(.drag-sliding):not(.smooth-dragging) {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
     transform: none !important;
 }
 
-.tab.pinned:not(.active):not(:hover):not(.drag-sliding) {
+.tab.pinned:not(.active):not(:hover):not(.drag-sliding):not(.smooth-dragging) {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
@@ -5921,7 +5946,7 @@ body.light-theme .shortcut-desc {
     border-color: rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.5);
 }
 
-.tab-group:not(:hover):not(.active) {
+.tab-group:not(:hover):not(.active):not(.smooth-dragging) {
     background: transparent !important;
     box-shadow: none !important;
 }
@@ -6110,7 +6135,7 @@ body.light-theme .shortcut-desc {
     transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
-.tab-group .tab:hover:not(.active) {
+.tab-group .tab:hover:not(.active):not(.smooth-dragging) {
     transform: none;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     background: rgba(255, 255, 255, 0.06);
@@ -6339,7 +6364,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 /* Removed duplicate url-icon hover animation */
 
 /* Inactive tabs should be transparent - override any conflicting rules (exclude drag-sliding so sibling shift works) */
-.tab:not(.active):not(:hover):not(.drag-sliding) {
+.tab:not(.active):not(:hover):not(.drag-sliding):not(.smooth-dragging) {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
@@ -7293,37 +7318,35 @@ body.light-theme .btn-primary {
     flex-shrink: 0;
 }
 
-/* Legacy styles for backwards compatibility */
+/* Legacy styles for backwards compatibility — shell matches .search-modal (Cmd+F) */
 .downloads-popup {
     position: fixed;
-    background: #000;
-    backdrop-filter: blur(28px) saturate(220%);
-    -webkit-backdrop-filter: blur(28px) saturate(220%);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 14px;
-    box-shadow:
-        0 22px 60px rgba(0, 0, 0, 0.85),
-        0 0 0 1px rgba(255, 255, 255, 0.06);
+    background: rgba(10, 10, 12, 0.86);
+    backdrop-filter: blur(20px) saturate(165%);
+    -webkit-backdrop-filter: blur(20px) saturate(165%);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 16px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
     z-index: 1002;
     opacity: 0;
     visibility: hidden;
-    transform: scale(0.96) translateY(-8px);
+    transform: scale(0.97) translateY(-4px);
     transition: opacity 0.22s cubic-bezier(0.32, 0.72, 0, 1),
                 visibility 0.22s,
                 transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
     overflow: hidden;
     will-change: opacity, transform;
-    padding: 8px 8px 0;
+    padding: 8px 8px 2px;
     box-sizing: border-box;
-    min-width: 320px;
-    max-width: 380px;
+    min-width: 248px;
+    max-width: 340px;
 }
 
 .downloads-popup-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 4px 4px 6px;
+    padding: 6px 6px 8px;
     gap: 8px;
 }
 
@@ -7346,7 +7369,7 @@ body.light-theme .btn-primary {
     background: rgba(255, 255, 255, 0.06);
     color: rgba(255, 255, 255, 0.78);
     font-size: 11px;
-    padding: 3px 10px;
+    padding: 4px 12px;
     border-radius: 999px;
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease;
@@ -7372,21 +7395,21 @@ body.light-theme .btn-primary {
     display: block !important; /* allow transition; override global .hidden */
     opacity: 0;
     visibility: hidden;
-    transform: scale(0.96) translateY(-8px);
+    transform: scale(0.97) translateY(-4px);
     pointer-events: none;
 }
 
 .downloads-popup-list {
     padding: 2px 2px 4px;
     overflow: hidden;
-    max-height: 240px;
+    max-height: 232px;
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 2px;
 }
 
 .downloads-popup-list::-webkit-scrollbar {
-    width: 6px;
+    width: 4px;
 }
 
 .downloads-popup-list::-webkit-scrollbar-track {
@@ -7394,37 +7417,37 @@ body.light-theme .btn-primary {
 }
 
 .downloads-popup-list::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 2px;
 }
 
 .downloads-popup-list::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.28);
 }
 
 .downloads-popup-item {
     display: flex;
     align-items: center;
-    padding: 8px 12px;
-    margin: 0 6px;
-    border-radius: 10px;
-    cursor: pointer;
+    padding: 8px 10px;
+    margin: 0 4px;
+    border-radius: 8px;
+    cursor: grab;
     transition: background 0.2s ease;
-    gap: 10px;
+    gap: 8px;
     user-select: none;
     position: relative;
-    min-height: 44px;
+    min-height: 40px;
 }
 
 .downloads-popup-thumbnail {
     width: 28px;
     height: 28px;
-    border-radius: 8px;
+    border-radius: 6px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 8px;
+    margin-right: 2px;
     background: radial-gradient(circle at 10% 0%, rgba(255, 255, 255, 0.14) 0, transparent 55%);
     position: relative;
     overflow: hidden;
@@ -7437,8 +7460,23 @@ body.light-theme .btn-primary {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: 11px;
     color: rgba(255, 255, 255, 0.9);
+}
+
+.downloads-popup-thumbnail-inner.downloads-popup-thumbnail-loading {
+    background: rgba(255, 255, 255, 0.07);
+    animation: downloads-popup-thumb-load 0.85s ease-in-out infinite;
+}
+
+@keyframes downloads-popup-thumb-load {
+    0%,
+    100% {
+        opacity: 0.4;
+    }
+    50% {
+        opacity: 0.95;
+    }
 }
 
 .downloads-popup-thumbnail-inner.image {
@@ -7499,10 +7537,11 @@ body.light-theme .btn-primary {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    line-height: 1.25;
 }
 
 .downloads-popup-name {
-    font-size: 13px;
+    font-size: 12px;
     color: rgba(255, 255, 255, 0.96);
     font-weight: 500;
     white-space: nowrap;
@@ -7511,27 +7550,27 @@ body.light-theme .btn-primary {
 }
 
 .downloads-popup-time {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.6);
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.55);
 }
 
 /* Reveal in Finder: icon-only button on the same row, native macOS style */
 .downloads-popup-reveal-btn {
-    width: 24px;
-    height: 24px;
-    min-width: 24px;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
     border: none;
     background: transparent;
     color: rgba(255, 255, 255, 0.5);
     cursor: pointer;
-    border-radius: 6px;
+    border-radius: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
-    margin-left: 4px;
+    margin-left: 2px;
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: 10px;
     transition: color 0.15s ease, background 0.15s ease;
     -webkit-app-region: no-drag;
 }
@@ -7543,7 +7582,7 @@ body.light-theme .btn-primary {
     background: rgba(255, 255, 255, 0.18);
 }
 .downloads-popup-reveal-btn i {
-    font-size: 12px;
+    font-size: 10px;
 }
 
 /* Open Downloads footer row */
@@ -7554,14 +7593,14 @@ body.light-theme .btn-primary {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
-    padding: 5px 12px 8px;
+    gap: 6px;
+    padding: 8px 12px 9px;
     border: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 0 0 14px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 0 0 16px 16px;
     cursor: pointer;
     background: transparent;
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 11px;
     font-weight: 500;
     transition: background 0.12s ease, color 0.12s ease;
@@ -7584,16 +7623,17 @@ body.light-theme .btn-primary {
 
 .downloads-popup-item:active {
     background: rgba(255, 255, 255, 0.15);
+    cursor: grabbing;
 }
 
 .downloads-popup-show-folder {
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     border: none;
     background: transparent;
     color: rgba(255, 255, 255, 0.5);
     cursor: pointer;
-    border-radius: 8px;
+    border-radius: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -7601,7 +7641,7 @@ body.light-theme .btn-primary {
     opacity: 0;
     transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: 10px;
 }
 
 .downloads-popup-item:hover .downloads-popup-show-folder {
@@ -7624,10 +7664,11 @@ body.light-theme .btn-primary {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    line-height: 1.25;
 }
 
 .downloads-popup-name {
-    font-size: 13px;
+    font-size: 12px;
     color: rgba(255, 255, 255, 0.9);
     font-weight: 500;
     white-space: nowrap;
@@ -7636,25 +7677,26 @@ body.light-theme .btn-primary {
 }
 
 .downloads-popup-time {
-    font-size: 11px;
+    font-size: 10px;
     color: rgba(255, 255, 255, 0.5);
 }
 
 .downloads-popup-empty {
-    padding: 24px 16px;
+    padding: 20px 14px;
     text-align: center;
     color: rgba(255, 255, 255, 0.5);
 }
 
 .downloads-popup-empty i {
-    font-size: 24px;
+    font-size: 20px;
     margin-bottom: 8px;
     opacity: 0.5;
 }
 
 .downloads-popup-empty p {
-    margin: 4px 0;
-    font-size: 13px;
+    margin: 3px 0;
+    font-size: 11px;
+    line-height: 1.4;
 }
 
 .library-media-thumbnail {
@@ -9188,7 +9230,7 @@ body:not(.light-theme) .ai-response-content {
     font-size: 12px;
 }
 
-/* Center section - URL display */
+/* Center section - URL display (loading-bar is position:absolute bottom inside this box) */
 .url-bar-center {
     flex: 1;
     display: flex;
@@ -9196,7 +9238,7 @@ body:not(.light-theme) .ai-response-content {
     justify-content: flex-start;
     min-width: 0;
     padding: 0 8px;
-    overflow: visible;
+    overflow: hidden;
     gap: 8px;
     position: relative;
     height: 28px;
@@ -9231,6 +9273,10 @@ body:not(.light-theme) .ai-response-content {
 
 .webview-url-bar:not(.dark-mode) .url-bar-center:hover {
     border-color: rgba(0, 0, 0, 0.06);
+}
+
+.webview-url-bar:not(.dark-mode) .loading-bar-fill {
+    background: rgba(0, 0, 0, 0.32);
 }
 
 .url-bar-center:has(.url-bar-field:focus-within) {
@@ -9457,4 +9503,65 @@ body:not(.light-theme) .ai-response-content {
 
 .webview-container:has(.webview-url-bar.hidden) #webview {
     top: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Sidebar on the RIGHT (#main-area.sidebar-right)
+   Clip on #single-view (spinner steals .webview-container::after). Use full 6px
+   rounding so TR/BR match TL/BL — empty / new-tab fill the panel and looked square
+   on the seam side with 6px 0 0 6px only.
+   -------------------------------------------------------------------------- */
+#main-area.sidebar-right #sidebar {
+    margin-right: 0;
+    margin-left: -8px;
+    padding-top: 0;
+    box-sizing: border-box;
+}
+
+/* isolation: isolate keeps rounded-clip sane but traps descendant z-index inside this
+   context, so .webview-container’s z-index:10 no longer beats #content-area::before (drag strip,
+   z-index:1) — top bar feels “dead” unless you hit an edge. Stack whole card above ::before. */
+#main-area.sidebar-right #single-view {
+    border-radius: 6px;
+    overflow: hidden;
+    isolation: isolate;
+    z-index: 2;
+}
+
+#main-area.sidebar-right .webview-container {
+    margin-left: 0;
+    margin-right: -1px;
+    border-radius: 0 !important;
+    overflow: hidden !important;
+}
+
+#main-area.sidebar-right .webview-container::before {
+    border-radius: 0 !important;
+}
+
+/* Round both top corners of the bar (left = window edge, right = seam side) */
+#main-area.sidebar-right .webview-url-bar {
+    border-radius: 6px 6px 0 0 !important;
+}
+
+html.platform-darwin #main-area.sidebar-right .webview-url-bar {
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+/* Layers sit inside #single-view clip — avoid stacked radii fighting the spinner ::after */
+#main-area.sidebar-right #webview,
+#main-area.sidebar-right #webviews-container,
+#main-area.sidebar-right #webviews-container webview,
+#main-area.sidebar-right webview::before,
+#main-area.sidebar-right .empty-state,
+#main-area.sidebar-right .new-tab-page {
+    border-radius: 0 !important;
+}
+
+#main-area.sidebar-right .webview-container:has(.webview-url-bar.hidden) #webviews-container,
+#main-area.sidebar-right .webview-container:has(.webview-url-bar.hidden) #webview,
+#main-area.sidebar-right .webview-container:has(.webview-url-bar.hidden) #webviews-container webview,
+#main-area.sidebar-right .webview-container:has(.webview-url-bar.hidden) webview::before {
+    border-radius: 0 !important;
 }
