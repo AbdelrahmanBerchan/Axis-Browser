@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
+  platform: process.platform,
+
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
@@ -27,9 +29,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLibraryItems: (locationKey) => ipcRenderer.invoke('get-library-items', locationKey),
   openLibraryItem: (fullPath) => ipcRenderer.invoke('open-library-item', fullPath),
   showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
-  startFileDrag: (filePath) => ipcRenderer.invoke('start-file-drag', filePath),
+  startFileDrag: (filePath) => ipcRenderer.send('start-file-drag', filePath),
+  cacheDragIcons: (paths) => ipcRenderer.invoke('cache-drag-icons', paths),
   showDownloadsPopup: (x, y, width, height) => ipcRenderer.invoke('show-downloads-popup', x, y, width, height),
   getDownloadsFromFolder: () => ipcRenderer.invoke('get-downloads-from-folder'),
+  getFileThumbnailDataUrl: (filePath, maxSize) => ipcRenderer.invoke('get-file-thumbnail-data-url', filePath, maxSize),
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
   onDownloadsPopupAction: (callback) => ipcRenderer.on('downloads-popup-action', (event, action, data) => callback(action, data)),
   showDownloadsItemContextMenu: (x, y, filePath) => ipcRenderer.invoke('show-downloads-item-context-menu', x, y, filePath),
@@ -57,6 +61,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Window controls
   setWindowButtonVisibility: (visible) => ipcRenderer.invoke('set-window-button-visibility', visible),
+  setSidebarTrafficLayout: (sidebarOnRight) =>
+    ipcRenderer.invoke('set-sidebar-traffic-layout', sidebarOnRight),
   setWindowTitle: (title) => ipcRenderer.invoke('set-window-title', title),
   
   // Keyboard shortcuts
