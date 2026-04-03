@@ -24,7 +24,7 @@
   "author": "Axis Browser Team",
   "license": "SEE LICENSE IN LICENSE.md",
   "devDependencies": {
-    "electron": "^37.3.1",
+    "electron": "^39.8.4",
     "electron-builder": "^26.4.0",
     "lodash": "^4.17.23",
     "minimatch": "^10.2.3",
