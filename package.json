@@ -1,6 +1,6 @@
 {
   "name": "axis",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A minimalistic, customizable, and beautiful browser built on Electron",
   "main": "src/main.js",
   "scripts": {
@@ -13,7 +13,8 @@
     "tar": "^7.5.10",
     "ajv": "^8.18.0",
     "minimatch": "^10.2.3",
-    "picomatch": "4.0.4"
+    "picomatch": "4.0.4",
+    "@xmldom/xmldom": "0.8.12"
   },
   "keywords": [
     "browser",
@@ -24,7 +25,7 @@
   "author": "Axis Browser Team",
   "license": "SEE LICENSE IN LICENSE.md",
   "devDependencies": {
-    "electron": "^37.3.1",
+    "electron": "39.8.5",
     "electron-builder": "^26.4.0",
     "lodash": "^4.17.23",
     "minimatch": "^10.2.3",
