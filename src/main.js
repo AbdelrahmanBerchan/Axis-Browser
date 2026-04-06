@@ -13,6 +13,111 @@ const historyStore = new Store({ name: 'history' });
 const downloadsStore = new Store({ name: 'downloads' });
 const notesStore = new Store({ name: 'notes' });
 
+function normalizePermissionOrigin(url) {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    try {
+      const s = url.trim();
+      if (!s) return null;
+      return new URL(s.includes('://') ? s : `https://${s}`).origin;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function cleanSitePermissionOverrides(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [origin, perms] of Object.entries(raw)) {
+    if (!origin || typeof perms !== 'object' || !perms) continue;
+    const row = {};
+    for (const k of ['camera', 'microphone', 'notifications', 'geolocation']) {
+      if (perms[k] === 'allow' || perms[k] === 'deny') row[k] = perms[k];
+    }
+    out[origin] = row;
+  }
+  return out;
+}
+
+/** @param {string|null} origin @param {string} permission Electron permission id */
+function getSitePermissionDecision(origin, permission) {
+  const overrides = store.get('sitePermissionOverrides', {});
+  if (!origin || typeof overrides !== 'object') return null;
+  const site = overrides[origin];
+  if (!site || typeof site !== 'object') return null;
+
+  if (permission === 'media') {
+    const cam = site.camera;
+    const mic = site.microphone;
+    if (cam === 'deny' || mic === 'deny') return 'deny';
+    if (cam === 'allow' || mic === 'allow') return 'allow';
+    return null;
+  }
+
+  if (permission === 'geolocation' || permission === 'notifications') {
+    const v = site[permission];
+    if (v === 'deny' || v === 'allow') return v;
+    return null;
+  }
+
+  return null;
+}
+
+function permissionRequestHandler(webContents, permission, callback, details) {
+  const requestingUrl = details && details.requestingUrl;
+  const origin = normalizePermissionOrigin(requestingUrl);
+  const decided = getSitePermissionDecision(origin, permission);
+  if (decided === 'deny') {
+    callback(false);
+    return;
+  }
+  if (decided === 'allow') {
+    callback(true);
+    return;
+  }
+
+  const allowedPermissions = [
+    'display-capture',
+    'fullscreen',
+    'geolocation',
+    'idle-detection',
+    'media',
+    'mediaKeySystem',
+    'midi',
+    'midiSysex',
+    'notifications',
+    'pointerLock',
+    'keyboardLock',
+    'openExternal',
+    'speaker-selection',
+    'storage-access',
+    'top-level-storage-access',
+    'window-management',
+    'clipboard-read',
+    'clipboard-sanitized-write',
+    'unknown',
+    'fileSystem'
+  ];
+
+  callback(allowedPermissions.includes(permission));
+}
+
+function permissionCheckHandler(webContents, permission, requestingOrigin, details) {
+  const origin = normalizePermissionOrigin(requestingOrigin) || requestingOrigin;
+  const decided = getSitePermissionDecision(origin, permission);
+  if (decided === 'deny') return false;
+  if (decided === 'allow') return true;
+  return true;
+}
+
+function installSessionPermissionHandlers(sess) {
+  sess.setPermissionRequestHandler(permissionRequestHandler);
+  sess.setPermissionCheckHandler(permissionCheckHandler);
+}
+
 // Keep a global reference of the window object
 let mainWindow;
 let settingsWindow = null;
@@ -92,18 +197,26 @@ const getShortcuts = () => {
   return getDefaultShortcuts();
 };
 
-// Register global shortcuts when window is focused (works even in webviews)
+// Get the active Axis window (prefers focused, then main, then any)
+function getActiveAxisWindow() {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) return focused;
+  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
+  const all = BrowserWindow.getAllWindows().filter(w => !w.isDestroyed());
+  return all.length > 0 ? all[0] : null;
+}
+
+// Register global shortcuts (works in all Axis windows, including incognito)
 const registerShortcuts = () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  
   const shortcuts = getShortcuts();
   
   Object.entries(shortcuts).forEach(([action, key]) => {
     if (action === 'find') return;
     try {
       globalShortcut.register(key, () => {
-        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
-          mainWindow.webContents.send('browser-shortcut', action);
+        const win = getActiveAxisWindow();
+        if (win) {
+          win.webContents.send('browser-shortcut', action);
         }
       });
     } catch (error) {
@@ -207,39 +320,17 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      enableRemoteModule: false,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
-      // Maximum performance optimizations
       backgroundThrottling: false,
       offscreen: false,
       experimentalFeatures: true,
-        // Reduce JS parse/compile time on startup
-        v8CacheOptions: 'code',
-        spellcheck: false,
-      // Speed optimizations
-      hardwareAcceleration: true,
+      v8CacheOptions: 'code',
+      spellcheck: false,
       webSecurity: true,
-      experimentalCanvasFeatures: true,
-      enableWebGL: true,
-      enableWebGL2: true,
-      enableAcceleratedVideoDecode: true,
-      enableAcceleratedVideoEncode: true,
-      enableGpuRasterization: true,
-      enableZeroCopy: true,
-      enableHardwareAcceleration: true,
-      enableAggressiveDomStorageFlushing: false, // Disable to prevent content unloading
-      enableExperimentalWebPlatformFeatures: true,
-      enableTcpFastOpen: true,
-      enableQuic: true,
-      aggressiveCacheDiscard: false, // Disable to prevent content unloading
-      enableNetworkService: true,
-      enableNetworkServiceLogging: false,
-      // Consolidated Blink features
-      enableBlinkFeatures: 'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn',
-      enableThrottleForegroundTimers: true,
-      enableWebGPU: true,
-      enableWebGPUDawn: true
+      webgl: true,
+      enableBlinkFeatures:
+        'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn'
     },
     titleBarStyle: 'hiddenInset',
     frame: false,
@@ -270,21 +361,6 @@ function createWindow() {
     // Show window controls by default (sidebar is visible)
     mainWindow.setWindowButtonVisibility(true);
   });
-  
-  // Register shortcuts when window gains focus
-  mainWindow.on('focus', () => {
-    registerShortcuts();
-  });
-  
-  // Unregister when window loses focus (so shortcuts don't affect other apps)
-  mainWindow.on('blur', () => {
-    unregisterShortcuts();
-  });
-  
-  // Initial registration if window starts focused
-  if (mainWindow.isFocused()) {
-    registerShortcuts();
-  }
 
   // Handle window closed
   mainWindow.on('closed', () => {
@@ -334,9 +410,11 @@ function createWindow() {
   // Use the new API instead of deprecated setPreloads
   try {
     if (mainSession.registerPreloadScript) {
-      mainSession.registerPreloadScript(path.join(__dirname, 'preload.js'));
+      mainSession.registerPreloadScript({
+        filePath: path.join(__dirname, 'preload.js'),
+        type: 'frame'
+      });
     } else if (mainSession.setPreloads) {
-      // Fallback for older Electron versions
       mainSession.setPreloads([path.join(__dirname, 'preload.js')]);
     }
   } catch (error) {
@@ -355,27 +433,13 @@ function createWindow() {
 
   // Note: command line switches are now set early to ensure Chromium honors them
   
-  // Allow insecure content for development
-  mainSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowedPermissions = [
-      'camera',
-      'microphone',
-      'notifications',
-      'geolocation',
-      'media',
-      'midi',
-      'midiSysex',
-      'pointerLock',
-      'fullscreen',
-      'openExternal'
-    ];
-    
-    if (allowedPermissions.includes(permission)) {
-      callback(true);
-    } else {
-      callback(false);
-    }
-  });
+  installSessionPermissionHandlers(mainSession);
+  installSessionPermissionHandlers(session.fromPartition('persist:main'));
+  try {
+    installSessionPermissionHandlers(session.fromPartition('incognito'));
+  } catch (e) {
+    console.warn('Could not attach permission handlers to incognito session:', e);
+  }
 
   // Handle certificate errors - allow all certificates
   mainSession.setCertificateVerifyProc((request, callback) => {
@@ -425,9 +489,9 @@ function openSettingsWindow(tab = null) {
     return;
   }
   const windowOptions = {
-    width: 680,
-    height: 520,
-    minWidth: 520,
+    width: 760,
+    height: 560,
+    minWidth: 560,
     minHeight: 400,
     title: 'Settings',
     show: false,
@@ -760,7 +824,6 @@ function createIncognitoWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      enableRemoteModule: false,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
       backgroundThrottling: false,
@@ -768,7 +831,9 @@ function createIncognitoWindow() {
       experimentalFeatures: true,
       enableBlinkFeatures: 'CSSColorSchemeUARendering',
       v8CacheOptions: 'code',
-      spellcheck: false
+      spellcheck: false,
+      webSecurity: true,
+      webgl: true
       // Shell: default session (same as normal windows) so IPC e.g. set-window-title works
       // reliably; private browsing stays in <webview partition="incognito"> (renderer).
     },
@@ -838,6 +903,17 @@ function updateDockMenu() {
 app.whenReady().then(() => {
   createWindow();
   updateDockMenu();
+  // Ensure shortcuts are active whenever any Axis window has focus
+  app.on('browser-window-focus', () => {
+    unregisterShortcuts();
+    registerShortcuts();
+  });
+  // When no Axis window is focused (app in background), remove global shortcuts
+  app.on('browser-window-blur', () => {
+    if (!BrowserWindow.getFocusedWindow()) {
+      unregisterShortcuts();
+    }
+  });
 });
 
 // Clean up global shortcuts on quit
@@ -924,6 +1000,16 @@ ipcMain.handle('open-url-in-browser', (event, url) => {
 
 ipcMain.handle('get-settings', () => {
   return store.store;
+});
+
+ipcMain.handle('get-site-permission-overrides', () => {
+  return store.get('sitePermissionOverrides', {});
+});
+
+ipcMain.handle('set-site-permission-overrides', (event, obj) => {
+  const cleaned = cleanSitePermissionOverrides(obj);
+  store.set('sitePermissionOverrides', cleaned);
+  return cleaned;
 });
 
 ipcMain.handle('set-setting', (event, key, value) => {
