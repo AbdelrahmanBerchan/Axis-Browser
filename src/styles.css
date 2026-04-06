@@ -26,19 +26,20 @@ html, body {
 
 /* CSS Variables for custom colors - Enhanced */
 :root {
-    --background-color: rgba(26, 26, 26, 0.4);
+    /* Much more transparent: let a lot more desktop show through */
+    --background-color: rgba(26, 26, 26, 0.08);
     --accent-color: #555;
     --text-color: #ffffff;
     --text-color-secondary: #ccc;
     --text-color-muted: #999;
     --popup-background: #111;
-    --popup-background-subtle: rgba(40, 40, 40, 0.85);
+    --popup-background-subtle: rgba(40, 40, 40, 0.45);
     --popup-header: #2a2a2a;
     --button-background: #2a2a2a;
     --button-hover: #333;
     --button-text: #ccc;
     --button-text-hover: #fff;
-    --sidebar-background: rgba(17, 17, 17, 0.3);
+    --sidebar-background: rgba(17, 17, 17, 0.1);
     --sidebar-slide-out-background: rgba(28, 28, 28, 0.98);
     --url-bar-background: #111;
     --url-bar-focus-background: #1a1a1a;
@@ -9175,6 +9176,12 @@ body:not(.light-theme) .ai-response-content {
     --url-bar-text: rgba(0, 0, 0, 0.85);
     --url-bar-text-muted: rgba(0, 0, 0, 0.45);
     --url-bar-btn-hover: rgba(0, 0, 0, 0.06);
+}
+
+/* Transparent sites mode: frosted URL bar (JS sets --url-bar-bg + tint; blur as fallback) */
+body.transparent-sites-mode .webview-url-bar {
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
 }
 
 /* Left section - navigation buttons */
