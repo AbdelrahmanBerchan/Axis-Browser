@@ -164,6 +164,31 @@
         @media (prefers-color-scheme: dark) {
             input[type="checkbox"] { accent-color: #0a84ff; }
         }
+        input[type="range"] {
+            width: 140px;
+            max-width: 40vw;
+            min-height: 24px;
+            accent-color: #007aff;
+        }
+        @media (prefers-color-scheme: dark) {
+            input[type="range"] { accent-color: #0a84ff; }
+        }
+        .ambient-volume-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 200px;
+        }
+        .ambient-volume-value {
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            min-width: 2.5em;
+            text-align: right;
+            color: #86868b;
+        }
+        @media (prefers-color-scheme: dark) {
+            .ambient-volume-value { color: #98989d; }
+        }
         button {
             font-family: inherit;
             font-size: 13px;
@@ -282,6 +307,107 @@
             color: #86868b;
             font-size: 12px;
         }
+        .perm-intro {
+            font-size: 12px;
+            color: #86868b;
+            line-height: 1.45;
+            padding: 10px 18px 4px;
+            margin: 0;
+        }
+        @media (prefers-color-scheme: dark) {
+            .perm-intro { color: #98989d; }
+        }
+        .perm-add-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 18px 14px;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+        }
+        @media (prefers-color-scheme: dark) {
+            .perm-add-row { border-bottom-color: rgba(255,255,255,0.06); }
+        }
+        .perm-add-row input[type="text"] {
+            flex: 1;
+            min-width: 180px;
+            padding: 8px 12px;
+            border: 1px solid rgba(0,0,0,0.2);
+            border-radius: 6px;
+            font-size: 13px;
+            background: #fff;
+            color: inherit;
+        }
+        @media (prefers-color-scheme: dark) {
+            .perm-add-row input[type="text"] {
+                background: #3a3a3c;
+                border-color: rgba(255,255,255,0.2);
+            }
+        }
+        .perm-add-error {
+            font-size: 11px;
+            color: #ff3b30;
+            flex-basis: 100%;
+        }
+        @media (prefers-color-scheme: dark) {
+            .perm-add-error { color: #ff453a; }
+        }
+        .perm-table-wrap {
+            overflow-x: auto;
+            max-width: 100%;
+        }
+        .perm-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .perm-table th {
+            text-align: left;
+            padding: 10px 12px;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: #86868b;
+            border-bottom: 1px solid rgba(0,0,0,0.08);
+            white-space: nowrap;
+        }
+        @media (prefers-color-scheme: dark) {
+            .perm-table th { color: #98989d; border-bottom-color: rgba(255,255,255,0.08); }
+        }
+        .perm-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+            vertical-align: middle;
+        }
+        @media (prefers-color-scheme: dark) {
+            .perm-table td { border-bottom-color: rgba(255,255,255,0.06); }
+        }
+        .perm-table td.perm-origin {
+            font-family: 'SF Mono', Monaco, ui-monospace, monospace;
+            font-size: 11px;
+            word-break: break-all;
+            max-width: 200px;
+        }
+        .perm-table select {
+            min-width: 96px;
+            max-width: 120px;
+            font-size: 12px;
+            padding: 4px 8px;
+        }
+        .perm-table .perm-remove {
+            padding: 4px 10px;
+            font-size: 11px;
+        }
+        .perm-empty {
+            text-align: center;
+            color: #86868b;
+            font-size: 12px;
+            padding: 24px 16px !important;
+        }
+        @media (prefers-color-scheme: dark) {
+            .perm-empty { color: #98989d; }
+        }
     </style>
 </head>
 <body>
@@ -297,6 +423,10 @@
         <div class="sidebar-item" data-section="shortcuts">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 20H7v-2h10v2zm2-4H5V6h14v10zm-2-8H7V4h10v4z"/></svg>
             <span>Shortcuts</span>
+        </div>
+        <div class="sidebar-item" data-section="permissions">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+            <span>Site permissions</span>
         </div>
     </nav>
     
@@ -381,6 +511,13 @@
                             <option value="135deg">Diagonal</option>
                         </select>
                     </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Transparent sites (glass mode)</div>
+                            <div class="row-desc">Make page backgrounds more translucent so your wallpaper shows through (experimental)</div>
+                        </div>
+                        <input type="checkbox" id="transparent-sites">
+                    </div>
                 </div>
             </div>
             <div class="group">
@@ -392,6 +529,13 @@
                             <div class="row-desc">Show Start/Stop Speaking options when text is selected</div>
                         </div>
                         <input type="checkbox" id="speech-enabled">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Voice</div>
+                            <div class="row-desc">System text-to-speech voice (from macOS / Windows / Linux)</div>
+                        </div>
+                        <select id="speech-voice"></select>
                     </div>
                     <div class="row">
                         <div class="row-label">
@@ -415,6 +559,74 @@
                             <option value="1" selected>Normal</option>
                             <option value="1.2">Higher</option>
                         </select>
+                    </div>
+                </div>
+            </div>
+            <div class="group">
+                <div class="group-title">Ambient audio</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Enable ambient audio</div>
+                            <div class="row-desc">Optional subtle background sound while browsing (generated locally, no files downloaded)</div>
+                        </div>
+                        <input type="checkbox" id="ambient-audio-enabled">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Sound</div>
+                            <div class="row-desc">Each style uses soft noise and filters</div>
+                        </div>
+                        <select id="ambient-audio-preset">
+                            <option value="rain">Rain</option>
+                            <option value="warm">Warm room</option>
+                            <option value="focus">Deep focus</option>
+                            <option value="ocean">Ocean breeze</option>
+                            <option value="wind">Wind</option>
+                            <option value="still">Night still</option>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Volume</div>
+                            <div class="row-desc">How loud the ambient layer is</div>
+                        </div>
+                        <div class="ambient-volume-wrap">
+                            <input type="range" id="ambient-audio-volume" min="0" max="100" step="1" value="35">
+                            <span class="ambient-volume-value" id="ambient-audio-volume-label">35%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="pane" id="permissions-pane">
+            <div class="group">
+                <div class="group-title">Site permission overrides</div>
+                <div class="group-content perm-panel">
+                    <p class="perm-intro">
+                        Choose <strong>Allow</strong>, <strong>Block</strong>, or <strong>Default</strong> (no override) for each site.
+                        Camera and Microphone both apply when a page requests media (e.g. video calls). Saved per origin (scheme + host + port).
+                    </p>
+                    <div class="perm-add-row">
+                        <input type="text" id="site-perm-add-input" placeholder="example.com or https://site.org/…" autocomplete="off">
+                        <button type="button" id="site-perm-add-btn">Add site</button>
+                        <span class="perm-add-error" id="site-perm-add-error"></span>
+                    </div>
+                    <div class="perm-table-wrap">
+                        <table class="perm-table" id="site-perm-table" aria-label="Per-site permissions">
+                            <thead>
+                                <tr>
+                                    <th>Site</th>
+                                    <th>Camera</th>
+                                    <th>Microphone</th>
+                                    <th>Notifications</th>
+                                    <th>Location</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="site-perm-tbody"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -447,7 +659,7 @@
     
     <script>
         (async function() {
-            const THEME_KEYS = ['themeColor', 'gradientColor', 'gradientEnabled', 'gradientDirection'];
+            const THEME_KEYS = ['themeColor', 'gradientColor', 'gradientEnabled', 'gradientDirection', 'transparentSites'];
             const SHORTCUT_ACTIONS = [
                 { action: 'spotlight-search', label: 'New Tab' },
                 { action: 'close-tab', label: 'Close Tab' },
@@ -506,8 +718,12 @@
                     key === 'searchEngine' ||
                     key === 'alwaysShowFullUrl' ||
                     key === 'speechEnabled' ||
+                    key === 'speechVoiceURI' ||
                     key === 'speechRate' ||
-                    key === 'speechPitch'
+                    key === 'speechPitch' ||
+                    key === 'ambientAudioEnabled' ||
+                    key === 'ambientAudioPreset' ||
+                    key === 'ambientAudioVolume'
                 ) {
                     window.electronAPI.sendSettingsUpdated();
                 }
@@ -528,10 +744,70 @@
             document.getElementById('speech-enabled').checked = settings.speechEnabled !== false;
             document.getElementById('speech-rate').value = String(settings.speechRate || 1);
             document.getElementById('speech-pitch').value = String(settings.speechPitch || 1);
+
+            let speechVoicePersist = settings.speechVoiceURI || '';
+            function populateSpeechVoices() {
+                const sel = document.getElementById('speech-voice');
+                if (!sel || typeof window.speechSynthesis === 'undefined') return;
+                const wasUserPick = sel.value;
+                const voices = window.speechSynthesis.getVoices().slice().sort((a, b) => {
+                    const la = (a.lang || '').toLowerCase();
+                    const lb = (b.lang || '').toLowerCase();
+                    if (la !== lb) return la.localeCompare(lb);
+                    return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+                });
+                sel.innerHTML = '';
+                const defOpt = document.createElement('option');
+                defOpt.value = '';
+                defOpt.textContent = 'Default';
+                sel.appendChild(defOpt);
+                voices.forEach((v) => {
+                    const opt = document.createElement('option');
+                    opt.value = v.voiceURI;
+                    const tag = v.lang ? ' — ' + v.lang : '';
+                    const remote = v.localService === false ? ' (cloud)' : '';
+                    opt.textContent = (v.name || 'Voice') + tag + remote;
+                    sel.appendChild(opt);
+                });
+                const candidates = [wasUserPick, speechVoicePersist, settings.speechVoiceURI || ''].filter(Boolean);
+                let pick = '';
+                for (const c of candidates) {
+                    if (voices.some((v) => v.voiceURI === c)) {
+                        pick = c;
+                        break;
+                    }
+                }
+                sel.value = pick;
+                speechVoicePersist = pick;
+            }
+            populateSpeechVoices();
+            if (window.speechSynthesis) {
+                window.speechSynthesis.onvoiceschanged = populateSpeechVoices;
+                window.speechSynthesis.getVoices();
+                setTimeout(populateSpeechVoices, 250);
+            }
             document.getElementById('theme-color').value = settings.themeColor || '#1a1a1a';
             document.getElementById('gradient-color').value = settings.gradientColor || '#2a2a2a';
             document.getElementById('gradient-enabled').checked = settings.gradientEnabled || false;
             document.getElementById('gradient-direction').value = settings.gradientDirection || '135deg';
+            document.getElementById('transparent-sites').checked = !!settings.transparentSites;
+
+            const AMBIENT_PRESET_IDS = ['rain', 'warm', 'focus', 'ocean', 'wind', 'still'];
+            document.getElementById('ambient-audio-enabled').checked = !!settings.ambientAudioEnabled;
+            const ambientPreset = settings.ambientAudioPreset || 'rain';
+            document.getElementById('ambient-audio-preset').value = AMBIENT_PRESET_IDS.includes(ambientPreset) ? ambientPreset : 'rain';
+            const ambientVolRaw = Number(settings.ambientAudioVolume);
+            const ambientVol = Math.max(0, Math.min(100, Number.isFinite(ambientVolRaw) ? ambientVolRaw : 35));
+            const ambientVolInput = document.getElementById('ambient-audio-volume');
+            const ambientVolLabel = document.getElementById('ambient-audio-volume-label');
+            ambientVolInput.value = String(ambientVol);
+            ambientVolLabel.textContent = ambientVol + '%';
+            function syncAmbientControlsDisabled() {
+                const aOn = document.getElementById('ambient-audio-enabled').checked;
+                document.getElementById('ambient-audio-preset').disabled = !aOn;
+                ambientVolInput.disabled = !aOn;
+            }
+            syncAmbientControlsDisabled();
             
             const gradRows = document.querySelectorAll('.gradient-rows');
             gradRows.forEach(r => r.classList.toggle('visible', settings.gradientEnabled));
@@ -563,6 +839,130 @@
             const hash = (location.hash || '').replace(/^#/, '');
             if (hash) switchSection(hash);
             window.electronAPI?.onSwitchSettingsTab?.(switchSection);
+
+            const SITE_PERM_KEYS = ['camera', 'microphone', 'notifications', 'geolocation'];
+            function normalizeSiteOriginInput(raw) {
+                if (!raw || typeof raw !== 'string') return null;
+                const s = raw.trim();
+                if (!s) return null;
+                try {
+                    return new URL(s.includes('://') ? s : `https://${s}`).origin;
+                } catch {
+                    return null;
+                }
+            }
+            function cleanPermOverridesLocal(obj) {
+                const out = {};
+                if (!obj || typeof obj !== 'object') return out;
+                for (const [origin, perms] of Object.entries(obj)) {
+                    if (!origin || typeof perms !== 'object' || !perms) continue;
+                    const row = {};
+                    for (const k of SITE_PERM_KEYS) {
+                        if (perms[k] === 'allow' || perms[k] === 'deny') row[k] = perms[k];
+                    }
+                    out[origin] = row;
+                }
+                return out;
+            }
+            let sitePermissionOverrides = {};
+            function permSelectHtml(current) {
+                const v = current === 'allow' || current === 'deny' ? current : '';
+                return (
+                    '<option value=""' + (v === '' ? ' selected' : '') + '>Default</option>' +
+                    '<option value="allow"' + (v === 'allow' ? ' selected' : '') + '>Allow</option>' +
+                    '<option value="deny"' + (v === 'deny' ? ' selected' : '') + '>Block</option>'
+                );
+            }
+            async function loadSitePermissionOverrides() {
+                try {
+                    sitePermissionOverrides = (await window.electronAPI.getSitePermissionOverrides()) || {};
+                } catch (e) {
+                    sitePermissionOverrides = {};
+                }
+                renderSitePermissionTable();
+            }
+            async function persistSitePermissionOverrides() {
+                sitePermissionOverrides = (
+                    (await window.electronAPI.setSitePermissionOverrides(
+                        cleanPermOverridesLocal(sitePermissionOverrides)
+                    )) || {}
+                );
+                renderSitePermissionTable();
+            }
+            function renderSitePermissionTable() {
+                const tbody = document.getElementById('site-perm-tbody');
+                if (!tbody) return;
+                tbody.innerHTML = '';
+                const origins = Object.keys(sitePermissionOverrides).sort((a, b) => a.localeCompare(b));
+                if (origins.length === 0) {
+                    const tr = document.createElement('tr');
+                    const td = document.createElement('td');
+                    td.colSpan = 6;
+                    td.className = 'perm-empty';
+                    td.textContent = 'No sites yet. Add a site above to set overrides.';
+                    tr.appendChild(td);
+                    tbody.appendChild(tr);
+                    return;
+                }
+                for (const origin of origins) {
+                    const perms = sitePermissionOverrides[origin] || {};
+                    const tr = document.createElement('tr');
+                    const tdO = document.createElement('td');
+                    tdO.className = 'perm-origin';
+                    tdO.textContent = origin;
+                    tr.appendChild(tdO);
+                    for (const key of SITE_PERM_KEYS) {
+                        const td = document.createElement('td');
+                        const sel = document.createElement('select');
+                        sel.dataset.origin = origin;
+                        sel.dataset.permKey = key;
+                        sel.innerHTML = permSelectHtml(perms[key]);
+                        sel.addEventListener('change', () => {
+                            const o = sel.dataset.origin;
+                            const k = sel.dataset.permKey;
+                            const val = sel.value;
+                            if (!sitePermissionOverrides[o]) sitePermissionOverrides[o] = {};
+                            if (!val) delete sitePermissionOverrides[o][k];
+                            else sitePermissionOverrides[o][k] = val;
+                            persistSitePermissionOverrides();
+                        });
+                        td.appendChild(sel);
+                        tr.appendChild(td);
+                    }
+                    const tdR = document.createElement('td');
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'perm-remove destructive';
+                    btn.textContent = 'Remove';
+                    btn.addEventListener('click', () => {
+                        delete sitePermissionOverrides[origin];
+                        persistSitePermissionOverrides();
+                    });
+                    tdR.appendChild(btn);
+                    tr.appendChild(tdR);
+                    tbody.appendChild(tr);
+                }
+            }
+            document.getElementById('site-perm-add-btn')?.addEventListener('click', async () => {
+                const errEl = document.getElementById('site-perm-add-error');
+                const input = document.getElementById('site-perm-add-input');
+                if (errEl) errEl.textContent = '';
+                const o = normalizeSiteOriginInput(input && input.value);
+                if (!o) {
+                    if (errEl) errEl.textContent = 'Enter a valid URL or domain.';
+                    return;
+                }
+                if (!sitePermissionOverrides[o]) sitePermissionOverrides[o] = {};
+                input.value = '';
+                await persistSitePermissionOverrides();
+            });
+            document.getElementById('site-perm-add-input')?.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('site-perm-add-btn')?.click();
+                }
+            });
+            loadSitePermissionOverrides();
 
             // Settings search (instant filter)
             const settingsSearchInput = document.getElementById('settings-search');
@@ -619,8 +1019,21 @@
             document.getElementById('search-engine').addEventListener('change', e => saveSetting('searchEngine', e.target.value, false));
             document.getElementById('always-show-full-url').addEventListener('change', e => saveSetting('alwaysShowFullUrl', e.target.checked, false));
             document.getElementById('speech-enabled').addEventListener('change', e => saveSetting('speechEnabled', e.target.checked, false));
+            document.getElementById('speech-voice').addEventListener('change', e => {
+                speechVoicePersist = e.target.value || '';
+                saveSetting('speechVoiceURI', e.target.value || '', false);
+            });
             document.getElementById('speech-rate').addEventListener('change', e => saveSetting('speechRate', parseFloat(e.target.value), false));
             document.getElementById('speech-pitch').addEventListener('change', e => saveSetting('speechPitch', parseFloat(e.target.value), false));
+            document.getElementById('ambient-audio-enabled').addEventListener('change', e => {
+                syncAmbientControlsDisabled();
+                saveSetting('ambientAudioEnabled', e.target.checked, false);
+            });
+            document.getElementById('ambient-audio-preset').addEventListener('change', e => saveSetting('ambientAudioPreset', e.target.value, false));
+            ambientVolInput.addEventListener('input', e => {
+                ambientVolLabel.textContent = parseInt(e.target.value, 10) + '%';
+            });
+            ambientVolInput.addEventListener('change', e => saveSetting('ambientAudioVolume', parseInt(e.target.value, 10), false));
             document.getElementById('theme-color').addEventListener('input', e => {
                 saveSetting('themeColor', e.target.value, true);
                 updateThemePreview();
@@ -638,6 +1051,9 @@
             document.getElementById('gradient-direction').addEventListener('change', e => {
                 saveSetting('gradientDirection', e.target.value, true);
                 updateThemePreview();
+            });
+            document.getElementById('transparent-sites').addEventListener('change', e => {
+                saveSetting('transparentSites', e.target.checked, true);
             });
             
             // History
