@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
+  getSitePermissionOverrides: () => ipcRenderer.invoke('get-site-permission-overrides'),
+  setSitePermissionOverrides: (obj) => ipcRenderer.invoke('set-site-permission-overrides', obj),
   sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
   openSettingsWindow: (tab) => ipcRenderer.invoke('open-settings-window', tab),
   openUrlInBrowser: (url) => ipcRenderer.invoke('open-url-in-browser', url),
