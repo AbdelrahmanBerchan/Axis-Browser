@@ -1,4 +1,9 @@
 // Axis Browser Renderer Process
+
+/** Injected into each <webview> for transparent-site mode (single string, reused). */
+const AXIS_TRANSPARENT_SITES_CSS =
+    'html,body{background-color:transparent!important;background-image:none!important}';
+
 class AxisBrowser {
     constructor() {
         this.currentTab = null;
@@ -62,6 +67,11 @@ class AxisBrowser {
         this.pipVideoIndex = 0; // Index of video element in webview
         this.pipWebview = null; // Reference to the webview with video
         this.pipLeaveCheckInterval = null; // Interval to detect native "back to tab" (PiP closed)
+        this._urlBarThemeSeq = 0;
+        this._settingsUpdatedRaf = null;
+        this._ambientAudioCtx = null;
+        this._ambientAudioChain = null;
+        this._ambientPreset = null;
         
         this.isIncognitoWindow = (window.location.hash === '#incognito');
         
@@ -129,6 +139,7 @@ class AxisBrowser {
     async init() {
         // Load settings first and apply theme immediately
         await this.loadSettings();
+        this.syncTransparentSitesUi();
 
         if (window.electronAPI?.platform === 'darwin') {
             document.documentElement.classList.add('platform-darwin');
@@ -209,6 +220,12 @@ class AxisBrowser {
         
         // Initialize URL bar with default state
         this.updateUrlBar(null);
+        
+        if (!this.isIncognitoWindow && this.settings?.transparentSites) {
+            this.applyTransparentSitesToAllWebviews();
+        }
+
+        this.runWhenIdle(() => this.applyAmbientFromSettings());
         
         // Make browser instance globally accessible for incognito windows
         window.browser = this;
@@ -292,6 +309,261 @@ class AxisBrowser {
         } catch (error) {
             console.error('Failed to save setting:', error);
         }
+    }
+
+    async removeTransparentSitesFromWebview(webview) {
+        if (!webview) return;
+        const key = webview.__axisTransparentCssKey;
+        if (!key) return;
+        try {
+            await webview.removeInsertedCSS(key);
+        } catch (e) {
+            /* webview may be torn down or API unavailable */
+        }
+        webview.__axisTransparentCssKey = null;
+    }
+
+    async flushTransparentSitesForWebview(webview) {
+        if (!webview || this.isBenchmarking) return;
+        if (!this.settings?.transparentSites) {
+            await this.removeTransparentSitesFromWebview(webview);
+            return;
+        }
+        try {
+            const prev = webview.__axisTransparentCssKey;
+            if (prev) {
+                try {
+                    await webview.removeInsertedCSS(prev);
+                } catch (e) {}
+                webview.__axisTransparentCssKey = null;
+            }
+            const key = await webview.insertCSS(AXIS_TRANSPARENT_SITES_CSS);
+            if (key) webview.__axisTransparentCssKey = key;
+        } catch (e) {
+            /* Restricted URLs / guest destroy */
+        }
+    }
+
+    applyTransparentSitesToAllWebviews() {
+        if (!this.settings?.transparentSites) return;
+        this.tabs.forEach((tab) => {
+            if (tab?.webview) void this.flushTransparentSitesForWebview(tab.webview);
+        });
+    }
+
+    removeTransparentSitesFromAllWebviews() {
+        this.tabs.forEach((tab) => {
+            if (tab?.webview) void this.removeTransparentSitesFromWebview(tab.webview);
+        });
+    }
+
+    syncTransparentSitesUi() {
+        const on = !!(this.settings && this.settings.transparentSites);
+        document.body?.classList.toggle('transparent-sites-mode', on);
+        const urlBar = this.elements?.webviewUrlBar;
+        if (urlBar && !on) {
+            urlBar.style.backdropFilter = '';
+            urlBar.style.webkitBackdropFilter = '';
+        }
+    }
+
+    stopAmbientAudio() {
+        const ch = this._ambientAudioChain;
+        if (!ch) return;
+        try {
+            if (ch.source) {
+                try {
+                    ch.source.stop();
+                } catch (e) {
+                    /* already stopped */
+                }
+                try {
+                    ch.source.disconnect();
+                } catch (e) {}
+            }
+            if (ch.nodes) {
+                ch.nodes.forEach((n) => {
+                    try {
+                        n.disconnect();
+                    } catch (e) {}
+                });
+            }
+        } catch (e) {}
+        this._ambientAudioChain = null;
+    }
+
+    _createAmbientNoiseBuffer(ctx, seconds, type) {
+        const frames = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+        const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        if (type === 'brown') {
+            let last = 0;
+            for (let i = 0; i < frames; i++) {
+                const w = Math.random() * 2 - 1;
+                last = (last + 0.04 * w) * 0.98;
+                d[i] = Math.max(-1, Math.min(1, last * 2.8));
+            }
+        } else {
+            for (let i = 0; i < frames; i++) {
+                d[i] = Math.random() * 2 - 1;
+            }
+        }
+        return buf;
+    }
+
+    startAmbientAudio(preset, volume01) {
+        this.stopAmbientAudio();
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+
+        if (!this._ambientAudioCtx) {
+            this._ambientAudioCtx = new Ctx();
+        }
+        const ctx = this._ambientAudioCtx;
+        if (ctx.state === 'suspended' && ctx.resume) {
+            ctx.resume().catch(() => {});
+        }
+
+        const targetGain = Math.max(0, Math.min(1, volume01 * 0.55));
+        const master = ctx.createGain();
+        master.gain.value = targetGain;
+
+        const source = ctx.createBufferSource();
+        const nodes = [];
+        let filter;
+        let hp;
+        let shelf;
+
+        switch (preset) {
+            case 'rain':
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 2.5, 'white');
+                source.loop = true;
+                filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 880;
+                filter.Q.value = 0.7;
+                source.connect(filter);
+                filter.connect(master);
+                nodes.push(filter, master);
+                break;
+            case 'warm':
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 3, 'brown');
+                source.loop = true;
+                filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 420;
+                filter.Q.value = 0.5;
+                source.connect(filter);
+                filter.connect(master);
+                nodes.push(filter, master);
+                break;
+            case 'focus':
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 3, 'brown');
+                source.loop = true;
+                filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 130;
+                filter.Q.value = 0.35;
+                source.connect(filter);
+                filter.connect(master);
+                master.gain.value = targetGain * 0.88;
+                nodes.push(filter, master);
+                break;
+            case 'ocean':
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 3, 'brown');
+                source.loop = true;
+                filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 220;
+                filter.Q.value = 0.35;
+                shelf = ctx.createBiquadFilter();
+                shelf.type = 'lowshelf';
+                shelf.frequency.value = 280;
+                shelf.gain.value = 4;
+                source.connect(filter);
+                filter.connect(shelf);
+                shelf.connect(master);
+                nodes.push(filter, shelf, master);
+                break;
+            case 'wind':
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 2, 'white');
+                source.loop = true;
+                hp = ctx.createBiquadFilter();
+                hp.type = 'highpass';
+                hp.frequency.value = 480;
+                filter = ctx.createBiquadFilter();
+                filter.type = 'peaking';
+                filter.frequency.value = 1100;
+                filter.Q.value = 0.6;
+                filter.gain.value = -2;
+                source.connect(hp);
+                hp.connect(filter);
+                filter.connect(master);
+                nodes.push(hp, filter, master);
+                break;
+            case 'still':
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 3, 'brown');
+                source.loop = true;
+                filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 650;
+                source.connect(filter);
+                filter.connect(master);
+                master.gain.value = targetGain * 0.52;
+                nodes.push(filter, master);
+                break;
+            default:
+                try {
+                    master.disconnect();
+                } catch (e) {}
+                return;
+        }
+
+        master.connect(ctx.destination);
+        this._ambientAudioChain = { source, master, nodes };
+        try {
+            source.start(0);
+        } catch (e) {
+            this.stopAmbientAudio();
+        }
+    }
+
+    applyAmbientFromSettings() {
+        const presets = new Set(['rain', 'warm', 'focus', 'ocean', 'wind', 'still']);
+        const on = this.settings?.ambientAudioEnabled === true;
+        let preset = this.settings?.ambientAudioPreset || 'rain';
+        if (!presets.has(preset)) preset = 'rain';
+        let v = Number(this.settings?.ambientAudioVolume);
+        if (!Number.isFinite(v)) v = 35;
+        v = Math.max(0, Math.min(100, v));
+        const v01 = v / 100;
+        const targetGain = Math.max(0, Math.min(1, v01 * 0.55));
+
+        if (!on) {
+            this.stopAmbientAudio();
+            this._ambientPreset = null;
+            return;
+        }
+
+        if (
+            this._ambientAudioChain &&
+            this._ambientPreset === preset &&
+            this._ambientAudioChain.master &&
+            this._ambientAudioCtx
+        ) {
+            try {
+                const ctx = this._ambientAudioCtx;
+                this._ambientAudioChain.master.gain.setTargetAtTime(targetGain, ctx.currentTime, 0.06);
+            } catch (e) {
+                try {
+                    this._ambientAudioChain.master.gain.value = targetGain;
+                } catch (e2) {}
+            }
+            return;
+        }
+
+        this._ambientPreset = preset;
+        this.startAmbientAudio(preset, v01);
     }
 
     setupEventListeners() {
@@ -1051,11 +1323,49 @@ class AxisBrowser {
         });
         
         // Listen for settings updates from settings window (refresh theme)
-        window.electronAPI.onSettingsUpdated?.(async () => {
-            this.applyCustomThemeFromSettings();
-            await this.loadSettings();
-            this.applySidebarPosition();
+        window.electronAPI.onSettingsUpdated?.(() => {
+            if (this._settingsUpdatedRaf != null) cancelAnimationFrame(this._settingsUpdatedRaf);
+            this._settingsUpdatedRaf = requestAnimationFrame(() => {
+                this._settingsUpdatedRaf = null;
+                void this.applySettingsUpdateFromMain();
+            });
         });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') return;
+            if (this.settings?.ambientAudioEnabled && this._ambientAudioCtx?.resume) {
+                this._ambientAudioCtx.resume().catch(() => {});
+            }
+        });
+    }
+
+    async applySettingsUpdateFromMain() {
+        try {
+            await this.loadSettings();
+            this.syncTransparentSitesUi();
+            this.applyCustomThemeFromSettings();
+            this.applySidebarPosition();
+            if (this.settings?.transparentSites) {
+                this.applyTransparentSitesToAllWebviews();
+            } else {
+                this.removeTransparentSitesFromAllWebviews();
+            }
+            const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+            const wv = this.getActiveWebview();
+            this.updateUrlBar(wv, { skipExtractTheme: true });
+            if (tab && tab.url === this.NEWTAB_URL) {
+                /* updateUrlBar already called applyAppThemeToUrlBar */
+            } else if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+                this.applyAppThemeToUrlBar();
+            } else if (wv) {
+                await this.extractUrlBarTheme(wv);
+            } else {
+                this.applyAppThemeToUrlBar();
+            }
+            this.applyAmbientFromSettings();
+        } catch (e) {
+            console.error('applySettingsUpdateFromMain failed', e);
+        }
     }
     
     // Copy the current tab's URL to clipboard
@@ -1340,6 +1650,11 @@ class AxisBrowser {
                     this.setUrlBarLoadProgress(webview.__loadProgressMilestone, tabId);
                 }
             }
+
+            // Transparent sites: every tab (not only the active one — background tabs used to miss this)
+            if (!this.isBenchmarking && this.settings?.transparentSites) {
+                void this.flushTransparentSitesForWebview(webview);
+            }
             
             if (!isActiveTab() || this.isBenchmarking) return;
             
@@ -1373,6 +1688,9 @@ class AxisBrowser {
             clearLoadingTimeout();
             // Only hide loading when main frame finishes (avoid hiding on iframe/subframe load)
             const isMainFrame = event == null || event.isMainFrame !== false;
+            if (isMainFrame && !this.isBenchmarking && this.settings?.transparentSites) {
+                void this.flushTransparentSitesForWebview(webview);
+            }
             if (isMainFrame && this.loadingBarTabId === tabId) {
                 this.bumpUrlBarLoadMilestone(webview, tabId, 1);
                 this.hideLoadingIndicator();
@@ -7029,9 +7347,10 @@ class AxisBrowser {
         }
         
         if (event.data.type === 'openSiteSettings') {
-            // Open a site permissions guide in a new tab
-            this.createNewTab('https://myaccount.google.com/security');
-            this.showNotification('Opening site permissions in a new tab', 'info');
+            if (window.electronAPI?.openSettingsWindow) {
+                window.electronAPI.openSettingsWindow('permissions');
+                this.showNotification('Opening Site permissions in Settings', 'info');
+            }
             return;
         }
         
@@ -11239,20 +11558,52 @@ class AxisBrowser {
         if (!safeText) return;
         const speechRate = Math.min(2, Math.max(0.1, Number(this.settings?.speechRate || 1)));
         const speechPitch = Math.min(2, Math.max(0, Number(this.settings?.speechPitch || 1)));
+        const speechVoiceURI = String(this.settings?.speechVoiceURI || '').trim();
         const script = `
             (function() {
                 try {
                     if (!window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== 'function') {
                         return;
                     }
-                    // Stop any existing speech first
-                    window.speechSynthesis.cancel();
-                    const utterance = new SpeechSynthesisUtterance(${JSON.stringify(safeText)});
-                    utterance.rate = ${speechRate};
-                    utterance.pitch = ${speechPitch};
-                    utterance.volume = 1;
-                    window.__axisCurrentUtterance = utterance;
-                    window.speechSynthesis.speak(utterance);
+                    var text = ${JSON.stringify(safeText)};
+                    var rate = ${speechRate};
+                    var pitch = ${speechPitch};
+                    var uri = ${JSON.stringify(speechVoiceURI)};
+                    function go() {
+                        window.speechSynthesis.cancel();
+                        var utterance = new SpeechSynthesisUtterance(text);
+                        utterance.rate = rate;
+                        utterance.pitch = pitch;
+                        utterance.volume = 1;
+                        if (uri) {
+                            var listOrig = window.speechSynthesis.getVoices();
+                            for (var j = 0; j < listOrig.length; j++) {
+                                if (listOrig[j].voiceURI === uri) {
+                                    utterance.voice = listOrig[j];
+                                    break;
+                                }
+                            }
+                        }
+                        window.__axisCurrentUtterance = utterance;
+                        window.speechSynthesis.speak(utterance);
+                    }
+                    if (uri && window.speechSynthesis.getVoices().length === 0) {
+                        var done = false;
+                        var finish = function() {
+                            if (done) return;
+                            done = true;
+                            try {
+                                if (window.speechSynthesis.onvoiceschanged === finish) {
+                                    window.speechSynthesis.onvoiceschanged = null;
+                                }
+                            } catch (e2) {}
+                            go();
+                        };
+                        window.speechSynthesis.onvoiceschanged = finish;
+                        setTimeout(finish, 500);
+                    } else {
+                        go();
+                    }
                 } catch (e) {
                     // Ignore speech errors
                 }
@@ -15609,7 +15960,8 @@ class AxisBrowser {
     }
     
     // Update the URL bar display and theme
-    updateUrlBar(webview) {
+    // opts.skipExtractTheme: when true, do not run extractUrlBarTheme (caller will await it — avoids races on rapid settings toggles)
+    updateUrlBar(webview, opts = {}) {
         if (this.splitView) {
             this.updateSplitPanesUrlBars();
             return;
@@ -15768,7 +16120,9 @@ class AxisBrowser {
             return;
         }
         // Extract theme color from website
-        this.extractUrlBarTheme(webview);
+        if (!opts.skipExtractTheme) {
+            this.extractUrlBarTheme(webview);
+        }
     }
     
     // Apply app theme to URL bar (for axis://settings and other internal pages)
@@ -15779,6 +16133,29 @@ class AxisBrowser {
         const gradientColor = this.settings?.gradientColor || '#2a2a2a';
         const gradientEnabled = this.settings?.gradientEnabled && gradientColor;
         const gradientDirection = this.settings?.gradientDirection || '135deg';
+
+        if (this.settings?.transparentSites) {
+            urlBar.style.setProperty('backdrop-filter', 'blur(22px)');
+            urlBar.style.setProperty('-webkit-backdrop-filter', 'blur(22px)');
+            urlBar.classList.add('dark-mode');
+            const bgColor = gradientEnabled
+                ? this.smoothGradient(
+                    gradientDirection,
+                    this.hexToRgba(themeColor, 0.4),
+                    this.hexToRgba(gradientColor, 0.4)
+                )
+                : this.hexToRgba(themeColor, 0.4);
+            urlBar.style.setProperty('--url-bar-bg', bgColor);
+            urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
+            urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
+            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.14)');
+            this.applyChatPanelTheme(urlBar, bgColor, true);
+            return;
+        }
+
+        urlBar.style.removeProperty('backdrop-filter');
+        urlBar.style.removeProperty('-webkit-backdrop-filter');
         const bgColor = gradientEnabled
             ? this.smoothGradient(gradientDirection, themeColor, gradientColor)
             : themeColor;
@@ -15797,6 +16174,8 @@ class AxisBrowser {
         
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
+
+        const seq = ++this._urlBarThemeSeq;
         
         try {
             const colorInfo = await webview.executeJavaScript(`
@@ -15878,37 +16257,88 @@ class AxisBrowser {
                     }
                 })();
             `);
+
+            if (seq !== this._urlBarThemeSeq) return;
             
             if (colorInfo) {
-                const { r, g, b, brightness } = colorInfo;
-                
-                // Determine if dark or light mode from the *actual* page color
-                const isDark = brightness < 128;
-                
-                // Use the page color directly for the bar background so it matches as closely as possible
-                const bgColor = `rgba(${r}, ${g}, ${b}, 1)`;
-                
-                if (isDark) {
-                    urlBar.classList.add('dark-mode');
-                    urlBar.style.setProperty('--url-bar-bg', bgColor);
-                    urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.14)');
-                    urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-                    urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
-                    urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.16)');
+                const { r, g, b, brightness, source } = colorInfo;
+                const isDefaultOrError = source === 'default' || source === 'error';
+                let isDark = brightness < 128;
+
+                if (this.settings?.transparentSites) {
+                    urlBar.style.setProperty('backdrop-filter', 'blur(22px)');
+                    urlBar.style.setProperty('-webkit-backdrop-filter', 'blur(22px)');
+
+                    let bgColor;
+                    if (isDefaultOrError) {
+                        // Transparent page backgrounds yield "default" light — use neutral dark glass (not solid white)
+                        isDark = true;
+                        bgColor = 'rgba(14, 15, 18, 0.45)';
+                    } else if (isDark) {
+                        bgColor = `rgba(${r}, ${g}, ${b}, 0.36)`;
+                    } else {
+                        bgColor = `rgba(${r}, ${g}, ${b}, 0.28)`;
+                    }
+
+                    if (isDark) {
+                        urlBar.classList.add('dark-mode');
+                        urlBar.style.setProperty('--url-bar-bg', bgColor);
+                        urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
+                        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+                        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
+                        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.14)');
+                    } else {
+                        urlBar.classList.remove('dark-mode');
+                        urlBar.style.setProperty('--url-bar-bg', bgColor);
+                        urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.08)');
+                        urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.88)');
+                        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
+                        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.08)');
+                    }
+                    this.applyChatPanelTheme(urlBar, bgColor, isDark);
                 } else {
-                    urlBar.classList.remove('dark-mode');
-                    urlBar.style.setProperty('--url-bar-bg', bgColor);
-                    urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.06)');
-                    urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
-                    urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
-                    urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.06)');
+                    urlBar.style.removeProperty('backdrop-filter');
+                    urlBar.style.removeProperty('-webkit-backdrop-filter');
+                    // Use the page color directly for the bar background so it matches as closely as possible
+                    const bgColor = `rgba(${r}, ${g}, ${b}, 1)`;
+
+                    if (isDark) {
+                        urlBar.classList.add('dark-mode');
+                        urlBar.style.setProperty('--url-bar-bg', bgColor);
+                        urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.14)');
+                        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+                        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
+                        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.16)');
+                    } else {
+                        urlBar.classList.remove('dark-mode');
+                        urlBar.style.setProperty('--url-bar-bg', bgColor);
+                        urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.06)');
+                        urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
+                        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
+                        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.06)');
+                    }
+                    this.applyChatPanelTheme(urlBar, bgColor, isDark);
                 }
-                this.applyChatPanelTheme(urlBar, bgColor, isDark);
             }
         } catch (e) {
-            // Apply default light theme on error
-            urlBar.classList.remove('dark-mode');
-            urlBar.style.setProperty('--url-bar-bg', 'rgba(250, 250, 250, 0.95)');
+            if (seq !== this._urlBarThemeSeq) return;
+            if (this.settings?.transparentSites) {
+                urlBar.classList.add('dark-mode');
+                urlBar.style.setProperty('backdrop-filter', 'blur(22px)');
+                urlBar.style.setProperty('-webkit-backdrop-filter', 'blur(22px)');
+                const bg = 'rgba(14, 15, 18, 0.45)';
+                urlBar.style.setProperty('--url-bar-bg', bg);
+                urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
+                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
+                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.14)');
+                this.applyChatPanelTheme(urlBar, bg, true);
+            } else {
+                urlBar.classList.remove('dark-mode');
+                urlBar.style.removeProperty('backdrop-filter');
+                urlBar.style.removeProperty('-webkit-backdrop-filter');
+                urlBar.style.setProperty('--url-bar-bg', 'rgba(250, 250, 250, 0.95)');
+            }
         }
     }
 
