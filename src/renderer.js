@@ -1,8 +1,197 @@
 // Axis Browser Renderer Process
 
-/** Injected into each <webview> for transparent-site mode (single string, reused). */
-const AXIS_TRANSPARENT_SITES_CSS =
-    'html,body{background-color:transparent!important;background-image:none!important}';
+/**
+ * Injected into each <webview> main frame for transparent-site mode.
+ * YouTube relies on design tokens inside shadow roots (variables must be set on html).
+ * Google Search/Images uses many light-DOM wrappers with explicit fills.
+ */
+const AXIS_TRANSPARENT_SITES_CSS = `
+html, body {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+}
+#root, #app, #__next, #__nuxt, #__layout, #app-mount, #gatsby-focus-wrapper,
+[data-nuxt-root], [data-vue-app], .app-root, main#main {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+/* YouTube: tokens inherit into open shadow trees */
+html, html[dark], html[dark="true"], html[system-icons][dark], ytd-app {
+  --yt-spec-base-background: transparent !important;
+  --yt-spec-general-background-a: transparent !important;
+  --yt-spec-general-background-b: transparent !important;
+  --yt-spec-general-background-c: transparent !important;
+  --yt-spec-brand-background-solid: transparent !important;
+  --yt-spec-brand-background-primary: transparent !important;
+  --yt-spec-brand-background-secondary: transparent !important;
+  --yt-raised-background: transparent !important;
+  --yt-spec-menu-background: transparent !important;
+  --yt-spec-feed-background-a: transparent !important;
+  --yt-spec-feed-background-b: transparent !important;
+  --yt-spec-static-background: transparent !important;
+  --yt-spec-static-overlay-background-solid: rgba(0, 0, 0, 0.2) !important;
+}
+ytd-app, ytd-browse, ytd-page-manager, ytd-watch-flexy, ytd-miniplayer,
+ytd-masthead, ytd-app-drawer, ytd-video-preview, #content.ytd-page-manager {
+  background-color: transparent !important;
+  background: transparent !important;
+}
+/* Google web (Search, Images, etc.): main chrome ids */
+#viewport, #cnt, #gsr, #main, #center_col, #rcnt, #rhs, #rhscol, #lhcol,
+#searchform, #tsf, #layout, #rso, #islsp, #islmp, #iur, #isr_m, #iry,
+#arc_tp, #appbar, #main-content, #search, #before-appbar, #sfcnt, #top_nav, #yDmH0d {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+div[role="main"], div[role="navigation"]:not([aria-hidden="true"]) {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+/* Full-width strips (headers / toolbars) often sit outside role=main */
+header, footer, [role="banner"], [role="contentinfo"] {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+`.replace(/\s+/g, ' ').trim();
+
+/**
+ * YouTube tokens + Google ids + generic sweep: large opaque layers (any host) get cleared.
+ * Skips modals, media, form controls, ytd-* hosts (tokens handle those).
+ */
+const AXIS_TRANSPARENT_SITES_DOM_PATCH = [
+    '(function(){',
+    'try{',
+    'var NS="__axisTransparentV4";',
+    'var st=window[NS]||(window[NS]={mo:null,t:0,idle:null,sweepTO:null});',
+    'var T="transparent";',
+    'var IMP="important";',
+    'function ytVarNames(){return["--yt-spec-base-background","--yt-spec-general-background-a","--yt-spec-general-background-b","--yt-spec-general-background-c","--yt-spec-brand-background-solid","--yt-spec-brand-background-primary","--yt-spec-brand-background-secondary","--yt-raised-background","--yt-spec-menu-background","--yt-spec-feed-background-a","--yt-spec-feed-background-b","--yt-spec-static-background","--yt-spec-static-overlay-background-solid","--yt-spec-10-percent-layer","--yt-spec-themed-blue","--yt-spec-themed-green"];}',
+    'function applyYt(){',
+    'var r=document.documentElement;',
+    'ytVarNames().forEach(function(n){',
+    'var v=T;',
+    'if(n.indexOf("overlay")>=0)v="rgba(0,0,0,0.18)";',
+    'if(n.indexOf("blue")>=0||n.indexOf("green")>=0||n.indexOf("percent-layer")>=0)return;',
+    'try{r.style.setProperty(n,v,IMP);}catch(e){}});',
+    'try{',
+    'var app=document.querySelector("ytd-app");',
+    'if(app){app.style.setProperty("background",T,IMP);app.style.setProperty("background-color",T,IMP);}',
+    'document.querySelectorAll("ytd-browse,ytd-watch-flexy,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer").forEach(function(el){',
+    'try{el.style.setProperty("background",T,IMP);el.style.setProperty("background-color",T,IMP);}catch(e){}});',
+    '}catch(e){}',
+    '}',
+    'function googleIds(){return["viewport","cnt","gsr","main","center_col","rcnt","rhs","rhscol","lhcol","islsp","islmp","iur","isr_m","iry","rso","searchform","tsf","layout","arc_tp","appbar","main-content","search","before-appbar","sfcnt","top_nav","yDmH0d","scb","eUDTde","MAmRG","lfooter","tw-container","analytics-ddh"];}',
+    'function applyGoogle(){',
+    'googleIds().forEach(function(id){try{var el=document.getElementById(id);if(el){el.style.setProperty("background-color",T,IMP);el.style.setProperty("background-image","none",IMP);}}catch(e){}});',
+    'try{var main=document.querySelector(\'[role="main"]\');if(main){main.style.setProperty("background-color",T,IMP);main.style.setProperty("background-image","none",IMP);}}catch(e){}',
+    '}',
+    'function sweepLargeOpaqueLayers(){',
+    'var b=document.body;if(!b)return;',
+    'var sk={IMG:1,VIDEO:1,AUDIO:1,CANVAS:1,IFRAME:1,SVG:1,PICTURE:1,OBJECT:1,EMBED:1,STYLE:1,SCRIPT:1,LINK:1,META:1,NOSCRIPT:1,TEMPLATE:1,INPUT:1,TEXTAREA:1,SELECT:1,BUTTON:1,OPTION:1,LABEL:1};',
+    'var n=0,mx=6500,vh=window.innerHeight||800,vw=window.innerWidth||1200,vA=Math.max(1,vh*vw);',
+    'if(typeof NodeFilter==="undefined")return;',
+    'var w=document.createTreeWalker(b,NodeFilter.SHOW_ELEMENT,null),el;',
+    'while((el=w.nextNode())&&n<mx){n++;var t=el.tagName;if(sk[t])continue;',
+    'if(t&&t.indexOf("-")>0){var q=t.toLowerCase();if(q.slice(0,4)==="ytd-"||q.slice(0,3)==="yt-")continue;}',
+    'try{if(el.closest(\'[aria-modal="true"],[role="dialog"],dialog,[data-radix-portal],.modal,.Modal,[class*="modal_root"]\'))continue;}catch(e){}',
+    'try{',
+    'var cs=getComputedStyle(el);',
+    'if(cs.display==="none"||cs.visibility==="hidden"||(cs.position==="fixed"&&parseFloat(cs.opacity||"1")<0.04))continue;',
+    'var bg=cs.backgroundColor;if(!bg||bg==="transparent"||bg==="rgba(0, 0, 0, 0)")continue;',
+    'var a=1;if(bg.indexOf("rgba")===0){var i=bg.lastIndexOf(",");if(i>0){var tail=bg.slice(i+1,-1).trim();var pv=parseFloat(tail);if(!isNaN(pv))a=pv;}}',
+    'if(a<0.12)continue;',
+    'var r=el.getBoundingClientRect();if(r.width<24||r.height<22)continue;',
+    'var f=r.width*r.height/vA,tl=r.height>Math.min(340,vh*0.38),tb=r.width>vw*0.86&&r.height>90;',
+    'if(f<0.032&&!tl&&!tb)continue;',
+    'el.style.setProperty("background-color",T,IMP);',
+    'var bi=cs.backgroundImage;if(bi&&bi!=="none"&&bi.indexOf("url(")<0&&(bi.indexOf("gradient")>=0||bi.indexOf("linear-gradient")>=0))el.style.setProperty("background-image","none",IMP);',
+    '}catch(e2){}',
+    '}',
+    '}',
+    'function scheduleSweep(){',
+    'if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}',
+    'if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}',
+    'var go=function(){st.idle=null;st.sweepTO=null;try{sweepLargeOpaqueLayers();}catch(e){}};',
+    'if(window.requestIdleCallback)st.idle=window.requestIdleCallback(go,{timeout:950});',
+    'else st.sweepTO=setTimeout(go,200);',
+    '}',
+    'function run(){',
+    'var host=(String(location.hostname||"")).toLowerCase();',
+    'var isYt=host.indexOf("youtube.com")>=0||host==="youtu.be";',
+    'var isGo=host.indexOf("google.")>=0;',
+    'if(isYt)applyYt();',
+    'if(isGo)applyGoogle();',
+    'try{',
+    'document.documentElement.style.setProperty("background-color",T,IMP);',
+    'if(document.body){document.body.style.setProperty("background-color",T,IMP);document.body.style.setProperty("background-image","none",IMP);}',
+    '}catch(e){}',
+    'scheduleSweep();',
+    '}',
+    'run();',
+    'if(!st.mo&&document.body){',
+    'st.mo=new MutationObserver(function(){clearTimeout(st.t);st.t=setTimeout(run,155);});',
+    'st.mo.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["style","class","data-darkreader-inline-bgcolor"]});',
+    '}else{run();}',
+    '}catch(e){}',
+    '})();'
+].join('');
+
+const AXIS_TRANSPARENT_SITES_DOM_PATCH_CLEANUP =
+    '(function(){try{var st=window.__axisTransparentV4;if(st){if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}}delete window.__axisTransparentV4;}catch(e){}})();';
+
+/**
+ * Shell chrome interpolation: Settings ▸ windowChromeLight — 0 = opaque (handled in getShellChromeStyle),
+ * 50 = default blend, 100 = most light. These structs are the dense vs airy *blend endpoints* for t∈(0,1], not slider 0.
+ */
+const AXIS_SHELL_CHROME_OPAQUE = {
+    glassAlpha: 0.34,
+    slideOutAlpha: 0.9,
+    popupAlpha: 0.52,
+    urlBarAlpha: 0.42,
+    blurMain: 72,
+    satMain: 178,
+    blurStrong: 78,
+    satStrong: 184,
+    urlBarBlur: 18,
+    urlBarSat: 126,
+    urlBarTintDefault: 0.38,
+    urlBarTintDark: 0.34,
+    urlBarTintLight: 0.26,
+    newTabSearchAlpha: 0.46,
+    newTabSearchBlur: 16,
+    newTabSearchSat: 130,
+    newTabToggleAlpha: 0.22,
+    newTabToggleBlur: 18,
+    newTabToggleSat: 132,
+    newTabAskAlpha: 0.52,
+    newTabAskBlur: 18,
+    newTabAskSat: 130,
+};
+const AXIS_SHELL_CHROME_TRANSPARENT = {
+    glassAlpha: 0.045,
+    slideOutAlpha: 0.28,
+    popupAlpha: 0.18,
+    urlBarAlpha: 0.08,
+    blurMain: 26,
+    satMain: 148,
+    blurStrong: 28,
+    satStrong: 160,
+    urlBarBlur: 10,
+    urlBarSat: 118,
+    urlBarTintDefault: 0.1,
+    urlBarTintDark: 0.09,
+    urlBarTintLight: 0.07,
+    newTabSearchAlpha: 0.1,
+    newTabSearchBlur: 10,
+    newTabSearchSat: 118,
+    newTabToggleAlpha: 0.06,
+    newTabToggleBlur: 12,
+    newTabToggleSat: 125,
+    newTabAskAlpha: 0.18,
+    newTabAskBlur: 12,
+    newTabAskSat: 120,
+};
 
 class AxisBrowser {
     constructor() {
@@ -313,6 +502,16 @@ class AxisBrowser {
 
     async removeTransparentSitesFromWebview(webview) {
         if (!webview) return;
+        const timers = webview.__axisTransparentFlushTimers;
+        if (timers) {
+            timers.forEach((id) => clearTimeout(id));
+            webview.__axisTransparentFlushTimers = null;
+        }
+        try {
+            await webview.executeJavaScript(AXIS_TRANSPARENT_SITES_DOM_PATCH_CLEANUP);
+        } catch (e) {
+            /* guest destroyed / restricted */
+        }
         const key = webview.__axisTransparentCssKey;
         if (!key) return;
         try {
@@ -323,11 +522,72 @@ class AxisBrowser {
         webview.__axisTransparentCssKey = null;
     }
 
+    async _runTransparentSitesDomPatch(webview) {
+        if (!webview) return;
+        try {
+            await webview.executeJavaScript(AXIS_TRANSPARENT_SITES_DOM_PATCH);
+        } catch (e) {
+            /* guest destroyed / CSP (rare for top document) */
+        }
+    }
+
+    _scheduleTransparentSitesReinjection(webview) {
+        if (!webview || this.isBenchmarking || !this.settings?.transparentSites) return;
+        const prop = '__axisTransparentFlushTimers';
+        const prev = webview[prop];
+        if (prev) prev.forEach((id) => clearTimeout(id));
+        const delays = [100, 420, 1400];
+        webview[prop] = delays.map((ms) =>
+            setTimeout(() => {
+                if (!this.settings?.transparentSites || this.isBenchmarking) return;
+                void this.flushTransparentSitesForWebview(webview);
+            }, ms)
+        );
+    }
+
+    _touchTransparentSitesForWebview(webview) {
+        if (!webview || this.isBenchmarking || !this.settings?.transparentSites) return;
+        void this.flushTransparentSitesForWebview(webview).then((didInject) => {
+            if (didInject) this._scheduleTransparentSitesReinjection(webview);
+        });
+    }
+
+    /**
+     * Fully hide non-active webviews. (Do not use a 0.3-opacity “stack”: Chromium/Electron composites
+     * multiple guests so inactive pages visibly bleed through the active tab when glass mode is off.)
+     */
+    _styleInactiveTabWebview(wv) {
+        if (!wv) return;
+        wv.style.opacity = '0';
+        wv.style.visibility = 'hidden';
+        wv.style.pointerEvents = 'none';
+        wv.style.zIndex = '0';
+        wv.classList.add('inactive');
+        wv.style.willChange = '';
+    }
+
     async flushTransparentSitesForWebview(webview) {
-        if (!webview || this.isBenchmarking) return;
+        if (!webview || this.isBenchmarking) return false;
         if (!this.settings?.transparentSites) {
             await this.removeTransparentSitesFromWebview(webview);
-            return;
+            return false;
+        }
+        let url = '';
+        try {
+            url = webview.getURL() || '';
+        } catch (e) {
+            return false;
+        }
+        if (
+            !url ||
+            url === 'about:blank' ||
+            /^axis:/i.test(url) ||
+            /^file:/i.test(url) ||
+            url.startsWith('chrome-error:') ||
+            url.startsWith('chrome-devtools:')
+        ) {
+            await this.removeTransparentSitesFromWebview(webview);
+            return false;
         }
         try {
             const prev = webview.__axisTransparentCssKey;
@@ -338,16 +598,30 @@ class AxisBrowser {
                 webview.__axisTransparentCssKey = null;
             }
             const key = await webview.insertCSS(AXIS_TRANSPARENT_SITES_CSS);
-            if (key) webview.__axisTransparentCssKey = key;
+            if (key) {
+                webview.__axisTransparentCssKey = key;
+                await this._runTransparentSitesDomPatch(webview);
+                return true;
+            }
+            return false;
         } catch (e) {
             /* Restricted URLs / guest destroy */
+            return false;
         }
     }
 
     applyTransparentSitesToAllWebviews() {
         if (!this.settings?.transparentSites) return;
-        this.tabs.forEach((tab) => {
-            if (tab?.webview) void this.flushTransparentSitesForWebview(tab.webview);
+        // Hide background tabs before injecting transparency (injection is async; avoids one frame of bleed).
+        this._syncBackgroundTabWebviewsForTransparentSetting();
+        const cur = this.currentTab;
+        this.tabs.forEach((tab, id) => {
+            if (!tab?.webview) return;
+            if (id === cur) {
+                this._touchTransparentSitesForWebview(tab.webview);
+            } else {
+                this._scheduleTransparentSitesTouchForBackgroundWebview(tab.webview);
+            }
         });
     }
 
@@ -355,6 +629,40 @@ class AxisBrowser {
         this.tabs.forEach((tab) => {
             if (tab?.webview) void this.removeTransparentSitesFromWebview(tab.webview);
         });
+        this._syncBackgroundTabWebviewsForTransparentSetting();
+    }
+
+    _syncBackgroundTabWebviewsForTransparentSetting() {
+        const cur = this.currentTab;
+        this.tabs.forEach((tab, id) => {
+            if (!tab?.webview || id === cur) return;
+            this._styleInactiveTabWebview(tab.webview);
+        });
+    }
+
+    /**
+     * Before showing the target tab, force every other webview into the inactive/hidden state.
+     * Avoids transparent pages briefly compositing over another tab’s pixels (ordering bugs, missed updates).
+     */
+    _prepareWebviewsForTabSwitch(targetTabId) {
+        if (targetTabId == null) return;
+        this.tabs.forEach((tab, id) => {
+            if (!tab?.webview || id === targetTabId) return;
+            this._styleInactiveTabWebview(tab.webview);
+        });
+    }
+
+    _scheduleTransparentSitesTouchForBackgroundWebview(webview) {
+        if (!webview || this.isBenchmarking || !this.settings?.transparentSites) return;
+        const run = () => {
+            if (!this.settings?.transparentSites || this.isBenchmarking) return;
+            this._touchTransparentSitesForWebview(webview);
+        };
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(run, { timeout: 900 });
+        } else {
+            setTimeout(run, 48);
+        }
     }
 
     syncTransparentSitesUi() {
@@ -364,6 +672,19 @@ class AxisBrowser {
         if (urlBar && !on) {
             urlBar.style.backdropFilter = '';
             urlBar.style.webkitBackdropFilter = '';
+        }
+        const ntp = document.getElementById('new-tab-page');
+        const ntpOpen = ntp && !ntp.classList.contains('hidden');
+        const tab = this.currentTab && this.tabs.has(this.currentTab) ? this.tabs.get(this.currentTab) : null;
+        const wv = tab?.webview;
+        if (ntpOpen && wv && tab?.url === this.NEWTAB_URL) {
+            if (on) {
+                wv.style.opacity = '0';
+                wv.style.visibility = 'hidden';
+            } else {
+                wv.style.opacity = '1';
+                wv.style.visibility = 'visible';
+            }
         }
     }
 
@@ -392,6 +713,17 @@ class AxisBrowser {
         this._ambientAudioChain = null;
     }
 
+    /**
+     * Maps settings slider (0–1) to master gain. Perceptual curve + low ceiling
+     * so ambient stays “bed” level and high slider positions are usable.
+     */
+    _ambientUiToMaxNodeGain(volume01) {
+        const v = Math.max(0, Math.min(1, volume01));
+        const shaped = Math.pow(v, 1.28);
+        const maxOut = 0.26;
+        return Math.max(0, Math.min(1, shaped * maxOut));
+    }
+
     _createAmbientNoiseBuffer(ctx, seconds, type) {
         const frames = Math.max(1, Math.floor(ctx.sampleRate * seconds));
         const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
@@ -400,12 +732,44 @@ class AxisBrowser {
             let last = 0;
             for (let i = 0; i < frames; i++) {
                 const w = Math.random() * 2 - 1;
-                last = (last + 0.04 * w) * 0.98;
-                d[i] = Math.max(-1, Math.min(1, last * 2.8));
+                last = (last + 0.035 * w) * 0.985;
+                d[i] = Math.max(-1, Math.min(1, last * 2.45));
+            }
+        } else if (type === 'pink') {
+            let b0 = 0;
+            let b1 = 0;
+            let b2 = 0;
+            let b3 = 0;
+            let b4 = 0;
+            let b5 = 0;
+            let b6 = 0;
+            for (let i = 0; i < frames; i++) {
+                const white = Math.random() * 2 - 1;
+                b0 = 0.99886 * b0 + white * 0.0555179;
+                b1 = 0.99332 * b1 + white * 0.0750759;
+                b2 = 0.969 * b2 + white * 0.153852;
+                b3 = 0.8665 * b3 + white * 0.310485;
+                b4 = 0.55 * b4 + white * 0.5329522;
+                b5 = -0.7616 * b5 - white * 0.016898;
+                const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+                b6 = 0.536926 * b6 + white * 0.115926;
+                d[i] = Math.max(-1, Math.min(1, pink * 0.11));
             }
         } else {
             for (let i = 0; i < frames; i++) {
                 d[i] = Math.random() * 2 - 1;
+            }
+        }
+        const fade = Math.min(Math.floor(ctx.sampleRate * 0.07), Math.floor(frames / 2));
+        if (fade > 32) {
+            for (let i = 0; i < fade; i++) {
+                const t = i / fade;
+                const w = 0.5 - 0.5 * Math.cos(Math.PI * t);
+                const head = d[i];
+                const tail = d[frames - fade + i];
+                const mid = head * (1 - w) + tail * w;
+                d[i] = mid;
+                d[frames - fade + i] = mid;
             }
         }
         return buf;
@@ -424,9 +788,17 @@ class AxisBrowser {
             ctx.resume().catch(() => {});
         }
 
-        const targetGain = Math.max(0, Math.min(1, volume01 * 0.55));
+        const targetGain = this._ambientUiToMaxNodeGain(volume01);
+        const trim = ctx.createGain();
         const master = ctx.createGain();
         master.gain.value = targetGain;
+
+        const compressor = ctx.createDynamicsCompressor();
+        compressor.threshold.value = -32;
+        compressor.knee.value = 22;
+        compressor.ratio.value = 2.1;
+        compressor.attack.value = 0.025;
+        compressor.release.value = 0.38;
 
         const source = ctx.createBufferSource();
         const nodes = [];
@@ -434,93 +806,105 @@ class AxisBrowser {
         let hp;
         let shelf;
 
+        const connectToDestination = (tail) => {
+            tail.connect(trim);
+            trim.connect(master);
+            master.connect(compressor);
+            compressor.connect(ctx.destination);
+            nodes.push(trim, master, compressor);
+        };
+
         switch (preset) {
             case 'rain':
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 2.5, 'white');
+                trim.gain.value = 1;
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 4, 'pink');
                 source.loop = true;
                 filter = ctx.createBiquadFilter();
                 filter.type = 'bandpass';
-                filter.frequency.value = 880;
-                filter.Q.value = 0.7;
+                filter.frequency.value = 820;
+                filter.Q.value = 0.62;
                 source.connect(filter);
-                filter.connect(master);
-                nodes.push(filter, master);
+                connectToDestination(filter);
+                nodes.unshift(filter);
                 break;
             case 'warm':
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 3, 'brown');
+                trim.gain.value = 1;
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 4, 'brown');
                 source.loop = true;
                 filter = ctx.createBiquadFilter();
                 filter.type = 'lowpass';
-                filter.frequency.value = 420;
-                filter.Q.value = 0.5;
+                filter.frequency.value = 400;
+                filter.Q.value = 0.48;
                 source.connect(filter);
-                filter.connect(master);
-                nodes.push(filter, master);
+                connectToDestination(filter);
+                nodes.unshift(filter);
                 break;
             case 'focus':
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 3, 'brown');
+                trim.gain.value = 0.9;
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 4, 'brown');
                 source.loop = true;
                 filter = ctx.createBiquadFilter();
                 filter.type = 'lowpass';
-                filter.frequency.value = 130;
-                filter.Q.value = 0.35;
+                filter.frequency.value = 118;
+                filter.Q.value = 0.32;
                 source.connect(filter);
-                filter.connect(master);
-                master.gain.value = targetGain * 0.88;
-                nodes.push(filter, master);
+                connectToDestination(filter);
+                nodes.unshift(filter);
                 break;
             case 'ocean':
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 3, 'brown');
+                trim.gain.value = 1;
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 4, 'brown');
                 source.loop = true;
                 filter = ctx.createBiquadFilter();
                 filter.type = 'bandpass';
-                filter.frequency.value = 220;
-                filter.Q.value = 0.35;
+                filter.frequency.value = 205;
+                filter.Q.value = 0.32;
                 shelf = ctx.createBiquadFilter();
                 shelf.type = 'lowshelf';
-                shelf.frequency.value = 280;
-                shelf.gain.value = 4;
+                shelf.frequency.value = 265;
+                shelf.gain.value = 2.4;
                 source.connect(filter);
                 filter.connect(shelf);
-                shelf.connect(master);
-                nodes.push(filter, shelf, master);
+                connectToDestination(shelf);
+                nodes.unshift(filter, shelf);
                 break;
             case 'wind':
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 2, 'white');
+                trim.gain.value = 1;
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 3.5, 'pink');
                 source.loop = true;
                 hp = ctx.createBiquadFilter();
                 hp.type = 'highpass';
-                hp.frequency.value = 480;
+                hp.frequency.value = 440;
                 filter = ctx.createBiquadFilter();
                 filter.type = 'peaking';
-                filter.frequency.value = 1100;
-                filter.Q.value = 0.6;
-                filter.gain.value = -2;
+                filter.frequency.value = 1050;
+                filter.Q.value = 0.55;
+                filter.gain.value = -2.5;
                 source.connect(hp);
                 hp.connect(filter);
-                filter.connect(master);
-                nodes.push(hp, filter, master);
+                connectToDestination(filter);
+                nodes.unshift(hp, filter);
                 break;
             case 'still':
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 3, 'brown');
+                trim.gain.value = 0.55;
+                source.buffer = this._createAmbientNoiseBuffer(ctx, 4, 'brown');
                 source.loop = true;
                 filter = ctx.createBiquadFilter();
                 filter.type = 'lowpass';
-                filter.frequency.value = 650;
+                filter.frequency.value = 620;
                 source.connect(filter);
-                filter.connect(master);
-                master.gain.value = targetGain * 0.52;
-                nodes.push(filter, master);
+                connectToDestination(filter);
+                nodes.unshift(filter);
                 break;
             default:
                 try {
                     master.disconnect();
+                    compressor.disconnect();
                 } catch (e) {}
                 return;
         }
 
-        master.connect(ctx.destination);
-        this._ambientAudioChain = { source, master, nodes };
+        this._ambientAudioChain = { source, master, trim, compressor, nodes };
         try {
             source.start(0);
         } catch (e) {
@@ -534,10 +918,10 @@ class AxisBrowser {
         let preset = this.settings?.ambientAudioPreset || 'rain';
         if (!presets.has(preset)) preset = 'rain';
         let v = Number(this.settings?.ambientAudioVolume);
-        if (!Number.isFinite(v)) v = 35;
+        if (!Number.isFinite(v)) v = 48;
         v = Math.max(0, Math.min(100, v));
         const v01 = v / 100;
-        const targetGain = Math.max(0, Math.min(1, v01 * 0.55));
+        const targetGain = this._ambientUiToMaxNodeGain(v01);
 
         if (!on) {
             this.stopAmbientAudio();
@@ -1343,6 +1727,9 @@ class AxisBrowser {
         try {
             await this.loadSettings();
             this.syncTransparentSitesUi();
+            if (this.settings?.transparentSites) {
+                this._syncBackgroundTabWebviewsForTransparentSetting();
+            }
             this.applyCustomThemeFromSettings();
             this.applySidebarPosition();
             if (this.settings?.transparentSites) {
@@ -1354,7 +1741,7 @@ class AxisBrowser {
             const wv = this.getActiveWebview();
             this.updateUrlBar(wv, { skipExtractTheme: true });
             if (tab && tab.url === this.NEWTAB_URL) {
-                /* updateUrlBar already called applyAppThemeToUrlBar */
+                /* handled in updateUrlBar → applyNewTabPageUrlBarStyle */
             } else if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
                 this.applyAppThemeToUrlBar();
             } else if (wv) {
@@ -1626,6 +2013,9 @@ class AxisBrowser {
 
         const loadCommitHandler = (e) => {
             if (!e || !e.isMainFrame) return;
+            if (!this.isBenchmarking && this.settings?.transparentSites) {
+                this._touchTransparentSitesForWebview(webview);
+            }
             webview.__loadProgressMilestone = Math.max(webview.__loadProgressMilestone || 0, 0.28);
             if (this.loadingBarTabId === tabId && isActiveTab()) {
                 this.setUrlBarLoadProgress(webview.__loadProgressMilestone, tabId);
@@ -1651,9 +2041,9 @@ class AxisBrowser {
                 }
             }
 
-            // Transparent sites: every tab (not only the active one — background tabs used to miss this)
+            // Transparent sites: every tab (not only the active one); follow-up passes catch SPAs after hydrate
             if (!this.isBenchmarking && this.settings?.transparentSites) {
-                void this.flushTransparentSitesForWebview(webview);
+                this._touchTransparentSitesForWebview(webview);
             }
             
             if (!isActiveTab() || this.isBenchmarking) return;
@@ -1689,7 +2079,7 @@ class AxisBrowser {
             // Only hide loading when main frame finishes (avoid hiding on iframe/subframe load)
             const isMainFrame = event == null || event.isMainFrame !== false;
             if (isMainFrame && !this.isBenchmarking && this.settings?.transparentSites) {
-                void this.flushTransparentSitesForWebview(webview);
+                this._touchTransparentSitesForWebview(webview);
             }
             if (isMainFrame && this.loadingBarTabId === tabId) {
                 this.bumpUrlBarLoadMilestone(webview, tabId, 1);
@@ -1879,6 +2269,9 @@ class AxisBrowser {
         webview.addEventListener('will-navigate', willNavigateHandler);
 
         const didNavigateHandler = () => {
+            if (!this.isBenchmarking && this.settings?.transparentSites) {
+                this._touchTransparentSitesForWebview(webview);
+            }
             if (!isActiveTab() || this.isBenchmarking) return;
                 this.batchDOMUpdates([
                     () => this.updateUrlBar(),
@@ -1891,6 +2284,9 @@ class AxisBrowser {
         webview.addEventListener('did-navigate', didNavigateHandler);
 
         webview.addEventListener('did-navigate-in-page', () => {
+            if (!this.isBenchmarking && this.settings?.transparentSites) {
+                this._touchTransparentSitesForWebview(webview);
+            }
             if (!isActiveTab() || this.isBenchmarking) return;
                 this.batchDOMUpdates([
                     () => this.updateUrlBar(),
@@ -2540,31 +2936,32 @@ class AxisBrowser {
         
         const themeColor = this.settings.themeColor || '#1a1a1a';
         const gradientColor = this.settings.gradientColor || '#2a2a2a';
-        const gradientEnabled = this.settings.gradientEnabled || false;
+        const gradientEnabled = !!(this.settings.gradientEnabled && gradientColor);
         const gradientDirection = this.settings.gradientDirection || 'to right';
+        const chrome = this.getShellChromeStyle();
         
         // Create sidebar background
         let sidebarBg;
         if (gradientEnabled) {
-            const themeRgba = this.hexToRgba(themeColor, 0.3);
-            const gradientRgba = this.hexToRgba(gradientColor, 0.3);
+            const themeRgba = this.hexToRgba(themeColor, chrome.glassAlpha);
+            const gradientRgba = this.hexToRgba(gradientColor, chrome.glassAlpha);
             sidebarBg = this.smoothGradient(gradientDirection, themeRgba, gradientRgba);
         } else {
-            sidebarBg = this.hexToRgba(themeColor, 0.3);
+            sidebarBg = this.hexToRgba(themeColor, chrome.glassAlpha);
         }
         
         // Apply to sidebar only
         if (this.elements?.sidebar) {
             this.elements.sidebar.style.setProperty('background', sidebarBg, 'important');
-            this.elements.sidebar.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-            this.elements.sidebar.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+            this.elements.sidebar.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
+            this.elements.sidebar.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
         }
         
         // Also apply to app container for the blur effect
         const app = document.getElementById('app');
         if (app) {
-            app.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-            app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+            app.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
+            app.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
         }
     }
 
@@ -3268,23 +3665,33 @@ class AxisBrowser {
         const root = document.documentElement;
         const style = root.style;
         
-        // Apply gradient if enabled and provided (check before setting background-color)
-        const gradientEnabled = this.settings?.gradientEnabled !== false && colors.gradientColor;
+        // Gradient only when enabled in settings; second color may live on `colors` or only on `settings` (must match shell opacity in all branches).
         const gradientDirection = this.settings?.gradientDirection || '135deg';
+        const gradientColorResolved =
+            this.settings?.gradientEnabled &&
+            (colors.gradientColor || this.settings.gradientColor)
+                ? colors.gradientColor || this.settings.gradientColor || '#2a2a2a'
+                : null;
+        const gradientEnabled = !!gradientColorResolved;
         
-        // Incognito: force solid black, no transparency
+        // Incognito: force solid black surfaces (chrome blur still uses transmission = 0 / opaque endpoint)
         const forceOpaqueBlack = this.isIncognitoWindow;
+        const chrome = this.getShellChromeStyle();
         if (forceOpaqueBlack) {
             style.setProperty('--background-color', '#000000');
             style.setProperty('--sidebar-background', '#000000');
             style.setProperty('--sidebar-slide-out-background', '#000000');
         }
-        // Core theme colors - batch update
+        // Core theme colors - batch update (translucent so :root matches the airy glass shell)
         if (!forceOpaqueBlack && gradientEnabled) {
-            const gradient = this.smoothGradient(gradientDirection, darkerPrimary, colors.gradientColor);
-            style.setProperty('--background-color', gradient);
+            const bgGrad = this.smoothGradient(
+                gradientDirection,
+                this.hexToRgba(darkerPrimary, chrome.glassAlpha),
+                this.hexToRgba(gradientColorResolved, chrome.glassAlpha)
+            );
+            style.setProperty('--background-color', bgGrad);
         } else if (!forceOpaqueBlack) {
-            style.setProperty('--background-color', darkerPrimary);
+            style.setProperty('--background-color', this.hexToRgba(darkerPrimary, chrome.glassAlpha));
         }
         style.setProperty('--text-color', colors.text);
         style.setProperty('--text-color-secondary', textSecondary);
@@ -3296,19 +3703,19 @@ class AxisBrowser {
             glassSidebarBg = '#000000';
             sidebarSlideOutBg = '#000000';
         } else if (gradientEnabled) {
-            const primaryRgba = this.hexToRgba(darkerPrimary, 0.4);
-            const gradientRgba = this.hexToRgba(colors.gradientColor, 0.4);
+            const primaryRgba = this.hexToRgba(darkerPrimary, chrome.glassAlpha);
+            const gradientRgba = this.hexToRgba(gradientColorResolved, chrome.glassAlpha);
             glassSidebarBg = this.smoothGradient(gradientDirection, primaryRgba, gradientRgba);
-            const primaryOpaque = this.hexToRgba(darkerPrimary, 0.98);
-            const gradientOpaque = this.hexToRgba(colors.gradientColor, 0.98);
-            sidebarSlideOutBg = this.smoothGradient(gradientDirection, primaryOpaque, gradientOpaque);
+            const primarySlide = this.hexToRgba(darkerPrimary, chrome.slideOutAlpha);
+            const gradientSlide = this.hexToRgba(gradientColorResolved, chrome.slideOutAlpha);
+            sidebarSlideOutBg = this.smoothGradient(gradientDirection, primarySlide, gradientSlide);
         } else {
-            glassSidebarBg = this.hexToRgba(darkerPrimary, 0.4) || `rgba(20, 20, 20, 0.4)`;
-            sidebarSlideOutBg = this.hexToRgba(darkerPrimary, 0.98) || `rgba(28, 28, 28, 0.98)`;
+            glassSidebarBg = this.hexToRgba(darkerPrimary, chrome.glassAlpha) || `rgba(20, 20, 20, ${chrome.glassAlpha})`;
+            sidebarSlideOutBg = this.hexToRgba(darkerPrimary, chrome.slideOutAlpha) || `rgba(28, 28, 28, ${chrome.slideOutAlpha})`;
         }
         // Popups use subtle dominant color (primary color, even if gradient)
         // Extract primary color and make it subtle for popups
-        const popupBgRgba = this.hexToRgba(darkerPrimary, 0.85);
+        const popupBgRgba = this.hexToRgba(darkerPrimary, chrome.popupAlpha);
         style.setProperty('--popup-background-subtle', popupBgRgba);
         style.setProperty('--popup-header', headerBg);
         style.setProperty('--button-background', 'transparent');
@@ -3337,12 +3744,16 @@ class AxisBrowser {
         style.setProperty('--primary-color', darkerPrimary);
         style.setProperty('--secondary-color', secondaryColor);
         
-        // Set gradient variables
+        // Set gradient variables (use same glass alpha as shell so UI that reads --primary-gradient respects window brightness)
         if (gradientEnabled) {
-            const gradient = this.smoothGradient(gradientDirection, darkerPrimary, colors.gradientColor);
+            const gradient = this.smoothGradient(
+                gradientDirection,
+                this.hexToRgba(darkerPrimary, chrome.glassAlpha),
+                this.hexToRgba(gradientColorResolved, chrome.glassAlpha)
+            );
             style.setProperty('--primary-gradient', gradient);
             style.setProperty('--theme-color', darkerPrimary);
-            style.setProperty('--gradient-color', colors.gradientColor);
+            style.setProperty('--gradient-color', gradientColorResolved);
             style.setProperty('--gradient-enabled', '1');
         } else {
             style.setProperty('--theme-color', darkerPrimary);
@@ -3396,8 +3807,8 @@ class AxisBrowser {
             // When tabs are open: Apply theme to main-area for seamless blend
             if (mainArea) {
                 mainArea.style.setProperty('background', glassSidebarBg, 'important');
-                mainArea.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-                mainArea.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+                mainArea.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
+                mainArea.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
             }
             
             // Remove backgrounds from individual elements to prevent duplication
@@ -3415,29 +3826,29 @@ class AxisBrowser {
         if (app) {
                 // Use semi-transparent background for frosted glass effect
                 const appBg = gradientEnabled ? 
-                    this.smoothGradient(gradientDirection, this.hexToRgba(darkerPrimary, 0.4), this.hexToRgba(colors.gradientColor, 0.4)) : 
-                    this.hexToRgba(darkerPrimary, 0.4);
+                    this.smoothGradient(gradientDirection, this.hexToRgba(darkerPrimary, chrome.glassAlpha), this.hexToRgba(gradientColorResolved, chrome.glassAlpha)) : 
+                    this.hexToRgba(darkerPrimary, chrome.glassAlpha);
                 app.style.setProperty('background', appBg, 'important');
-            app.style.setProperty('backdrop-filter', 'blur(80px) saturate(180%)', 'important');
-            app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(180%)', 'important');
+            app.style.setProperty('backdrop-filter', chrome.backdropMain, 'important');
+            app.style.setProperty('-webkit-backdrop-filter', chrome.backdropMain, 'important');
             }
         } else {
             // When NO tabs are open: Keep theme background everywhere, just hide webviews
             // Apply theme to main-area so background is visible
             if (mainArea) {
                 mainArea.style.setProperty('background', glassSidebarBg, 'important');
-                mainArea.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-                mainArea.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
+                mainArea.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
+                mainArea.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
             }
             
             // Also apply to app element
             if (app) {
                 const appBg = gradientEnabled ? 
-                    this.smoothGradient(gradientDirection, this.hexToRgba(darkerPrimary, 0.4), this.hexToRgba(colors.gradientColor, 0.4)) : 
-                    this.hexToRgba(darkerPrimary, 0.4);
+                    this.smoothGradient(gradientDirection, this.hexToRgba(darkerPrimary, chrome.glassAlpha), this.hexToRgba(gradientColorResolved, chrome.glassAlpha)) : 
+                    this.hexToRgba(darkerPrimary, chrome.glassAlpha);
                 app.style.setProperty('background', appBg, 'important');
-                app.style.setProperty('backdrop-filter', 'blur(80px) saturate(180%)', 'important');
-                app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(180%)', 'important');
+                app.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
+                app.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
             }
             
             // Remove backgrounds from individual elements to prevent duplication
@@ -3453,12 +3864,21 @@ class AxisBrowser {
                 contentArea.style.setProperty('backdrop-filter', 'none', 'important');
                 contentArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
             }
-            
-            // App container keeps blur for overall effect
-            if (app) {
-                app.style.setProperty('backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-                app.style.setProperty('-webkit-backdrop-filter', 'blur(80px) saturate(200%)', 'important');
-            }
+        }
+
+        // Transparent-sites UI (URL bar / new tab) reads these from :root
+        if (!forceOpaqueBlack) {
+            style.setProperty('--axis-ts-urlbar-blur', `${chrome.urlBarBlur}px`);
+            style.setProperty('--axis-ts-urlbar-sat', `${chrome.urlBarSat}%`);
+            style.setProperty('--axis-nt-search-bg', chrome.newTabSearchBg);
+            style.setProperty('--axis-nt-search-blur', `${chrome.newTabSearchBlur}px`);
+            style.setProperty('--axis-nt-search-sat', `${chrome.newTabSearchSat}%`);
+            style.setProperty('--axis-nt-toggle-bg', chrome.newTabToggleBg);
+            style.setProperty('--axis-nt-toggle-blur', `${chrome.newTabToggleBlur}px`);
+            style.setProperty('--axis-nt-toggle-sat', `${chrome.newTabToggleSat}%`);
+            style.setProperty('--axis-nt-ask-bg', chrome.newTabAskBg);
+            style.setProperty('--axis-nt-ask-blur', `${chrome.newTabAskBlur}px`);
+            style.setProperty('--axis-nt-ask-sat', `${chrome.newTabAskSat}%`);
         }
         
         // Re-enable transitions after theme is applied (use RAF to ensure CSS variables are updated first)
@@ -3469,10 +3889,111 @@ class AxisBrowser {
         });
     }
 
-    // Convert hex color (e.g. #1a1a1a) to rgba with configurable alpha for glass effect
+    /** 0 = opaque chrome, 1 = most desktop light through (settings slider / 100). */
+    getShellChromeTransmissionT() {
+        if (this.isIncognitoWindow) return 0;
+        const raw = this.settings?.windowChromeLight;
+        const n = Number(raw);
+        const v = Number.isFinite(n) ? n : 50;
+        return Math.max(0, Math.min(100, v)) / 100;
+    }
+
+    getShellChromeStyle() {
+        const t = this.getShellChromeTransmissionT();
+        /** Slider 0: solid theme colors, no blur — `AXIS_SHELL_CHROME_OPAQUE` is still partly translucent for the old “opaque” *blend endpoint* at t>0. */
+        if (t <= 0) {
+            const none = 'none';
+            return {
+                t: 0,
+                glassAlpha: 1,
+                slideOutAlpha: 1,
+                popupAlpha: 1,
+                urlBarAlpha: 1,
+                backdropMain: none,
+                backdropStrong: none,
+                urlBarBackdrop: none,
+                urlBarBlur: 0,
+                urlBarSat: 100,
+                urlBarTintDefault: 1,
+                urlBarTintDark: 1,
+                urlBarTintLight: 1,
+                newTabSearchBg: 'rgba(14, 15, 18, 1)',
+                newTabSearchBlur: 0,
+                newTabSearchSat: 100,
+                newTabToggleBg: 'rgba(255, 255, 255, 1)',
+                newTabToggleBlur: 0,
+                newTabToggleSat: 100,
+                newTabAskBg: 'rgba(10, 11, 14, 1)',
+                newTabAskBlur: 0,
+                newTabAskSat: 100,
+            };
+        }
+        const L = (a, b) => a + (b - a) * t;
+        const o = AXIS_SHELL_CHROME_OPAQUE;
+        const tr = AXIS_SHELL_CHROME_TRANSPARENT;
+        const glassAlpha = L(o.glassAlpha, tr.glassAlpha);
+        const slideOutAlpha = L(o.slideOutAlpha, tr.slideOutAlpha);
+        const popupAlpha = L(o.popupAlpha, tr.popupAlpha);
+        const urlBarAlpha = L(o.urlBarAlpha, tr.urlBarAlpha);
+        const blurMain = Math.round(L(o.blurMain, tr.blurMain));
+        const satMain = Math.round(L(o.satMain, tr.satMain));
+        const blurStrong = Math.round(L(o.blurStrong, tr.blurStrong));
+        const satStrong = Math.round(L(o.satStrong, tr.satStrong));
+        const urlBarBlur = Math.round(L(o.urlBarBlur, tr.urlBarBlur));
+        const urlBarSat = Math.round(L(o.urlBarSat, tr.urlBarSat));
+        const urlBarTintDefault = L(o.urlBarTintDefault, tr.urlBarTintDefault);
+        const urlBarTintDark = L(o.urlBarTintDark, tr.urlBarTintDark);
+        const urlBarTintLight = L(o.urlBarTintLight, tr.urlBarTintLight);
+        const ntS = L(o.newTabSearchAlpha, tr.newTabSearchAlpha);
+        const newTabSearchBg = `rgba(14, 15, 18, ${ntS.toFixed(3)})`;
+        const newTabToggleBg = `rgba(255, 255, 255, ${L(o.newTabToggleAlpha, tr.newTabToggleAlpha).toFixed(3)})`;
+        const ntA = L(o.newTabAskAlpha, tr.newTabAskAlpha);
+        const newTabAskBg = `rgba(10, 11, 14, ${ntA.toFixed(3)})`;
+        const newTabSearchBlur = Math.round(L(o.newTabSearchBlur, tr.newTabSearchBlur));
+        const newTabSearchSat = Math.round(L(o.newTabSearchSat, tr.newTabSearchSat));
+        const newTabToggleBlur = Math.round(L(o.newTabToggleBlur, tr.newTabToggleBlur));
+        const newTabToggleSat = Math.round(L(o.newTabToggleSat, tr.newTabToggleSat));
+        const newTabAskBlur = Math.round(L(o.newTabAskBlur, tr.newTabAskBlur));
+        const newTabAskSat = Math.round(L(o.newTabAskSat, tr.newTabAskSat));
+        return {
+            t,
+            glassAlpha,
+            slideOutAlpha,
+            popupAlpha,
+            urlBarAlpha,
+            backdropMain: `blur(${blurMain}px) saturate(${satMain}%)`,
+            backdropStrong: `blur(${blurStrong}px) saturate(${satStrong}%)`,
+            urlBarBackdrop: `blur(${urlBarBlur}px) saturate(${urlBarSat}%)`,
+            urlBarBlur,
+            urlBarSat,
+            urlBarTintDefault,
+            urlBarTintDark,
+            urlBarTintLight,
+            newTabSearchBg,
+            newTabSearchBlur,
+            newTabSearchSat,
+            newTabToggleBg,
+            newTabToggleBlur,
+            newTabToggleSat,
+            newTabAskBg,
+            newTabAskBlur,
+            newTabAskSat,
+        };
+    }
+
+    // Convert hex or rgb() color to rgba with configurable alpha for glass effect
     hexToRgba(hex, alpha = 1) {
-        if (!hex) return null;
-        let value = hex.trim();
+        if (hex == null || hex === '') return null;
+        const raw = String(hex).trim();
+        const rgbMatch = raw.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+        if (rgbMatch) {
+            const r = Math.round(parseFloat(rgbMatch[1]));
+            const g = Math.round(parseFloat(rgbMatch[2]));
+            const b = Math.round(parseFloat(rgbMatch[3]));
+            if ([r, g, b].some((n) => Number.isNaN(n))) return null;
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+        let value = raw;
         if (value.startsWith('#')) {
             value = value.slice(1);
         }
@@ -3626,7 +4147,7 @@ class AxisBrowser {
         this.tabs.set(tabId, tab);
         
         // Determine icon HTML based on type
-        let iconHTML = '<img class="tab-favicon" src="" alt="" onerror="this.style.visibility=\'hidden\'">';
+        let iconHTML = '<img class="tab-favicon" src="" alt="" draggable="false" onerror="this.style.visibility=\'hidden\'">';
         if (tab.customIcon) {
             if (tab.customIconType === 'emoji') {
                 iconHTML = `<span class="tab-favicon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">${tab.customIcon}</span>`;
@@ -3803,6 +4324,27 @@ class AxisBrowser {
             }
         });
 
+        tabElement.addEventListener('dblclick', (e) => {
+            if (e.target.closest('.tab-close') || e.target.closest('.tab-audio-indicator')) return;
+            const titleElement = tabElement.querySelector('.tab-title');
+            if (!titleElement) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.renameTab(tabId, titleElement);
+        });
+
+        // Middle-click / wheel-click closes tab (browser convention; suppresses autoscroll)
+        tabElement.addEventListener('mousedown', (e) => {
+            if (e.button !== 1) return;
+            e.preventDefault();
+        });
+        tabElement.addEventListener('auxclick', (e) => {
+            if (e.button !== 1) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.closeTab(tabId);
+        });
+
         // Tab close
         const closeBtn = tabElement.querySelector('.tab-close');
         if (closeBtn) {
@@ -3862,26 +4404,19 @@ class AxisBrowser {
         // INSTANT tab switching - all critical updates happen synchronously
         const activeTab = document.querySelector(`[data-tab-id="${tabId}"]`);
         const tab = this.tabs.get(tabId);
-        
-        // CRITICAL: Hide previous tab's webview instantly (synchronous)
-        if (this.currentTab && this.currentTab !== tabId) {
-            const prevTab = this.tabs.get(this.currentTab);
-            if (prevTab && prevTab.webview) {
-                prevTab.webview.style.opacity = '0.3';
-                prevTab.webview.style.visibility = 'visible';
-                prevTab.webview.style.pointerEvents = 'none';
-                prevTab.webview.style.zIndex = '0';
-                prevTab.webview.classList.add('inactive');
-                // Clear will-change on inactive webview to reduce compositor/RAM use
-                prevTab.webview.style.willChange = '';
-                // Check if previous tab has a playing video and show PIP
-                this.checkAndShowPIP(this.currentTab, prevTab.webview);
+
+        const prevTabId = this.currentTab;
+        if (prevTabId && prevTabId !== tabId) {
+            const prevTab = this.tabs.get(prevTabId);
+            if (prevTab?.webview) {
+                this.checkAndShowPIP(prevTabId, prevTab.webview);
             }
-            
-            // Remove active from previous tab instantly
-            const prevTabElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
+            const prevTabElement = document.querySelector(`[data-tab-id="${prevTabId}"]`);
             if (prevTabElement) prevTabElement.classList.remove('active');
         }
+
+        // Demote other webviews before the active tab paints (always fully hide — avoids multi-guest bleed)
+        this._prepareWebviewsForTabSwitch(tabId);
         
         // Hide PIP if switching back to the tab that has PIP
         if (this.pipTabId === tabId) {
@@ -4448,6 +4983,9 @@ class AxisBrowser {
     updateNewTabPageVisibility(show) {
         const newTabPage = document.getElementById('new-tab-page');
         const urlBar = this.elements.webviewUrlBar;
+        const activeTab = this.currentTab && this.tabs.has(this.currentTab) ? this.tabs.get(this.currentTab) : null;
+        const activeWv = activeTab?.webview;
+
         if (newTabPage) {
             if (show) {
                 if (this._resetNewTabPageOnShow) {
@@ -4460,11 +4998,20 @@ class AxisBrowser {
                     }
                 }
                 newTabPage.classList.remove('hidden');
+                /* Transparent sites: hide the webview under the overlay so we see shell theme, not about:blank */
+                if (this.settings?.transparentSites && activeWv && activeTab?.url === this.NEWTAB_URL) {
+                    activeWv.style.opacity = '0';
+                    activeWv.style.visibility = 'hidden';
+                }
                 requestAnimationFrame(() => {
                     document.getElementById('new-tab-input')?.focus();
                 });
             } else {
                 newTabPage.classList.add('hidden');
+                if (this.settings?.transparentSites && activeWv) {
+                    activeWv.style.opacity = '1';
+                    activeWv.style.visibility = 'visible';
+                }
                 // Restore webview interactivity (was pointer-events: none for overlay)
                 if (this.currentTab) {
                     const tab = this.tabs.get(this.currentTab);
@@ -4483,7 +5030,7 @@ class AxisBrowser {
                 // When the new tab page is open, keep the URL bar visible
                 // but force it to use the app's dark theme so it doesn't flash white.
                 urlBar.classList.remove('hidden');
-                this.applyAppThemeToUrlBar();
+                this.applyNewTabPageUrlBarStyle();
             } else {
                 urlBar.classList.remove('hidden');
             }
@@ -4497,6 +5044,7 @@ class AxisBrowser {
         const emptyContent = document.getElementById('empty-state-empty');
         
         if (this.tabs.size === 0 || this.currentTab === null) {
+            document.body.classList.add('chrome-no-tabs');
             this.updateNewTabPageVisibility(false);
             emptyState.classList.remove('hidden');
             if (emptyContent) emptyContent.classList.add('hidden');
@@ -4529,10 +5077,13 @@ class AxisBrowser {
                     border: 'rgba(255, 255, 255, 0.08)',
                     borderLight: 'rgba(255, 255, 255, 0.12)'
                 };
+                if (this.settings?.gradientEnabled && this.settings?.gradientColor) {
+                    colors.gradientColor = this.settings.gradientColor;
+                }
                 this.applyCustomTheme(colors);
             }
             
-            // Ensure webviews are hidden
+            // Clear container chrome fill so shell theme shows through the dimmed webview frame
             const webviewContainer = document.querySelector('.webview-container');
             if (webviewContainer) {
                 webviewContainer.style.setProperty('background', 'transparent', 'important');
@@ -4540,7 +5091,7 @@ class AxisBrowser {
                 webviewContainer.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
             }
             
-            // Hide all webviews when no tabs are open (but show glass effect if visible)
+            /* Dimmed glass frame on placeholder webview(s) — same for transparent sites (no background tabs to leak) */
             const webviews = document.querySelectorAll('webview');
             webviews.forEach(wv => {
                 wv.style.setProperty('opacity', '0.3', 'important');
@@ -4553,27 +5104,36 @@ class AxisBrowser {
             if (webviewsContainer) {
                 webviewsContainer.style.setProperty('background', 'transparent', 'important');
             }
+            this._lastEmptyStateHadOpenTabs = false;
         } else {
+            document.body.classList.remove('chrome-no-tabs');
             // Hide empty state
             emptyState.classList.add('hidden');
             if (emptyContent) emptyContent.classList.add('hidden');
-            
-            // Reapply theme background when tabs are open
-            if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
-                this.applyCustomThemeFromSettings();
-            } else {
-                // Apply default theme with background
-                const colors = {
-                    primary: '#1a1a1a',
-                    secondary: '#222222',
-                    accent: '#2a2a2a',
-                    text: '#ffffff',
-                    textSecondary: '#cccccc',
-                    textMuted: '#999999',
-                    border: 'rgba(255, 255, 255, 0.08)',
-                    borderLight: 'rgba(255, 255, 255, 0.12)'
-                };
-                this.applyCustomTheme(colors);
+
+            // Reapply full shell theme only when leaving the empty (no-tab) state — not on every tab switch
+            // (applyCustomThemeFromSettings is expensive and was causing visible lag / compositor hitches).
+            const shouldRefreshThemeForTabs = this._lastEmptyStateHadOpenTabs !== true;
+            this._lastEmptyStateHadOpenTabs = true;
+            if (shouldRefreshThemeForTabs) {
+                if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+                    this.applyCustomThemeFromSettings();
+                } else {
+                    const colors = {
+                        primary: '#1a1a1a',
+                        secondary: '#222222',
+                        accent: '#2a2a2a',
+                        text: '#ffffff',
+                        textSecondary: '#cccccc',
+                        textMuted: '#999999',
+                        border: 'rgba(255, 255, 255, 0.08)',
+                        borderLight: 'rgba(255, 255, 255, 0.12)'
+                    };
+                    if (this.settings?.gradientEnabled && this.settings?.gradientColor) {
+                        colors.gradientColor = this.settings.gradientColor;
+                    }
+                    this.applyCustomTheme(colors);
+                }
             }
         }
         
@@ -5332,20 +5892,23 @@ class AxisBrowser {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             /* Let the main app theme show through instead of forcing grey */
             background: transparent;
             color: #fff;
-            min-height: 100vh;
             padding: 0;
             line-height: 1.6;
-            overflow: hidden;
         }
         .settings-wrapper {
             display: flex;
             flex-direction: column;
-            height: 100vh;
+            height: 100%;
+            min-height: 0;
             /* Transparent so it sits on top of the existing theme */
             background: transparent;
         }
@@ -5367,9 +5930,11 @@ class AxisBrowser {
         .settings-content-wrapper {
             display: flex;
             flex: 1;
+            min-height: 0;
             overflow: hidden;
             padding: 24px;
             gap: 20px;
+            align-items: stretch;
         }
         .settings-sidebar {
             width: 200px;
@@ -5379,6 +5944,9 @@ class AxisBrowser {
             flex-direction: column;
             gap: 4px;
             flex-shrink: 0;
+            align-self: stretch;
+            overflow-y: auto;
+            overflow-x: hidden;
         }
         .nav-item {
             display: flex;
@@ -5408,9 +5976,13 @@ class AxisBrowser {
         }
         .settings-main {
             flex: 1;
+            min-width: 0;
+            min-height: 0;
             background: transparent;
             padding: 0;
             overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
         }
         .settings-main::-webkit-scrollbar {
             width: 8px;
@@ -8265,36 +8837,51 @@ class AxisBrowser {
                 }
             }
         }
-        
-        const finishRename = () => {
+
+        let finished = false;
+        const detach = () => {
+            input.removeEventListener('blur', onBlur);
+            input.removeEventListener('keydown', onKeydown);
+        };
+
+        const commitRename = () => {
+            if (finished) return;
+            finished = true;
+            detach();
             const newTitle = input.value.trim() || currentTitle;
-            
-            // Restore the title element
             const newTitleElement = document.createElement('span');
             newTitleElement.className = 'tab-title';
             newTitleElement.textContent = newTitle;
-            input.parentNode.replaceChild(newTitleElement, input);
-            
-            // Update tab data
+            if (input.parentNode) input.parentNode.replaceChild(newTitleElement, input);
             const tab = this.tabs.get(tabId);
             if (tab) {
                 tab.title = newTitle;
-                // Store custom title so it persists even when website changes title
                 tab.customTitle = newTitle;
             }
         };
-        
-        input.addEventListener('blur', finishRename);
-        input.addEventListener('keypress', (e) => {
+
+        const cancelRename = () => {
+            if (finished) return;
+            finished = true;
+            detach();
+            const restored = document.createElement('span');
+            restored.className = 'tab-title';
+            restored.textContent = currentTitle;
+            if (input.parentNode) input.parentNode.replaceChild(restored, input);
+        };
+
+        const onBlur = () => commitRename();
+        const onKeydown = (e) => {
             if (e.key === 'Enter') {
-                finishRename();
+                e.preventDefault();
+                commitRename();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelRename();
             }
-        });
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                finishRename();
-            }
-        });
+        };
+        input.addEventListener('blur', onBlur);
+        input.addEventListener('keydown', onKeydown);
     }
 
 
@@ -8450,6 +9037,7 @@ class AxisBrowser {
         if (faviconEl.tagName !== 'IMG') {
             img = document.createElement('img');
             img.className = 'tab-favicon';
+            img.draggable = false;
             img.src = '';
             img.alt = '';
             img.setAttribute('onerror', "this.style.visibility='hidden'");
@@ -8820,7 +9408,7 @@ class AxisBrowser {
                 const displayTitle = pinnedData.customTitle || pinnedData.title || 'New Tab';
                 
                 // Determine icon HTML based on type
-                let iconHTML = '<img class="tab-favicon" src="" alt="" onerror="this.style.visibility=\'hidden\'">';
+                let iconHTML = '<img class="tab-favicon" src="" alt="" draggable="false" onerror="this.style.visibility=\'hidden\'">';
                 if (pinnedData.customIcon) {
                     if (pinnedData.customIconType === 'emoji') {
                         iconHTML = `<span class="tab-favicon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">${pinnedData.customIcon}</span>`;
@@ -10337,6 +10925,7 @@ class AxisBrowser {
             if (faviconEl.tagName !== 'IMG') {
                 const imgElement = document.createElement('img');
                 imgElement.className = 'tab-favicon';
+                imgElement.draggable = false;
                 imgElement.src = '';
                 imgElement.alt = '';
                 imgElement.setAttribute('onerror', "this.style.visibility='hidden'");
@@ -10850,7 +11439,7 @@ class AxisBrowser {
             ? (tab.customIconType === 'emoji'
                 ? `<span class="tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;">${tab.customIcon || ''}</span>`
                 : `<i class="fas ${tab.customIcon} tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;color:rgba(255,255,255,0.7);"></i>`)
-            : '<img class="tab-favicon" src="" alt="" onerror="this.style.visibility=\'hidden\'">';
+            : '<img class="tab-favicon" src="" alt="" draggable="false" onerror="this.style.visibility=\'hidden\'">';
         tabElement.innerHTML = `
             <div class="tab-content">
                 <div class="tab-left">${iconHtml}
@@ -13828,9 +14417,8 @@ class AxisBrowser {
                 // Ensure tab still exists
                 if (!tab.parentElement) return;
                 
-                // Prevent default to avoid text selection
-                e.preventDefault();
-                e.stopPropagation();
+                // Do not preventDefault/stopPropagation here — that breaks click + dblclick (e.g. rename).
+                // Text selection is suppressed via CSS (.tab { user-select: none }).
                 
                 startPos = { x: e.clientX, y: e.clientY };
                 dragging = false;
@@ -15974,7 +16562,7 @@ class AxisBrowser {
         if (currentTab && currentTab.url === this.NEWTAB_URL) {
             el.webviewUrlBar.classList.remove('hidden');
             el.webviewUrlBar.classList.add('new-tab-page');
-            this.applyAppThemeToUrlBar();
+            this.applyNewTabPageUrlBarStyle();
             if (el.urlBarInput) el.urlBarInput.value = '';
             if (el.urlBarDisplay) el.urlBarDisplay.textContent = '';
             if (el.urlBarBack) el.urlBarBack.disabled = true;
@@ -16135,22 +16723,23 @@ class AxisBrowser {
         const gradientDirection = this.settings?.gradientDirection || '135deg';
 
         if (this.settings?.transparentSites) {
-            urlBar.style.setProperty('backdrop-filter', 'blur(22px)');
-            urlBar.style.setProperty('-webkit-backdrop-filter', 'blur(22px)');
+            const sc = this.getShellChromeStyle();
+            urlBar.style.setProperty('backdrop-filter', sc.urlBarBackdrop);
+            urlBar.style.setProperty('-webkit-backdrop-filter', sc.urlBarBackdrop);
             urlBar.classList.add('dark-mode');
             const bgColor = gradientEnabled
                 ? this.smoothGradient(
                     gradientDirection,
-                    this.hexToRgba(themeColor, 0.4),
-                    this.hexToRgba(gradientColor, 0.4)
+                    this.hexToRgba(themeColor, sc.urlBarAlpha),
+                    this.hexToRgba(gradientColor, sc.urlBarAlpha)
                 )
-                : this.hexToRgba(themeColor, 0.4);
+                : this.hexToRgba(themeColor, sc.urlBarAlpha);
             urlBar.style.setProperty('--url-bar-bg', bgColor);
             urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
             urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
             urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
             urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.14)');
-            this.applyChatPanelTheme(urlBar, bgColor, true);
+            this.applyChatPanelTheme(urlBar);
             return;
         }
 
@@ -16165,7 +16754,39 @@ class AxisBrowser {
         urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
         urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
         urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.16)');
-        this.applyChatPanelTheme(urlBar, bgColor, true);
+        this.applyChatPanelTheme(urlBar);
+    }
+
+    /** New tab page: black top bar (opaque). Transparent sites: same glass tint as the new-tab search shell (not user theme colors). */
+    applyNewTabPageUrlBarStyle() {
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar) return;
+
+        if (this.settings?.transparentSites) {
+            const sc = this.getShellChromeStyle();
+            urlBar.style.setProperty('backdrop-filter', sc.urlBarBackdrop);
+            urlBar.style.setProperty('-webkit-backdrop-filter', sc.urlBarBackdrop);
+            urlBar.classList.add('dark-mode');
+            const bg = sc.newTabSearchBg;
+            urlBar.style.setProperty('--url-bar-bg', bg);
+            urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
+            urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
+            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+            this.applyChatPanelTheme(urlBar);
+            return;
+        }
+
+        urlBar.style.removeProperty('backdrop-filter');
+        urlBar.style.removeProperty('-webkit-backdrop-filter');
+        urlBar.classList.add('dark-mode');
+        const black = '#000000';
+        urlBar.style.setProperty('--url-bar-bg', black);
+        urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
+        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.55)');
+        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+        this.applyChatPanelTheme(urlBar);
     }
     
     // Extract website theme color and apply to URL bar
@@ -16266,18 +16887,19 @@ class AxisBrowser {
                 let isDark = brightness < 128;
 
                 if (this.settings?.transparentSites) {
-                    urlBar.style.setProperty('backdrop-filter', 'blur(22px)');
-                    urlBar.style.setProperty('-webkit-backdrop-filter', 'blur(22px)');
+                    const sc = this.getShellChromeStyle();
+                    urlBar.style.setProperty('backdrop-filter', sc.urlBarBackdrop);
+                    urlBar.style.setProperty('-webkit-backdrop-filter', sc.urlBarBackdrop);
 
                     let bgColor;
                     if (isDefaultOrError) {
                         // Transparent page backgrounds yield "default" light — use neutral dark glass (not solid white)
                         isDark = true;
-                        bgColor = 'rgba(14, 15, 18, 0.45)';
+                        bgColor = `rgba(14, 15, 18, ${sc.urlBarTintDefault.toFixed(3)})`;
                     } else if (isDark) {
-                        bgColor = `rgba(${r}, ${g}, ${b}, 0.36)`;
+                        bgColor = `rgba(${r}, ${g}, ${b}, ${sc.urlBarTintDark.toFixed(3)})`;
                     } else {
-                        bgColor = `rgba(${r}, ${g}, ${b}, 0.28)`;
+                        bgColor = `rgba(${r}, ${g}, ${b}, ${sc.urlBarTintLight.toFixed(3)})`;
                     }
 
                     if (isDark) {
@@ -16295,7 +16917,7 @@ class AxisBrowser {
                         urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
                         urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.08)');
                     }
-                    this.applyChatPanelTheme(urlBar, bgColor, isDark);
+                    this.applyChatPanelTheme(urlBar);
                 } else {
                     urlBar.style.removeProperty('backdrop-filter');
                     urlBar.style.removeProperty('-webkit-backdrop-filter');
@@ -16317,44 +16939,41 @@ class AxisBrowser {
                         urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
                         urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.06)');
                     }
-                    this.applyChatPanelTheme(urlBar, bgColor, isDark);
+                    this.applyChatPanelTheme(urlBar);
                 }
             }
         } catch (e) {
             if (seq !== this._urlBarThemeSeq) return;
             if (this.settings?.transparentSites) {
                 urlBar.classList.add('dark-mode');
-                urlBar.style.setProperty('backdrop-filter', 'blur(22px)');
-                urlBar.style.setProperty('-webkit-backdrop-filter', 'blur(22px)');
-                const bg = 'rgba(14, 15, 18, 0.45)';
+                const sc = this.getShellChromeStyle();
+                urlBar.style.setProperty('backdrop-filter', sc.urlBarBackdrop);
+                urlBar.style.setProperty('-webkit-backdrop-filter', sc.urlBarBackdrop);
+                const bg = `rgba(14, 15, 18, ${sc.urlBarTintDefault.toFixed(3)})`;
                 urlBar.style.setProperty('--url-bar-bg', bg);
                 urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
                 urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
                 urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
                 urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.14)');
-                this.applyChatPanelTheme(urlBar, bg, true);
+                this.applyChatPanelTheme(urlBar);
             } else {
                 urlBar.classList.remove('dark-mode');
                 urlBar.style.removeProperty('backdrop-filter');
                 urlBar.style.removeProperty('-webkit-backdrop-filter');
                 urlBar.style.setProperty('--url-bar-bg', 'rgba(250, 250, 250, 0.95)');
+                this.applyChatPanelTheme(urlBar);
             }
         }
     }
 
-    applyChatPanelTheme(urlBar, bgColor, isDark) {
+    /** AI chat panel is always black chrome with light text (not tied to page / URL bar theming). */
+    applyChatPanelTheme(urlBar) {
         const container = urlBar && urlBar.closest ? urlBar.closest('.webview-container') : null;
         if (!container) return;
-        container.style.setProperty('--chat-panel-bg', bgColor);
-        if (isDark) {
-            container.style.setProperty('--chat-panel-border', 'rgba(255, 255, 255, 0.14)');
-            container.style.setProperty('--chat-panel-text', 'rgba(255, 255, 255, 0.96)');
-            container.style.setProperty('--chat-panel-text-muted', 'rgba(255, 255, 255, 0.6)');
-        } else {
-            container.style.setProperty('--chat-panel-border', 'rgba(0, 0, 0, 0.08)');
-            container.style.setProperty('--chat-panel-text', 'rgba(0, 0, 0, 0.9)');
-            container.style.setProperty('--chat-panel-text-muted', 'rgba(0, 0, 0, 0.5)');
-        }
+        container.style.setProperty('--chat-panel-bg', '#000000');
+        container.style.setProperty('--chat-panel-border', 'rgba(255, 255, 255, 0.1)');
+        container.style.setProperty('--chat-panel-text', 'rgba(255, 255, 255, 0.96)');
+        container.style.setProperty('--chat-panel-text-muted', 'rgba(255, 255, 255, 0.55)');
     }
     
     // Native Picture-in-Picture functionality using browser API
