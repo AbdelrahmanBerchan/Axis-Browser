@@ -120,6 +120,24 @@ function installSessionPermissionHandlers(sess) {
 
 // Keep a global reference of the window object
 let mainWindow;
+
+/** macOS: vibrancy shows desktop through the window; turn it off when settings “Window glass brightness” is 0 (fully opaque chrome). */
+function applyMainWindowVibrancyFromStore() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (process.platform !== 'darwin') return;
+  const raw = store.get('windowChromeLight', 50);
+  const n = Number(raw);
+  const solidChrome = Number.isFinite(n) ? n <= 0 : false;
+  try {
+    if (solidChrome) {
+      mainWindow.setVibrancy(null);
+    } else {
+      mainWindow.setVibrancy('under-window');
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
 let settingsWindow = null;
 let isQuitConfirmed = false;
 let isUserQuitting = false;
@@ -357,6 +375,7 @@ function createWindow() {
     if (process.platform === 'darwin' && mainWindow && !mainWindow.isDestroyed()) {
       positionMacTrafficLights(mainWindow, !!mainWindow.__axisSidebarRight);
     }
+    applyMainWindowVibrancyFromStore();
     mainWindow.show();
     // Show window controls by default (sidebar is visible)
     mainWindow.setWindowButtonVisibility(true);
@@ -986,6 +1005,7 @@ ipcMain.handle('set-window-title', (event, title) => {
 });
 
 ipcMain.on('settings-updated', () => {
+  applyMainWindowVibrancyFromStore();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('settings-updated');
   }
