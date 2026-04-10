@@ -26,21 +26,21 @@ html, body {
 
 /* CSS Variables for custom colors - Enhanced */
 :root {
-    /* Much more transparent: let a lot more desktop show through */
-    --background-color: rgba(26, 26, 26, 0.08);
+    /* Default shell: very light tint over the desktop */
+    --background-color: rgba(26, 26, 26, 0.04);
     --accent-color: #555;
     --text-color: #ffffff;
     --text-color-secondary: #ccc;
     --text-color-muted: #999;
     --popup-background: #111;
-    --popup-background-subtle: rgba(40, 40, 40, 0.45);
+    --popup-background-subtle: rgba(40, 40, 40, 0.28);
     --popup-header: #2a2a2a;
     --button-background: #2a2a2a;
     --button-hover: #333;
     --button-text: #ccc;
     --button-text-hover: #fff;
-    --sidebar-background: rgba(17, 17, 17, 0.1);
-    --sidebar-slide-out-background: rgba(28, 28, 28, 0.98);
+    --sidebar-background: rgba(17, 17, 17, 0.05);
+    --sidebar-slide-out-background: rgba(28, 28, 28, 0.28);
     --url-bar-background: #111;
     --url-bar-focus-background: #1a1a1a;
     --url-bar-text: #fff;
@@ -165,8 +165,8 @@ body.theme-switching *::after {
     overflow: hidden;
     opacity: 0;
     filter: blur(0);
-    backdrop-filter: blur(80px) saturate(180%);
-    -webkit-backdrop-filter: blur(80px) saturate(180%);
+    backdrop-filter: blur(26px) saturate(148%);
+    -webkit-backdrop-filter: blur(26px) saturate(148%);
     transition: opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     will-change: opacity;
 }
@@ -351,8 +351,8 @@ body.theme-switching *::after {
     max-height: 100vh;
     overflow: hidden;
     background: transparent;
-    backdrop-filter: blur(80px) saturate(180%);
-    -webkit-backdrop-filter: blur(80px) saturate(180%);
+    backdrop-filter: blur(28px) saturate(160%);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
 }
 
 /* Navigation Controls in Sidebar */
@@ -410,8 +410,8 @@ body.theme-switching *::after {
 #sidebar {
     width: 300px;
     background: var(--sidebar-background);
-    backdrop-filter: blur(80px) saturate(200%);
-    -webkit-backdrop-filter: blur(80px) saturate(200%);
+    backdrop-filter: blur(28px) saturate(160%);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -607,9 +607,9 @@ body.theme-switching *::after {
     display: flex !important;
     flex-direction: column !important;
     gap: 8px !important;
-    background: var(--sidebar-slide-out-background, rgba(28, 28, 28, 0.98)) !important;
-    backdrop-filter: blur(40px) saturate(150%) !important;
-    -webkit-backdrop-filter: blur(40px) saturate(150%) !important;
+    background: var(--sidebar-slide-out-background, rgba(28, 28, 28, 0.28)) !important;
+    backdrop-filter: blur(26px) saturate(148%) !important;
+    -webkit-backdrop-filter: blur(26px) saturate(148%) !important;
     border-radius: 0 !important;
     min-width: 200px !important;
     max-width: 500px !important;
@@ -630,7 +630,7 @@ body.theme-switching *::after {
 }
 
 body.light-theme #sidebar.slide-out {
-    background: var(--sidebar-slide-out-background, rgba(252, 252, 252, 0.98)) !important;
+    background: var(--sidebar-slide-out-background, rgba(252, 252, 252, 0.42)) !important;
 }
 
 /* Sidebar Resize Handle – thin separator line */
@@ -1542,7 +1542,7 @@ body.light-theme .clear-unpinned-btn:active {
     border: none;
     border-radius: 10px;
     background: transparent;
-    color: var(--text-color-secondary, rgba(255, 255, 255, 0.6));
+    color: #95979f;
     font-size: 13px;
     font-weight: 500;
     font-family: inherit;
@@ -1581,11 +1581,10 @@ body.light-theme .clear-unpinned-btn:active {
     font-size: 12px;
     flex-shrink: 0;
     color: inherit;
-    opacity: 0.85;
+    opacity: 1;
 }
 .sidebar-new-tab-btn:hover {
     background: rgba(255, 255, 255, 0.04);
-    color: var(--text-color, rgba(255, 255, 255, 0.9));
 }
 .sidebar-new-tab-btn:active {
     background: rgba(255, 255, 255, 0.06);
@@ -1630,6 +1629,18 @@ body.light-theme .clear-unpinned-btn:active {
     overflow: hidden;
     display: flex;
     align-items: center;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* Inline rename field (input replaces .tab-title span) */
+.tab input.tab-title {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.tab img.tab-favicon {
+    -webkit-user-drag: none;
 }
 
 .tab:hover,
@@ -2390,6 +2401,27 @@ webview[style*="opacity:0.3"]::before {
 webview:not(.inactive)[style*="opacity: 1"]::before,
 webview:not(.inactive)[style*="opacity:1"]::before {
     opacity: 0;
+}
+
+/* Transparent sites: background tabs must not leak through the active page */
+body.transparent-sites-mode #webviews-container webview.inactive {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+body.transparent-sites-mode #webviews-container webview.inactive::before {
+    opacity: 0 !important;
+}
+
+/* No open tabs: restore glass frame (transparent mode would otherwise hide inactive webviews entirely) */
+body.transparent-sites-mode.chrome-no-tabs #webviews-container webview.inactive {
+    opacity: 0.3 !important;
+    visibility: visible !important;
+    pointer-events: none !important;
+}
+body.transparent-sites-mode.chrome-no-tabs #webviews-container webview.inactive::before {
+    opacity: 1 !important;
 }
 
 /* Empty State Welcome Message */
@@ -3193,7 +3225,7 @@ body.light-theme {
     --button-text: #666;
     --button-text-hover: #333;
     --sidebar-background: #fff;
-    --sidebar-slide-out-background: rgba(252, 252, 252, 0.98);
+    --sidebar-slide-out-background: rgba(252, 252, 252, 0.42);
     --url-bar-background: #f8f8f8;
     --url-bar-text: #333;
     --url-bar-text-muted: #666;
@@ -3250,6 +3282,10 @@ body.light-theme .tab.active {
 
 body.light-theme .tab-title {
     color: var(--text-color-secondary);
+}
+
+body.light-theme .sidebar-new-tab-btn {
+    color: #575a62;
 }
 
 body.light-theme .tab.active .tab-title {
@@ -9162,6 +9198,25 @@ body:not(.light-theme) .ai-response-content {
     display: none;
 }
 
+/* New tab: black top bar (not user theme); transparent mode uses same shell variables as the search glass */
+body:not(.transparent-sites-mode) .webview-url-bar.new-tab-page {
+    --url-bar-bg: #000000;
+    --url-bar-border: rgba(255, 255, 255, 0.1);
+    --url-bar-text: rgba(255, 255, 255, 0.96);
+    --url-bar-text-muted: rgba(255, 255, 255, 0.55);
+    --url-bar-btn-hover: rgba(255, 255, 255, 0.12);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+body.transparent-sites-mode .webview-url-bar.new-tab-page {
+    --url-bar-bg: var(--axis-nt-search-bg, rgba(14, 15, 18, 0.1));
+    --url-bar-border: rgba(255, 255, 255, 0.1);
+    --url-bar-text: rgba(255, 255, 255, 0.96);
+    --url-bar-text-muted: rgba(255, 255, 255, 0.58);
+    --url-bar-btn-hover: rgba(255, 255, 255, 0.12);
+}
+
 .webview-url-bar.dark-mode {
     --url-bar-bg: rgba(30, 30, 30, 0.95);
     --url-bar-border: rgba(255, 255, 255, 0.08);
@@ -9180,8 +9235,39 @@ body:not(.light-theme) .ai-response-content {
 
 /* Transparent sites mode: frosted URL bar (JS sets --url-bar-bg + tint; blur as fallback) */
 body.transparent-sites-mode .webview-url-bar {
-    backdrop-filter: blur(22px) saturate(140%);
-    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    backdrop-filter: blur(var(--axis-ts-urlbar-blur, 10px)) saturate(var(--axis-ts-urlbar-sat, 118%));
+    -webkit-backdrop-filter: blur(var(--axis-ts-urlbar-blur, 10px)) saturate(var(--axis-ts-urlbar-sat, 118%));
+}
+
+/* New tab page is in-app HTML (not a webview) — use glass so shell theme shows through like sites */
+body.transparent-sites-mode .new-tab-page {
+    background: transparent !important;
+}
+body.transparent-sites-mode .new-tab-search-wrapper {
+    background: var(--axis-nt-search-bg, rgba(14, 15, 18, 0.10)) !important;
+    backdrop-filter: blur(var(--axis-nt-search-blur, 10px)) saturate(var(--axis-nt-search-sat, 118%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-search-blur, 10px)) saturate(var(--axis-nt-search-sat, 118%));
+    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.12),
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+body.transparent-sites-mode .new-tab-search-wrapper:hover {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.26),
+                inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+body.transparent-sites-mode .new-tab-search-wrapper:focus-within {
+    box-shadow: 0 8px 36px rgba(0, 0, 0, 0.3),
+                0 0 0 1px rgba(255, 255, 255, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+body.transparent-sites-mode .new-tab-mode-toggle {
+    background: var(--axis-nt-toggle-bg, rgba(255, 255, 255, 0.06)) !important;
+    backdrop-filter: blur(var(--axis-nt-toggle-blur, 12px)) saturate(var(--axis-nt-toggle-sat, 125%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-toggle-blur, 12px)) saturate(var(--axis-nt-toggle-sat, 125%));
+}
+body.transparent-sites-mode .new-tab-ask-input-row {
+    background: var(--axis-nt-ask-bg, rgba(10, 11, 14, 0.18)) !important;
+    backdrop-filter: blur(var(--axis-nt-ask-blur, 12px)) saturate(var(--axis-nt-ask-sat, 120%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-ask-blur, 12px)) saturate(var(--axis-nt-ask-sat, 120%));
 }
 
 /* Left section - navigation buttons */
