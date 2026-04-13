@@ -120,23 +120,71 @@ function installSessionPermissionHandlers(sess) {
 
 // Keep a global reference of the window object
 let mainWindow;
+let sessionConfigured = false;
+
+/** One-time session configuration — must only run once per app lifecycle. */
+function configureSession() {
+  if (sessionConfigured) return;
+  sessionConfigured = true;
+
+  const mainSession = session.defaultSession;
+
+  try {
+    if (mainSession.registerPreloadScript) {
+      mainSession.registerPreloadScript({
+        filePath: path.join(__dirname, 'preload.js'),
+        type: 'frame'
+      });
+    } else if (mainSession.setPreloads) {
+      mainSession.setPreloads([path.join(__dirname, 'preload.js')]);
+    }
+  } catch (error) {
+    console.warn('Could not register preload script:', error);
+  }
+
+  setImmediate(() => {
+    try {
+      mainSession.clearHostResolverCache();
+      mainSession.setSpellCheckerDictionaryDownloadURL('');
+    } catch (_) {}
+  });
+
+  installSessionPermissionHandlers(mainSession);
+  installSessionPermissionHandlers(session.fromPartition('persist:main'));
+  try {
+    installSessionPermissionHandlers(session.fromPartition('incognito'));
+  } catch (_) {
+    console.warn('Could not attach permission handlers to incognito session');
+  }
+
+  // Trust all certificates for every session (default, persist:main, incognito)
+  const certBypass = (request, callback) => callback(0);
+  mainSession.setCertificateVerifyProc(certBypass);
+  try { session.fromPartition('persist:main').setCertificateVerifyProc(certBypass); } catch (_) {}
+  try { session.fromPartition('incognito').setCertificateVerifyProc(certBypass); } catch (_) {}
+}
 
 /** macOS: vibrancy shows desktop through the window; turn it off when settings “Window glass brightness” is 0 (fully opaque chrome). */
-function applyMainWindowVibrancyFromStore() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+function applyVibrancyToWindow(browserWindow) {
+  if (!browserWindow || browserWindow.isDestroyed()) return;
   if (process.platform !== 'darwin') return;
   const raw = store.get('windowChromeLight', 50);
   const n = Number(raw);
   const solidChrome = Number.isFinite(n) ? n <= 0 : false;
   try {
     if (solidChrome) {
-      mainWindow.setVibrancy(null);
+      browserWindow.setVibrancy(null);
     } else {
-      mainWindow.setVibrancy('under-window');
+      browserWindow.setVibrancy('under-window');
     }
   } catch (_) {
     /* ignore */
   }
+}
+
+function applyMainWindowVibrancyFromStore() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  applyVibrancyToWindow(mainWindow);
 }
 let settingsWindow = null;
 let isQuitConfirmed = false;
@@ -179,7 +227,8 @@ const getDefaultShortcuts = () => {
     'toggle-sidebar': `${cmdOrCtrl}+B`,
     'refresh': `${cmdOrCtrl}+R`,
     'focus-url': `${cmdOrCtrl}+L`,
-    'pin-tab': `${cmdOrCtrl}+P`,
+    'print': `${cmdOrCtrl}+P`,
+    'pin-tab': `${cmdOrCtrl}+Shift+P`,
     'new-tab': `${cmdOrCtrl}+N`,
     'duplicate-tab': `${cmdOrCtrl}+D`,
     'settings': `${cmdOrCtrl}+,`,
@@ -187,7 +236,10 @@ const getDefaultShortcuts = () => {
     'history': `${cmdOrCtrl}+Y`,
     'downloads': `${cmdOrCtrl}+J`,
     'toggle-chat': `${cmdOrCtrl}+Shift+E`,
+    'toggle-mute-tab': `${cmdOrCtrl}+Shift+M`,
     'find': `${cmdOrCtrl}+F`,
+    'select-all': `${cmdOrCtrl}+A`,
+    'paste-match-style': `${cmdOrCtrl}+Shift+V`,
     'copy-url': `${cmdOrCtrl}+Shift+C`,
     'clear-history': `${cmdOrCtrl}+Shift+H`,
     'zoom-in': `${cmdOrCtrl}+=`,
@@ -205,15 +257,35 @@ const getDefaultShortcuts = () => {
   };
 };
 
-// Get shortcuts (custom or default)
+/**
+ * Merged active shortcuts for global registration and menus.
+ * Store may set an action to null / '' / '__disabled__' to turn that shortcut off.
+ */
 const getShortcuts = () => {
-  const customShortcuts = store.get('keyboardShortcuts', null);
-  if (customShortcuts) {
-    // Merge with defaults to ensure all actions have shortcuts
-    return { ...getDefaultShortcuts(), ...customShortcuts };
+  const defaults = getDefaultShortcuts();
+  const custom = store.get('keyboardShortcuts', null);
+  if (!custom) return { ...defaults };
+  const out = {};
+  for (const action of Object.keys(defaults)) {
+    if (Object.prototype.hasOwnProperty.call(custom, action)) {
+      const val = custom[action];
+      if (val !== null && val !== '' && val !== '__disabled__') {
+        out[action] = val;
+      }
+    } else {
+      out[action] = defaults[action];
+    }
   }
-  return getDefaultShortcuts();
+  for (const [action, val] of Object.entries(custom)) {
+    if (!defaults[action] && val !== null && val !== '' && val !== '__disabled__') {
+      out[action] = val;
+    }
+  }
+  return out;
 };
+
+/** Raw user overrides (null = disabled for that action). */
+const getShortcutOverrides = () => store.get('keyboardShortcuts', null) || {};
 
 // Get the active Axis window (prefers focused, then main, then any)
 function getActiveAxisWindow() {
@@ -227,9 +299,15 @@ function getActiveAxisWindow() {
 // Register global shortcuts (works in all Axis windows, including incognito)
 const registerShortcuts = () => {
   const shortcuts = getShortcuts();
-  
+
   Object.entries(shortcuts).forEach(([action, key]) => {
     if (action === 'find') return;
+    // Cmd/Ctrl+A must be handled in the renderer so URL bar and other shell fields keep native select-all.
+    if (action === 'select-all') {
+      const norm = (key || '').replace(/\s/g, '').toLowerCase();
+      if (norm === 'cmd+a' || norm === 'ctrl+a') return;
+    }
+    if (!key || typeof key !== 'string') return;
     try {
       globalShortcut.register(key, () => {
         const win = getActiveAxisWindow();
@@ -249,6 +327,9 @@ const unregisterShortcuts = () => {
 
 // Apply consolidated Chromium/Electron performance flags as early as possible
 (function applyPerformanceFlags() {
+  app.commandLine.appendSwitch('log-level', '3');
+  app.commandLine.appendSwitch('disable-logging');
+
   app.commandLine.appendSwitch('ignore-gpu-blocklist');
   app.commandLine.appendSwitch('enable-gpu-rasterization');
   app.commandLine.appendSwitch('enable-zero-copy');
@@ -260,14 +341,9 @@ const unregisterShortcuts = () => {
   app.commandLine.appendSwitch('disable-background-timer-throttling');
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-  
-  // Prevent viewport-based content unloading
-  app.commandLine.appendSwitch('disable-features', 'LazyFrameLoading,LazyImageLoading,DeferredImageDecoding');
 
-  // V8 heap: balanced for performance and lower RAM (2048MB is enough for many tabs without reserving 8GB)
   app.commandLine.appendSwitch('js-flags', '--max-old-space-size=2048 --max-semi-space-size=64 --no-expose-gc');
-  
-  // Fewer renderer processes and WebGL contexts to reduce memory use
+
   app.commandLine.appendSwitch('renderer-process-limit', '25');
   app.commandLine.appendSwitch('max-active-webgl-contexts', '8');
   app.commandLine.appendSwitch('disable-hang-monitor');
@@ -280,13 +356,11 @@ const unregisterShortcuts = () => {
   app.commandLine.appendSwitch('disable-client-side-phishing-detection');
   app.commandLine.appendSwitch('disable-component-update');
   app.commandLine.appendSwitch('disable-domain-reliability');
-  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,BlinkGenPropertyTrees,TranslateUI');
-  
-  // Networking tweaks
+
   app.commandLine.appendSwitch('enable-tcp-fast-open');
   app.commandLine.appendSwitch('enable-quic');
 
-  // Combine feature flags in single switches to avoid overwriting
+  // Single enable-features call to avoid overwriting
   app.commandLine.appendSwitch(
     'enable-features',
     [
@@ -300,6 +374,7 @@ const unregisterShortcuts = () => {
       'UseSkiaRenderer'
     ].join(',')
   );
+  // Single disable-features call (appendSwitch overwrites, so must be one call)
   app.commandLine.appendSwitch(
     'disable-features',
     [
@@ -316,7 +391,6 @@ const unregisterShortcuts = () => {
       'Translate',
       'BlinkGenPropertyTrees',
       'ThrottleForegroundTimers',
-      'PartitionAlloc',
       'LazyFrameLoading',
       'LazyImageLoading',
       'DeferredImageDecoding',
@@ -422,79 +496,6 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // Configure session for better webview support (non-blocking)
-  const mainSession = session.defaultSession;
-  
-  // Optimize session for better scroll performance and prevent content unloading
-  // Use the new API instead of deprecated setPreloads
-  try {
-    if (mainSession.registerPreloadScript) {
-      mainSession.registerPreloadScript({
-        filePath: path.join(__dirname, 'preload.js'),
-        type: 'frame'
-      });
-    } else if (mainSession.setPreloads) {
-      mainSession.setPreloads([path.join(__dirname, 'preload.js')]);
-    }
-  } catch (error) {
-    console.warn('Could not register preload script:', error);
-  }
-  
-  // Clear DNS cache and configure network (non-blocking, can happen async)
-  setImmediate(() => {
-    try {
-  mainSession.clearHostResolverCache();
-      mainSession.setSpellCheckerDictionaryDownloadURL('');
-    } catch (error) {
-      // Ignore errors
-    }
-  });
-
-  // Note: command line switches are now set early to ensure Chromium honors them
-  
-  installSessionPermissionHandlers(mainSession);
-  installSessionPermissionHandlers(session.fromPartition('persist:main'));
-  try {
-    installSessionPermissionHandlers(session.fromPartition('incognito'));
-  } catch (e) {
-    console.warn('Could not attach permission handlers to incognito session:', e);
-  }
-
-  // Handle certificate errors - allow all certificates
-  mainSession.setCertificateVerifyProc((request, callback) => {
-    // Always allow certificates
-    callback(0);
-  });
-
-  // Use default Chromium user agent for best compatibility and performance
-  
-  // Configure web security - simplified (allow all requests)
-  mainSession.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: false });
-  });
-  
-  // Enable caching and compression (consolidated handler)
-  mainSession.webRequest.onBeforeSendHeaders((details, callback) => {
-    const headers = details.requestHeaders || {};
-    
-    // Add cache control headers for static assets
-    if (details.url.includes('.css') || details.url.includes('.js') || 
-        details.url.includes('.png') || details.url.includes('.jpg') || 
-        details.url.includes('.gif') || details.url.includes('.webp')) {
-      headers['Cache-Control'] = 'max-age=3600, public';
-    } else {
-      // General cache headers for other content
-      headers['Cache-Control'] = 'max-age=31536000, public';
-    }
-    
-    // Enable compression
-    if (!headers['Accept-Encoding']) {
-    headers['Accept-Encoding'] = 'gzip, deflate, br';
-    }
-    
-    callback({ requestHeaders: headers });
-  });
-
   // Create application menu
   createMenu();
 }
@@ -534,23 +535,129 @@ function openSettingsWindow(tab = null) {
   });
 }
 
+function menuAccel(key) {
+  return key && typeof key === 'string' ? key : undefined;
+}
+
+/** Open a URL in a new tab in the main Axis window (not the system browser). */
+function openUrlInAxisBrowser(url) {
+  if (!url || typeof url !== 'string') return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send('open-url-in-browser', url);
+}
+
+function isSafeHttpUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** Open http(s) URL in a new normal browser window (secondary window; does not replace mainWindow). */
+function openUrlInNewBrowserWindow(url) {
+  if (!isSafeHttpUrl(url)) return;
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    title: 'Axis Browser',
+    icon: path.join(__dirname, 'Axis_logo.png'),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webviewTag: true,
+      preload: path.join(__dirname, 'preload.js'),
+      backgroundThrottling: false,
+      offscreen: false,
+      experimentalFeatures: true,
+      v8CacheOptions: 'code',
+      spellcheck: false,
+      webSecurity: true,
+      webgl: true,
+      enableBlinkFeatures:
+        'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn'
+    },
+    titleBarStyle: 'hiddenInset',
+    frame: false,
+    show: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
+      : {})
+  });
+
+  if (process.platform === 'darwin') {
+    win.__axisSidebarRight = false;
+    attachMacTrafficLightResize(win);
+  }
+
+  win.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('open-url-in-browser', url);
+      }
+    }, 400);
+  });
+
+  win.loadFile('src/index.html');
+
+  win.webContents.setWindowOpenHandler(({ url: openUrl }) => {
+    if (openUrl && (openUrl.startsWith('http://') || openUrl.startsWith('https://'))) {
+      const lowerUrl = openUrl.toLowerCase();
+      if (
+        lowerUrl.startsWith('javascript:') ||
+        lowerUrl.startsWith('data:') ||
+        lowerUrl.startsWith('vbscript:') ||
+        lowerUrl.startsWith('file:')
+      ) {
+        return { action: 'deny' };
+      }
+      return { action: 'allow' };
+    }
+    return { action: 'deny' };
+  });
+
+  win.once('ready-to-show', () => {
+    if (process.platform === 'darwin' && !win.isDestroyed()) {
+      positionMacTrafficLights(win, !!win.__axisSidebarRight);
+    }
+    applyVibrancyToWindow(win);
+    win.show();
+    win.setWindowButtonVisibility(true);
+  });
+}
+
 function createMenu() {
-  // Use current shortcuts so menu accelerators always match user settings
+  // Use current shortcuts so menu accelerators always match user settings (omit if disabled)
   const shortcuts = getShortcuts();
-  const closeTabShortcut = shortcuts['close-tab'] || 'CmdOrCtrl+W';
-  const settingsShortcut = shortcuts['settings'] || 'CmdOrCtrl+,';
-  const newTabShortcut = shortcuts['new-tab'] || 'CmdOrCtrl+N';
-  const refreshShortcut = shortcuts['refresh'] || 'CmdOrCtrl+R';
-  const toggleSidebarShortcut = shortcuts['toggle-sidebar'] || 'CmdOrCtrl+B';
-  const historyShortcut = shortcuts['history'] || 'CmdOrCtrl+Y';
-  const downloadsShortcut = shortcuts['downloads'] || 'CmdOrCtrl+J';
-  const toggleChatShortcut = shortcuts['toggle-chat'] || 'CmdOrCtrl+Shift+E';
-  const findShortcut = shortcuts['find'] || 'CmdOrCtrl+F';
-  const focusUrlShortcut = shortcuts['focus-url'] || 'CmdOrCtrl+L';
-  const recoverTabShortcut = shortcuts['recover-tab'] || 'CmdOrCtrl+Z';
-  const zoomInShortcut = shortcuts['zoom-in'] || 'CmdOrCtrl+=';
-  const zoomOutShortcut = shortcuts['zoom-out'] || 'CmdOrCtrl+-';
-  const resetZoomShortcut = shortcuts['reset-zoom'] || 'CmdOrCtrl+0';
+  const closeTabShortcut = menuAccel(shortcuts['close-tab']);
+  const settingsShortcut = menuAccel(shortcuts['settings']);
+  const newTabShortcut = menuAccel(shortcuts['new-tab']);
+  const refreshShortcut = menuAccel(shortcuts['refresh']);
+  const toggleSidebarShortcut = menuAccel(shortcuts['toggle-sidebar']);
+  const historyShortcut = menuAccel(shortcuts['history']);
+  const downloadsShortcut = menuAccel(shortcuts['downloads']);
+  const toggleChatShortcut = menuAccel(shortcuts['toggle-chat']);
+  const toggleMuteTabShortcut = menuAccel(shortcuts['toggle-mute-tab']);
+  const findShortcut = menuAccel(shortcuts['find']);
+  const selectAllShortcut = menuAccel(shortcuts['select-all']);
+  const pasteMatchStyleShortcut = menuAccel(shortcuts['paste-match-style']);
+  const printShortcut = menuAccel(shortcuts['print']);
+  const focusUrlShortcut = menuAccel(shortcuts['focus-url']);
+  const recoverTabShortcut = menuAccel(shortcuts['recover-tab']);
+  const zoomInShortcut = menuAccel(shortcuts['zoom-in']);
+  const zoomOutShortcut = menuAccel(shortcuts['zoom-out']);
+  const resetZoomShortcut = menuAccel(shortcuts['reset-zoom']);
 
   const template = [];
 
@@ -564,7 +671,7 @@ function createMenu() {
         { type: 'separator' },
         {
           label: 'Settings...',
-          accelerator: settingsShortcut,
+          ...(settingsShortcut ? { accelerator: settingsShortcut } : {}),
           click: () => openSettingsWindow()
         },
         { type: 'separator' },
@@ -594,7 +701,7 @@ function createMenu() {
   const fileSubmenu = [
       {
         label: 'New Tab',
-        accelerator: newTabShortcut,
+        ...(newTabShortcut ? { accelerator: newTabShortcut } : {}),
         click: () => {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('browser-shortcut', 'new-tab');
@@ -622,7 +729,7 @@ function createMenu() {
           ]),
       {
         label: 'Close Tab',
-        accelerator: closeTabShortcut,
+        ...(closeTabShortcut ? { accelerator: closeTabShortcut } : {}),
         click: () => {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('browser-shortcut', 'close-tab');
@@ -631,7 +738,7 @@ function createMenu() {
       },
       {
         label: 'Reopen Closed Tab',
-        accelerator: recoverTabShortcut,
+        ...(recoverTabShortcut ? { accelerator: recoverTabShortcut } : {}),
         click: () => {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('browser-shortcut', 'recover-tab');
@@ -641,7 +748,7 @@ function createMenu() {
       { type: 'separator' },
       {
         label: 'History',
-        accelerator: historyShortcut,
+        ...(historyShortcut ? { accelerator: historyShortcut } : {}),
         click: () => {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('browser-shortcut', 'history');
@@ -650,10 +757,20 @@ function createMenu() {
       },
       {
         label: 'Downloads',
-        accelerator: downloadsShortcut,
+        ...(downloadsShortcut ? { accelerator: downloadsShortcut } : {}),
         click: () => {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('browser-shortcut', 'downloads');
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Print…',
+        ...(printShortcut ? { accelerator: printShortcut } : {}),
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('browser-shortcut', 'print');
           }
         }
       },
@@ -696,10 +813,28 @@ function createMenu() {
         { role: 'cut' },
         { role: 'copy' },
         { role: 'paste' },
+        {
+          label: 'Paste and Match Style',
+          ...(pasteMatchStyleShortcut ? { accelerator: pasteMatchStyleShortcut } : {}),
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('browser-shortcut', 'paste-match-style');
+            }
+          }
+        },
+        {
+          label: 'Select All',
+          ...(selectAllShortcut ? { accelerator: selectAllShortcut } : {}),
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('browser-shortcut', 'select-all');
+            }
+          }
+        },
         { type: 'separator' },
         {
           label: 'Find in Page',
-          accelerator: findShortcut,
+          ...(findShortcut ? { accelerator: findShortcut } : {}),
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('browser-shortcut', 'find');
@@ -708,7 +843,11 @@ function createMenu() {
         },
         ...(process.platform !== 'darwin' ? [
           { type: 'separator' },
-          { label: 'Settings...', accelerator: settingsShortcut, click: () => openSettingsWindow() }
+          {
+            label: 'Settings...',
+            ...(settingsShortcut ? { accelerator: settingsShortcut } : {}),
+            click: () => openSettingsWindow()
+          }
         ] : [])
       ]
     },
@@ -717,7 +856,7 @@ function createMenu() {
       submenu: [
         {
           label: 'Reload Page',
-          accelerator: refreshShortcut,
+          ...(refreshShortcut ? { accelerator: refreshShortcut } : {}),
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('browser-shortcut', 'refresh');
@@ -729,7 +868,7 @@ function createMenu() {
         { type: 'separator' },
         {
           label: 'Actual Size',
-          accelerator: resetZoomShortcut,
+          ...(resetZoomShortcut ? { accelerator: resetZoomShortcut } : {}),
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('browser-shortcut', 'reset-zoom');
@@ -738,7 +877,7 @@ function createMenu() {
         },
         {
           label: 'Zoom In',
-          accelerator: zoomInShortcut,
+          ...(zoomInShortcut ? { accelerator: zoomInShortcut } : {}),
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('browser-shortcut', 'zoom-in');
@@ -747,7 +886,7 @@ function createMenu() {
         },
         {
           label: 'Zoom Out',
-          accelerator: zoomOutShortcut,
+          ...(zoomOutShortcut ? { accelerator: zoomOutShortcut } : {}),
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('browser-shortcut', 'zoom-out');
@@ -757,7 +896,7 @@ function createMenu() {
         { type: 'separator' },
         {
           label: 'Toggle Sidebar',
-          accelerator: toggleSidebarShortcut,
+          ...(toggleSidebarShortcut ? { accelerator: toggleSidebarShortcut } : {}),
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('browser-shortcut', 'toggle-sidebar');
@@ -766,10 +905,20 @@ function createMenu() {
         },
         {
           label: 'Toggle Chat',
-          accelerator: toggleChatShortcut,
+          ...(toggleChatShortcut ? { accelerator: toggleChatShortcut } : {}),
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('browser-shortcut', 'toggle-chat');
+            }
+          }
+        },
+        {
+          label: 'Mute / Unmute Tab',
+          ...(toggleMuteTabShortcut ? { accelerator: toggleMuteTabShortcut } : {}),
+          click: () => {
+            const win = getActiveAxisWindow();
+            if (win && !win.isDestroyed()) {
+              win.webContents.send('browser-shortcut', 'toggle-mute-tab');
             }
           }
         },
@@ -822,6 +971,33 @@ function createMenu() {
           }
         }
       ]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'View License',
+          click: () =>
+            openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser/blob/main/LICENSE.md')
+        },
+        {
+          label: 'Report an Issue',
+          click: () => openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser/issues')
+        },
+        {
+          label: 'Report a Vulnerability',
+          click: () =>
+            openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser/security')
+        },
+        {
+          label: 'Donate',
+          click: () => openUrlInAxisBrowser('https://www.patreon.com/cw/AbdelrahmanBerchan')
+        },
+        {
+          label: 'Visit GitHub Page',
+          click: () => openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser')
+        }
+      ]
     }
   );
 
@@ -829,7 +1005,7 @@ function createMenu() {
   Menu.setApplicationMenu(menu);
 }
 
-function createIncognitoWindow() {
+function createIncognitoWindow(initialUrl = null) {
   // Create a new session for incognito mode
   const incognitoSession = session.fromPartition('incognito');
   
@@ -871,6 +1047,16 @@ function createIncognitoWindow() {
   if (process.platform === 'darwin') {
     incognitoWindow.__axisSidebarRight = false;
     attachMacTrafficLightResize(incognitoWindow);
+  }
+
+  if (initialUrl && isSafeHttpUrl(initialUrl)) {
+    incognitoWindow.webContents.once('did-finish-load', () => {
+      setTimeout(() => {
+        if (!incognitoWindow.isDestroyed()) {
+          incognitoWindow.webContents.send('open-url-in-browser', initialUrl);
+        }
+      }, 400);
+    });
   }
 
   // Load the app with hash so renderer knows it's incognito (for indicator, theme lock, no history)
@@ -918,8 +1104,52 @@ function updateDockMenu() {
   app.dock.setMenu(dockMenu);
 }
 
+// Filter noisy Chromium/Electron messages from stderr.
+// These are harmless internal diagnostics, not application bugs.
+const SUPPRESSED_PATTERNS = [
+  'GUEST_VIEW_MANAGER_CALL',
+  'ERR_BLOCKED_BY_RESPONSE',
+  'ERR_NAME_NOT_RESOLVED',
+  'Failed to load URL',
+  'sysctlbyname',
+  'kern.hv_vmm_present',
+  'blink.mojom',
+  'interface_endpoint_client',
+];
+
+function matchesSuppressed(text) {
+  return typeof text === 'string' && SUPPRESSED_PATTERNS.some(p => text.includes(p));
+}
+
+const _origStderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = (chunk, ...rest) => {
+  if (matchesSuppressed(typeof chunk === 'string' ? chunk : chunk?.toString?.())) return true;
+  return _origStderrWrite(chunk, ...rest);
+};
+
+const _origConsoleError = console.error;
+console.error = (...args) => {
+  const first = args[0];
+  if (matchesSuppressed(typeof first === 'string' ? first : '')) return;
+  if (first instanceof Error && (first.errno === -3 || matchesSuppressed(first.message))) return;
+  _origConsoleError.apply(console, args);
+};
+
+const _origProcessEmitWarning = process.emitWarning;
+process.emitWarning = (warning, ...rest) => {
+  const msg = typeof warning === 'string' ? warning
+    : (warning instanceof Error ? warning.message : '');
+  if (matchesSuppressed(msg)) return;
+  _origProcessEmitWarning.call(process, warning, ...rest);
+};
+
 // App event handlers
 app.whenReady().then(() => {
+  app.on('web-contents-created', (_event, contents) => {
+    contents.setMaxListeners(0);
+  });
+
+  configureSession();
   createWindow();
   updateDockMenu();
   // Ensure shortcuts are active whenever any Axis window has focus
@@ -1011,10 +1241,17 @@ ipcMain.on('settings-updated', () => {
   }
 });
 
-ipcMain.handle('open-url-in-browser', (event, url) => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('open-url-in-browser', url);
+ipcMain.handle('print-page', (event, webContentsId) => {
+  const { webContents } = require('electron');
+  const guest = webContents.fromId(webContentsId);
+  if (guest && !guest.isDestroyed()) {
+    guest.print({ silent: false, printBackground: true });
   }
+  return true;
+});
+
+ipcMain.handle('open-url-in-browser', (event, url) => {
+  openUrlInAxisBrowser(url);
   return true;
 });
 
@@ -1044,6 +1281,10 @@ ipcMain.handle('get-shortcuts', () => {
 
 ipcMain.handle('get-default-shortcuts', () => {
   return getDefaultShortcuts();
+});
+
+ipcMain.handle('get-shortcut-overrides', () => {
+  return getShortcutOverrides();
 });
 
 ipcMain.handle('set-shortcuts', (event, shortcuts) => {
@@ -1277,9 +1518,16 @@ ipcMain.handle('show-item-in-folder', async (event, filePath) => {
   }
 });
 
-// Incognito window
-ipcMain.handle('open-incognito-window', () => {
-  createIncognitoWindow();
+// Incognito window (optional initial URL to open in a new tab)
+ipcMain.handle('open-incognito-window', (event, url) => {
+  createIncognitoWindow(typeof url === 'string' && url.length > 0 ? url : null);
+  return true;
+});
+
+ipcMain.handle('open-url-in-new-window', (event, url) => {
+  if (typeof url === 'string' && isSafeHttpUrl(url)) {
+    openUrlInNewBrowserWindow(url);
+  }
   return true;
 });
 
@@ -1383,6 +1631,20 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
         event.sender.send('webpage-context-menu-action', 'open-link-new-tab', { linkURL: ctx.linkURL });
       }
     });
+    if (isSafeHttpUrl(ctx.linkURL)) {
+      template.push({
+        label: 'Open Link in New Window',
+        click: () => {
+          openUrlInNewBrowserWindow(ctx.linkURL);
+        }
+      });
+      template.push({
+        label: 'Open Link in Incognito Window',
+        click: () => {
+          createIncognitoWindow(ctx.linkURL);
+        }
+      });
+    }
     template.push({
       label: 'Copy Link Address',
       click: () => {
@@ -1461,6 +1723,13 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
     }
   });
   template.push({
+    label: 'Paste and Match Style',
+    enabled: ctx.canPaste || ctx.isEditable || false,
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'paste-match-style');
+    }
+  });
+  template.push({
     label: 'Select All',
     click: () => {
       event.sender.send('webpage-context-menu-action', 'select-all');
@@ -1518,6 +1787,12 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
     }
   });
   template.push({
+    label: 'Print…',
+    click: () => {
+      event.sender.send('webpage-context-menu-action', 'print');
+    }
+  });
+  template.push({
     label: 'Inspect Element',
     click: () => {
       event.sender.send('webpage-context-menu-action', 'inspect');
@@ -1560,6 +1835,13 @@ ipcMain.handle('show-urlbar-context-menu', async (event, x, y, contextInfo) => {
       enabled: canPasteAndGo,
       click: () => {
         event.sender.send('urlbar-context-menu-action', 'paste', { text: clipboard.readText() || '' });
+      }
+    },
+    {
+      label: 'Paste and Match Style',
+      enabled: canPasteAndGo,
+      click: () => {
+        event.sender.send('urlbar-context-menu-action', 'paste-match-style');
       }
     },
     { type: 'separator' },
