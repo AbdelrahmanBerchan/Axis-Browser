@@ -2290,6 +2290,23 @@ body.incognito-window #main-area.sidebar-right .webview-container {
     z-index: 1;
 }
 
+/* Soft lift under the web panel (URL bar + webviews): inset matches padding so the shadow
+   isn’t clipped by .webview-container / #single-view overflow. */
+#content-area::after {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    pointer-events: none;
+    z-index: 0;
+    border-radius: 0 2px 2px 0;
+    box-shadow:
+        0 4px 18px rgba(0, 0, 0, 0.12),
+        0 2px 5px rgba(0, 0, 0, 0.07);
+}
+
 .webview-container {
     --chat-panel-bg: rgba(22, 22, 22, 0.98);
     --chat-panel-border: rgba(255, 255, 255, 0.06);
@@ -6913,6 +6930,8 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 
 #single-view {
     background: transparent;
+    position: relative;
+    z-index: 1;
 }
 
 /* Enhanced focus states */
@@ -9233,10 +9252,10 @@ body.transparent-sites-mode .webview-url-bar.new-tab-page {
     --url-bar-btn-hover: rgba(0, 0, 0, 0.06);
 }
 
-/* Transparent sites mode: frosted URL bar (JS sets --url-bar-bg + tint; blur as fallback) */
+/* Transparent sites mode: frosted URL bar — blur/sat match #app (JS sets vars from shell main glass) */
 body.transparent-sites-mode .webview-url-bar {
-    backdrop-filter: blur(var(--axis-ts-urlbar-blur, 10px)) saturate(var(--axis-ts-urlbar-sat, 118%));
-    -webkit-backdrop-filter: blur(var(--axis-ts-urlbar-blur, 10px)) saturate(var(--axis-ts-urlbar-sat, 118%));
+    backdrop-filter: blur(var(--axis-ts-urlbar-blur, 26px)) saturate(var(--axis-ts-urlbar-sat, 148%));
+    -webkit-backdrop-filter: blur(var(--axis-ts-urlbar-blur, 26px)) saturate(var(--axis-ts-urlbar-sat, 148%));
 }
 
 /* New tab page is in-app HTML (not a webview) — use glass so shell theme shows through like sites */
@@ -9619,6 +9638,10 @@ body.transparent-sites-mode .new-tab-ask-input-row {
     overflow: hidden;
     isolation: isolate;
     z-index: 2;
+}
+
+#main-area.sidebar-right #content-area::after {
+    border-radius: 6px;
 }
 
 #main-area.sidebar-right .webview-container {
