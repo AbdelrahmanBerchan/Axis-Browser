@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
   openSettingsWindow: (tab) => ipcRenderer.invoke('open-settings-window', tab),
   openUrlInBrowser: (url) => ipcRenderer.invoke('open-url-in-browser', url),
+  printPage: (webContentsId) => ipcRenderer.invoke('print-page', webContentsId),
   
   // History management
   getHistory: () => ipcRenderer.invoke('get-history'),
@@ -53,8 +54,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cancelQuit: () => ipcRenderer.send('cancel-quit'),
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
   
-  // Incognito window
-  openIncognitoWindow: () => ipcRenderer.invoke('open-incognito-window'),
+  // Incognito window (optional URL to open in a new tab)
+  openIncognitoWindow: (url) => ipcRenderer.invoke('open-incognito-window', url),
+  openUrlInNewWindow: (url) => ipcRenderer.invoke('open-url-in-new-window', url),
   
   // Notes management
   getNotes: () => ipcRenderer.invoke('get-notes'),
@@ -69,6 +71,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Keyboard shortcuts
   getShortcuts: () => ipcRenderer.invoke('get-shortcuts'),
+  getShortcutOverrides: () => ipcRenderer.invoke('get-shortcut-overrides'),
   getDefaultShortcuts: () => ipcRenderer.invoke('get-default-shortcuts'),
   setShortcuts: (shortcuts) => ipcRenderer.invoke('set-shortcuts', shortcuts),
   resetShortcuts: () => ipcRenderer.invoke('reset-shortcuts'),
