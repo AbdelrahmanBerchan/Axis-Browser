@@ -301,6 +301,26 @@
             .shortcut-row { border-bottom-color: rgba(255,255,255,0.06); }
         }
         .shortcut-row:last-child { border-bottom: none; }
+        .shortcut-row .shortcut-row-main { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+        .shortcut-row .shortcut-row-main span { font-size: 13px; }
+        .shortcut-row-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .shortcut-action-btn {
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(0,0,0,0.12);
+            background: rgba(0,0,0,0.04);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        @media (prefers-color-scheme: dark) {
+            .shortcut-action-btn { border-color: rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); }
+        }
+        .shortcuts-subheading { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #86868b; margin: 16px 0 8px; padding: 0 16px; }
+        @media (prefers-color-scheme: dark) {
+            .shortcuts-subheading { color: #98989d; }
+        }
+        .shortcut-row.shortcut-row-disabled .shortcut-input { opacity: 0.55; pointer-events: none; }
         .gradient-rows { display: none; }
         .gradient-rows.visible { display: flex; flex-direction: column; }
         .settings-search-wrap {
@@ -502,6 +522,20 @@
                         </div>
                         <input type="checkbox" id="always-show-full-url">
                     </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">HTTPS-only mode</div>
+                            <div class="row-desc">Ask before loading sites that use HTTP (not HTTPS). Localhost is always allowed.</div>
+                        </div>
+                        <input type="checkbox" id="https-only-mode">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">JavaScript</div>
+                            <div class="row-desc">Allow sites to run JavaScript. Turn off for minimal, mostly static pages (many sites will break).</div>
+                        </div>
+                        <input type="checkbox" id="javascript-enabled">
+                    </div>
                 </div>
             </div>
             <div class="group">
@@ -616,6 +650,13 @@
                     </div>
                     <div class="row">
                         <div class="row-label">
+                            <div class="row-title">Mute ambient when tab audio is playing</div>
+                            <div class="row-desc">Lowers ambient to silence while any tab outputs audible page audio (not when the tab is muted)</div>
+                        </div>
+                        <input type="checkbox" id="ambient-mute-when-tab-audio">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
                             <div class="row-title">Sound</div>
                             <div class="row-desc">Each style uses soft noise and filters</div>
                         </div>
@@ -711,7 +752,12 @@
                 { action: 'focus-url', label: 'Focus URL Bar' },
                 { action: 'duplicate-tab', label: 'Duplicate Tab' },
                 { action: 'find', label: 'Find in Page' },
+                { action: 'select-all', label: 'Select All' },
+                { action: 'paste-match-style', label: 'Paste and Match Style' },
+                { action: 'print', label: 'Print Page' },
+                { action: 'copy-url', label: 'Copy URL' },
                 { action: 'pin-tab', label: 'Pin Tab' },
+                { action: 'toggle-mute-tab', label: 'Mute / Unmute Tab' },
                 { action: 'zoom-in', label: 'Zoom In' },
                 { action: 'zoom-out', label: 'Zoom Out' },
                 { action: 'reset-zoom', label: 'Reset Zoom' },
@@ -720,7 +766,11 @@
                 { action: 'downloads', label: 'Downloads' },
                 { action: 'toggle-chat', label: 'Open Chat' },
                 { action: 'settings', label: 'Settings' },
-                { action: 'clear-history', label: 'Clear History' }
+                { action: 'clear-history', label: 'Clear History' },
+                ...Array.from({ length: 9 }, (_, i) => ({
+                    action: 'switch-tab-' + (i + 1),
+                    label: 'Switch to tab ' + (i + 1)
+                }))
             ];
             
             function escapeHtml(str) {
@@ -759,11 +809,14 @@
                     key === 'sidebarPosition' ||
                     key === 'searchEngine' ||
                     key === 'alwaysShowFullUrl' ||
+                    key === 'httpsOnlyMode' ||
+                    key === 'javascriptEnabled' ||
                     key === 'speechEnabled' ||
                     key === 'speechVoiceURI' ||
                     key === 'speechRate' ||
                     key === 'speechPitch' ||
                     key === 'ambientAudioEnabled' ||
+                    key === 'ambientMuteWhenTabAudio' ||
                     key === 'ambientAudioPreset' ||
                     key === 'ambientAudioVolume'
                 ) {
@@ -773,16 +826,20 @@
             
             // Load settings
             let settings = {};
-            let shortcuts = {};
+            let shortcutDefaults = {};
+            let shortcutOverrides = {};
             try {
                 settings = await window.electronAPI.getSettings() || {};
-                shortcuts = await window.electronAPI.getShortcuts() || {};
+                shortcutDefaults = await window.electronAPI.getDefaultShortcuts() || {};
+                shortcutOverrides = await window.electronAPI.getShortcutOverrides() || {};
             } catch (e) { console.error(e); }
             
             // Populate form
             document.getElementById('sidebar-position').value = settings.sidebarPosition || 'left';
             document.getElementById('search-engine').value = settings.searchEngine || 'google';
             document.getElementById('always-show-full-url').checked = !!settings.alwaysShowFullUrl;
+            document.getElementById('https-only-mode').checked = !!settings.httpsOnlyMode;
+            document.getElementById('javascript-enabled').checked = settings.javascriptEnabled !== false;
             document.getElementById('speech-enabled').checked = settings.speechEnabled !== false;
             document.getElementById('speech-rate').value = String(settings.speechRate || 1);
             document.getElementById('speech-pitch').value = String(settings.speechPitch || 1);
@@ -849,6 +906,7 @@
 
             const AMBIENT_PRESET_IDS = ['rain', 'warm', 'focus', 'ocean', 'wind', 'still'];
             document.getElementById('ambient-audio-enabled').checked = !!settings.ambientAudioEnabled;
+            document.getElementById('ambient-mute-when-tab-audio').checked = !!settings.ambientMuteWhenTabAudio;
             const ambientPreset = settings.ambientAudioPreset || 'rain';
             document.getElementById('ambient-audio-preset').value = AMBIENT_PRESET_IDS.includes(ambientPreset) ? ambientPreset : 'rain';
             const ambientVolRaw = Number(settings.ambientAudioVolume);
@@ -861,6 +919,7 @@
                 const aOn = document.getElementById('ambient-audio-enabled').checked;
                 document.getElementById('ambient-audio-preset').disabled = !aOn;
                 ambientVolInput.disabled = !aOn;
+                document.getElementById('ambient-mute-when-tab-audio').disabled = !aOn;
             }
             syncAmbientControlsDisabled();
             
@@ -1073,6 +1132,8 @@
             document.getElementById('sidebar-position').addEventListener('change', e => saveSetting('sidebarPosition', e.target.value, false));
             document.getElementById('search-engine').addEventListener('change', e => saveSetting('searchEngine', e.target.value, false));
             document.getElementById('always-show-full-url').addEventListener('change', e => saveSetting('alwaysShowFullUrl', e.target.checked, false));
+            document.getElementById('https-only-mode').addEventListener('change', e => saveSetting('httpsOnlyMode', e.target.checked, false));
+            document.getElementById('javascript-enabled').addEventListener('change', e => saveSetting('javascriptEnabled', e.target.checked, false));
             document.getElementById('speech-enabled').addEventListener('change', e => saveSetting('speechEnabled', e.target.checked, false));
             document.getElementById('speech-voice').addEventListener('change', e => {
                 speechVoicePersist = e.target.value || '';
@@ -1083,6 +1144,9 @@
             document.getElementById('ambient-audio-enabled').addEventListener('change', e => {
                 syncAmbientControlsDisabled();
                 saveSetting('ambientAudioEnabled', e.target.checked, false);
+            });
+            document.getElementById('ambient-mute-when-tab-audio').addEventListener('change', e => {
+                saveSetting('ambientMuteWhenTabAudio', e.target.checked, false);
             });
             document.getElementById('ambient-audio-preset').addEventListener('change', e => saveSetting('ambientAudioPreset', e.target.value, false));
             ambientVolInput.addEventListener('input', e => {
@@ -1174,17 +1238,62 @@
             });
             await populateHistory();
             
-            // Shortcuts
-            let currentShortcuts = { ...shortcuts };
+            // Shortcuts: overrides store null = disabled; omitted key = use default
+            async function persistShortcutOverrides() {
+                await window.electronAPI.setShortcuts(shortcutOverrides);
+            }
+            async function reloadShortcutState() {
+                shortcutOverrides = await window.electronAPI.getShortcutOverrides() || {};
+                shortcutDefaults = await window.electronAPI.getDefaultShortcuts() || {};
+            }
+            function mergedActiveShortcuts() {
+                const merged = {};
+                for (const { action } of SHORTCUT_ACTIONS) {
+                    const def = shortcutDefaults[action];
+                    if (!def) continue;
+                    if (Object.prototype.hasOwnProperty.call(shortcutOverrides, action)) {
+                        const v = shortcutOverrides[action];
+                        if (v !== null && v !== '' && v !== '__disabled__') merged[action] = v;
+                    } else {
+                        merged[action] = def;
+                    }
+                }
+                return merged;
+            }
             function renderShortcuts() {
                 const list = document.getElementById('shortcuts-list');
-                list.innerHTML = SHORTCUT_ACTIONS.map(({ action, label }) => `
-                    <div class="shortcut-row">
-                        <span>${escapeHtml(label)}</span>
-                        <input type="text" class="shortcut-input" readonly data-action="${escapeHtml(action)}" value="${escapeHtml(formatShortcut(currentShortcuts[action]))}">
-                    </div>
-                `).join('');
-                list.querySelectorAll('.shortcut-input').forEach(input => {
+                const merged = mergedActiveShortcuts();
+                const enabled = SHORTCUT_ACTIONS.filter(({ action }) => merged[action]);
+                const disabled = SHORTCUT_ACTIONS.filter(
+                    ({ action }) => !merged[action] && shortcutDefaults[action]
+                );
+                const rowHtml = (action, label, isDisabled) => {
+                    const val = merged[action];
+                    const showVal = isDisabled ? 'Disabled' : formatShortcut(val);
+                    const disableBtn = !isDisabled
+                        ? `<button type="button" class="shortcut-action-btn" data-disable-action="${escapeHtml(action)}">Disable</button>`
+                        : `<button type="button" class="shortcut-action-btn" data-enable-action="${escapeHtml(action)}">Enable</button>`;
+                    return `
+                    <div class="shortcut-row ${isDisabled ? 'shortcut-row-disabled' : ''}" data-shortcut-action="${escapeHtml(action)}">
+                        <div class="shortcut-row-main">
+                            <span>${escapeHtml(label)}</span>
+                        </div>
+                        <div class="shortcut-row-actions">
+                            <input type="text" class="shortcut-input" readonly data-action="${escapeHtml(action)}" value="${escapeHtml(showVal)}" ${isDisabled ? 'disabled' : ''}>
+                            ${disableBtn}
+                        </div>
+                    </div>`;
+                };
+                let html = '';
+                html += '<div class="shortcuts-subheading">Active</div>';
+                html += enabled.map(({ action, label }) => rowHtml(action, label, false)).join('');
+                html += '<div class="shortcuts-subheading">Disabled</div>';
+                html += disabled.length
+                    ? disabled.map(({ action, label }) => rowHtml(action, label, true)).join('')
+                    : '<div class="shortcut-row"><span style="font-size:12px;color:#86868b;padding:4px 16px;">No shortcuts disabled</span></div>';
+                list.innerHTML = html;
+                list.querySelectorAll('.shortcut-input').forEach((input) => {
+                    if (input.disabled) return;
                     input.addEventListener('focus', () => {
                         window.electronAPI?.disableShortcuts?.();
                         input.value = 'Press keys...';
@@ -1194,14 +1303,18 @@
                         window.electronAPI?.enableShortcuts?.();
                         input.removeAttribute('data-recording');
                         const a = input.dataset.action;
-                        if (input.value === 'Press keys...' && currentShortcuts[a]) {
-                            input.value = formatShortcut(currentShortcuts[a]);
+                        const m = mergedActiveShortcuts();
+                        if (input.value === 'Press keys...' && m[a]) {
+                            input.value = formatShortcut(m[a]);
                         }
                     });
                     input.addEventListener('keydown', async (e) => {
                         if (!input.dataset.recording) return;
                         e.preventDefault();
-                        if (e.key === 'Escape') { input.blur(); return; }
+                        if (e.key === 'Escape') {
+                            input.blur();
+                            return;
+                        }
                         const isMac = navigator.platform.toUpperCase().includes('MAC');
                         const parts = [];
                         if (isMac && e.metaKey) parts.push('Cmd');
@@ -1211,23 +1324,62 @@
                         let key = e.key;
                         if (key === ' ') key = 'Space';
                         else if (key.length === 1) key = key.toUpperCase();
-                        if (['Control','Meta','Alt','Shift'].includes(key)) return;
+                        if (['Control', 'Meta', 'Alt', 'Shift'].includes(key)) return;
                         parts.push(key);
                         const shortcut = parts.join('+');
-                        currentShortcuts[input.dataset.action] = shortcut;
-                        input.value = formatShortcut(shortcut);
-                        input.removeAttribute('data-recording');
-                        await window.electronAPI.setShortcuts(currentShortcuts);
+                        const action = input.dataset.action;
+                        let conflict = null;
+                        const m0 = mergedActiveShortcuts();
+                        for (const [other, sc] of Object.entries(m0)) {
+                            if (other !== action && sc === shortcut) {
+                                conflict = other;
+                                break;
+                            }
+                        }
+                        if (conflict) {
+                            const conflictName = SHORTCUT_ACTIONS.find((x) => x.action === conflict)?.label || conflict;
+                            if (!confirm('This shortcut is already used by "' + conflictName + '". Disable that shortcut and use it here?')) {
+                                input.blur();
+                                return;
+                            }
+                            shortcutOverrides[conflict] = null;
+                        }
+                        if (shortcut === shortcutDefaults[action]) {
+                            delete shortcutOverrides[action];
+                        } else {
+                            shortcutOverrides[action] = shortcut;
+                        }
+                        await persistShortcutOverrides();
+                        await reloadShortcutState();
+                        renderShortcuts();
                         window.electronAPI?.enableShortcuts?.();
                     });
                 });
-                // Keep live filter applied after rerendering shortcut rows
+                list.querySelectorAll('[data-disable-action]').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        const action = btn.getAttribute('data-disable-action');
+                        shortcutOverrides[action] = null;
+                        await persistShortcutOverrides();
+                        await reloadShortcutState();
+                        renderShortcuts();
+                    });
+                });
+                list.querySelectorAll('[data-enable-action]').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        const action = btn.getAttribute('data-enable-action');
+                        delete shortcutOverrides[action];
+                        await persistShortcutOverrides();
+                        await reloadShortcutState();
+                        renderShortcuts();
+                    });
+                });
                 applySettingsSearch(settingsSearchInput?.value || '');
             }
             renderShortcuts();
             document.getElementById('reset-shortcuts').addEventListener('click', async () => {
                 if (confirm('Reset all shortcuts?')) {
-                    currentShortcuts = await window.electronAPI.resetShortcuts() || {};
+                    await window.electronAPI.resetShortcuts();
+                    await reloadShortcutState();
                     renderShortcuts();
                 }
             });
