@@ -140,6 +140,39 @@ const AXIS_TRANSPARENT_SITES_DOM_PATCH = [
 const AXIS_TRANSPARENT_SITES_DOM_PATCH_CLEANUP =
     '(function(){try{var st=window.__axisTransparentV4;if(st){if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}}delete window.__axisTransparentV4;}catch(e){}})();';
 
+/** Keyboard shortcut editor rows (must match settings.html SHORTCUT_ACTIONS). */
+function getShortcutEditorActions() {
+    return [
+        { action: 'spotlight-search', label: 'New Tab / Spotlight' },
+        { action: 'close-tab', label: 'Close Tab' },
+        { action: 'new-tab', label: 'New Window' },
+        { action: 'recover-tab', label: 'Recover Closed Tab' },
+        { action: 'refresh', label: 'Refresh Page' },
+        { action: 'focus-url', label: 'Focus URL Bar' },
+        { action: 'duplicate-tab', label: 'Duplicate Tab' },
+        { action: 'find', label: 'Find in Page' },
+        { action: 'select-all', label: 'Select All' },
+        { action: 'paste-match-style', label: 'Paste and Match Style' },
+        { action: 'print', label: 'Print Page' },
+        { action: 'copy-url', label: 'Copy Current URL' },
+        { action: 'pin-tab', label: 'Pin / Unpin Tab' },
+        { action: 'toggle-mute-tab', label: 'Mute / Unmute Tab' },
+        { action: 'zoom-in', label: 'Zoom In' },
+        { action: 'zoom-out', label: 'Zoom Out' },
+        { action: 'reset-zoom', label: 'Reset Zoom' },
+        { action: 'toggle-sidebar', label: 'Toggle Sidebar' },
+        { action: 'history', label: 'Open History' },
+        { action: 'downloads', label: 'Open Downloads' },
+        { action: 'toggle-chat', label: 'Open Chat' },
+        { action: 'settings', label: 'Open Settings' },
+        { action: 'clear-history', label: 'Clear History' },
+        ...Array.from({ length: 9 }, (_, i) => ({
+            action: `switch-tab-${i + 1}`,
+            label: `Switch to tab ${i + 1}`
+        }))
+    ];
+}
+
 /**
  * Shell chrome interpolation: Settings ▸ windowChromeLight — 0 = opaque (handled in getShellChromeStyle),
  * 50 = default blend, 100 = most light. These structs are the dense vs airy *blend endpoints* for t∈(0,1], not slider 0.
@@ -261,7 +294,8 @@ class AxisBrowser {
         this._ambientAudioCtx = null;
         this._ambientAudioChain = null;
         this._ambientPreset = null;
-        
+        this._shortcutCache = {};
+
         this.isIncognitoWindow = (window.location.hash === '#incognito');
         
         // Cache frequently accessed DOM elements for performance
@@ -328,6 +362,8 @@ class AxisBrowser {
     async init() {
         // Load settings first and apply theme immediately
         await this.loadSettings();
+        await this.refreshShortcutCache();
+        this._lastJavascriptEnabled = this.settings?.javascriptEnabled !== false;
         this.syncTransparentSitesUi();
 
         if (window.electronAPI?.platform === 'darwin') {
@@ -724,6 +760,22 @@ class AxisBrowser {
         return Math.max(0, Math.min(1, shaped * maxOut));
     }
 
+    /** True if any tab is outputting audible page media (playing and not tab-muted). */
+    _anyTabPlayingAudibleAudio() {
+        for (const tab of this.tabs.values()) {
+            if (tab && tab.isPlayingAudio && !tab.isMuted) return true;
+        }
+        return false;
+    }
+
+    /** Applies optional “mute ambient when tab audio plays” ducking. */
+    _ambientFinalOutputGain(targetGain) {
+        if (this.settings?.ambientMuteWhenTabAudio === true && this._anyTabPlayingAudibleAudio()) {
+            return 0;
+        }
+        return targetGain;
+    }
+
     _createAmbientNoiseBuffer(ctx, seconds, type) {
         const frames = Math.max(1, Math.floor(ctx.sampleRate * seconds));
         const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
@@ -775,7 +827,7 @@ class AxisBrowser {
         return buf;
     }
 
-    startAmbientAudio(preset, volume01) {
+    startAmbientAudio(preset, volume01, masterGainOverride) {
         this.stopAmbientAudio();
         const Ctx = window.AudioContext || window.webkitAudioContext;
         if (!Ctx) return;
@@ -788,7 +840,11 @@ class AxisBrowser {
             ctx.resume().catch(() => {});
         }
 
-        const targetGain = this._ambientUiToMaxNodeGain(volume01);
+        const baseGain = this._ambientUiToMaxNodeGain(volume01);
+        const targetGain =
+            typeof masterGainOverride === 'number' && Number.isFinite(masterGainOverride)
+                ? masterGainOverride
+                : baseGain;
         const trim = ctx.createGain();
         const master = ctx.createGain();
         master.gain.value = targetGain;
@@ -922,6 +978,7 @@ class AxisBrowser {
         v = Math.max(0, Math.min(100, v));
         const v01 = v / 100;
         const targetGain = this._ambientUiToMaxNodeGain(v01);
+        const outGain = this._ambientFinalOutputGain(targetGain);
 
         if (!on) {
             this.stopAmbientAudio();
@@ -937,17 +994,17 @@ class AxisBrowser {
         ) {
             try {
                 const ctx = this._ambientAudioCtx;
-                this._ambientAudioChain.master.gain.setTargetAtTime(targetGain, ctx.currentTime, 0.06);
+                this._ambientAudioChain.master.gain.setTargetAtTime(outGain, ctx.currentTime, 0.06);
             } catch (e) {
                 try {
-                    this._ambientAudioChain.master.gain.value = targetGain;
+                    this._ambientAudioChain.master.gain.value = outGain;
                 } catch (e2) {}
             }
             return;
         }
 
         this._ambientPreset = preset;
-        this.startAmbientAudio(preset, v01);
+        this.startAmbientAudio(preset, v01, outGain);
     }
 
     setupEventListeners() {
@@ -1145,6 +1202,9 @@ class AxisBrowser {
                 case 'paste':
                     this.paste();
                     break;
+                case 'paste-match-style':
+                    void this.pasteMatchStyle();
+                    break;
                 case 'select-all':
                     this.selectAll();
                     break;
@@ -1196,6 +1256,9 @@ class AxisBrowser {
                     break;
                 case 'copy-url':
                     this.copyCurrentUrl();
+                    break;
+                case 'print':
+                    this.printPage();
                     break;
                 case 'inspect':
                     const webview = this.getActiveWebview();
@@ -1343,13 +1406,12 @@ class AxisBrowser {
 
         // Additional keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Cmd+A to select all
-            if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+            if (this.matchesSelectAllShortcut(e)) {
                 e.preventDefault();
-                this.selectAll();
+                this.selectAllFromShortcut(e);
                 return;
             }
-            
+
             // Prevent the Tab key from triggering any custom app behavior
             // when pressed outside editable fields. We want Tab to behave
             // normally ONLY inside text inputs / textareas / contenteditable.
@@ -1691,6 +1753,10 @@ class AxisBrowser {
                 case 'paste':
                     this.insertTextInInput(input, data?.text || '');
                     break;
+                case 'paste-match-style':
+                    input.focus();
+                    void this.pasteMatchStyle();
+                    break;
                 case 'select-all':
                     input.focus();
                     input.select();
@@ -1725,7 +1791,14 @@ class AxisBrowser {
 
     async applySettingsUpdateFromMain() {
         try {
+            const prevJs = this._lastJavascriptEnabled;
             await this.loadSettings();
+            await this.refreshShortcutCache();
+            const curJs = this.settings?.javascriptEnabled !== false;
+            if (prevJs !== undefined && prevJs !== curJs) {
+                this.rebuildAllTabWebviewsForWebPreferences();
+            }
+            this._lastJavascriptEnabled = curJs;
             this.syncTransparentSitesUi();
             if (this.settings?.transparentSites) {
                 this._syncBackgroundTabWebviewsForTransparentSetting();
@@ -1784,7 +1857,66 @@ class AxisBrowser {
             console.error('Failed to copy URL:', e);
         }
     }
-    
+
+    async refreshShortcutCache() {
+        try {
+            this._shortcutCache = (await window.electronAPI.getShortcuts?.()) || {};
+        } catch (_) {
+            this._shortcutCache = {};
+        }
+    }
+
+    /** True if key event matches the merged "select-all" accelerator (respects user remap / disable). */
+    matchesSelectAllShortcut(e) {
+        const accel = this._shortcutCache?.['select-all'];
+        if (accel === null || accel === undefined || accel === '' || accel === '__disabled__') return false;
+        const parts = String(accel).split('+').map((s) => s.trim().toLowerCase());
+        const keyToken = parts[parts.length - 1];
+        const keyLower = (e.key || '').toLowerCase();
+        if (keyToken.length === 1) {
+            if (keyLower !== keyToken) return false;
+        } else if (keyToken === 'plus' || keyToken === '=') {
+            if (e.key !== '+' && e.key !== '=') return false;
+        } else if (keyLower !== keyToken) {
+            return false;
+        }
+        const wantsShift = parts.includes('shift');
+        const wantsAlt = parts.includes('alt') || parts.includes('option');
+        const wantsCmd = parts.includes('cmd') || parts.includes('command');
+        const wantsCtrl = parts.includes('ctrl') || parts.includes('control');
+        if (wantsShift !== e.shiftKey) return false;
+        if (wantsAlt !== e.altKey) return false;
+        const mac = window.electronAPI?.platform === 'darwin';
+        if (mac) {
+            if (wantsCmd && !e.metaKey) return false;
+            if (wantsCtrl && !e.ctrlKey) return false;
+            if (wantsCmd && !wantsCtrl && e.ctrlKey) return false;
+        } else {
+            if (wantsCtrl && !e.ctrlKey) return false;
+            if (wantsCmd && !e.metaKey) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Select all in a focused shell field (URL bar, search, etc.), or the active webview page.
+     * With a key event, uses e.target; without (menu / global shortcut), uses document.activeElement.
+     */
+    selectAllFromShortcut(e) {
+        const t = e && e.target ? e.target : document.activeElement;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+            if (typeof t.select === 'function') t.select();
+            return;
+        }
+        if (t && t.isContentEditable) {
+            try {
+                document.execCommand('selectAll');
+            } catch (_) {}
+            return;
+        }
+        this.selectAll();
+    }
+
     // Execute browser shortcut action (called from main process IPC)
     executeBrowserShortcut(action) {
         switch (action) {
@@ -1836,8 +1968,20 @@ class AxisBrowser {
             case 'toggle-chat':
                 this.toggleAIChat();
                 break;
+            case 'toggle-mute-tab':
+                if (this.currentTab) this.toggleTabMute(this.currentTab);
+                break;
             case 'find':
                 this.toggleSearch();
+                break;
+            case 'select-all':
+                this.selectAllFromShortcut();
+                break;
+            case 'paste-match-style':
+                void this.pasteMatchStyle();
+                break;
+            case 'print':
+                this.printPage();
                 break;
             case 'copy-url':
                 this.copyCurrentUrl();
@@ -1906,28 +2050,8 @@ class AxisBrowser {
         // Mark this webview as having listeners set up
         this.webviewListenersSetup.set(webview, true);
         
-        // Store handlers object
         webview.__eventHandlers = {};
         
-        // Try to increase max listeners on the underlying WebContents when it becomes available
-        // This prevents MaxListenersExceededWarning
-        const trySetMaxListeners = () => {
-            try {
-                // Access WebContents through webview's getWebContents method
-                if (webview.getWebContents && typeof webview.getWebContents === 'function') {
-                    const webContents = webview.getWebContents();
-                    if (webContents && typeof webContents.setMaxListeners === 'function') {
-                        webContents.setMaxListeners(100); // Increase limit significantly
-                            }
-                        }
-                    } catch (e) {
-                // WebContents might not be accessible yet, that's okay
-            }
-        };
-        
-        // Try after webview is attached (dom-ready is the most reliable)
-        
-        // Optimize webview for performance
         webview.style.willChange = 'transform';
         webview.style.transform = 'translateZ(0)';
         webview.style.backfaceVisibility = 'hidden';
@@ -2026,13 +2150,6 @@ class AxisBrowser {
 
         // Extract theme early on dom-ready (before all resources load)
         const domReadyHandler = () => {
-            // Always try to set max listeners when dom is ready (WebContents should be available)
-            // Do this BEFORE any early returns
-            trySetMaxListeners();
-            
-            // Also try after a short delay to ensure webview is fully attached
-            setTimeout(trySetMaxListeners, 50);
-
             tryBindLoadProgressFromWebContents();
             if (!this.isBenchmarking) {
                 webview.__loadProgressMilestone = Math.max(webview.__loadProgressMilestone || 0, 0.58);
@@ -2072,6 +2189,7 @@ class AxisBrowser {
                 `).catch(() => {});
             } catch (e) {}
         };
+        webview.__eventHandlers.domReadyOptimize = domReadyOptimizeHandler;
         webview.addEventListener('dom-ready', domReadyOptimizeHandler);
         
         const didFinishLoadHandler = (event) => {
@@ -2086,7 +2204,7 @@ class AxisBrowser {
                 this.hideLoadingIndicator();
                 this.loadingBarTabId = null;
             }
-            if (tabId === this.currentTab) {
+            if (isMainFrame && tabId === this.currentTab) {
                 this.isWebviewLoading = false;
                 this.updateRefreshButton(false);
             }
@@ -2107,14 +2225,14 @@ class AxisBrowser {
                 }
             }
 
+            // Reset per-tab retry counters on successful load
+            this[`__errorRetryCount_${tabId}`] = 0;
+            this[`__dnsRetryCount_${tabId}`] = 0;
+
             if (!isActiveTab()) return;
             if (this.isBenchmarking) {
-                this.errorRetryCount = 0;
-                this.dnsRetryCount = 0;
                 return;
             }
-            this.errorRetryCount = 0;
-            this.dnsRetryCount = 0;
             
             this.batchDOMUpdates([
                 () => this.updateNavigationButtons(),
@@ -2203,10 +2321,17 @@ class AxisBrowser {
         webview.addEventListener('console-message', consoleMessageHandler);
 
         const didFailLoadHandler = (event) => {
+            // -3 (ERR_ABORTED) fires on redirects and sub-frame cancellations;
+            // a new navigation is already in progress so don't touch loading state.
+            if (event.errorCode === -3) return;
+
+            // Only handle main-frame failures — sub-frame errors (ad iframes,
+            // tracking pixels, etc.) must NOT interfere with the main page load.
+            if (event.isMainFrame === false) return;
+
             clearLoadingTimeout();
             const tab = getTab();
-            
-            // Don't handle errors for settings tabs - they use data URLs
+
             if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
                 return;
             }
@@ -2219,21 +2344,21 @@ class AxisBrowser {
                 this.isWebviewLoading = false;
                 this.updateRefreshButton(false);
             }
-            
-            if (this.errorRetryCount >= 5) {
+
+            const retryKey = `__errorRetryCount_${tabId}`;
+            const count = this[retryKey] || 0;
+            if (count >= 5) {
                 if (isActiveTab()) {
                     this.showErrorPage('Unable to load page. Please check your internet connection.', webview);
                 }
                 return;
             }
-            
-            this.errorRetryCount = (this.errorRetryCount || 0) + 1;
-            
+            this[retryKey] = count + 1;
+
             if (event.errorCode === -2) {
-                    webview.reload();
-            } else if (event.errorCode === -3) {
+                webview.reload();
             } else if (event.errorCode === -105) {
-                const currentUrl = event.url || webview.getURL() || 'https://www.google.com';
+                const currentUrl = event.validatedURL || webview.getURL() || 'https://www.google.com';
                 this.handleDNSFailure(currentUrl, webview);
             } else if (isActiveTab()) {
                 this.showErrorPage(event.errorDescription, webview);
@@ -2256,6 +2381,18 @@ class AxisBrowser {
         const willNavigateHandler = (event) => {
             if (!isActiveTab()) return;
             const nextUrl = event.url || '';
+            if (
+                this.settings?.httpsOnlyMode &&
+                nextUrl &&
+                event.isMainFrame !== false &&
+                this.isNonSecureHttpUrl(nextUrl) &&
+                !window.confirm(
+                    'This page uses HTTP (not HTTPS). Your connection would not be encrypted on this site.\n\nContinue to:\n' + nextUrl
+                )
+            ) {
+                event.preventDefault();
+                return;
+            }
             this.isBenchmarking = /browserbench\.org\/speedometer/i.test(nextUrl);
             if (!this.isBenchmarking) {
                 this.updateUrlBar();
@@ -2283,7 +2420,7 @@ class AxisBrowser {
         webview.__eventHandlers.didNavigate = didNavigateHandler;
         webview.addEventListener('did-navigate', didNavigateHandler);
 
-        webview.addEventListener('did-navigate-in-page', () => {
+        const didNavigateInPageHandler = () => {
             if (!this.isBenchmarking && this.settings?.transparentSites) {
                 this._touchTransparentSitesForWebview(webview);
             }
@@ -2293,23 +2430,21 @@ class AxisBrowser {
                     () => this.updateNavigationButtons(),
                     () => this.updateTabTitle()
                 ]);
-                // Update themed URL bar
                 this.updateUrlBar(webview);
-        });
+        };
+        webview.__eventHandlers.didNavigateInPage = didNavigateInPageHandler;
+        webview.addEventListener('did-navigate-in-page', didNavigateInPageHandler);
 
-        webview.addEventListener('page-title-updated', async () => {
+        const pageTitleUpdatedHandler = async () => {
             const tab = getTab();
             if (tab) {
-                // Only update title if tab doesn't have a custom title
                 if (!tab.customTitle) {
                 tab.title = webview.getTitle() || tab.title;
                 }
             }
 
             if (!isActiveTab() || this.isBenchmarking) return;
-                // updateTabTitle will check for customTitle and use it if present
                 this.updateTabTitle();
-                // Update themed URL bar with new title
                 this.updateUrlBar(webview);
                 
                 if (tab && tab.url === 'axis:note://new') {
@@ -2327,9 +2462,11 @@ class AxisBrowser {
                     }
                 }
             }
-        });
+        };
+        webview.__eventHandlers.pageTitleUpdated = pageTitleUpdatedHandler;
+        webview.addEventListener('page-title-updated', pageTitleUpdatedHandler);
 
-        webview.addEventListener('page-favicon-updated', (event) => {
+        const pageFaviconUpdatedHandler = (event) => {
             if (!event.favicons || event.favicons.length === 0) return;
                 const faviconUrl = event.favicons[0];
             const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
@@ -2344,17 +2481,15 @@ class AxisBrowser {
                     if (tab) {
                         tab.favicon = faviconUrl;
                     }
-        });
+        };
+        webview.__eventHandlers.pageFaviconUpdated = pageFaviconUpdatedHandler;
+        webview.addEventListener('page-favicon-updated', pageFaviconUpdatedHandler);
         
-        // Audio detection using polling (more reliable than media events)
-        // Start audio detection polling for this webview
         this.startAudioDetection(tabId, webview);
 
-        // Listen for context-menu event from webview's webContents
-        webview.addEventListener('context-menu', (e) => {
+        const contextMenuHandler = (e) => {
             if (!isActiveTab()) return;
             
-            // Store context info for the menu
             this.webviewContextInfo = {
                 hasSelection: e.params?.selectionText?.length > 0,
                 selectionText: e.params?.selectionText || '',
@@ -2370,7 +2505,6 @@ class AxisBrowser {
                 y: e.params?.y || 0
             };
             
-            // Get webview position to convert to window coordinates
             const webviewRect = webview.getBoundingClientRect();
             const x = (e.params?.x || 0) + webviewRect.left;
             const y = (e.params?.y || 0) + webviewRect.top;
@@ -2379,28 +2513,28 @@ class AxisBrowser {
                 clientX: x,
                 clientY: y
             });
-        });
+        };
+        webview.__eventHandlers.contextMenu = contextMenuHandler;
+        webview.addEventListener('context-menu', contextMenuHandler);
         
-        // Handle IPC messages from webview (for settings page)
-        webview.addEventListener('ipc-message', (event) => {
+        const ipcMessageHandler = (event) => {
             if (!isActiveTab()) return;
             const { channel, args } = event;
             if (channel === 'settings-message') {
                 this.onEmbeddedMessage({ data: args[0] });
             }
-        });
+        };
+        webview.__eventHandlers.ipcMessage = ipcMessageHandler;
+        webview.addEventListener('ipc-message', ipcMessageHandler);
         
-        // Listen for settings updates from webview - use polling to detect changes instantly
-        webview.addEventListener('dom-ready', () => {
+        const settingsDomReadyHandler = () => {
             if (!isActiveTab()) return;
             const url = webview.getURL();
             if (url && url.includes('axis://settings')) {
-                const browser = this; // Store reference
-                // Store last known values
+                const browser = this;
                 let lastSidebarPos = null;
                 let lastSearchEngine = null;
                 
-                // Poll for changes every 500ms when settings tab is open (reduces CPU)
                 webview.__settingsPollInterval = setInterval(async () => {
                     if (!isActiveTab() || webview.isDestroyed?.()) {
                         if (webview.__settingsPollInterval) {
@@ -2422,14 +2556,12 @@ class AxisBrowser {
                             })();
                         `);
                         
-                        // Check and save sidebar position
                         if (currentValues.sidebarPosition !== null && currentValues.sidebarPosition !== lastSidebarPos) {
                             lastSidebarPos = currentValues.sidebarPosition;
                             await browser.saveSetting('sidebarPosition', currentValues.sidebarPosition);
                             browser.applySidebarPosition();
                         }
                         
-                        // Check and save search engine
                         if (currentValues.searchEngine !== null && currentValues.searchEngine !== lastSearchEngine) {
                             lastSearchEngine = currentValues.searchEngine;
                             await browser.saveSetting('searchEngine', currentValues.searchEngine);
@@ -2439,41 +2571,101 @@ class AxisBrowser {
                     }
                 }, 500);
                 
-                // Clean up on navigation
-                webview.addEventListener('did-navigate', () => {
+                const settingsNavCleanup = () => {
                     if (webview.__settingsPollInterval) {
                         clearInterval(webview.__settingsPollInterval);
                         webview.__settingsPollInterval = null;
                     }
-                }, { once: true });
+                };
+                webview.__eventHandlers._settingsNavCleanup = settingsNavCleanup;
+                webview.addEventListener('did-navigate', settingsNavCleanup, { once: true });
             }
-        });
+        };
+        webview.__eventHandlers.settingsDomReady = settingsDomReadyHandler;
+        webview.addEventListener('dom-ready', settingsDomReadyHandler);
     }
         
+    /** Remove every event listener that setupWebviewEventListeners attached. */
+    cleanupWebviewListeners(webview) {
+        if (!webview) return;
+
+        const eventMap = {
+            didStartLoading:   'did-start-loading',
+            loadCommit:        'load-commit',
+            domReady:          'dom-ready',
+            domReadyOptimize:  'dom-ready',
+            didFinishLoad:     'did-finish-load',
+            didStopLoading:    'did-stop-loading',
+            consoleMessage:    'console-message',
+            didFailLoad:       'did-fail-load',
+            newWindow:         'new-window',
+            willNavigate:      'will-navigate',
+            didNavigate:       'did-navigate',
+            didNavigateInPage: 'did-navigate-in-page',
+            pageTitleUpdated:  'page-title-updated',
+            pageFaviconUpdated:'page-favicon-updated',
+            contextMenu:       'context-menu',
+            ipcMessage:        'ipc-message',
+            settingsDomReady:  'dom-ready',
+        };
+
+        const handlers = webview.__eventHandlers;
+        if (handlers) {
+            for (const [key, eventName] of Object.entries(eventMap)) {
+                if (handlers[key]) {
+                    webview.removeEventListener(eventName, handlers[key]);
+                }
+            }
+            if (handlers._settingsNavCleanup) {
+                webview.removeEventListener('did-navigate', handlers._settingsNavCleanup);
+            }
+        }
+
+        if (webview.__wcLoadProgressHandler && webview.__wcLoadProgressWc) {
+            try {
+                webview.__wcLoadProgressWc.removeListener('did-change-load-progress', webview.__wcLoadProgressHandler);
+            } catch (_) {}
+        }
+
+        if (webview.__settingsPollInterval) {
+            clearInterval(webview.__settingsPollInterval);
+            webview.__settingsPollInterval = null;
+        }
+        if (webview.__loadingTimeout) {
+            clearTimeout(webview.__loadingTimeout);
+            webview.__loadingTimeout = null;
+        }
+        if (webview.__audioCheckInterval) {
+            clearInterval(webview.__audioCheckInterval);
+            webview.__audioCheckInterval = null;
+        }
+
+        webview.__eventHandlers = null;
+        webview.__wcLoadProgressBound = false;
+        webview.__wcLoadProgressHandler = null;
+        webview.__wcLoadProgressWc = null;
+        this.webviewListenersSetup.delete(webview);
+    }
+
     handleDNSFailure(url, targetWebview = null) {
-        
         const webview = targetWebview || this.getActiveWebview();
         if (!webview) return;
-        
-        // Don't handle DNS failures for settings tabs
+
         const tab = this.tabs.get(this.currentTab);
         if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
             return;
         }
-        
-        // Prevent infinite retry loops
-        if (this.dnsRetryCount >= 3) {
+
+        const tabId = this.currentTab;
+        const retryKey = `__dnsRetryCount_${tabId}`;
+        if ((this[retryKey] || 0) >= 3) {
             webview.src = 'https://www.google.com';
             return;
         }
-        
-        this.dnsRetryCount = (this.dnsRetryCount || 0) + 1;
-        
-        // Try simple fallback to search engine
+        this[retryKey] = (this[retryKey] || 0) + 1;
+
         const searchQuery = url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
         const fallbackUrl = this.getSearchUrl(searchQuery);
-        
-        
         const sanitizedFallbackUrl = this.sanitizeUrl(fallbackUrl);
         webview.src = sanitizedFallbackUrl || 'https://www.google.com';
     }
@@ -3866,10 +4058,10 @@ class AxisBrowser {
             }
         }
 
-        // Transparent-sites UI (URL bar / new tab) reads these from :root
+        // Transparent-sites UI (URL bar / new tab) reads these from :root — match #app shell blur/sat
         if (!forceOpaqueBlack) {
-            style.setProperty('--axis-ts-urlbar-blur', `${chrome.urlBarBlur}px`);
-            style.setProperty('--axis-ts-urlbar-sat', `${chrome.urlBarSat}%`);
+            style.setProperty('--axis-ts-urlbar-blur', `${chrome.blurMain}px`);
+            style.setProperty('--axis-ts-urlbar-sat', `${chrome.satMain}%`);
             style.setProperty('--axis-nt-search-bg', chrome.newTabSearchBg);
             style.setProperty('--axis-nt-search-blur', `${chrome.newTabSearchBlur}px`);
             style.setProperty('--axis-nt-search-sat', `${chrome.newTabSearchSat}%`);
@@ -3909,6 +4101,8 @@ class AxisBrowser {
                 slideOutAlpha: 1,
                 popupAlpha: 1,
                 urlBarAlpha: 1,
+                blurMain: 0,
+                satMain: 100,
                 backdropMain: none,
                 backdropStrong: none,
                 urlBarBackdrop: none,
@@ -3961,6 +4155,8 @@ class AxisBrowser {
             slideOutAlpha,
             popupAlpha,
             urlBarAlpha,
+            blurMain,
+            satMain,
             backdropMain: `blur(${blurMain}px) saturate(${satMain}%)`,
             backdropStrong: `blur(${blurStrong}px) saturate(${satStrong}%)`,
             urlBarBackdrop: `blur(${urlBarBlur}px) saturate(${urlBarSat}%)`,
@@ -4085,6 +4281,38 @@ class AxisBrowser {
         });
     }
 
+    getTabWebpreferencesString() {
+        const base =
+            'contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false';
+        return this.settings?.javascriptEnabled === false ? `${base},javascript=no` : base;
+    }
+
+    /** Destroy all tab webviews so they are recreated with current webpreferences (e.g. JavaScript on/off). */
+    rebuildAllTabWebviewsForWebPreferences() {
+        if (!this.tabs || this.tabs.size === 0) return;
+        const currentId = this.currentTab;
+        for (const tabId of this.tabs.keys()) {
+            const tab = this.tabs.get(tabId);
+            if (!tab?.webview) continue;
+            try {
+                this.cleanupWebviewListeners(tab.webview);
+                try {
+                    tab.webview.src = 'about:blank';
+                } catch (_) {}
+                if (tab.webview.parentNode) {
+                    tab.webview.parentNode.removeChild(tab.webview);
+                }
+            } catch (e) {
+                console.error('rebuildAllTabWebviewsForWebPreferences', e);
+            }
+            tab.webview = null;
+            this.tabs.set(tabId, tab);
+        }
+        if (currentId != null && this.tabs.has(currentId)) {
+            this.switchToTab(currentId);
+        }
+    }
+
     createTabWebview(tabId) {
         const container = document.getElementById('webviews-container');
         if (!container) return null;
@@ -4092,9 +4320,10 @@ class AxisBrowser {
         const webview = document.createElement('webview');
         webview.dataset.tabId = String(tabId);
         webview.setAttribute('allowpopups', '');
-        webview.setAttribute('webpreferences', 'contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false');
+        webview.setAttribute('webpreferences', this.getTabWebpreferencesString());
         webview.setAttribute('partition', this.isIncognitoWindow ? 'incognito' : 'persist:main');
-        webview.setAttribute('useragent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        // Let Electron use its real Chromium version in the UA string;
+        // hardcoding an old Chrome version can cause sites to refuse loading.
         webview.setAttribute('autosize', 'true');
         webview.style.cssText = `
             position: absolute;
@@ -4127,6 +4356,24 @@ class AxisBrowser {
     }
 
     createNewTab(url = null) {
+        let effectiveUrl = url;
+        if (
+            url &&
+            url !== this.NEWTAB_URL &&
+            url !== 'axis://settings' &&
+            !url.startsWith('axis:note://') &&
+            !String(url).toLowerCase().startsWith('axis:')
+        ) {
+            const sanitized = this.sanitizeUrl(url);
+            if (!sanitized) {
+                effectiveUrl = null;
+            } else if (!this.confirmInsecureHttpNavigation(sanitized)) {
+                effectiveUrl = null;
+            } else {
+                effectiveUrl = sanitized;
+            }
+        }
+
         const tabId = Date.now();
         const tabElement = document.createElement('div');
         tabElement.className = 'tab';
@@ -4135,10 +4382,10 @@ class AxisBrowser {
         // Create tab object first to check for custom icon / favicon
         const tab = {
             id: tabId,
-            url: url || this.NEWTAB_URL,
+            url: effectiveUrl || this.NEWTAB_URL,
             title: 'New Tab',
             // Use a simple search icon for the default new tab favicon
-            favicon: url ? null : 'data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><g fill=\"none\" stroke=\"%23ffffff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"7\" cy=\"7\" r=\"4.25\"/><path d=\"M10.25 10.25L13 13\"/></g></svg>',
+            favicon: effectiveUrl ? null : 'data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><g fill=\"none\" stroke=\"%23ffffff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"7\" cy=\"7\" r=\"4.25\"/><path d=\"M10.25 10.25L13 13\"/></g></svg>',
             customIcon: null,
             customIconType: null,
             pinned: false,
@@ -4173,13 +4420,13 @@ class AxisBrowser {
         const separator = this.elements.tabsSeparator;
         const tabData = {
             id: tabId,
-            url: url ? url : this.NEWTAB_URL,
+            url: this.NEWTAB_URL,
             title: 'New Tab',
             favicon: tab.favicon,
             canGoBack: false,
             canGoForward: false,
-            history: url ? [url] : [],
-            historyIndex: url ? 0 : -1,
+            history: [],
+            historyIndex: -1,
             pinned: false,
             webview: null,
             isMuted: false,
@@ -4189,11 +4436,6 @@ class AxisBrowser {
         const webview = this.createTabWebview(tabId);
         if (webview) {
             tabData.webview = webview;
-            // Start loading immediately for real URLs so the webview isn't stuck on about:blank
-            if (url && url !== this.NEWTAB_URL && url !== 'axis://settings' && !url.startsWith('axis:note://')) {
-                const sanitized = this.sanitizeUrl(url);
-                if (sanitized) webview.src = sanitized;
-            }
         }
         
         this.tabs.set(tabId, tabData);
@@ -4210,14 +4452,14 @@ class AxisBrowser {
         this.setupTabEventListeners(tabElement, tabId);
 
         // Only reset new tab page when opening a brand-new tab (not when returning to an existing one)
-        this._resetNewTabPageOnShow = !url || url === this.NEWTAB_URL;
-        // Switch to new tab
+        this._resetNewTabPageOnShow = !effectiveUrl || effectiveUrl === this.NEWTAB_URL;
+        // Switch to new tab (navigate() below is the single place that sets webview.src)
         this.switchToTab(tabId);
 
         this.updateEmptyState();
 
-        if (url) {
-            this.navigate(url);
+        if (effectiveUrl) {
+            this.navigate(effectiveUrl, { skipHttpsConfirm: true });
         }
         this.updateTabFavicon(tabId, tabElement);
         this.updateTabTooltip(tabId);
@@ -5205,6 +5447,7 @@ class AxisBrowser {
                 this.savePinnedTabs();
                 this.updatePinnedSeparatorVisibility();
                 this.updateEmptyState();
+                this.applyAmbientFromSettings();
                 return;
             }
             
@@ -5212,14 +5455,12 @@ class AxisBrowser {
             // Remove the tab's webview
             if (tab && tab.webview) {
                 try {
-                    // Stop audio detection polling
-                    this.stopAudioDetection(tab.webview);
-                    // Unload page so Chromium can release memory sooner
+                    tab.isPlayingAudio = false;
+                    this.cleanupWebviewListeners(tab.webview);
                     try { tab.webview.src = 'about:blank'; } catch (_) {}
                     if (tab.webview.parentNode) {
                         tab.webview.parentNode.removeChild(tab.webview);
                     }
-                    // Clear webview reference
                     tab.webview = null;
                     this.tabs.set(tabId, tab);
                 } catch (e) {
@@ -5227,12 +5468,10 @@ class AxisBrowser {
                 }
             }
             
-            // Remove active state from tab element
             if (tabElement) {
                 tabElement.classList.remove('active');
             }
             
-            // Update closed state (will add closed class since webview is null)
             this.updatePinnedTabClosedState(tabId);
             
             // If we closed the active tab, switch only to an unpinned tab; if none left, don't open any tab
@@ -5255,6 +5494,7 @@ class AxisBrowser {
             }
             this.savePinnedTabs();
             this.updatePinnedSeparatorVisibility();
+            this.applyAmbientFromSettings();
             return;
         }
         
@@ -5290,24 +5530,9 @@ class AxisBrowser {
             }
         }
         
-        // Remove the tab's webview
         if (tab && tab.webview) {
             try {
-                // Stop audio detection polling
-                this.stopAudioDetection(tab.webview);
-                
-                // Clear loading timeout if it exists
-                if (tab.webview.__loadingTimeout) {
-                    clearTimeout(tab.webview.__loadingTimeout);
-                    tab.webview.__loadingTimeout = null;
-                }
-                
-                // Clear any settings poll interval
-                if (tab.webview.__settingsPollInterval) {
-                    clearInterval(tab.webview.__settingsPollInterval);
-                    tab.webview.__settingsPollInterval = null;
-                }
-                // Unload page so Chromium can release memory sooner
+                this.cleanupWebviewListeners(tab.webview);
                 try { tab.webview.src = 'about:blank'; } catch (_) {}
                 if (tab.webview.parentNode) {
                     tab.webview.parentNode.removeChild(tab.webview);
@@ -5351,6 +5576,7 @@ class AxisBrowser {
                 }
             }
         }
+        this.applyAmbientFromSettings();
     }
 
     clearUnpinnedTabs() {
@@ -5466,7 +5692,7 @@ class AxisBrowser {
         }
     }
 
-    navigate(url) {
+    navigate(url, options = {}) {
         if (!url) return;
 
         // Create a tab if there are no tabs
@@ -5484,6 +5710,10 @@ class AxisBrowser {
         const sanitizedUrl = this.sanitizeUrl(url);
         if (!sanitizedUrl) {
             console.error('Invalid URL provided:', url);
+            return;
+        }
+
+        if (!options.skipHttpsConfirm && !this.confirmInsecureHttpNavigation(sanitizedUrl)) {
             return;
         }
 
@@ -5509,16 +5739,16 @@ class AxisBrowser {
         if (tab) {
             // Initialize history if empty
             if (!tab.history || tab.history.length === 0) {
-                tab.history = [url];
+                tab.history = [sanitizedUrl];
                 tab.historyIndex = 0;
-            } else if (tab.url && tab.url !== url) {
+            } else if (tab.url && tab.url !== sanitizedUrl) {
                 // Remove any forward history if we're navigating to a new URL
                 if (tab.historyIndex < tab.history.length - 1) {
                     tab.history = tab.history.slice(0, tab.historyIndex + 1);
                 }
                 
                 // Add new URL to history
-                tab.history.push(url);
+                tab.history.push(sanitizedUrl);
                 // Cap in-memory history per tab to limit RAM (back/forward still works)
                 const maxHistory = 50;
                 if (tab.history.length > maxHistory) {
@@ -5529,10 +5759,10 @@ class AxisBrowser {
                 }
             }
             
-            tab.url = url;
+            tab.url = sanitizedUrl;
             this.tabs.set(this.currentTab, tab);
         }
-        if (url !== this.NEWTAB_URL) {
+        if (sanitizedUrl !== this.NEWTAB_URL) {
             this.updateNewTabPageVisibility(false);
         }
         this.updateNavigationButtons();
@@ -5590,7 +5820,7 @@ class AxisBrowser {
         }
     }
 
-    navigateToUrlInCurrentTab(url) {
+    navigateToUrlInCurrentTab(url, options = {}) {
         // Don't navigate away from settings tabs
         const currentTab = this.tabs.get(this.currentTab);
         if (currentTab && (currentTab.url === 'axis://settings' || currentTab.isSettings)) {
@@ -5601,11 +5831,15 @@ class AxisBrowser {
         
         if (webview) {
             const sanitizedUrl = this.sanitizeUrl(url);
-            webview.src = sanitizedUrl || 'https://www.google.com';
+            if (!sanitizedUrl) return;
+            if (!options.skipHttpsConfirm && !this.confirmInsecureHttpNavigation(sanitizedUrl)) {
+                return;
+            }
+            webview.src = sanitizedUrl;
             
             // Update tab data
             if (currentTab) {
-                currentTab.url = url;
+                currentTab.url = sanitizedUrl;
             }
         }
     }
@@ -5665,6 +5899,21 @@ class AxisBrowser {
             // Change back to reload icon
             icon.className = 'fas fa-redo-alt';
             refreshBtn.title = 'Reload';
+        }
+    }
+
+    printPage() {
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+        try {
+            const wcId = webview.getWebContentsId();
+            if (wcId && window.electronAPI?.printPage) {
+                window.electronAPI.printPage(wcId);
+            } else {
+                webview.print({ silent: false, printBackground: true });
+            }
+        } catch (e) {
+            this.showNotification('Unable to print this page.', 'error');
         }
     }
 
@@ -5853,10 +6102,13 @@ class AxisBrowser {
         const sidebarPosition = this.settings.sidebarPosition || 'left';
         const searchEngine = this.settings.searchEngine || 'google';
 
-        // Get keyboard shortcuts
-        let shortcuts = {};
+        // Keyboard shortcuts (defaults + overrides; null override = disabled)
+        let shortcutDefaults = {};
+        let shortcutOverrides = {};
+        const shortcutActionsJson = JSON.stringify(getShortcutEditorActions());
         try {
-            shortcuts = await window.electronAPI.getShortcuts();
+            shortcutDefaults = await window.electronAPI.getDefaultShortcuts();
+            shortcutOverrides = await window.electronAPI.getShortcutOverrides();
         } catch (err) {
             console.error('Failed to load shortcuts:', err);
         }
@@ -6335,6 +6587,40 @@ class AxisBrowser {
             background: rgba(255, 255, 255, 0.02);
             border-radius: 8px;
         }
+        .shortcuts-editor-root { width: 100%; }
+        .shortcut-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .shortcut-row:last-child { border-bottom: none; }
+        .shortcut-row .shortcut-row-main { flex: 1; min-width: 0; }
+        .shortcut-row .shortcut-row-main span { font-size: 14px; color: rgba(255,255,255,0.85); }
+        .shortcut-row-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .shortcut-action-btn {
+            font-size: 11px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.06);
+            color: rgba(255, 255, 255, 0.85);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .shortcut-action-btn:hover { background: rgba(255, 255, 255, 0.1); }
+        .shortcut-row.shortcut-row-disabled .shortcut-input { opacity: 0.5; pointer-events: none; }
+        .shortcuts-subheading {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: rgba(255, 255, 255, 0.45);
+            margin: 16px 0 10px;
+        }
         .empty-state {
             text-align: center;
             padding: 60px 20px;
@@ -6790,6 +7076,26 @@ class AxisBrowser {
                                 <option value="yandex" ${searchEngine === 'yandex' ? 'selected' : ''}>Yandex</option>
                             </select>
                         </div>
+                        <div class="setting-row">
+                            <div class="setting-row-content">
+                                <div class="setting-row-title">HTTPS-only mode</div>
+                                <div class="setting-row-desc">Ask before loading sites that use HTTP (not HTTPS). Localhost is always allowed.</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="https-only-mode" ${this.settings.httpsOnlyMode ? 'checked' : ''}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-row-content">
+                                <div class="setting-row-title">JavaScript</div>
+                                <div class="setting-row-desc">Allow sites to run JavaScript. Turn off for minimal static pages (many sites will break).</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="javascript-enabled" ${this.settings.javascriptEnabled !== false ? 'checked' : ''}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
                     </div>
                     
                     <div class="section fade-in">
@@ -6956,97 +7262,7 @@ class AxisBrowser {
                                 <i class="fas fa-undo"></i> Reset to Defaults
                             </button>
                         </div>
-                        <div class="shortcut-group">
-                            <h4>Navigation</h4>
-                            <div class="shortcut-item editable" data-action="spotlight-search">
-                                <span class="shortcut-desc">New Tab / Spotlight</span>
-                                <input type="text" class="shortcut-input" readonly data-action="spotlight-search">
-                            </div>
-                            <div class="shortcut-item editable" data-action="close-tab">
-                                <span class="shortcut-desc">Close Tab</span>
-                                <input type="text" class="shortcut-input" readonly data-action="close-tab">
-                            </div>
-                            <div class="shortcut-item editable" data-action="new-tab">
-                                <span class="shortcut-desc">New Window</span>
-                                <input type="text" class="shortcut-input" readonly data-action="new-tab">
-                            </div>
-                            <div class="shortcut-item editable" data-action="recover-tab">
-                                <span class="shortcut-desc">Recover Closed Tab</span>
-                                <input type="text" class="shortcut-input" readonly data-action="recover-tab">
-                            </div>
-                            <div class="shortcut-item editable" data-action="refresh">
-                                <span class="shortcut-desc">Refresh Page</span>
-                                <input type="text" class="shortcut-input" readonly data-action="refresh">
-                            </div>
-                            <div class="shortcut-item editable" data-action="focus-url">
-                                <span class="shortcut-desc">Focus URL Bar</span>
-                                <input type="text" class="shortcut-input" readonly data-action="focus-url">
-                            </div>
-                            <div class="shortcut-item editable" data-action="find">
-                                <span class="shortcut-desc">Find in Page</span>
-                                <input type="text" class="shortcut-input" readonly data-action="find">
-                            </div>
-                            <div class="shortcut-item editable" data-action="copy-url">
-                                <span class="shortcut-desc">Copy Current URL</span>
-                                <input type="text" class="shortcut-input" readonly data-action="copy-url">
-                            </div>
-                        </div>
-                        
-                        <div class="shortcut-group">
-                            <h4>Tab Management</h4>
-                            <div class="shortcut-item editable" data-action="pin-tab">
-                                <span class="shortcut-desc">Pin / Unpin Tab</span>
-                                <input type="text" class="shortcut-input" readonly data-action="pin-tab">
-                            </div>
-                        </div>
-                        
-                        <div class="shortcut-group">
-                            <h4>Zoom</h4>
-                            <div class="shortcut-item editable" data-action="zoom-in">
-                                <span class="shortcut-desc">Zoom In</span>
-                                <input type="text" class="shortcut-input" readonly data-action="zoom-in">
-                            </div>
-                            <div class="shortcut-item editable" data-action="zoom-out">
-                                <span class="shortcut-desc">Zoom Out</span>
-                                <input type="text" class="shortcut-input" readonly data-action="zoom-out">
-                            </div>
-                            <div class="shortcut-item editable" data-action="reset-zoom">
-                                <span class="shortcut-desc">Reset Zoom</span>
-                                <input type="text" class="shortcut-input" readonly data-action="reset-zoom">
-                            </div>
-                        </div>
-                        
-                        <div class="shortcut-group">
-                            <h4>Panels & Menus</h4>
-                            <div class="shortcut-item editable" data-action="toggle-sidebar">
-                                <span class="shortcut-desc">Toggle Sidebar</span>
-                                <input type="text" class="shortcut-input" readonly data-action="toggle-sidebar">
-                            </div>
-                            <div class="shortcut-item editable" data-action="history">
-                                <span class="shortcut-desc">Open History</span>
-                                <input type="text" class="shortcut-input" readonly data-action="history">
-                            </div>
-                            <div class="shortcut-item editable" data-action="downloads">
-                                <span class="shortcut-desc">Open Downloads</span>
-                                <input type="text" class="shortcut-input" readonly data-action="downloads">
-                            </div>
-                            <div class="shortcut-item editable" data-action="toggle-chat">
-                                <span class="shortcut-desc">Open Chat</span>
-                                <input type="text" class="shortcut-input" readonly data-action="toggle-chat">
-                            </div>
-                            <div class="shortcut-item editable" data-action="settings">
-                                <span class="shortcut-desc">Open Settings</span>
-                                <input type="text" class="shortcut-input" readonly data-action="settings">
-                            </div>
-                        </div>
-                        
-                        <div class="shortcut-group">
-                            <h4>Data Management</h4>
-                            <div class="shortcut-item editable" data-action="clear-history">
-                                <span class="shortcut-desc">Clear History</span>
-                                <input type="text" class="shortcut-input" readonly data-action="clear-history">
-                            </div>
-                        </div>
+                        <div id="shortcuts-editor-root" class="shortcuts-editor-root"></div>
                     </div>
                 </div>
             </div>
@@ -7054,8 +7270,9 @@ class AxisBrowser {
     </div>
     
     <script>
-        // Inject keyboard shortcuts from parent
-        window._axisShortcuts = ${JSON.stringify(shortcuts)};
+        window._axisShortcutDefaults = ${JSON.stringify(shortcutDefaults)};
+        window._axisShortcutOverrides = ${JSON.stringify(shortcutOverrides)};
+        window.SHORTCUT_ACTIONS = ${shortcutActionsJson};
         
         // Navigation switching
         document.querySelectorAll('.nav-item').forEach(item => {
@@ -7088,6 +7305,20 @@ class AxisBrowser {
                 const key = 'searchEngine';
                 const value = e.target.value;
                 console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: key, value: value }));
+            });
+        }
+        
+        const httpsOnlyModeEl = document.getElementById('https-only-mode');
+        if (httpsOnlyModeEl) {
+            httpsOnlyModeEl.addEventListener('change', (e) => {
+                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'httpsOnlyMode', value: e.target.checked }));
+            });
+        }
+        
+        const javascriptEnabledEl = document.getElementById('javascript-enabled');
+        if (javascriptEnabledEl) {
+            javascriptEnabledEl.addEventListener('change', (e) => {
+                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'javascriptEnabled', value: e.target.checked }));
             });
         }
         
@@ -7545,182 +7776,182 @@ class AxisBrowser {
             });
         });
         
-        // ========== Keyboard Shortcuts Editor ==========
-        
-        // Current shortcuts state - will be injected by parent
-        let currentShortcuts = window._axisShortcuts || {};
-        let isRecording = false;
-        
-        // Format shortcut for display (convert Cmd+T to ⌘ + T)
+        // ========== Keyboard Shortcuts Editor (Active / Disabled + rebind) ==========
+        let shortcutDefaults = window._axisShortcutDefaults || {};
+        let shortcutOverrides = Object.assign({}, window._axisShortcutOverrides || {});
+        const SHORTCUT_UI = window.SHORTCUT_ACTIONS || [];
+
+        function escAttr(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        }
         function formatShortcutDisplay(shortcut) {
             if (!shortcut) return '';
-            return shortcut
+            return String(shortcut)
                 .replace(/Cmd/g, '⌘')
                 .replace(/Ctrl/g, '⌃')
                 .replace(/Alt/g, '⌥')
                 .replace(/Shift/g, '⇧')
-                .replace(/\\+/g, ' + ')
-                .replace(/\\+([A-Z0-9,\\.\\-=])/gi, ' + $1');
+                .replace(/\\+/g, ' + ');
         }
-        
-        // Parse key event to shortcut string
-        function keyEventToShortcut(e) {
-            const parts = [];
-            const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-            
-            // Escape explicitly means "cancel recording"
-            if (e.key === 'Escape') return '__CANCEL__';
-            
-            if (isMac) {
-                if (e.metaKey) parts.push('Cmd');
-                if (e.ctrlKey) parts.push('Ctrl');
-            } else {
-                if (e.ctrlKey) parts.push('Ctrl');
-                if (e.metaKey) parts.push('Meta');
-            }
-            if (e.altKey) parts.push('Alt');
-            if (e.shiftKey) parts.push('Shift');
-            
-            // Get the key
-            let key = e.key;
-            if (key === ' ') key = 'Space';
-            else if (key === '+') key = '='; // Normalize + to =
-            else if (key.length === 1) key = key.toUpperCase();
-            
-            // If user pressed only a modifier (Cmd, Ctrl, etc), keep recording
-            // and wait for a real key instead of cancelling.
-            if (['Control', 'Meta', 'Alt', 'Shift'].includes(key)) return null;
-            
-            parts.push(key);
-            return parts.join('+');
-        }
-        
-        // Update display with current shortcuts
-        function updateShortcutInputs() {
-            document.querySelectorAll('.shortcut-input').forEach(input => {
-                const action = input.dataset.action;
-                if (currentShortcuts[action]) {
-                    input.value = formatShortcutDisplay(currentShortcuts[action]);
+        function mergedActiveShortcuts() {
+            const merged = {};
+            for (let i = 0; i < SHORTCUT_UI.length; i++) {
+                const action = SHORTCUT_UI[i].action;
+                const def = shortcutDefaults[action];
+                if (!def) continue;
+                if (Object.prototype.hasOwnProperty.call(shortcutOverrides, action)) {
+                    const v = shortcutOverrides[action];
+                    if (v !== null && v !== '' && v !== '__disabled__') merged[action] = v;
+                } else {
+                    merged[action] = def;
                 }
-            });
+            }
+            return merged;
         }
-        
-        // Save shortcuts - send via console.log
-        function saveShortcuts() {
-            console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'setShortcuts', shortcuts: currentShortcuts }));
+        function persistShortcutOverrides() {
+            console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'setShortcuts', shortcuts: shortcutOverrides }));
         }
-        
-        // Pause global shortcuts during recording
         function pauseGlobalShortcuts() {
             console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'pauseShortcuts' }));
         }
-        
-        // Resume global shortcuts after recording
         function resumeGlobalShortcuts() {
             console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'resumeShortcuts' }));
         }
-        
-        // Reset shortcuts to defaults
-        function resetShortcuts() {
-            console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'resetShortcuts' }));
-        }
-        
-        // Handle messages from parent window (for receiving shortcuts data)
-        window.addEventListener('message', (event) => {
-            if (event.data && event.data.type === 'shortcutsLoaded') {
-                currentShortcuts = event.data.shortcuts || {};
-                updateShortcutInputs();
+        function renderShortcutsEditor(refreshFromWindow) {
+            if (refreshFromWindow) {
+                shortcutDefaults = window._axisShortcutDefaults || {};
+                shortcutOverrides = Object.assign({}, window._axisShortcutOverrides || {});
             }
-        });
-        
-        // Setup shortcut input listeners
-        document.querySelectorAll('.shortcut-input').forEach(input => {
-            input.addEventListener('focus', () => {
-                isRecording = true;
-                input.value = 'Press keys...';
-                input.classList.add('recording');
-                // Pause global shortcuts while recording
-                pauseGlobalShortcuts();
+            const root = document.getElementById('shortcuts-editor-root');
+            if (!root) return;
+            const merged = mergedActiveShortcuts();
+            const enabled = SHORTCUT_UI.filter(function (row) { return merged[row.action]; });
+            const disabled = SHORTCUT_UI.filter(function (row) {
+                return !merged[row.action] && shortcutDefaults[row.action];
             });
-            
-            input.addEventListener('blur', () => {
-                input.classList.remove('recording');
-                // Restore the original value if nothing was set
-                const action = input.dataset.action;
-                if (input.value === 'Press keys...' && currentShortcuts[action]) {
-                    input.value = formatShortcutDisplay(currentShortcuts[action]);
+            let html = '';
+            html += '<div class="shortcuts-subheading">Active</div>';
+            for (let i = 0; i < enabled.length; i++) {
+                const row = enabled[i];
+                const action = row.action;
+                const label = row.label;
+                const val = formatShortcutDisplay(merged[action]);
+                html += '<div class="shortcut-row" data-shortcut-action="' + escAttr(action) + '">';
+                html += '<div class="shortcut-row-main"><span>' + escAttr(label) + '</span></div>';
+                html += '<div class="shortcut-row-actions">';
+                html += '<input type="text" class="shortcut-input" readonly data-action="' + escAttr(action) + '" value="' + escAttr(val) + '">';
+                html += '<button type="button" class="shortcut-action-btn" data-disable-action="' + escAttr(action) + '">Disable</button>';
+                html += '</div></div>';
+            }
+            html += '<div class="shortcuts-subheading">Disabled</div>';
+            if (disabled.length === 0) {
+                html += '<div class="shortcut-row"><span style="font-size:12px;color:rgba(255,255,255,0.45);">No shortcuts disabled</span></div>';
+            } else {
+                for (let j = 0; j < disabled.length; j++) {
+                    const row = disabled[j];
+                    const action = row.action;
+                    const label = row.label;
+                    html += '<div class="shortcut-row shortcut-row-disabled" data-shortcut-action="' + escAttr(action) + '">';
+                    html += '<div class="shortcut-row-main"><span>' + escAttr(label) + '</span></div>';
+                    html += '<div class="shortcut-row-actions">';
+                    html += '<input type="text" class="shortcut-input" readonly disabled value="Disabled">';
+                    html += '<button type="button" class="shortcut-action-btn" data-enable-action="' + escAttr(action) + '">Enable</button>';
+                    html += '</div></div>';
                 }
-                isRecording = false;
-                // Resume global shortcuts
-                resumeGlobalShortcuts();
-            });
-            
-            input.addEventListener('keydown', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                const shortcut = keyEventToShortcut(e);
-                
-                // '__CANCEL__' means explicit cancel (Escape)
-                if (shortcut === '__CANCEL__') {
-                    input.blur();
-                    return;
-                }
-                
-                // null / empty shortcut means only modifiers were pressed so far;
-                // keep recording and wait for a non‑modifier key.
-                if (!shortcut) {
-                    return;
-                }
-                
-                // Check for conflicts
-                const action = input.dataset.action;
-                let conflict = null;
-                for (const [existingAction, existingShortcut] of Object.entries(currentShortcuts)) {
-                    if (existingAction !== action && existingShortcut === shortcut) {
-                        conflict = existingAction;
-                        break;
+            }
+            root.innerHTML = html;
+            root.querySelectorAll('.shortcut-input:not([disabled])').forEach(function (input) {
+                input.addEventListener('focus', function () {
+                    pauseGlobalShortcuts();
+                    input.value = 'Press keys...';
+                    input.dataset.recording = '1';
+                    input.classList.add('recording');
+                });
+                input.addEventListener('blur', function () {
+                    input.classList.remove('recording');
+                    input.removeAttribute('data-recording');
+                    const a = input.dataset.action;
+                    const m = mergedActiveShortcuts();
+                    if (input.value === 'Press keys...' && m[a]) {
+                        input.value = formatShortcutDisplay(m[a]);
                     }
-                }
-                
-                if (conflict) {
-                    // Show conflict warning
-                    const conflictName = conflict.replace(/-/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());
-                    if (!confirm('This shortcut is already used by "' + conflictName + '". Do you want to replace it?')) {
+                    resumeGlobalShortcuts();
+                });
+                input.addEventListener('keydown', function (e) {
+                    if (!input.dataset.recording) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.key === 'Escape') {
                         input.blur();
                         return;
                     }
-                    // Remove from conflicting action
-                    delete currentShortcuts[conflict];
-                }
-                
-                // Update the shortcut
-                currentShortcuts[action] = shortcut;
-                input.value = formatShortcutDisplay(shortcut);
-                input.classList.remove('recording');
-                input.blur();
-                
-                // Save changes
-                saveShortcuts();
-                
-                // Update other inputs in case of conflict resolution
-                updateShortcutInputs();
+                    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+                    const parts = [];
+                    if (isMac && e.metaKey) parts.push('Cmd');
+                    else if (e.ctrlKey) parts.push('Ctrl');
+                    if (e.altKey) parts.push('Alt');
+                    if (e.shiftKey) parts.push('Shift');
+                    let key = e.key;
+                    if (key === ' ') key = 'Space';
+                    else if (key.length === 1) key = key.toUpperCase();
+                    if (['Control', 'Meta', 'Alt', 'Shift'].includes(key)) return;
+                    parts.push(key);
+                    const shortcut = parts.join('+');
+                    const action = input.dataset.action;
+                    let conflict = null;
+                    const m0 = mergedActiveShortcuts();
+                    for (const k in m0) {
+                        if (Object.prototype.hasOwnProperty.call(m0, k) && k !== action && m0[k] === shortcut) {
+                            conflict = k;
+                            break;
+                        }
+                    }
+                    if (conflict) {
+                        const conflictLabel = (SHORTCUT_UI.find(function (r) { return r.action === conflict; }) || {}).label || conflict;
+                        if (!confirm('This shortcut is already used by "' + conflictLabel + '". Disable that shortcut and use it here?')) {
+                            input.blur();
+                            return;
+                        }
+                        shortcutOverrides[conflict] = null;
+                    }
+                    if (shortcut === shortcutDefaults[action]) {
+                        delete shortcutOverrides[action];
+                    } else {
+                        shortcutOverrides[action] = shortcut;
+                    }
+                    persistShortcutOverrides();
+                    input.classList.remove('recording');
+                    resumeGlobalShortcuts();
+                    input.blur();
+                });
             });
-        });
-        
-        // Reset button
+            root.querySelectorAll('[data-disable-action]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const action = btn.getAttribute('data-disable-action');
+                    shortcutOverrides[action] = null;
+                    persistShortcutOverrides();
+                });
+            });
+            root.querySelectorAll('[data-enable-action]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const action = btn.getAttribute('data-enable-action');
+                    delete shortcutOverrides[action];
+                    persistShortcutOverrides();
+                });
+            });
+        }
+        window.renderShortcutsEditor = renderShortcutsEditor;
+
         const resetBtn = document.getElementById('reset-shortcuts-btn');
         if (resetBtn) {
-            resetBtn.addEventListener('click', () => {
+            resetBtn.addEventListener('click', function () {
                 if (confirm('Reset all keyboard shortcuts to their defaults?')) {
-                    resetShortcuts();
+                    console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'resetShortcuts' }));
                 }
             });
         }
-        
-        // Initialize shortcuts display on page load
-        updateShortcutInputs();
-        
+        renderShortcutsEditor(true);
+
     </script>
 </body>
 </html>`;
@@ -7862,6 +8093,10 @@ class AxisBrowser {
                 // Save to persistent storage
                 await window.electronAPI.setSetting(key, value);
                 this.settings[key] = value;
+                if (key === 'javascriptEnabled') {
+                    this._lastJavascriptEnabled = value !== false;
+                    this.rebuildAllTabWebviewsForWebPreferences();
+                }
                 // Apply setting changes immediately
                 if (key === 'sidebarPosition') {
                     this.applySidebarPosition();
@@ -9161,6 +9396,7 @@ class AxisBrowser {
                 if (tab.isPlayingAudio !== isAudible) {
                     tab.isPlayingAudio = isAudible;
                     this.updateTabAudioIndicator(tabId, isAudible);
+                    this.applyAmbientFromSettings();
                 }
             } catch (e) {
                 // Webview might be destroyed, clean up
@@ -11947,6 +12183,7 @@ class AxisBrowser {
             }
             // Update the audio indicator to show correct state
             this.updateTabAudioIndicator(tabId, tab.isPlayingAudio);
+            this.applyAmbientFromSettings();
         } catch (error) {
             console.error('Failed to toggle tab mute:', error);
         }
@@ -12220,19 +12457,20 @@ class AxisBrowser {
         const webview = this.getActiveWebview();
         if (!webview) return;
         webview.executeJavaScript(`
-            try {
-                if (document.activeElement && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+            (function() {
+                try {
+                    var el = document.activeElement;
+                    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+                        el.select();
+                        return;
+                    }
+                    if (el && el.isContentEditable) {
+                        document.execCommand('selectAll');
+                        return;
+                    }
                     document.execCommand('selectAll');
-                } else {
-                    const selection = window.getSelection();
-                    selection.removeAllRanges();
-                    const range = document.createRange();
-                    range.selectNodeContents(document.body);
-                    selection.addRange(range);
-                }
-            } catch (e) {
-                // Select all failed
-            }
+                } catch (e) {}
+            })();
         `);
     }
 
@@ -12301,6 +12539,57 @@ class AxisBrowser {
         const webview = this.getActiveWebview();
         if (!webview) return;
         webview.executeJavaScript('document.execCommand("paste")');
+    }
+
+    /** Paste plain text from the clipboard (no rich formatting), matching destination style. */
+    async pasteMatchStyle() {
+        let text;
+        try {
+            text = await navigator.clipboard.readText();
+        } catch (e) {
+            this.showNotification('Could not read clipboard.', 'error');
+            return;
+        }
+        if (text == null) text = '';
+
+        const el = document.activeElement;
+        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+            this.insertTextInInput(el, text);
+            return;
+        }
+        if (el && el.isContentEditable) {
+            try {
+                document.execCommand('insertText', false, text);
+            } catch (_) {}
+            return;
+        }
+
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+        const payload = JSON.stringify(text);
+        webview.executeJavaScript(`
+            (function() {
+                var text = ${payload};
+                try {
+                    var el = document.activeElement;
+                    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+                        var start = el.selectionStart != null ? el.selectionStart : 0;
+                        var end = el.selectionEnd != null ? el.selectionEnd : 0;
+                        var v = el.value;
+                        el.value = v.slice(0, start) + text + v.slice(end);
+                        var pos = start + text.length;
+                        el.selectionStart = el.selectionEnd = pos;
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        return;
+                    }
+                    if (el && el.isContentEditable) {
+                        document.execCommand('insertText', false, text);
+                        return;
+                    }
+                    document.execCommand('insertText', false, text);
+                } catch (e) {}
+            })();
+        `);
     }
 
     closeCurrentActiveTab() {
@@ -16174,6 +16463,28 @@ class AxisBrowser {
         );
     }
 
+    /** True for http:// URLs that are not loopback (HTTPS-only mode prompts for these). */
+    isNonSecureHttpUrl(urlStr) {
+        if (!urlStr || typeof urlStr !== 'string') return false;
+        try {
+            const u = new URL(urlStr);
+            if (u.protocol !== 'http:') return false;
+            const h = u.hostname.toLowerCase();
+            if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]') return false;
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    confirmInsecureHttpNavigation(url) {
+        if (!this.settings?.httpsOnlyMode) return true;
+        if (!this.isNonSecureHttpUrl(url)) return true;
+        return window.confirm(
+            'This page uses HTTP (not HTTPS). Your connection would not be encrypted on this site.\n\nContinue to:\n' + url
+        );
+    }
+
     sanitizeUrl(input) {
         if (!input || typeof input !== 'string') {
             return null;
@@ -16354,26 +16665,33 @@ class AxisBrowser {
 
     // ========== Keyboard Shortcuts Management ==========
     
+    async refreshEmbeddedShortcutsEditor(webview) {
+        if (!webview) return;
+        try {
+            const defaults = await window.electronAPI.getDefaultShortcuts();
+            const overrides = await window.electronAPI.getShortcutOverrides();
+            await webview.executeJavaScript(`
+                window._axisShortcutDefaults = ${JSON.stringify(defaults)};
+                window._axisShortcutOverrides = ${JSON.stringify(overrides)};
+                if (typeof renderShortcutsEditor === 'function') { renderShortcutsEditor(true); }
+            `);
+        } catch (e) {
+            console.error('refreshEmbeddedShortcutsEditor', e);
+        }
+    }
+
     async handleShortcutsMessage(data, webview) {
         try {
             switch (data.type) {
                 case 'setShortcuts':
                     await window.electronAPI.setShortcuts(data.shortcuts);
                     this.showNotification('Keyboard shortcuts saved', 'success');
+                    await this.refreshEmbeddedShortcutsEditor(webview);
                     break;
                     
                 case 'resetShortcuts':
-                    const defaultShortcuts = await window.electronAPI.resetShortcuts();
-                    // Send the defaults back to the settings page
-                    if (webview) {
-                        webview.executeJavaScript(`
-                            window._axisShortcuts = ${JSON.stringify(defaultShortcuts)};
-                            if (typeof currentShortcuts !== 'undefined') {
-                                currentShortcuts = window._axisShortcuts;
-                                updateShortcutInputs();
-                            }
-                        `);
-                    }
+                    await window.electronAPI.resetShortcuts();
+                    await this.refreshEmbeddedShortcutsEditor(webview);
                     this.showNotification('Keyboard shortcuts reset to defaults', 'success');
                     break;
                     
@@ -16392,21 +16710,25 @@ class AxisBrowser {
     
     async loadAndSendShortcuts() {
         try {
-            const shortcuts = await window.electronAPI.getShortcuts();
-            // Send shortcuts to the settings page via webview
             const webview = this.getActiveWebview();
-            if (webview) {
-                webview.executeJavaScript(`
-                    window._axisShortcuts = ${JSON.stringify(shortcuts)};
-                    if (typeof currentShortcuts !== 'undefined') {
-                        currentShortcuts = window._axisShortcuts;
-                        updateShortcutInputs();
-                    }
-                `);
-            }
+            await this.refreshEmbeddedShortcutsEditor(webview);
         } catch (error) {
             console.error('Error loading shortcuts:', error);
         }
+    }
+
+    async saveCustomShortcuts(shortcuts) {
+        await window.electronAPI.setShortcuts(shortcuts);
+        const webview = this.getActiveWebview();
+        await this.refreshEmbeddedShortcutsEditor(webview);
+        this.showNotification('Keyboard shortcuts saved', 'success');
+    }
+
+    async resetShortcutsToDefaults() {
+        await window.electronAPI.resetShortcuts();
+        const webview = this.getActiveWebview();
+        await this.refreshEmbeddedShortcutsEditor(webview);
+        this.showNotification('Keyboard shortcuts reset to defaults', 'success');
     }
     
     // URL Bar Setup - themed bar that matches website colors
@@ -16724,16 +17046,16 @@ class AxisBrowser {
 
         if (this.settings?.transparentSites) {
             const sc = this.getShellChromeStyle();
-            urlBar.style.setProperty('backdrop-filter', sc.urlBarBackdrop);
-            urlBar.style.setProperty('-webkit-backdrop-filter', sc.urlBarBackdrop);
+            urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
+            urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
             urlBar.classList.add('dark-mode');
             const bgColor = gradientEnabled
                 ? this.smoothGradient(
                     gradientDirection,
-                    this.hexToRgba(themeColor, sc.urlBarAlpha),
-                    this.hexToRgba(gradientColor, sc.urlBarAlpha)
+                    this.hexToRgba(themeColor, sc.glassAlpha),
+                    this.hexToRgba(gradientColor, sc.glassAlpha)
                 )
-                : this.hexToRgba(themeColor, sc.urlBarAlpha);
+                : this.hexToRgba(themeColor, sc.glassAlpha);
             urlBar.style.setProperty('--url-bar-bg', bgColor);
             urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
             urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
@@ -16764,8 +17086,8 @@ class AxisBrowser {
 
         if (this.settings?.transparentSites) {
             const sc = this.getShellChromeStyle();
-            urlBar.style.setProperty('backdrop-filter', sc.urlBarBackdrop);
-            urlBar.style.setProperty('-webkit-backdrop-filter', sc.urlBarBackdrop);
+            urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
+            urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
             urlBar.classList.add('dark-mode');
             const bg = sc.newTabSearchBg;
             urlBar.style.setProperty('--url-bar-bg', bg);
@@ -16888,18 +17210,17 @@ class AxisBrowser {
 
                 if (this.settings?.transparentSites) {
                     const sc = this.getShellChromeStyle();
-                    urlBar.style.setProperty('backdrop-filter', sc.urlBarBackdrop);
-                    urlBar.style.setProperty('-webkit-backdrop-filter', sc.urlBarBackdrop);
+                    urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
+                    urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
 
                     let bgColor;
+                    const ga = sc.glassAlpha.toFixed(3);
                     if (isDefaultOrError) {
                         // Transparent page backgrounds yield "default" light — use neutral dark glass (not solid white)
                         isDark = true;
-                        bgColor = `rgba(14, 15, 18, ${sc.urlBarTintDefault.toFixed(3)})`;
-                    } else if (isDark) {
-                        bgColor = `rgba(${r}, ${g}, ${b}, ${sc.urlBarTintDark.toFixed(3)})`;
+                        bgColor = `rgba(14, 15, 18, ${ga})`;
                     } else {
-                        bgColor = `rgba(${r}, ${g}, ${b}, ${sc.urlBarTintLight.toFixed(3)})`;
+                        bgColor = `rgba(${r}, ${g}, ${b}, ${ga})`;
                     }
 
                     if (isDark) {
@@ -16947,9 +17268,9 @@ class AxisBrowser {
             if (this.settings?.transparentSites) {
                 urlBar.classList.add('dark-mode');
                 const sc = this.getShellChromeStyle();
-                urlBar.style.setProperty('backdrop-filter', sc.urlBarBackdrop);
-                urlBar.style.setProperty('-webkit-backdrop-filter', sc.urlBarBackdrop);
-                const bg = `rgba(14, 15, 18, ${sc.urlBarTintDefault.toFixed(3)})`;
+                urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
+                urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
+                const bg = `rgba(14, 15, 18, ${sc.glassAlpha.toFixed(3)})`;
                 urlBar.style.setProperty('--url-bar-bg', bg);
                 urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
                 urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
