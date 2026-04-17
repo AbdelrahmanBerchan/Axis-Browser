@@ -1,11 +1,13 @@
 {
   "name": "axis",
-  "version": "0.2.5",
+  "productName": "Axis",
+  "version": "0.2.6",
   "description": "A minimalistic, customizable, and beautiful browser built on Electron",
   "main": "src/main.js",
   "scripts": {
-    "start": "npx electron .",
-    "dev": "npx electron . --dev",
+    "postinstall": "node scripts/patch-electron-mac-display-name.js",
+    "start": "node scripts/run-electron.js",
+    "dev": "node scripts/run-electron.js --dev",
     "build": "npx electron-builder",
     "dist": "npx electron-builder --publish=never"
   },
@@ -34,6 +36,7 @@
   },
   "dependencies": {
     "electron-store": "^8.1.0",
+    "jimp": "^0.22.12",
     "qrcode": "^1.5.4"
   },
   "build": {
@@ -45,10 +48,13 @@
     "files": [
       "src/**/*",
       "assets/**/*",
+      "Axis_logo.png",
       "node_modules/**/*"
     ],
+    "icon": "Axis_logo.png",
     "mac": {
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "icon": "Axis_logo.png"
     },
     "win": {
       "target": "nsis"
