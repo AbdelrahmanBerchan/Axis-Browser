@@ -1376,24 +1376,52 @@ body.resizing .ai-chat-resize-handle {
     background: transparent;
     margin: 0;
     flex-shrink: 0;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     pointer-events: auto;
     display: flex;
     align-items: center;
+    overflow: visible;
+    /* Truncated line end: small gap + ~Clear+chevron width (tune via this one variable) */
+    --tabs-separator-short-right: calc(4px + 42px);
 }
 
-/* The actual separator line – thin so it doesn't dominate */
-.tabs-separator::before {
+/*
+ * Two line layers crossfade (no sliding): full-width vs truncated before Clear.
+ * --tabs-separator-short-right: distance from separator’s right edge to line end (gap + control).
+ */
+.tabs-separator::before,
+.tabs-separator::after {
     content: '';
     position: absolute;
     top: 50%;
     left: 16px;
-    right: 16px;
     height: 0.5px;
     background: var(--border-color-light);
     transform: translateY(-50%);
     z-index: 1;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+/* Idle: full line between side insets */
+.tabs-separator::before {
+    right: 16px;
+    opacity: 1;
+}
+
+/* Hover: shorter line (fades in); full line fades out — no right-edge slide */
+.tabs-separator::after {
+    right: var(--tabs-separator-short-right);
+    opacity: 0;
+}
+
+#sidebar:hover .tabs-separator::before {
+    opacity: 0;
+}
+
+#sidebar:hover .tabs-separator::after {
+    opacity: 1;
 }
 
 /* Hide separator if it's the first child (no pinned tabs above) */
@@ -1401,7 +1429,7 @@ body.resizing .ai-chat-resize-handle {
     display: none;
 }
 
-/* Clear unpinned tabs button – no visible box; thin strip behind text masks separator line under button */
+/* Clear unpinned — line swaps via ::before/::after opacity crossfade on #sidebar:hover */
 .clear-unpinned-btn {
     position: absolute;
     right: 0;
@@ -1420,27 +1448,12 @@ body.resizing .ai-chat-resize-handle {
     cursor: pointer;
     opacity: 0;
     pointer-events: none;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 2;
     white-space: nowrap;
     font-family: inherit;
     box-shadow: none;
     outline: none;
-    isolation: isolate;
-}
-
-/* Thin strip behind button text only – matches sidebar so separator doesn’t show under button, no visible box */
-.clear-unpinned-btn::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
-    height: 4px;
-    transform: translateY(-50%);
-    background: var(--sidebar-background);
-    z-index: -1;
-    border-radius: 0;
 }
 
 body.light-theme .clear-unpinned-btn {
@@ -1507,13 +1520,15 @@ body.light-theme .clear-unpinned-btn:active {
 }
 
 /* Separator color change when dragging over pinned/unpinned sections */
-.tabs-separator.drag-over-pinned::before {
+.tabs-separator.drag-over-pinned::before,
+.tabs-separator.drag-over-pinned::after {
     background: rgba(255, 193, 7, 0.8);
     height: 1px;
     box-shadow: 0 0 8px rgba(255, 193, 7, 0.5);
 }
 
-.tabs-separator.drag-over-unpinned::before {
+.tabs-separator.drag-over-unpinned::before,
+.tabs-separator.drag-over-unpinned::after {
     background: rgba(100, 180, 255, 0.8);
     height: 1px;
     box-shadow: 0 0 8px rgba(100, 180, 255, 0.5);
@@ -1524,8 +1539,9 @@ body.light-theme .clear-unpinned-btn:active {
     height: 14px;
 }
 
-.tabs-separator.drag-active::before {
-    transition: all 0.2s ease;
+.tabs-separator.drag-active::before,
+.tabs-separator.drag-active::after {
+    transition: opacity 0.2s ease;
 }
 
 /* "+ New Tab" button – matches tab layout (favicon-sized icon + label), no gradient */
@@ -6137,9 +6153,10 @@ body.light-theme .shortcut-desc {
 .tab-group-content {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.3s cubic-bezier(0.33, 1, 0.68, 1),
-                opacity 0.26s cubic-bezier(0.33, 1, 0.68, 1),
-                padding 0.3s cubic-bezier(0.33, 1, 0.68, 1);
+    /* Match TAB_GROUP_ANIM_MS / easing in renderer.js toggleTabGroup */
+    transition: max-height 0.2s cubic-bezier(0.22, 1, 0.32, 1),
+                opacity 0.16s ease-out,
+                padding 0.2s cubic-bezier(0.22, 1, 0.32, 1);
     opacity: 0;
     padding: 0 6px;
     display: none;
@@ -6160,9 +6177,9 @@ body.light-theme .shortcut-desc {
     padding: 2px 6px 6px 6px;
     visibility: visible;
     display: flex;
-    transition: max-height 0.3s cubic-bezier(0.33, 1, 0.68, 1),
-                opacity 0.26s cubic-bezier(0.33, 1, 0.68, 1),
-                padding 0.3s cubic-bezier(0.33, 1, 0.68, 1);
+    transition: max-height 0.2s cubic-bezier(0.22, 1, 0.32, 1),
+                opacity 0.16s ease-out,
+                padding 0.2s cubic-bezier(0.22, 1, 0.32, 1);
 }
 
 .tab-group.toggling .tab-group-content {
