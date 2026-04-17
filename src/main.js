@@ -45,9 +45,9 @@ function applySquircleAlphaToJimp(image) {
 function getDockSquircleCachePath() {
   try {
     // Bump filename when squircle pipeline changes so stale cache is not reused.
-    return path.join(app.getPath('userData'), 'dock-squircle-cache-v3.png');
+    return path.join(app.getPath('userData'), 'dock-squircle-cache-v4.png');
   } catch (_) {
-    return path.join(os.tmpdir(), 'axis-browser-dock-squircle-cache-v3.png');
+    return path.join(os.tmpdir(), 'axis-browser-dock-squircle-cache-v4.png');
   }
 }
 
@@ -72,8 +72,11 @@ async function getMacSquircleIconNativeImage() {
   } catch (_) {}
 
   let Jimp;
+  let JimpMime;
   try {
-    Jimp = require('jimp');
+    const jimpPkg = require('jimp');
+    Jimp = jimpPkg.Jimp;
+    JimpMime = jimpPkg.JimpMime;
   } catch (_) {
     return getAppIconNativeImage();
   }
@@ -84,18 +87,16 @@ async function getMacSquircleIconNativeImage() {
     // shrink that bitmap — do NOT inset the logo *before* masking: a small square bitmap fully inside
     // the squircle reads as a square tile (no curved silhouette). System icons look smaller because the
     // whole squircle is scaled down with margin, not because the art is an unmasked square.
-    await image.contain(side, side);
+    image.contain({ w: side, h: side });
     applySquircleAlphaToJimp(image);
     const visualScale = 0.78;
     const inner = Math.round(side * visualScale);
-    await image.resize(inner, inner);
-    const padded = await new Promise((resolve, reject) => {
-      new Jimp(side, side, 0x00000000, (err, img) => (err ? reject(err) : resolve(img)));
-    });
+    image.resize({ w: inner, h: inner });
+    const padded = new Jimp({ width: side, height: side, color: 0x00000000 });
     const ox = Math.round((side - inner) / 2);
     const oy = Math.round((side - inner) / 2);
     padded.composite(image, ox, oy);
-    const buf = await padded.getBufferAsync(Jimp.MIME_PNG);
+    const buf = await padded.getBuffer(JimpMime.png);
     const out = nativeImage.createFromBuffer(buf);
     if (!out.isEmpty()) {
       macSquircleIconNativeImageCache = out;
