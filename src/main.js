@@ -1,2537 +1,786 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen, nativeImage, clipboard } = require('electron');
-const path = require('path');
-const Store = require('electron-store');
-const fs = require('fs');
-const os = require('os');
-const { exec } = require('child_process');
-
-// Initialize settings store
-const store = new Store();
-
-// Initialize history and downloads stores
-const historyStore = new Store({ name: 'history' });
-const downloadsStore = new Store({ name: 'downloads' });
-const notesStore = new Store({ name: 'notes' });
-
-function normalizePermissionOrigin(url) {
-  if (!url || typeof url !== 'string') return null;
-  try {
-    return new URL(url).origin;
-  } catch {
-    try {
-      const s = url.trim();
-      if (!s) return null;
-      return new URL(s.includes('://') ? s : `https://${s}`).origin;
-    } catch {
-      return null;
-    }
-  }
-}
-
-function cleanSitePermissionOverrides(raw) {
-  const out = {};
-  if (!raw || typeof raw !== 'object') return out;
-  for (const [origin, perms] of Object.entries(raw)) {
-    if (!origin || typeof perms !== 'object' || !perms) continue;
-    const row = {};
-    for (const k of ['camera', 'microphone', 'notifications', 'geolocation']) {
-      if (perms[k] === 'allow' || perms[k] === 'deny') row[k] = perms[k];
-    }
-    out[origin] = row;
-  }
-  return out;
-}
-
-/** @param {string|null} origin @param {string} permission Electron permission id */
-function getSitePermissionDecision(origin, permission) {
-  const overrides = store.get('sitePermissionOverrides', {});
-  if (!origin || typeof overrides !== 'object') return null;
-  const site = overrides[origin];
-  if (!site || typeof site !== 'object') return null;
-
-  if (permission === 'media') {
-    const cam = site.camera;
-    const mic = site.microphone;
-    if (cam === 'deny' || mic === 'deny') return 'deny';
-    if (cam === 'allow' || mic === 'allow') return 'allow';
-    return null;
-  }
-
-  if (permission === 'geolocation' || permission === 'notifications') {
-    const v = site[permission];
-    if (v === 'deny' || v === 'allow') return v;
-    return null;
-  }
-
-  return null;
-}
-
-function permissionRequestHandler(webContents, permission, callback, details) {
-  const requestingUrl = details && details.requestingUrl;
-  const origin = normalizePermissionOrigin(requestingUrl);
-  const decided = getSitePermissionDecision(origin, permission);
-  if (decided === 'deny') {
-    callback(false);
-    return;
-  }
-  if (decided === 'allow') {
-    callback(true);
-    return;
-  }
-
-  const allowedPermissions = [
-    'display-capture',
-    'fullscreen',
-    'geolocation',
-    'idle-detection',
-    'media',
-    'mediaKeySystem',
-    'midi',
-    'midiSysex',
-    'notifications',
-    'pointerLock',
-    'keyboardLock',
-    'openExternal',
-    'speaker-selection',
-    'storage-access',
-    'top-level-storage-access',
-    'window-management',
-    'clipboard-read',
-    'clipboard-sanitized-write',
-    'unknown',
-    'fileSystem'
-  ];
-
-  callback(allowedPermissions.includes(permission));
-}
-
-function permissionCheckHandler(webContents, permission, requestingOrigin, details) {
-  const origin = normalizePermissionOrigin(requestingOrigin) || requestingOrigin;
-  const decided = getSitePermissionDecision(origin, permission);
-  if (decided === 'deny') return false;
-  if (decided === 'allow') return true;
-  return true;
-}
-
-function installSessionPermissionHandlers(sess) {
-  sess.setPermissionRequestHandler(permissionRequestHandler);
-  sess.setPermissionCheckHandler(permissionCheckHandler);
-}
-
-// Keep a global reference of the window object
-let mainWindow;
-let sessionConfigured = false;
-
-/** One-time session configuration — must only run once per app lifecycle. */
-function configureSession() {
-  if (sessionConfigured) return;
-  sessionConfigured = true;
-
-  const mainSession = session.defaultSession;
-
-  try {
-    if (mainSession.registerPreloadScript) {
-      mainSession.registerPreloadScript({
-        filePath: path.join(__dirname, 'preload.js'),
-        type: 'frame'
-      });
-    } else if (mainSession.setPreloads) {
-      mainSession.setPreloads([path.join(__dirname, 'preload.js')]);
-    }
-  } catch (error) {
-    console.warn('Could not register preload script:', error);
-  }
-
-  setImmediate(() => {
-    try {
-      mainSession.clearHostResolverCache();
-      mainSession.setSpellCheckerDictionaryDownloadURL('');
-    } catch (_) {}
-  });
-
-  installSessionPermissionHandlers(mainSession);
-  installSessionPermissionHandlers(session.fromPartition('persist:main'));
-  try {
-    installSessionPermissionHandlers(session.fromPartition('incognito'));
-  } catch (_) {
-    console.warn('Could not attach permission handlers to incognito session');
-  }
-
-  // Trust all certificates for every session (default, persist:main, incognito)
-  const certBypass = (request, callback) => callback(0);
-  mainSession.setCertificateVerifyProc(certBypass);
-  try { session.fromPartition('persist:main').setCertificateVerifyProc(certBypass); } catch (_) {}
-  try { session.fromPartition('incognito').setCertificateVerifyProc(certBypass); } catch (_) {}
-}
-
-/** macOS: vibrancy shows desktop through the window; turn it off when settings “Window glass brightness” is 0 (fully opaque chrome). */
-function applyVibrancyToWindow(browserWindow) {
-  if (!browserWindow || browserWindow.isDestroyed()) return;
-  if (process.platform !== 'darwin') return;
-  const raw = store.get('windowChromeLight', 50);
-  const n = Number(raw);
-  const solidChrome = Number.isFinite(n) ? n <= 0 : false;
-  try {
-    if (solidChrome) {
-      browserWindow.setVibrancy(null);
-    } else {
-      browserWindow.setVibrancy('under-window');
-    }
-  } catch (_) {
-    /* ignore */
-  }
-}
-
-function applyMainWindowVibrancyFromStore() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  applyVibrancyToWindow(mainWindow);
-}
-let settingsWindow = null;
-let isQuitConfirmed = false;
-let isUserQuitting = false;
-
-/** macOS frameless + hiddenInset: corner inset when sidebar is left; mirrors to top-right when sidebar is right. */
-const MACOS_TRAFFIC_LIGHT_INSET = 16;
-/**
- * Cluster width for right placement: same math as left uses inset 16 — (x + cluster) ≈ width − 16.
- */
-const MACOS_TRAFFIC_LIGHT_CLUSTER_WIDTH_RIGHT = 52;
-
-function positionMacTrafficLights(browserWindow, sidebarOnRight) {
-  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
-  const { width } = browserWindow.getBounds();
-  const inset = MACOS_TRAFFIC_LIGHT_INSET;
-  if (sidebarOnRight) {
-    const x = Math.max(8, Math.round(width - MACOS_TRAFFIC_LIGHT_CLUSTER_WIDTH_RIGHT - inset));
-    browserWindow.setWindowButtonPosition({ x, y: inset });
-  } else {
-    browserWindow.setWindowButtonPosition({ x: inset, y: inset });
-  }
-}
-
-function attachMacTrafficLightResize(browserWindow) {
-  if (process.platform !== 'darwin' || !browserWindow) return;
-  browserWindow.on('resize', () => {
-    positionMacTrafficLights(browserWindow, !!browserWindow.__axisSidebarRight);
-  });
-}
-
-// ========== Keyboard Shortcuts (Global Functions) ==========
-
-// Default keyboard shortcuts
-const getDefaultShortcuts = () => {
-  const cmdOrCtrl = process.platform === 'darwin' ? 'Cmd' : 'Ctrl';
-  return {
-    'close-tab': `${cmdOrCtrl}+W`,
-    'spotlight-search': `${cmdOrCtrl}+T`,
-    'toggle-sidebar': `${cmdOrCtrl}+B`,
-    'refresh': `${cmdOrCtrl}+R`,
-    'focus-url': `${cmdOrCtrl}+L`,
-    'print': `${cmdOrCtrl}+P`,
-    'pin-tab': `${cmdOrCtrl}+Shift+P`,
-    'new-tab': `${cmdOrCtrl}+N`,
-    'duplicate-tab': `${cmdOrCtrl}+D`,
-    'settings': `${cmdOrCtrl}+,`,
-    'recover-tab': `${cmdOrCtrl}+Z`,
-    'history': `${cmdOrCtrl}+Y`,
-    'downloads': `${cmdOrCtrl}+J`,
-    'toggle-chat': `${cmdOrCtrl}+Shift+E`,
-    'toggle-mute-tab': `${cmdOrCtrl}+Shift+M`,
-    'find': `${cmdOrCtrl}+F`,
-    'select-all': `${cmdOrCtrl}+A`,
-    'paste-match-style': `${cmdOrCtrl}+Shift+V`,
-    'copy-url': `${cmdOrCtrl}+Shift+C`,
-    'clear-history': `${cmdOrCtrl}+Shift+H`,
-    'zoom-in': `${cmdOrCtrl}+=`,
-    'zoom-out': `${cmdOrCtrl}+-`,
-    'reset-zoom': `${cmdOrCtrl}+0`,
-    'switch-tab-1': `${cmdOrCtrl}+1`,
-    'switch-tab-2': `${cmdOrCtrl}+2`,
-    'switch-tab-3': `${cmdOrCtrl}+3`,
-    'switch-tab-4': `${cmdOrCtrl}+4`,
-    'switch-tab-5': `${cmdOrCtrl}+5`,
-    'switch-tab-6': `${cmdOrCtrl}+6`,
-    'switch-tab-7': `${cmdOrCtrl}+7`,
-    'switch-tab-8': `${cmdOrCtrl}+8`,
-    'switch-tab-9': `${cmdOrCtrl}+9`
-  };
-};
-
-/**
- * Merged active shortcuts for global registration and menus.
- * Store may set an action to null / '' / '__disabled__' to turn that shortcut off.
- */
-const getShortcuts = () => {
-  const defaults = getDefaultShortcuts();
-  const custom = store.get('keyboardShortcuts', null);
-  if (!custom) return { ...defaults };
-  const out = {};
-  for (const action of Object.keys(defaults)) {
-    if (Object.prototype.hasOwnProperty.call(custom, action)) {
-      const val = custom[action];
-      if (val !== null && val !== '' && val !== '__disabled__') {
-        out[action] = val;
-      }
-    } else {
-      out[action] = defaults[action];
-    }
-  }
-  for (const [action, val] of Object.entries(custom)) {
-    if (!defaults[action] && val !== null && val !== '' && val !== '__disabled__') {
-      out[action] = val;
-    }
-  }
-  return out;
-};
-
-/** Raw user overrides (null = disabled for that action). */
-const getShortcutOverrides = () => store.get('keyboardShortcuts', null) || {};
-
-// Get the active Axis window (prefers focused, then main, then any)
-function getActiveAxisWindow() {
-  const focused = BrowserWindow.getFocusedWindow();
-  if (focused && !focused.isDestroyed()) return focused;
-  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
-  const all = BrowserWindow.getAllWindows().filter(w => !w.isDestroyed());
-  return all.length > 0 ? all[0] : null;
-}
-
-// Register global shortcuts (works in all Axis windows, including incognito)
-const registerShortcuts = () => {
-  const shortcuts = getShortcuts();
-
-  Object.entries(shortcuts).forEach(([action, key]) => {
-    if (action === 'find') return;
-    // Cmd/Ctrl+A must be handled in the renderer so URL bar and other shell fields keep native select-all.
-    if (action === 'select-all') {
-      const norm = (key || '').replace(/\s/g, '').toLowerCase();
-      if (norm === 'cmd+a' || norm === 'ctrl+a') return;
-    }
-    if (!key || typeof key !== 'string') return;
-    try {
-      globalShortcut.register(key, () => {
-        const win = getActiveAxisWindow();
-        if (win) {
-          win.webContents.send('browser-shortcut', action);
-        }
-      });
-    } catch (error) {
-      console.error(`Failed to register shortcut ${key} for action ${action}:`, error);
-    }
-  });
-};
-
-const unregisterShortcuts = () => {
-  globalShortcut.unregisterAll();
-};
-
-// Apply consolidated Chromium/Electron performance flags as early as possible
-(function applyPerformanceFlags() {
-  app.commandLine.appendSwitch('log-level', '3');
-  app.commandLine.appendSwitch('disable-logging');
-
-  app.commandLine.appendSwitch('ignore-gpu-blocklist');
-  app.commandLine.appendSwitch('enable-gpu-rasterization');
-  app.commandLine.appendSwitch('enable-zero-copy');
-  app.commandLine.appendSwitch('enable-oop-rasterization');
-  app.commandLine.appendSwitch('enable-accelerated-2d-canvas');
-  app.commandLine.appendSwitch('enable-partial-raster');
-  app.commandLine.appendSwitch('enable-lcd-text');
-
-  app.commandLine.appendSwitch('disable-background-timer-throttling');
-  app.commandLine.appendSwitch('disable-renderer-backgrounding');
-  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-
-  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=2048 --max-semi-space-size=64 --no-expose-gc');
-
-  app.commandLine.appendSwitch('renderer-process-limit', '25');
-  app.commandLine.appendSwitch('max-active-webgl-contexts', '8');
-  app.commandLine.appendSwitch('disable-hang-monitor');
-  app.commandLine.appendSwitch('disable-background-networking');
-  app.commandLine.appendSwitch('disable-default-apps');
-  app.commandLine.appendSwitch('disable-extensions');
-  app.commandLine.appendSwitch('disable-sync');
-  app.commandLine.appendSwitch('disable-translate');
-  app.commandLine.appendSwitch('disable-breakpad');
-  app.commandLine.appendSwitch('disable-client-side-phishing-detection');
-  app.commandLine.appendSwitch('disable-component-update');
-  app.commandLine.appendSwitch('disable-domain-reliability');
-
-  app.commandLine.appendSwitch('enable-tcp-fast-open');
-  app.commandLine.appendSwitch('enable-quic');
-
-  // Single enable-features call to avoid overwriting
-  app.commandLine.appendSwitch(
-    'enable-features',
-    [
-      'BackForwardCache',
-      'CanvasOopRasterization',
-      'Accelerated2dCanvas',
-      'VaapiVideoDecoder',
-      'WebGPU',
-      'WebUIDarkMode',
-      'VizDisplayCompositor',
-      'UseSkiaRenderer'
-    ].join(',')
-  );
-  // Single disable-features call (appendSwitch overwrites, so must be one call)
-  app.commandLine.appendSwitch(
-    'disable-features',
-    [
-      'CalculateNativeWinOcclusion',
-      'AutoExpandDetailsElement',
-      'AutofillEnableAccountWalletStorage',
-      'ChromeWhatsNewUI',
-      'DevicePosture',
-      'FedCm',
-      'InterestFeedContentSuggestions',
-      'MediaRouter',
-      'OptimizationHints',
-      'Prerender2',
-      'Translate',
-      'BlinkGenPropertyTrees',
-      'ThrottleForegroundTimers',
-      'LazyFrameLoading',
-      'LazyImageLoading',
-      'DeferredImageDecoding',
-      'ViewportSegments',
-      'ContentVisibility'
-    ].join(',')
-  );
-})();
-
-function createWindow() {
-  // Create the browser window with optimized settings
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    title: 'Axis Browser',
-    icon: path.join(__dirname, 'Axis_logo.png'),
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      webviewTag: true,
-      preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: false,
-      offscreen: false,
-      experimentalFeatures: true,
-      v8CacheOptions: 'code',
-      spellcheck: false,
-      webSecurity: true,
-      webgl: true,
-      enableBlinkFeatures:
-        'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn'
-    },
-    titleBarStyle: 'hiddenInset',
-    frame: false,
-    show: false,
-    transparent: true,
-    backgroundColor: '#00000000',
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
-      : {})
-  });
-
-  if (process.platform === 'darwin' && mainWindow) {
-    mainWindow.__axisSidebarRight = false;
-    attachMacTrafficLightResize(mainWindow);
-  }
-
-  // Load the app
-  mainWindow.loadFile('src/index.html');
-
-  // Show window when ready
-  mainWindow.once('ready-to-show', () => {
-    if (process.platform === 'darwin' && mainWindow && !mainWindow.isDestroyed()) {
-      positionMacTrafficLights(mainWindow, !!mainWindow.__axisSidebarRight);
-    }
-    applyMainWindowVibrancyFromStore();
-    mainWindow.show();
-    // Show window controls by default (sidebar is visible)
-    mainWindow.setWindowButtonVisibility(true);
-  });
-
-  // Handle window closed
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
-
-  // Intercept close - only show quit confirmation for actual quit actions, not window close
-  mainWindow.on('close', (e) => {
-    // On macOS, clicking X should just hide the window, not quit
-    if (process.platform === 'darwin' && !isUserQuitting) {
-      // Just hide the window instead of closing it
-      e.preventDefault();
-      mainWindow.hide();
-      return;
-    }
-    
-    // For actual quit actions (non-macOS), confirmation is sent from main via request-quit
-    if (!isQuitConfirmed && isUserQuitting) {
-      e.preventDefault();
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('request-quit');
-      }
-    }
-  });
-
-  // Handle new window requests with URL validation
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    // Validate URL before allowing new windows
-    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-      // Additional security checks - reject dangerous URL schemes
-      const lowerUrl = url.toLowerCase();
-      if (lowerUrl.startsWith('javascript:') || 
-          lowerUrl.startsWith('data:') || 
-          lowerUrl.startsWith('vbscript:') ||
-          lowerUrl.startsWith('file:')) {
-        return { action: 'deny' };
-      }
-      return { action: 'allow' };
-    }
-    return { action: 'deny' };
-  });
-
-  // Create application menu
-  createMenu();
-}
-
-function openSettingsWindow(tab = null) {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.focus();
-    if (tab) {
-      settingsWindow.webContents.send('switch-settings-tab', tab);
-    }
-    return;
-  }
-  const windowOptions = {
-    width: 760,
-    height: 560,
-    minWidth: 560,
-    minHeight: 400,
-    title: 'Settings',
-    show: false,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
-    }
-  };
-  if (process.platform === 'darwin') {
-    windowOptions.backgroundColor = '#f5f5f7';
-  }
-  settingsWindow = new BrowserWindow(windowOptions);
-  const settingsPath = path.join(__dirname, 'settings.html');
-  settingsWindow.loadFile(settingsPath, { hash: tab || '' });
-  settingsWindow.once('ready-to-show', () => {
-    settingsWindow.show();
-  });
-  settingsWindow.on('closed', () => {
-    settingsWindow = null;
-  });
-}
-
-function menuAccel(key) {
-  return key && typeof key === 'string' ? key : undefined;
-}
-
-/** Open a URL in a new tab in the main Axis window (not the system browser). */
-function openUrlInAxisBrowser(url) {
-  if (!url || typeof url !== 'string') return;
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-  mainWindow.webContents.send('open-url-in-browser', url);
-}
-
-function isSafeHttpUrl(url) {
-  if (!url || typeof url !== 'string') return false;
-  try {
-    const u = new URL(url);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-/** Open http(s) URL in a new normal browser window (secondary window; does not replace mainWindow). */
-function openUrlInNewBrowserWindow(url) {
-  if (!isSafeHttpUrl(url)) return;
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    title: 'Axis Browser',
-    icon: path.join(__dirname, 'Axis_logo.png'),
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      webviewTag: true,
-      preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: false,
-      offscreen: false,
-      experimentalFeatures: true,
-      v8CacheOptions: 'code',
-      spellcheck: false,
-      webSecurity: true,
-      webgl: true,
-      enableBlinkFeatures:
-        'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn'
-    },
-    titleBarStyle: 'hiddenInset',
-    frame: false,
-    show: false,
-    transparent: true,
-    backgroundColor: '#00000000',
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
-      : {})
-  });
-
-  if (process.platform === 'darwin') {
-    win.__axisSidebarRight = false;
-    attachMacTrafficLightResize(win);
-  }
-
-  win.webContents.once('did-finish-load', () => {
-    setTimeout(() => {
-      if (!win.isDestroyed()) {
-        win.webContents.send('open-url-in-browser', url);
-      }
-    }, 400);
-  });
-
-  win.loadFile('src/index.html');
-
-  win.webContents.setWindowOpenHandler(({ url: openUrl }) => {
-    if (openUrl && (openUrl.startsWith('http://') || openUrl.startsWith('https://'))) {
-      const lowerUrl = openUrl.toLowerCase();
-      if (
-        lowerUrl.startsWith('javascript:') ||
-        lowerUrl.startsWith('data:') ||
-        lowerUrl.startsWith('vbscript:') ||
-        lowerUrl.startsWith('file:')
-      ) {
-        return { action: 'deny' };
-      }
-      return { action: 'allow' };
-    }
-    return { action: 'deny' };
-  });
-
-  win.once('ready-to-show', () => {
-    if (process.platform === 'darwin' && !win.isDestroyed()) {
-      positionMacTrafficLights(win, !!win.__axisSidebarRight);
-    }
-    applyVibrancyToWindow(win);
-    win.show();
-    win.setWindowButtonVisibility(true);
-  });
-}
-
-function createMenu() {
-  // Use current shortcuts so menu accelerators always match user settings (omit if disabled)
-  const shortcuts = getShortcuts();
-  const closeTabShortcut = menuAccel(shortcuts['close-tab']);
-  const settingsShortcut = menuAccel(shortcuts['settings']);
-  const newTabShortcut = menuAccel(shortcuts['new-tab']);
-  const refreshShortcut = menuAccel(shortcuts['refresh']);
-  const toggleSidebarShortcut = menuAccel(shortcuts['toggle-sidebar']);
-  const historyShortcut = menuAccel(shortcuts['history']);
-  const downloadsShortcut = menuAccel(shortcuts['downloads']);
-  const toggleChatShortcut = menuAccel(shortcuts['toggle-chat']);
-  const toggleMuteTabShortcut = menuAccel(shortcuts['toggle-mute-tab']);
-  const findShortcut = menuAccel(shortcuts['find']);
-  const selectAllShortcut = menuAccel(shortcuts['select-all']);
-  const pasteMatchStyleShortcut = menuAccel(shortcuts['paste-match-style']);
-  const printShortcut = menuAccel(shortcuts['print']);
-  const focusUrlShortcut = menuAccel(shortcuts['focus-url']);
-  const recoverTabShortcut = menuAccel(shortcuts['recover-tab']);
-  const zoomInShortcut = menuAccel(shortcuts['zoom-in']);
-  const zoomOutShortcut = menuAccel(shortcuts['zoom-out']);
-  const resetZoomShortcut = menuAccel(shortcuts['reset-zoom']);
-
-  const template = [];
-
-  // Axis (app) menu - first on macOS for native feel
-  if (process.platform === 'darwin') {
-    const appName = app.name || 'Axis';
-    template.push({
-      label: appName,
-      submenu: [
-        { role: 'about', label: `About ${appName}` },
-        { type: 'separator' },
-        {
-          label: 'Settings...',
-          ...(settingsShortcut ? { accelerator: settingsShortcut } : {}),
-          click: () => openSettingsWindow()
-        },
-        { type: 'separator' },
-        { role: 'services', submenu: [] },
-        { type: 'separator' },
-        { role: 'hide', label: `Hide ${appName}` },
-        { role: 'hideOthers' },
-        { role: 'unhide' },
-        { type: 'separator' },
-        {
-          label: `Quit ${appName}`,
-          accelerator: 'Cmd+Q',
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed() && showNativeQuitDialog()) {
-              isQuitConfirmed = true;
-              isUserQuitting = true;
-              app.quit();
-            } else if (!mainWindow || mainWindow.isDestroyed()) {
-              app.quit();
-            }
-          }
-        }
-      ]
-    });
-  }
-
-  const fileSubmenu = [
-      {
-        label: 'New Tab',
-        ...(newTabShortcut ? { accelerator: newTabShortcut } : {}),
-        click: () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('browser-shortcut', 'new-tab');
-          }
-        }
-      },
-      ...(process.platform === 'darwin'
-        ? []
-        : [
-            {
-              label: 'New Window',
-              accelerator: 'Ctrl+Shift+N',
-              click: () => {
-                createWindow();
-              }
-            },
-            {
-              label: 'New Incognito Window',
-              accelerator: 'Ctrl+Shift+P',
-              click: () => {
-                createIncognitoWindow();
-              }
-            },
-            { type: 'separator' }
-          ]),
-      {
-        label: 'Close Tab',
-        ...(closeTabShortcut ? { accelerator: closeTabShortcut } : {}),
-        click: () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('browser-shortcut', 'close-tab');
-          }
-        }
-      },
-      {
-        label: 'Reopen Closed Tab',
-        ...(recoverTabShortcut ? { accelerator: recoverTabShortcut } : {}),
-        click: () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('browser-shortcut', 'recover-tab');
-          }
-        }
-      },
-      { type: 'separator' },
-      {
-        label: 'History',
-        ...(historyShortcut ? { accelerator: historyShortcut } : {}),
-        click: () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('browser-shortcut', 'history');
-          }
-        }
-      },
-      {
-        label: 'Downloads',
-        ...(downloadsShortcut ? { accelerator: downloadsShortcut } : {}),
-        click: () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('browser-shortcut', 'downloads');
-          }
-        }
-      },
-      { type: 'separator' },
-      {
-        label: 'Print…',
-        ...(printShortcut ? { accelerator: printShortcut } : {}),
-        click: () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('browser-shortcut', 'print');
-          }
-        }
-      },
-      { type: 'separator' },
-      {
-        label: 'Quit',
-        accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Ctrl+Q',
-        click: () => {
-          if (process.platform === 'darwin') {
-            if (mainWindow && !mainWindow.isDestroyed() && showNativeQuitDialog()) {
-              isQuitConfirmed = true;
-              isUserQuitting = true; // so window close handler allows quit instead of hiding
-              app.quit();
-            } else if (!mainWindow || mainWindow.isDestroyed()) {
-              app.quit();
-            }
-          } else {
-            isUserQuitting = true;
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('request-quit');
-            } else {
-              app.quit();
-            }
-          }
-        }
-      }
-  ];
-
-  template.push({
-    label: 'File',
-    submenu: fileSubmenu
-  });
-
-  template.push({
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        {
-          label: 'Paste and Match Style',
-          ...(pasteMatchStyleShortcut ? { accelerator: pasteMatchStyleShortcut } : {}),
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('browser-shortcut', 'paste-match-style');
-            }
-          }
-        },
-        {
-          label: 'Select All',
-          ...(selectAllShortcut ? { accelerator: selectAllShortcut } : {}),
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('browser-shortcut', 'select-all');
-            }
-          }
-        },
-        { type: 'separator' },
-        {
-          label: 'Find in Page',
-          ...(findShortcut ? { accelerator: findShortcut } : {}),
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('browser-shortcut', 'find');
-            }
-          }
-        },
-        ...(process.platform !== 'darwin' ? [
-          { type: 'separator' },
-          {
-            label: 'Settings...',
-            ...(settingsShortcut ? { accelerator: settingsShortcut } : {}),
-            click: () => openSettingsWindow()
-          }
-        ] : [])
-      ]
-    },
-    {
-      label: 'View',
-      submenu: [
-        {
-          label: 'Reload Page',
-          ...(refreshShortcut ? { accelerator: refreshShortcut } : {}),
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('browser-shortcut', 'refresh');
-            }
-          }
-        },
-        { role: 'forceReload', label: 'Force Reload Window' },
-        { role: 'toggleDevTools', label: 'Toggle Developer Tools' },
-        { type: 'separator' },
-        {
-          label: 'Actual Size',
-          ...(resetZoomShortcut ? { accelerator: resetZoomShortcut } : {}),
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('browser-shortcut', 'reset-zoom');
-            }
-          }
-        },
-        {
-          label: 'Zoom In',
-          ...(zoomInShortcut ? { accelerator: zoomInShortcut } : {}),
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('browser-shortcut', 'zoom-in');
-            }
-          }
-        },
-        {
-          label: 'Zoom Out',
-          ...(zoomOutShortcut ? { accelerator: zoomOutShortcut } : {}),
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('browser-shortcut', 'zoom-out');
-            }
-          }
-        },
-        { type: 'separator' },
-        {
-          label: 'Toggle Sidebar',
-          ...(toggleSidebarShortcut ? { accelerator: toggleSidebarShortcut } : {}),
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('browser-shortcut', 'toggle-sidebar');
-            }
-          }
-        },
-        {
-          label: 'Toggle Chat',
-          ...(toggleChatShortcut ? { accelerator: toggleChatShortcut } : {}),
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('browser-shortcut', 'toggle-chat');
-            }
-          }
-        },
-        {
-          label: 'Mute / Unmute Tab',
-          ...(toggleMuteTabShortcut ? { accelerator: toggleMuteTabShortcut } : {}),
-          click: () => {
-            const win = getActiveAxisWindow();
-            if (win && !win.isDestroyed()) {
-              win.webContents.send('browser-shortcut', 'toggle-mute-tab');
-            }
-          }
-        },
-        { type: 'separator' },
-        { role: 'togglefullscreen' }
-      ]
-    },
-    {
-      label: 'Window',
-      submenu: [
-        ...(process.platform === 'darwin'
-          ? [
-              {
-                label: 'New Window',
-                accelerator: 'Shift+Cmd+N',
-                click: () => createWindow()
-              },
-              {
-                label: 'New Incognito Window',
-                accelerator: 'Alt+Cmd+N',
-                click: () => createIncognitoWindow()
-              },
-              { type: 'separator' }
-            ]
-          : []),
-        { role: 'minimize' },
-        { role: 'zoom' },
-        ...(process.platform === 'darwin'
-          ? [{ type: 'separator' }, { role: 'front' }]
-          : []),
-        { type: 'separator' },
-        {
-          label: 'Close Window',
-          click: () => {
-            const win = BrowserWindow.getFocusedWindow();
-            if (win && !win.isDestroyed()) {
-              win.close();
-            }
-          }
-        },
-        {
-          label: 'Close All',
-          accelerator: process.platform === 'darwin' ? 'Alt+Cmd+W' : 'Ctrl+Shift+W',
-          click: () => {
-            BrowserWindow.getAllWindows().forEach((w) => {
-              if (!w.isDestroyed()) {
-                w.close();
-              }
-            });
-          }
-        }
-      ]
-    },
-    {
-      label: 'Help',
-      submenu: [
-        {
-          label: 'View License',
-          click: () =>
-            openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser/blob/main/LICENSE.md')
-        },
-        {
-          label: 'Report an Issue',
-          click: () => openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser/issues')
-        },
-        {
-          label: 'Report a Vulnerability',
-          click: () =>
-            openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser/security')
-        },
-        {
-          label: 'Donate',
-          click: () => openUrlInAxisBrowser('https://www.patreon.com/cw/AbdelrahmanBerchan')
-        },
-        {
-          label: 'Visit GitHub Page',
-          click: () => openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser')
-        }
-      ]
-    }
-  );
-
-  const menu = Menu.buildFromTemplate(template);
-  Menu.setApplicationMenu(menu);
-}
-
-function createIncognitoWindow(initialUrl = null) {
-  // Create a new session for incognito mode
-  const incognitoSession = session.fromPartition('incognito');
-  
-  const incognitoWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    title: 'Axis — Incognito',
-    icon: path.join(__dirname, 'Axis_logo.png'),
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      webviewTag: true,
-      preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: false,
-      offscreen: false,
-      experimentalFeatures: true,
-      enableBlinkFeatures: 'CSSColorSchemeUARendering',
-      v8CacheOptions: 'code',
-      spellcheck: false,
-      webSecurity: true,
-      webgl: true
-      // Shell: default session (same as normal windows) so IPC e.g. set-window-title works
-      // reliably; private browsing stays in <webview partition="incognito"> (renderer).
-    },
-    titleBarStyle: 'hiddenInset',
-    frame: false,
-    show: false,
-    transparent: true,
-    backgroundColor: '#00000000',
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
-      : {})
-  });
-
-  if (process.platform === 'darwin') {
-    incognitoWindow.__axisSidebarRight = false;
-    attachMacTrafficLightResize(incognitoWindow);
-  }
-
-  if (initialUrl && isSafeHttpUrl(initialUrl)) {
-    incognitoWindow.webContents.once('did-finish-load', () => {
-      setTimeout(() => {
-        if (!incognitoWindow.isDestroyed()) {
-          incognitoWindow.webContents.send('open-url-in-browser', initialUrl);
-        }
-      }, 400);
-    });
-  }
-
-  // Load the app with hash so renderer knows it's incognito (for indicator, theme lock, no history)
-  incognitoWindow.loadFile('src/index.html', { hash: 'incognito' });
-
-  incognitoWindow.once('ready-to-show', () => {
-    if (process.platform === 'darwin' && !incognitoWindow.isDestroyed()) {
-      positionMacTrafficLights(incognitoWindow, !!incognitoWindow.__axisSidebarRight);
-    }
-    incognitoWindow.show();
-  });
-
-  incognitoWindow.on('closed', () => {
-    incognitoSession.clearStorageData();
-    incognitoSession.clearCache();
-    incognitoSession.clearAuthCache();
-    incognitoSession.clearHostResolverCache();
-  });
-
-  return incognitoWindow;
-}
-
-function updateDockMenu() {
-  if (process.platform !== 'darwin' || !app.dock) return;
-
-  const dockMenu = Menu.buildFromTemplate([
-    {
-      label: 'New Window',
-      click: () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-          createWindow();
-        } else {
-          createWindow();
-        }
-      }
-    },
-    {
-      label: 'New Incognito Window',
-      click: () => {
-        createIncognitoWindow();
-      }
-    }
-  ]);
-
-  app.dock.setMenu(dockMenu);
-}
-
-// Filter noisy Chromium/Electron messages from stderr.
-// These are harmless internal diagnostics, not application bugs.
-const SUPPRESSED_PATTERNS = [
-  'GUEST_VIEW_MANAGER_CALL',
-  'ERR_BLOCKED_BY_RESPONSE',
-  'ERR_NAME_NOT_RESOLVED',
-  'Failed to load URL',
-  'sysctlbyname',
-  'kern.hv_vmm_present',
-  'blink.mojom',
-  'interface_endpoint_client',
-];
-
-function matchesSuppressed(text) {
-  return typeof text === 'string' && SUPPRESSED_PATTERNS.some(p => text.includes(p));
-}
-
-const _origStderrWrite = process.stderr.write.bind(process.stderr);
-process.stderr.write = (chunk, ...rest) => {
-  if (matchesSuppressed(typeof chunk === 'string' ? chunk : chunk?.toString?.())) return true;
-  return _origStderrWrite(chunk, ...rest);
-};
-
-const _origConsoleError = console.error;
-console.error = (...args) => {
-  const first = args[0];
-  if (matchesSuppressed(typeof first === 'string' ? first : '')) return;
-  if (first instanceof Error && (first.errno === -3 || matchesSuppressed(first.message))) return;
-  _origConsoleError.apply(console, args);
-};
-
-const _origProcessEmitWarning = process.emitWarning;
-process.emitWarning = (warning, ...rest) => {
-  const msg = typeof warning === 'string' ? warning
-    : (warning instanceof Error ? warning.message : '');
-  if (matchesSuppressed(msg)) return;
-  _origProcessEmitWarning.call(process, warning, ...rest);
-};
-
-// App event handlers
-app.whenReady().then(() => {
-  app.on('web-contents-created', (_event, contents) => {
-    contents.setMaxListeners(0);
-  });
-
-  configureSession();
-  createWindow();
-  updateDockMenu();
-  // Ensure shortcuts are active whenever any Axis window has focus
-  app.on('browser-window-focus', () => {
-    unregisterShortcuts();
-    registerShortcuts();
-  });
-  // When no Axis window is focused (app in background), remove global shortcuts
-  app.on('browser-window-blur', () => {
-    if (!BrowserWindow.getFocusedWindow()) {
-      unregisterShortcuts();
-    }
-  });
-});
-
-// Clean up global shortcuts on quit
-app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
-});
-
-app.on('window-all-closed', () => {
-  // Don't quit on macOS, keep the app running even when all windows are closed
-  // This prevents the app from closing when the last tab is closed
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
-
-// Native macOS quit confirmation (Cmd+Q or when quit is requested)
-function showNativeQuitDialog() {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  mainWindow.focus();
-  const response = dialog.showMessageBoxSync(mainWindow, {
-    type: 'question',
-    buttons: ['Cancel', 'Quit'],
-    defaultId: 0,
-    cancelId: 0,
-    message: 'Quit Axis?',
-    detail: 'Are you sure you want to exit the application?'
-  });
-  return response === 1;
-}
-
-// Handle Cmd+Q on macOS (before-quit fires before window close)
-app.on('before-quit', (e) => {
-  if (process.platform === 'darwin' && !isQuitConfirmed) {
-    e.preventDefault();
-    isUserQuitting = true;
-    if (showNativeQuitDialog()) {
-      isQuitConfirmed = true;
-      app.quit();
-    } else {
-      isUserQuitting = false;
-    }
-  }
-});
-
-app.on('activate', () => {
-  // On macOS, show the window if it exists but is hidden
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show();
-    mainWindow.focus();
-  } else if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
-});
-
-// IPC handlers
-ipcMain.handle('open-settings-window', (event, tab) => {
-  openSettingsWindow(tab || null);
-  return true;
-});
-
-ipcMain.handle('set-window-title', (event, title) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (win && !win.isDestroyed()) {
-    const safeTitle = (title && typeof title === 'string' && title.trim().length > 0)
-      ? title.trim()
-      : 'Axis Browser';
-    win.setTitle(safeTitle);
-  }
-  return true;
-});
-
-ipcMain.on('settings-updated', () => {
-  applyMainWindowVibrancyFromStore();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('settings-updated');
-  }
-});
-
-ipcMain.handle('print-page', (event, webContentsId) => {
-  const { webContents } = require('electron');
-  const guest = webContents.fromId(webContentsId);
-  if (guest && !guest.isDestroyed()) {
-    guest.print({ silent: false, printBackground: true });
-  }
-  return true;
-});
-
-ipcMain.handle('open-url-in-browser', (event, url) => {
-  openUrlInAxisBrowser(url);
-  return true;
-});
-
-ipcMain.handle('get-settings', () => {
-  return store.store;
-});
-
-ipcMain.handle('get-site-permission-overrides', () => {
-  return store.get('sitePermissionOverrides', {});
-});
-
-ipcMain.handle('set-site-permission-overrides', (event, obj) => {
-  const cleaned = cleanSitePermissionOverrides(obj);
-  store.set('sitePermissionOverrides', cleaned);
-  return cleaned;
-});
-
-ipcMain.handle('set-setting', (event, key, value) => {
-  store.set(key, value);
-  return true;
-});
-
-// Keyboard shortcuts management
-ipcMain.handle('get-shortcuts', () => {
-  return getShortcuts();
-});
-
-ipcMain.handle('get-default-shortcuts', () => {
-  return getDefaultShortcuts();
-});
-
-ipcMain.handle('get-shortcut-overrides', () => {
-  return getShortcutOverrides();
-});
-
-ipcMain.handle('set-shortcuts', (event, shortcuts) => {
-  store.set('keyboardShortcuts', shortcuts);
-  // Re-register shortcuts with new values
-  unregisterShortcuts();
-  registerShortcuts();
-  // Rebuild application menu so accelerators match new shortcuts
-  createMenu();
-  return shortcuts;
-});
-
-ipcMain.handle('reset-shortcuts', () => {
-  store.delete('keyboardShortcuts');
-  // Re-register shortcuts with defaults
-  unregisterShortcuts();
-  registerShortcuts();
-  return getDefaultShortcuts();
-});
-
-// Temporarily disable/enable shortcuts (e.g., when recording a new shortcut)
-ipcMain.handle('disable-shortcuts', () => {
-  unregisterShortcuts();
-  return true;
-});
-
-ipcMain.handle('enable-shortcuts', () => {
-  registerShortcuts();
-  return true;
-});
-
-// History management
-ipcMain.handle('get-history', () => {
-  return historyStore.get('items', []);
-});
-
-ipcMain.handle('add-history-item', (event, item) => {
-  const history = historyStore.get('items', []);
-  const newItem = {
-    id: Date.now(),
-    url: item.url,
-    title: item.title,
-    timestamp: new Date().toISOString(),
-    favicon: item.favicon || ''
-  };
-  
-  // Remove duplicate if exists
-  const existingIndex = history.findIndex(h => h.url === item.url);
-  if (existingIndex !== -1) {
-    history.splice(existingIndex, 1);
-  }
-  
-  // Add to beginning and limit to 1000 items
-  history.unshift(newItem);
-  if (history.length > 1000) {
-    history.splice(1000);
-  }
-  
-  historyStore.set('items', history);
-  return newItem;
-});
-
-ipcMain.handle('clear-history', () => {
-  historyStore.set('items', []);
-  return true;
-});
-
-ipcMain.handle('delete-history-item', (event, id) => {
-  const history = historyStore.get('items', []);
-  const filtered = history.filter(item => item.id !== id);
-  historyStore.set('items', filtered);
-  return true;
-});
-
-// Downloads management (history of browser downloads)
-ipcMain.handle('get-downloads', () => {
-  return downloadsStore.get('items', []);
-});
-
-ipcMain.handle('add-download', (event, downloadInfo) => {
-  const downloads = downloadsStore.get('items', []);
-  const newDownload = {
-    id: Date.now(),
-    url: downloadInfo.url,
-    filename: downloadInfo.filename,
-    path: downloadInfo.path,
-    size: downloadInfo.size || 0,
-    receivedBytes: 0,
-    status: 'downloading',
-    timestamp: new Date().toISOString()
-  };
-  
-  downloads.unshift(newDownload);
-  downloadsStore.set('items', downloads);
-  return newDownload;
-});
-
-ipcMain.handle('update-download-progress', (event, id, progress) => {
-  const downloads = downloadsStore.get('items', []);
-  const download = downloads.find(d => d.id === id);
-  if (download) {
-    download.receivedBytes = progress.receivedBytes;
-    download.status = progress.status || download.status;
-    downloadsStore.set('items', downloads);
-  }
-  return download;
-});
-
-ipcMain.handle('clear-downloads', () => {
-  downloadsStore.set('items', []);
-  return true;
-});
-
-ipcMain.handle('delete-download', (event, id) => {
-  const downloads = downloadsStore.get('items', []);
-  const filtered = downloads.filter(item => item.id !== id);
-  downloadsStore.set('items', filtered);
-  return true;
-});
-
-// Library management - show files from common user folders (Downloads, Desktop, Documents, Pictures)
-ipcMain.handle('get-library-items', async (event, locationKey = 'all') => {
-  try {
-    const home = os.homedir();
-    const locations = {
-      downloads: path.join(home, 'Downloads'),
-      desktop: path.join(home, 'Desktop'),
-      documents: path.join(home, 'Documents'),
-      pictures: path.join(home, 'Pictures')
-    };
-
-    const keys = locationKey === 'all' ? Object.keys(locations) : [locationKey];
-    const items = [];
-    let defaultBaseDir = null;
-
-    // Prioritize desktop as default baseDir
-    if (locationKey === 'all' || locationKey === 'desktop') {
-      const desktopDir = locations.desktop;
-      if (desktopDir) {
-        try {
-          await fs.promises.access(desktopDir, fs.constants.R_OK);
-          defaultBaseDir = desktopDir;
-        } catch {
-          // Desktop not accessible, will use first available
-        }
-      }
-    }
-
-    for (const key of keys) {
-      const baseDir = locations[key];
-      if (!baseDir) continue;
-
-      try {
-        await fs.promises.access(baseDir, fs.constants.R_OK);
-      } catch {
-        continue;
-      }
-
-      if (!defaultBaseDir) defaultBaseDir = baseDir;
-
-      const dirEntries = await fs.promises.readdir(baseDir, { withFileTypes: true });
-
-      const folderItems = await Promise.all(
-        dirEntries
-          .filter(entry => !entry.name.startsWith('.')) // hide hidden files
-          .map(async (entry) => {
-            const fullPath = path.join(baseDir, entry.name);
-            const stat = await fs.promises.stat(fullPath);
-            const isDirectory = entry.isDirectory();
-            const ext = path.extname(entry.name).toLowerCase();
-
-            let kind = 'file';
-            if (isDirectory) {
-              kind = 'folder';
-            } else if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic'].includes(ext)) {
-              kind = 'image';
-            } else if (['.mp4', '.mov', '.mkv', '.avi', '.webm'].includes(ext)) {
-              kind = 'video';
-            } else if (['.mp3', '.wav', '.flac', '.aac', '.ogg'].includes(ext)) {
-              kind = 'audio';
-            } else if (ext === '.pdf') {
-              kind = 'pdf';
-            } else if (['.doc', '.docx', '.pages', '.txt', '.md'].includes(ext)) {
-              kind = 'document';
-            }
-
-            return {
-              name: entry.name,
-              path: fullPath,
-              isDirectory,
-              kind,
-              size: stat.size,
-              mtime: stat.mtimeMs,
-              source: key
-            };
-          })
-      );
-
-      items.push(...folderItems);
-    }
-
-    // Sort by most recently modified first
-    items.sort((a, b) => b.mtime - a.mtime);
-
-    return { baseDir: defaultBaseDir, items };
-  } catch (error) {
-    console.error('get-library-items failed:', error);
-    return { baseDir: null, items: [] };
-  }
-});
-
-ipcMain.handle('open-library-item', async (event, fullPath) => {
-  try {
-    if (!fullPath) return false;
-    await shell.openPath(fullPath);
-    return true;
-  } catch (error) {
-    console.error('open-library-item failed:', error);
-    return false;
-  }
-});
-
-ipcMain.handle('show-item-in-folder', async (event, filePath) => {
-  try {
-    if (!filePath) return false;
-    shell.showItemInFolder(filePath);
-    return true;
-  } catch (error) {
-    console.error('show-item-in-folder failed:', error);
-    return false;
-  }
-});
-
-// Incognito window (optional initial URL to open in a new tab)
-ipcMain.handle('open-incognito-window', (event, url) => {
-  createIncognitoWindow(typeof url === 'string' && url.length > 0 ? url : null);
-  return true;
-});
-
-ipcMain.handle('open-url-in-new-window', (event, url) => {
-  if (typeof url === 'string' && isSafeHttpUrl(url)) {
-    openUrlInNewBrowserWindow(url);
-  }
-  return true;
-});
-
-// Notes management
-ipcMain.handle('get-notes', () => {
-  return notesStore.get('items', []);
-});
-
-ipcMain.handle('save-note', (event, note) => {
-  const notes = notesStore.get('items', []);
-  const existingIndex = notes.findIndex(n => n.id === note.id);
-  
-  if (existingIndex !== -1) {
-    // Update existing note
-    notes[existingIndex] = {
-      ...notes[existingIndex],
-      title: note.title,
-      content: note.content,
-      updatedAt: new Date().toISOString()
-    };
-  } else {
-    // Add new note
-    const newNote = {
-      id: note.id || Date.now(),
-      title: note.title || 'Untitled Note',
-      content: note.content || '',
-      createdAt: note.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    notes.unshift(newNote);
-  }
-  
-  notesStore.set('items', notes);
-  return notes[existingIndex !== -1 ? existingIndex : 0];
-});
-
-ipcMain.handle('delete-note', (event, id) => {
-  const notes = notesStore.get('items', []);
-  const filtered = notes.filter(note => note.id !== id);
-  notesStore.set('items', filtered);
-  return true;
-});
-
-// Sidebar context menu
-ipcMain.handle('show-sidebar-context-menu', async (event, x, y, isRight) => {
-  const template = [
-    {
-      label: 'New Tab',
-      click: () => {
-        event.sender.send('sidebar-context-menu-action', 'new-tab');
-      }
-    },
-    {
-      label: 'New Incognito Tab',
-      click: () => {
-        event.sender.send('sidebar-context-menu-action', 'new-incognito-tab');
-      }
-    },
-    {
-      label: 'New Tab Group',
-      click: () => {
-        event.sender.send('sidebar-context-menu-action', 'new-tab-group');
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Toggle Sidebar',
-      click: () => {
-        event.sender.send('sidebar-context-menu-action', 'toggle-sidebar');
-      }
-    },
-    {
-      label: isRight ? 'Move Sidebar Left' : 'Move Sidebar Right',
-      click: () => {
-        event.sender.send('sidebar-context-menu-action', 'toggle-position');
-      }
-    }
-  ];
-  
-  const menu = Menu.buildFromTemplate(template);
-  const window = BrowserWindow.fromWebContents(event.sender);
-  
-  // Use cursor position directly - Electron will position it correctly
-  menu.popup({
-    window: window
-  });
-  
-  return true;
-});
-
-// Webpage context menu
-ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => {
-  const ctx = contextInfo || {};
-  const template = [];
-  
-  // Link options (shown when right-clicking a link)
-  if (ctx.linkURL && ctx.linkURL.length > 0) {
-    template.push({
-      label: 'Open Link in New Tab',
-      click: () => {
-        event.sender.send('webpage-context-menu-action', 'open-link-new-tab', { linkURL: ctx.linkURL });
-      }
-    });
-    if (isSafeHttpUrl(ctx.linkURL)) {
-      template.push({
-        label: 'Open Link in New Window',
-        click: () => {
-          openUrlInNewBrowserWindow(ctx.linkURL);
-        }
-      });
-      template.push({
-        label: 'Open Link in Incognito Window',
-        click: () => {
-          createIncognitoWindow(ctx.linkURL);
-        }
-      });
-    }
-    template.push({
-      label: 'Copy Link Address',
-      click: () => {
-        event.sender.send('webpage-context-menu-action', 'copy-link', { linkURL: ctx.linkURL });
-      }
-    });
-    template.push({ type: 'separator' });
-  }
-  
-  // Image options (shown when right-clicking an image)
-  if (ctx.mediaType === 'image' && ctx.srcURL) {
-    template.push({
-      label: 'Open Image in New Tab',
-      click: () => {
-        event.sender.send('webpage-context-menu-action', 'open-image-new-tab', { srcURL: ctx.srcURL });
-      }
-    });
-    template.push({
-      label: 'Copy Image',
-      click: () => {
-        event.sender.send('webpage-context-menu-action', 'copy-image', { x: ctx.x || 0, y: ctx.y || 0 });
-      }
-    });
-    template.push({
-      label: 'Copy Image Address',
-      click: () => {
-        event.sender.send('webpage-context-menu-action', 'copy-image-url', { srcURL: ctx.srcURL });
-      }
-    });
-    template.push({ type: 'separator' });
-  }
-  
-  // Navigation options
-  template.push({
-    label: 'Back',
-    enabled: ctx.canGoBack || false,
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'back');
-    }
-  });
-  template.push({
-    label: 'Forward',
-    enabled: ctx.canGoForward || false,
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'forward');
-    }
-  });
-  template.push({
-    label: 'Reload',
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'reload');
-    }
-  });
-  template.push({ type: 'separator' });
-  
-  // Edit options
-  template.push({
-    label: 'Cut',
-    enabled: ctx.canCut || ctx.isEditable || false,
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'cut');
-    }
-  });
-  template.push({
-    label: 'Copy',
-    enabled: ctx.canCopy || (ctx.hasSelection && ctx.selectionText && ctx.selectionText.length > 0) || false,
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'copy');
-    }
-  });
-  template.push({
-    label: 'Paste',
-    enabled: ctx.canPaste || ctx.isEditable || false,
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'paste');
-    }
-  });
-  template.push({
-    label: 'Paste and Match Style',
-    enabled: ctx.canPaste || ctx.isEditable || false,
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'paste-match-style');
-    }
-  });
-  template.push({
-    label: 'Select All',
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'select-all');
-    }
-  });
-  
-  // Selection search option
-  if (ctx.hasSelection && ctx.selectionText && ctx.selectionText.length > 0) {
-    template.push({ type: 'separator' });
-    let displayText = ctx.selectionText.trim();
-    if (displayText.length > 20) {
-      displayText = displayText.substring(0, 20) + '...';
-    }
-    template.push({
-      label: `Search for "${displayText}"`,
-      click: () => {
-        event.sender.send('webpage-context-menu-action', 'search-selection', { selectionText: ctx.selectionText });
-      }
-    });
-
-    // Speech submenu (macOS-style) for selected text
-    if (ctx.speechEnabled !== false) {
-      template.push({
-        label: 'Speech',
-        enabled: !!ctx.selectionText && ctx.selectionText.trim().length > 0,
-        submenu: [
-          {
-            label: 'Start Speaking',
-            enabled: !ctx.isSpeaking,
-            click: () => {
-              event.sender.send('webpage-context-menu-action', 'speech-start', {
-                selectionText: ctx.selectionText
-              });
-            }
-          },
-          {
-            label: 'Stop Speaking',
-            enabled: !!ctx.isSpeaking,
-            click: () => {
-              event.sender.send('webpage-context-menu-action', 'speech-stop');
-            }
-          }
-        ]
-      });
-    }
-  }
-  
-  template.push({ type: 'separator' });
-  
-  // Page options
-  template.push({
-    label: 'Copy Page URL',
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'copy-url');
-    }
-  });
-  template.push({
-    label: 'Print…',
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'print');
-    }
-  });
-  template.push({
-    label: 'Inspect Element',
-    click: () => {
-      event.sender.send('webpage-context-menu-action', 'inspect');
-    }
-  });
-  
-  const menu = Menu.buildFromTemplate(template);
-  const window = BrowserWindow.fromWebContents(event.sender);
-  
-  // Use cursor position directly - Electron will position it correctly
-  menu.popup({
-    window: window
-  });
-  
-  return true;
-});
-
-// URL bar input context menu
-ipcMain.handle('show-urlbar-context-menu', async (event, x, y, contextInfo) => {
-  const ctx = contextInfo || {};
-  const clipText = (clipboard.readText() || '').trim();
-  const canPasteAndGo = clipText.length > 0;
-  const template = [
-    {
-      label: 'Cut',
-      enabled: !!ctx.isEditable,
-      click: () => {
-        event.sender.send('urlbar-context-menu-action', 'cut');
-      }
-    },
-    {
-      label: 'Copy',
-      enabled: !!ctx.hasSelection,
-      click: () => {
-        event.sender.send('urlbar-context-menu-action', 'copy');
-      }
-    },
-    {
-      label: 'Paste',
-      enabled: canPasteAndGo,
-      click: () => {
-        event.sender.send('urlbar-context-menu-action', 'paste', { text: clipboard.readText() || '' });
-      }
-    },
-    {
-      label: 'Paste and Match Style',
-      enabled: canPasteAndGo,
-      click: () => {
-        event.sender.send('urlbar-context-menu-action', 'paste-match-style');
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Paste and Go',
-      enabled: canPasteAndGo,
-      click: () => {
-        event.sender.send('urlbar-context-menu-action', 'paste-and-go', { text: clipboard.readText() || '' });
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Select All',
-      click: () => {
-        event.sender.send('urlbar-context-menu-action', 'select-all');
-      }
-    }
-  ];
-  
-  const menu = Menu.buildFromTemplate(template);
-  const window = BrowserWindow.fromWebContents(event.sender);
-  menu.popup({ window });
-  return true;
-});
-
-// Tab context menu
-ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
-  const info = tabInfo || {};
-  const template = [
-    {
-      label: 'Rename Tab',
-      click: () => {
-        event.sender.send('tab-context-menu-action', 'rename');
-      }
-    },
-    {
-      label: 'Duplicate Tab',
-      click: () => {
-        event.sender.send('tab-context-menu-action', 'duplicate');
-      }
-    }
-  ];
-  if (!info.isIncognito) {
-    template.push({
-      label: info.isPinned ? 'Unpin Tab' : 'Pin Tab',
-      click: () => {
-        event.sender.send('tab-context-menu-action', 'toggle-pin');
-      }
-    });
-  }
-  template.push(
-    {
-      label: info.isMuted ? 'Unmute Tab' : 'Mute Tab',
-      click: () => {
-        event.sender.send('tab-context-menu-action', 'toggle-mute');
-      }
-    },
-    {
-      label: 'Change Icon',
-      click: () => {
-        event.sender.send('tab-context-menu-action', 'change-icon');
-      }
-    }
-  );
-
-  const tabGroups = info.tabGroups || [];
-  if (tabGroups.length > 0) {
-    template.push({
-      label: 'Add to Tab Group',
-      submenu: tabGroups.map((g) => ({
-        label: g.name,
-        click: () => {
-          event.sender.send('tab-context-menu-action', 'add-to-tab-group', { tabGroupId: g.id });
-        }
-      }))
-    });
-  }
-
-  template.push({
-    label: 'Close Tab',
-    click: () => {
-      event.sender.send('tab-context-menu-action', 'close');
-    }
-  });
-
-  const menu = Menu.buildFromTemplate(template);
-  const window = BrowserWindow.fromWebContents(event.sender);
-
-  menu.popup({
-    window: window
-  });
-
-  return true;
-});
-
-// Tab group context menu
-ipcMain.handle('show-tab-group-context-menu', async (event, x, y) => {
-  const template = [
-    {
-      label: 'Rename Tab Group',
-      click: () => {
-        event.sender.send('tab-group-context-menu-action', 'rename');
-      }
-    },
-    {
-      label: 'Duplicate Tab Group',
-      click: () => {
-        event.sender.send('tab-group-context-menu-action', 'duplicate');
-      }
-    },
-    {
-      label: 'Change Color',
-      click: () => {
-        event.sender.send('tab-group-context-menu-action', 'change-color');
-      }
-    },
-    {
-      label: 'Change Icon',
-      click: () => {
-        event.sender.send('tab-group-context-menu-action', 'change-icon');
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Delete Tab Group',
-      click: () => {
-        event.sender.send('tab-group-context-menu-action', 'delete');
-      }
-    }
-  ];
-  
-  const menu = Menu.buildFromTemplate(template);
-  const window = BrowserWindow.fromWebContents(event.sender);
-  
-  menu.popup({
-    window: window
-  });
-  
-  return true;
-});
-
-// Helper function to format time ago
-function formatTimeAgo(timestamp) {
-  const now = new Date();
-  const time = new Date(timestamp);
-  const diffMs = now - time;
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return time.toLocaleDateString();
-}
-
-// Get downloads from folder for custom popup
-ipcMain.handle('get-downloads-from-folder', async (event) => {
-  try {
-    const home = os.homedir();
-    const downloadsPath = path.join(home, 'Downloads');
-    
-    let files = [];
-    try {
-      const dirFiles = await fs.promises.readdir(downloadsPath, { withFileTypes: true });
-      
-      for (const file of dirFiles) {
-        if (file.name.startsWith('.')) continue;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Axis Browser</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,200..1000;1,200..1000&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div id="app">
         
-        const fullPath = path.join(downloadsPath, file.name);
-        
-        try {
-          const stats = await fs.promises.stat(fullPath);
-          if (!file.isDirectory()) {
-            files.push({
-              name: file.name,
-              path: fullPath,
-              mtime: stats.mtime,
-              size: stats.size
-            });
-          }
-        } catch (statError) {
-          continue;
-        }
-      }
-    } catch (readError) {
-      console.error('Failed to read Downloads folder:', readError);
-    }
-    
-    files.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
-    return files.slice(0, 5);
-  } catch (error) {
-    console.error('Failed to get downloads from folder:', error);
-    return [];
-  }
-});
+        <!-- Title Bar -->
+        <div id="title-bar">
+            <div class="title-bar-center">
+                <span class="app-title">Axis</span>
+            </div>
+            <div class="title-bar-right">
+                <!-- Sidebar toggle moved to nav menu -->
+            </div>
+        </div>
 
-// Real file previews (HEIC, PDF, video, etc.) via OS thumbnail APIs — not <img src=file://>
-ipcMain.handle('get-file-thumbnail-data-url', async (event, filePath, maxSize = 128) => {
-  try {
-    if (!filePath || typeof filePath !== 'string') return null;
-    const resolved = path.resolve(filePath);
-    const st = await fs.promises.stat(resolved).catch(() => null);
-    if (!st || !st.isFile()) return null;
-    const dim = Math.min(Math.max(64, Number(maxSize) || 128), 512);
-    const thumb = await nativeImage.createThumbnailFromPath(resolved, { width: dim, height: dim });
-    if (!thumb || thumb.isEmpty()) return null;
+        <!-- Main area: Sidebar + Content -->
+        <div id="main-area">
+            <!-- Left Sidebar -->
+            <aside id="sidebar">
+                <div id="sidebar-resize-handle" class="resize-handle"></div>
+            <div class="sidebar-section tabs-section">
+                    <div id="tabs-container" class="tabs-container vertical">
+                        <!-- Pinned tabs will be added above the separator -->
+                        <!-- Separator between pinned and unpinned tabs -->
+                        <div id="tabs-separator" class="tabs-separator">
+                            <button class="clear-unpinned-btn" title="Clear all unpinned tabs">
+                                <span class="clear-text">Clear</span>
+                                <i class="fas fa-chevron-down clear-arrow"></i>
+                            </button>
+                        </div>
+                        <div id="incognito-indicator" class="incognito-indicator hidden">
+                            <i class="fas fa-mask incognito-indicator-icon"></i>
+                            <span class="incognito-indicator-text">Incognito</span>
+                        </div>
+                        <button type="button" id="sidebar-new-tab-btn" class="sidebar-new-tab-btn" title="New Tab" draggable="false">
+                            <span class="sidebar-new-tab-btn-inner">
+                                <i class="fas fa-plus sidebar-new-tab-btn-icon" aria-hidden="true"></i>
+                                <span class="sidebar-new-tab-btn-label">New Tab</span>
+                            </span>
+                        </button>
+                        <!-- Unpinned tabs will be added below -->
+                    </div>
+                </div>
 
-    const dragScaled = scaleNativeImageToMax(thumb, DRAG_ICON_MAX_PX);
-    if (dragScaled && !dragScaled.isEmpty()) {
-      dragIconCache.set(filePath, dragScaled);
-      trimDragIconCache();
-    }
-
-    return thumb.toDataURL();
-  } catch (error) {
-    return null;
-  }
-});
-
-// Context menu for downloads items
-ipcMain.handle('show-downloads-item-context-menu', async (event, x, y, filePath) => {
-  const template = [
-    {
-      label: 'Open',
-      click: () => {
-        event.sender.send('downloads-popup-action', 'open', { path: filePath });
-      }
-    },
-    {
-      label: 'Show in Folder',
-      click: () => {
-        event.sender.send('downloads-popup-action', 'show-in-folder', { path: filePath });
-      }
-    }
-  ];
-  
-  const menu = Menu.buildFromTemplate(template);
-  const window = BrowserWindow.fromWebContents(event.sender);
-  const cursorPoint = screen.getCursorScreenPoint();
-  
-  menu.popup({
-    window: window,
-    x: cursorPoint.x,
-    y: cursorPoint.y
-  });
-  
-  return true;
-});
-
-// Open the user's Downloads folder in Finder
-ipcMain.handle('open-downloads-folder', async () => {
-  const downloadsPath = path.join(os.homedir(), 'Downloads');
-  return shell.openPath(downloadsPath).catch((err) => {
-    console.error('Failed to open Downloads folder:', err);
-    return Promise.reject(err);
-  });
-});
-
-// Return a 16x16 fallback icon so menu items always show an icon
-function getFallbackFileIcon() {
-  if (process.platform === 'darwin') {
-    const systemPath = '/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericDocumentIcon.icns';
-    try {
-      const img = nativeImage.createFromPath(systemPath);
-      if (img && !img.isEmpty()) return img.resize({ width: 16, height: 16 });
-    } catch (e) {}
-  }
-  // Minimal 16x16 gray document icon as PNG data URL (always works)
-  const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAOklEQVQ4T2NkYGD4z0ABYBzVMKoBBg0MBv8ZGP4zMPxnYPjPwPD/PwPDfwYGhv8MDP8ZGP4zMPxnYPgPALmJCm0bicgAAAAASUVORK5CYII=';
-  try {
-    const img = nativeImage.createFromDataURL(dataUrl);
-    if (img && !img.isEmpty()) return img.resize({ width: 16, height: 16 });
-  } catch (e) {}
-  return nativeImage.createEmpty();
-}
-
-/** Max longest side (px) for drag ghost — full-size file previews cover the entire screen */
-const DRAG_ICON_MAX_PX = 32;
-/** Drag ghost bitmaps (OS thumbnails when possible — matches downloads popup previews) */
-const dragIconCache = new Map();
-const DRAG_ICON_CACHE_MAX = 40;
-
-function trimDragIconCache() {
-  while (dragIconCache.size > DRAG_ICON_CACHE_MAX) {
-    const first = dragIconCache.keys().next().value;
-    dragIconCache.delete(first);
-  }
-}
-
-function scaleNativeImageToMax(icon, maxDim) {
-  if (!icon || icon.isEmpty()) return null;
-  const { width, height } = icon.getSize();
-  if (width <= 0 || height <= 0) return null;
-  if (width <= maxDim && height <= maxDim) return icon;
-  const scale = Math.min(maxDim / width, maxDim / height);
-  const w = Math.max(1, Math.round(width * scale));
-  const h = Math.max(1, Math.round(height * scale));
-  try {
-    return icon.resize({ width: w, height: h, quality: 'best' });
-  } catch (e) {
-    try {
-      return icon.resize({ width: w, height: h });
-    } catch (e2) {
-      return null;
-    }
-  }
-}
-
-/** Never empty — startDrag with an empty icon is skipped and looks like drag is broken */
-function getGuaranteedDragFallbackIcon() {
-  const dataUrl =
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAOklEQVQ4T2NkYGD4z0ABYBzVMKoBBg0MBv8ZGP4zMPxnYPjPwPD/PwPDfwYGhv8MDP8ZGP4zMPxnYPgPALmJCm0bicgAAAAASUVORK5CYII=';
-  try {
-    const img = nativeImage.createFromDataURL(dataUrl);
-    if (img && !img.isEmpty()) {
-      const scaled = scaleNativeImageToMax(img, DRAG_ICON_MAX_PX);
-      if (scaled && !scaled.isEmpty()) return scaled;
-      try {
-        const r = img.resize({ width: 32, height: 32 });
-        if (r && !r.isEmpty()) return r;
-      } catch (e) {}
-      return img;
-    }
-  } catch (e) {}
-  try {
-    return nativeImage.createFromDataURL(
-      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
-    );
-  } catch (e2) {
-    return nativeImage.createEmpty();
-  }
-}
-
-function getDragPreviewIconSync(filePath) {
-  const cached = dragIconCache.get(filePath);
-  if (cached && !cached.isEmpty()) return cached;
-
-  let icon = nativeImage.createFromPath(filePath);
-  if (icon && !icon.isEmpty()) {
-    const scaled = scaleNativeImageToMax(icon, DRAG_ICON_MAX_PX);
-    if (scaled && !scaled.isEmpty()) return scaled;
-  }
-
-  const fallback = getFallbackFileIcon();
-  if (fallback && !fallback.isEmpty()) {
-    const scaledFb = scaleNativeImageToMax(fallback, DRAG_ICON_MAX_PX);
-    if (scaledFb && !scaledFb.isEmpty()) return scaledFb;
-    try {
-      const r = fallback.resize({ width: 32, height: 32 });
-      if (r && !r.isEmpty()) return r;
-    } catch (e) {}
-    return fallback;
-  }
-
-  return getGuaranteedDragFallbackIcon();
-}
-
-ipcMain.handle('cache-drag-icons', async (event, paths) => {
-  if (!Array.isArray(paths)) return;
-
-  const storeForPath = (p, nativeImg) => {
-    if (!nativeImg || nativeImg.isEmpty()) return;
-    const scaled = scaleNativeImageToMax(nativeImg, DRAG_ICON_MAX_PX);
-    if (scaled && !scaled.isEmpty()) {
-      dragIconCache.set(p, scaled);
-      trimDragIconCache();
-    }
-  };
-
-  await Promise.all(
-    paths.map(async (p) => {
-      if (!p || typeof p !== 'string') return;
-      let resolved;
-      try {
-        resolved = path.resolve(p);
-        const st = await fs.promises.stat(resolved).catch(() => null);
-        if (!st || !st.isFile()) return;
-      } catch (e) {
-        return;
-      }
-
-      try {
-        const thumb = await nativeImage.createThumbnailFromPath(resolved, { width: 128, height: 128 });
-        if (thumb && !thumb.isEmpty()) {
-          storeForPath(p, thumb);
-          return;
-        }
-      } catch (e) {}
-
-      try {
-        const icon = await app.getFileIcon(p, { size: 'normal' });
-        if (icon && !icon.isEmpty()) {
-          storeForPath(p, icon);
-          return;
-        }
-      } catch (e) {}
-
-      try {
-        const fromFile = nativeImage.createFromPath(resolved);
-        if (fromFile && !fromFile.isEmpty()) storeForPath(p, fromFile);
-      } catch (e2) {}
-    })
-  );
-});
-
-// Native file drag (must run synchronously during HTML dragstart — use on/send, not handle/invoke)
-ipcMain.on('start-file-drag', (event, filePath) => {
-  try {
-    if (!filePath || typeof filePath !== 'string') return;
-
-    let icon = getDragPreviewIconSync(filePath);
-    if (!icon || icon.isEmpty()) icon = getGuaranteedDragFallbackIcon();
-
-    event.sender.startDrag({
-      file: filePath,
-      icon
-    });
-  } catch (error) {
-    console.error('Failed to start file drag:', error);
-  }
-});
-
-// Downloads popup - native macOS menu showing recent files from Downloads folder
-ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWidth, buttonHeight) => {
-  try {
-    // Get files from Downloads folder
-    const home = os.homedir();
-    const downloadsPath = path.join(home, 'Downloads');
-    
-    let files = [];
-    try {
-      const dirFiles = await fs.promises.readdir(downloadsPath, { withFileTypes: true });
-      
-      for (const file of dirFiles) {
-        // Skip hidden files
-        if (file.name.startsWith('.')) continue;
-        
-        const fullPath = path.join(downloadsPath, file.name);
-        
-        try {
-          const stats = await fs.promises.stat(fullPath);
-          if (!file.isDirectory()) {
-            files.push({
-              name: file.name,
-              path: fullPath,
-              mtime: stats.mtime
-            });
-          }
-        } catch (statError) {
-          // Skip files we can't stat
-          continue;
-        }
-      }
-    } catch (readError) {
-      console.error('Failed to read Downloads folder:', readError);
-    }
-    
-    // Sort by modification time (newest first) and take top 5
-    files.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
-    files = files.slice(0, 5);
-    
-    const template = [];
-    
-    if (files.length === 0) {
-      template.push({
-        label: 'No downloads',
-        enabled: false
-      });
-    } else {
-      for (const file of files) {
-        // Format filename (truncate if too long)
-        let label = file.name;
-        if (label.length > 50) {
-          label = label.substring(0, 47) + '...';
-        }
-        
-        const timeAgo = formatTimeAgo(file.mtime);
-        const displayLabel = `${label}   ${timeAgo}`;
-        
-        // Always get an icon: try app.getFileIcon, then createFromPath, then fallback
-        let icon = null;
-        try {
-          icon = await app.getFileIcon(file.path, { size: 'small' });
-        } catch (e) {}
-        if (!icon || icon.isEmpty()) {
-          try {
-            icon = nativeImage.createFromPath(file.path);
-            if (icon && !icon.isEmpty()) icon = icon.resize({ width: 16, height: 16 });
-            else icon = null;
-          } catch (e) {
-            icon = null;
-          }
-        }
-        if (!icon || icon.isEmpty()) {
-          icon = getFallbackFileIcon();
-        } else {
-          icon = icon.resize({ width: 16, height: 16 });
-        }
-        
-        const filePath = file.path;
-        // Native macOS: one row per file; click opens file; submenu (>) has "Reveal in Finder"
-        template.push({
-          label: displayLabel,
-          icon,
-          click: () => {
-            event.sender.send('downloads-popup-action', 'open', { path: filePath });
-          },
-          submenu: [
-            {
-              label: 'Reveal in Finder',
-              click: () => {
-                event.sender.send('downloads-popup-action', 'show-in-folder', { path: filePath });
-              }
-            }
-          ]
-        });
-      }
-    }
-    
-    // Separator and "Open Downloads" button at the bottom
-    template.push({ type: 'separator' });
-    
-    let folderIcon = null;
-    try {
-      folderIcon = await app.getFileIcon(downloadsPath, { size: 'small' });
-    } catch (e) {}
-    if (!folderIcon || folderIcon.isEmpty()) {
-      try {
-        folderIcon = nativeImage.createFromPath(downloadsPath);
-        if (folderIcon && !folderIcon.isEmpty()) folderIcon = folderIcon.resize({ width: 16, height: 16 });
-        else folderIcon = null;
-      } catch (e) {
-        folderIcon = null;
-      }
-    }
-    if (!folderIcon || folderIcon.isEmpty()) {
-      folderIcon = getFallbackFileIcon();
-    } else {
-      folderIcon = folderIcon.resize({ width: 16, height: 16 });
-    }
-    
-    template.push({
-      label: 'Open Downloads',
-      icon: folderIcon,
-      click: () => {
-        shell.openPath(downloadsPath).catch((err) => console.error('Failed to open Downloads:', err));
-      }
-    });
-    
-    const menu = Menu.buildFromTemplate(template);
-    const window = BrowserWindow.fromWebContents(event.sender);
-    
-    // Position native macOS menu relative to button
-    if (buttonX !== undefined && buttonY !== undefined && buttonWidth !== undefined && buttonHeight !== undefined &&
-        typeof buttonX === 'number' && typeof buttonY === 'number' && 
-        typeof buttonWidth === 'number' && typeof buttonHeight === 'number' &&
-        !isNaN(buttonX) && !isNaN(buttonY) && !isNaN(buttonWidth) && !isNaN(buttonHeight)) {
-      try {
-        // Convert button position from client coordinates to screen coordinates
-        const contentBounds = window.getContentBounds();
-        if (contentBounds && typeof contentBounds.x === 'number' && typeof contentBounds.y === 'number') {
-          const screenX = contentBounds.x + buttonX;
-          const screenY = contentBounds.y + buttonY;
-          
-          // Calculate button center for arrow positioning
-          const buttonCenterX = screenX + (buttonWidth / 2);
-          
-          // Estimate menu height: ~22px per item + padding
-          const estimatedMenuHeight = Math.min(300, (template.length * 22) + 16);
-          
-          // Position menu above the button, centered horizontally for arrow alignment
-          // macOS native menus automatically show the arrow when positioned correctly
-          const estimatedMenuWidth = 280;
-          const menuX = Math.round(buttonCenterX - (estimatedMenuWidth / 2));
-          let menuY = Math.round(screenY - estimatedMenuHeight - 8); // 8px gap above button
-          
-          // Ensure menu doesn't go above screen
-          const display = screen.getDisplayNearestPoint({ x: menuX, y: menuY });
-          if (display) {
-            if (menuY < display.bounds.y) {
-              // If menu would go above screen, position it below the button instead
-              menuY = Math.round(screenY + buttonHeight + 8);
-            }
-            // Ensure menu doesn't go off screen edges
-            let finalX = menuX;
-            if (finalX + estimatedMenuWidth > display.bounds.x + display.bounds.width) {
-              finalX = display.bounds.x + display.bounds.width - estimatedMenuWidth - 8;
-            }
-            if (finalX < display.bounds.x) {
-              finalX = display.bounds.x + 8;
-            }
+            <div class="sidebar-section sidebar-footer">
+            </div>
             
-            // Use native macOS menu popup - it will automatically show the arrow
-            menu.popup({
-              window: window,
-              x: finalX,
-              y: menuY,
-              positioningItem: 0 // This helps macOS position the arrow correctly
-            });
-            return true;
-          }
-          
-          // Fallback with calculated position
-          if (!isNaN(menuX) && !isNaN(menuY) && isFinite(menuX) && isFinite(menuY) && menuX >= 0 && menuY >= 0) {
-            menu.popup({
-              window: window,
-              x: menuX,
-              y: menuY
-            });
-            return true;
-          }
-        }
-      } catch (error) {
-        console.error('Error calculating menu position:', error);
-      }
-    }
+            <!-- Sidebar plus dropdown (New tab / New tab group / Incognito) -->
+            <div id="sidebar-plus-menu" class="context-menu hidden">
+                <div class="context-menu-item" id="sidebar-plus-new-tab">
+                    <i class="fas fa-plus"></i>
+                    <span>New Tab</span>
+                </div>
+                <div class="context-menu-item" id="sidebar-plus-new-tab-group">
+                    <i class="fas fa-layer-group"></i>
+                    <span>New Tab Group</span>
+                </div>
+                <div class="context-menu-item" id="sidebar-plus-incognito">
+                    <i class="fas fa-mask"></i>
+                    <span>New Incognito Tab</span>
+                </div>
+            </div>
+            
+            <!-- Downloads Popup - in-app high quality panel -->
+            <div id="downloads-popup" class="downloads-popup hidden">
+                <div id="downloads-popup-list" class="downloads-popup-list">
+                    <!-- Download items will be populated here -->
+                </div>
+                <button id="downloads-popup-open-folder" class="downloads-popup-footer" title="Open Downloads folder">
+                    <i class="fas fa-folder-open"></i>
+                    <span>Open Downloads</span>
+                </button>
+            </div>
+            </aside>
+
+            <!-- Web Content Area -->
+            <div id="content-area">
+                <!-- Single View -->
+                <div id="single-view" class="view-container active">
+                    <div class="webview-container">
+                        <!-- Themed URL Bar -->
+                        <div id="webview-url-bar" class="webview-url-bar">
+                            <div class="url-bar-left">
+                                <button class="url-bar-btn url-bar-downloads-btn" id="downloads-btn-footer" title="Downloads">
+                                    <i class="far fa-circle-down"></i>
+                                </button>
+                                <button class="url-bar-btn" id="url-bar-back" title="Go Back" disabled>
+                                    <i class="fas fa-chevron-left"></i>
+                                </button>
+                                <button class="url-bar-btn" id="url-bar-forward" title="Go Forward" disabled>
+                                    <i class="fas fa-chevron-right"></i>
+                                </button>
+                                <button class="url-bar-btn" id="url-bar-refresh" title="Reload">
+                                    <i class="fas fa-redo-alt"></i>
+                                </button>
+                            </div>
+                            <div class="url-bar-center">
+                                <div class="url-bar-field">
+                                    <input type="text" class="url-bar-input" id="url-bar-input" readonly>
+                                    <span class="url-bar-url" id="url-bar-display"></span>
+                                </div>
+                                <div class="url-bar-actions">
+                                    <button class="url-bar-btn url-bar-action-btn url-bar-copy-btn" id="url-bar-copy" title="Copy Link">
+                                        <i class="fas fa-link"></i>
+                                    </button>
+                                    <button class="url-bar-btn url-bar-action-btn" id="url-bar-security" title="Security Info">
+                                        <i class="fas fa-lock"></i>
+                                    </button>
+                                </div>
+                                <div id="loading-bar" class="loading-bar" aria-hidden="true">
+                                    <div id="loading-bar-fill" class="loading-bar-fill"></div>
+                                </div>
+                            </div>
+                            <div class="url-bar-right">
+                                <button class="url-bar-chat-btn" id="url-bar-chat" title="Chat">
+                                    <span>Chat</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="zoom-indicator" class="zoom-indicator hidden">
+                            <div class="zoom-content">
+                                <i class="fas fa-search-plus"></i>
+                                <span class="zoom-percentage">100%</span>
+                            </div>
+                        </div>
+                        <!-- Legacy webview: placed first, z-index:0 in CSS - never blocks dynamic webviews -->
+                        <webview id="webview" 
+                                 src="about:blank" 
+                                 allowpopups 
+                                 webpreferences="contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false"
+                                 partition="persist:main"
+                                 autosize="true"
+                                 style="opacity:0;visibility:hidden;pointer-events:none;">
+                        </webview>
+                        <!-- Dynamic webviews for each tab - must be after legacy so they stack on top -->
+                        <div id="webviews-container"></div>
+                        <!-- New Tab Page (replaces spotlight - custom local page when opening new tab) -->
+                        <div id="new-tab-page" class="new-tab-page hidden">
+                            <div class="new-tab-page-content">
+                                <div class="new-tab-mode-toggle" id="new-tab-mode-toggle">
+                                    <button type="button" class="new-tab-mode-btn active" data-mode="search">Search</button>
+                                    <button type="button" class="new-tab-mode-btn" data-mode="ask">Ask</button>
+                                </div>
+                                <div class="new-tab-search-wrapper" id="new-tab-search-wrapper">
+                                    <div class="new-tab-search-bar">
+                                        <i class="fas fa-search new-tab-search-icon"></i>
+                                        <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search, ask, or @-mention a tab" autocomplete="off">
+                                    </div>
+                                    <div class="new-tab-suggestions" id="new-tab-suggestions"></div>
+                                    <div class="new-tab-ask-messages hidden" id="new-tab-ask-messages"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Empty State Welcome Message -->
+                        <div id="empty-state" class="empty-state">
+                            <div id="empty-state-empty" class="empty-state-content">
+                                <div class="empty-state-icon">
+                                    <i class="fas fa-window-maximize"></i>
+                                </div>
+                                <h2 class="empty-state-title">No tabs open</h2>
+                                <p class="empty-state-subtitle">Create a new tab to start browsing</p>
+                                <div class="empty-state-actions">
+                                    <button class="empty-state-btn" id="empty-state-new-tab-empty">
+                                        <i class="fas fa-plus"></i>
+                                        <span>New Tab</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- AI Chat Panel (inside webview container) -->
+                        <div id="ai-chat-panel" class="ai-chat-panel hidden">
+                            <div id="ai-chat-resize-handle" class="ai-chat-resize-handle" title="Drag to resize"></div>
+                            <div class="ai-chat-header">
+                                <button id="ai-chat-close" class="ai-chat-close-btn" title="Close Chat">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            <div class="ai-chat-messages" id="ai-chat-messages"></div>
+                            <div id="ai-chat-quote-bar" class="ai-chat-quote-bar hidden">
+                                <i class="fas fa-quote-right ai-chat-quote-icon"></i>
+                                <div class="ai-chat-quote-text" id="ai-chat-quote-text"></div>
+                                <button type="button" id="ai-chat-quote-dismiss" class="ai-chat-quote-dismiss" title="Remove quote">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            <div class="ai-chat-input-container">
+                                <textarea 
+                                    id="ai-chat-input" 
+                                    class="ai-chat-input" 
+                                    placeholder="Type your message..."
+                                    rows="1"
+                                ></textarea>
+                                <button id="ai-chat-send" class="ai-chat-send-btn" title="Send (Enter)">
+                                    <i class="fas fa-arrow-up"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+            </div>
+        </div>
+
+        <!-- Native PIP is handled directly by the browser - no custom window needed -->
+
+        <!-- Left-edge hover area to reveal sidebar when hidden -->
+        <div id="sidebar-hover-area"></div>
+
+
+        <!-- Backdrop for modals -->
+        <div id="modal-backdrop" class="modal-backdrop hidden"></div>
     
-    // Fallback: position at cursor or let Electron position automatically
-    // macOS will automatically add the arrow when positioned near a UI element
-    try {
-      const cursorPoint = screen.getCursorScreenPoint();
-      menu.popup({
-        window: window,
-        x: cursorPoint.x,
-        y: cursorPoint.y
-      });
-    } catch (error) {
-      // Last resort: let Electron position it automatically
-      menu.popup({
-        window: window
-      });
-    }
+    <!-- Tab Context Menu (order matches native tab menu) -->
+    <div id="tab-context-menu" class="context-menu hidden">
+        <div class="context-menu-item" id="rename-tab-option">
+            <i class="fas fa-edit"></i>
+            <span>Rename Tab</span>
+        </div>
+        <div class="context-menu-item" id="duplicate-tab-option">
+            <i class="fas fa-copy"></i>
+            <span>Duplicate Tab</span>
+        </div>
+        <div class="context-menu-item" id="pin-tab-option">
+            <i class="fas fa-thumbtack"></i>
+            <span id="pin-tab-text">Pin Tab</span>
+        </div>
+        <div class="context-menu-item" id="mute-tab-option">
+            <i id="mute-tab-icon" class="fas fa-volume-mute"></i>
+            <span id="mute-tab-text">Mute Tab</span>
+        </div>
+        <div class="context-menu-item" id="change-tab-icon-option">
+            <i class="fas fa-icons"></i>
+            <span>Change Icon</span>
+        </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="close-tab-option">
+            <i class="fas fa-times"></i>
+            <span>Close Tab</span>
+        </div>
+    </div>
     
-    return true;
-  } catch (error) {
-    console.error('Failed to show downloads popup:', error);
-    return false;
-  }
-});
-
-// Icon picker - trigger native macOS emoji/symbols picker
-ipcMain.handle('show-icon-picker', async (event, type) => {
-  if (process.platform === 'darwin') {
-    // On macOS, use AppleScript to trigger the Character Viewer (emoji picker)
-    // This opens the native macOS emoji and symbols picker
-    exec('osascript -e \'tell application "System Events" to keystroke " " using {command down, control down}\'', (error) => {
-      if (error) {
-        console.error('Error triggering emoji picker:', error);
-        // Fallback: send message to renderer to create input field
-        event.sender.send('trigger-native-emoji-picker', type);
-      }
-    });
+    <!-- Tab Group Context Menu -->
+    <div id="tab-group-context-menu" class="context-menu hidden">
+        <div class="context-menu-item" id="rename-tab-group-option">
+            <i class="fas fa-edit"></i>
+            <span>Rename Tab Group</span>
+        </div>
+        <div class="context-menu-item" id="duplicate-tab-group-option">
+            <i class="fas fa-copy"></i>
+            <span>Duplicate Tab Group</span>
+        </div>
+        <div class="context-menu-item" id="change-tab-group-color-option">
+            <i class="fas fa-palette"></i>
+            <span>Change Color</span>
+        </div>
+        <div class="context-menu-item" id="change-tab-group-icon-option">
+            <i class="fas fa-icons"></i>
+            <span>Change Icon</span>
+        </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="delete-tab-group-option">
+            <i class="fas fa-times"></i>
+            <span>Delete Tab Group</span>
+        </div>
+    </div>
     
-    // Also send message to renderer to create input field and listen for emoji selection
-    event.sender.send('trigger-native-emoji-picker', type);
-  } else {
-    // On non-macOS, just send the trigger message
-    event.sender.send('trigger-native-emoji-picker', type);
-  }
-  
-  return true;
-});
+    <!-- Tab Group Color Picker -->
+    <div id="tab-group-color-picker" class="color-picker hidden">
+        <div class="color-picker-header">
+            <span>Choose Color</span>
+            <button class="color-picker-close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="color-picker-colors">
+            <div class="color-option" data-color="#FF6B6B" style="background: #FF6B6B;"></div>
+            <div class="color-option" data-color="#4ECDC4" style="background: #4ECDC4;"></div>
+            <div class="color-option" data-color="#45B7D1" style="background: #45B7D1;"></div>
+            <div class="color-option" data-color="#96CEB4" style="background: #96CEB4;"></div>
+            <div class="color-option" data-color="#FFEAA7" style="background: #FFEAA7;"></div>
+            <div class="color-option" data-color="#DDA15E" style="background: #DDA15E;"></div>
+            <div class="color-option" data-color="#F39C12" style="background: #F39C12;"></div>
+            <div class="color-option" data-color="#E74C3C" style="background: #E74C3C;"></div>
+            <div class="color-option" data-color="#9B59B6" style="background: #9B59B6;"></div>
+            <div class="color-option" data-color="#3498DB" style="background: #3498DB;"></div>
+            <div class="color-option" data-color="#1ABC9C" style="background: #1ABC9C;"></div>
+            <div class="color-option" data-color="#2ECC71" style="background: #2ECC71;"></div>
+        </div>
+    </div>
+    
+    <!-- Sidebar Context Menu (order matches native sidebar menu) -->
+    <div id="sidebar-context-menu" class="context-menu hidden">
+        <div class="context-menu-item" id="sidebar-new-tab-option">
+            <i class="fas fa-plus"></i>
+            <span>New Tab</span>
+        </div>
+        <div class="context-menu-item" id="sidebar-new-tab-group-option">
+            <i class="fas fa-layer-group"></i>
+            <span>New Tab Group</span>
+        </div>
+        <div class="context-menu-item" id="sidebar-new-incognito-option">
+            <i class="fas fa-mask"></i>
+            <span>New Incognito Tab</span>
+        </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="sidebar-toggle-option">
+            <i class="fas fa-sidebar"></i>
+            <span>Toggle Sidebar</span>
+        </div>
+        <div class="context-menu-item" id="sidebar-position-option">
+            <i class="fas fa-arrows-alt-h"></i>
+            <span id="sidebar-position-context-text">Move Sidebar Right</span>
+        </div>
+    </div>
+    
+    <!-- Search Modal -->
+    <div id="search-modal" class="search-modal hidden">
+        <div class="search-container">
+            <input type="text" id="search-input" placeholder="Search on this page..." autocomplete="off">
+            <div class="search-controls">
+                <button id="search-prev" class="search-btn" title="Previous">
+                    <i class="fas fa-chevron-up"></i>
+                </button>
+                <button id="search-next" class="search-btn" title="Next">
+                    <i class="fas fa-chevron-down"></i>
+                </button>
+                <button id="search-close" class="search-btn" title="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Webpage Context Menu (order matches native page menu: link → image → nav → edit → selection → page) -->
+    <div id="webpage-context-menu" class="context-menu webpage-context-menu hidden">
+        <!-- Link -->
+        <div class="context-menu-item link-option" id="webpage-open-link-new-tab">
+            <i class="fas fa-external-link-alt"></i>
+            <span>Open Link in New Tab</span>
+        </div>
+        <div class="context-menu-item link-option" id="webpage-copy-link">
+            <i class="fas fa-link"></i>
+            <span>Copy Link Address</span>
+        </div>
+        <div class="context-menu-separator link-option"></div>
 
-ipcMain.on('confirm-quit', () => {
-  isQuitConfirmed = true;
-  isUserQuitting = true;
-  app.quit();
-});
+        <!-- Image -->
+        <div class="context-menu-item image-option" id="webpage-open-image-new-tab">
+            <i class="fas fa-image"></i>
+            <span>Open Image in New Tab</span>
+        </div>
+        <div class="context-menu-item image-option" id="webpage-copy-image">
+            <i class="fas fa-copy"></i>
+            <span>Copy Image</span>
+        </div>
+        <div class="context-menu-item image-option" id="webpage-copy-image-url">
+            <i class="fas fa-link"></i>
+            <span>Copy Image Address</span>
+        </div>
+        <div class="context-menu-separator image-option"></div>
 
-ipcMain.on('cancel-quit', () => {
-  // Reset flags when user cancels quit confirmation
-  isQuitConfirmed = false;
-  isUserQuitting = false;
-});
+        <!-- Navigation -->
+        <div class="context-menu-item nav-option" id="webpage-back">
+            <i class="fas fa-arrow-left"></i>
+            <span>Back</span>
+        </div>
+        <div class="context-menu-item nav-option" id="webpage-forward">
+            <i class="fas fa-arrow-right"></i>
+            <span>Forward</span>
+        </div>
+        <div class="context-menu-item" id="webpage-reload">
+            <i class="fas fa-redo"></i>
+            <span>Reload</span>
+        </div>
+        <div class="context-menu-separator"></div>
 
-// Toggle window button visibility (macOS traffic lights)
-ipcMain.handle('set-window-button-visibility', (event, visible) => {
-  if (mainWindow) {
-    mainWindow.setWindowButtonVisibility(visible);
-  }
-});
+        <!-- Edit -->
+        <div class="context-menu-item edit-option" id="webpage-cut">
+            <i class="fas fa-cut"></i>
+            <span>Cut</span>
+        </div>
+        <div class="context-menu-item" id="webpage-copy">
+            <i class="fas fa-copy"></i>
+            <span>Copy</span>
+        </div>
+        <div class="context-menu-item" id="webpage-paste">
+            <i class="fas fa-paste"></i>
+            <span>Paste</span>
+        </div>
+        <div class="context-menu-item" id="webpage-paste-match-style">
+            <i class="fas fa-paste"></i>
+            <span>Paste and Match Style</span>
+        </div>
+        <div class="context-menu-item" id="webpage-select-all">
+            <i class="fas fa-check-square"></i>
+            <span>Select All</span>
+        </div>
+        <div class="context-menu-separator"></div>
 
-// Mirror stoplights to top-right when sidebar is docked on the right (per-window; respects resize)
-ipcMain.handle('set-sidebar-traffic-layout', (event, sidebarOnRight) => {
-  if (process.platform !== 'darwin') return;
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win || win.isDestroyed()) return;
-  win.__axisSidebarRight = !!sidebarOnRight;
-  positionMacTrafficLights(win, win.__axisSidebarRight);
-});
+        <!-- Selection -->
+        <div class="context-menu-item selection-option" id="webpage-search-selection">
+            <i class="fas fa-search"></i>
+            <span>Search for "<span class="selection-text"></span>"</span>
+        </div>
+        <div class="context-menu-separator selection-option"></div>
 
+        <!-- Page -->
+        <div class="context-menu-item" id="webpage-copy-url">
+            <i class="fas fa-globe"></i>
+            <span>Copy Page URL</span>
+        </div>
+        <div class="context-menu-item" id="webpage-copy-url-markdown">
+            <i class="fa-brands fa-markdown"></i>
+            <span>Copy URL as Markdown</span>
+        </div>
+        <div class="context-menu-item" id="webpage-print">
+            <i class="fas fa-print"></i>
+            <span>Print…</span>
+        </div>
+        <div class="context-menu-item" id="webpage-inspect">
+            <i class="fas fa-code"></i>
+            <span>Inspect Element</span>
+        </div>
+    </div>
+
+    <!-- AI Text Selection Button -->
+    <div id="ai-selection-button" class="ai-selection-button hidden">
+        <button class="ai-button" title="Quote selection and ask in Chat">
+            <span class="ai-button-text">Ask</span>
+            <i class="fas fa-quote-right ai-button-icon"></i>
+        </button>
+    </div>
+
+    <!-- AI Floating Box -->
+    <div id="ai-popup" class="ai-popup hidden">
+        <div class="ai-popup-container">
+            <div class="ai-popup-content">
+                <div class="ai-popup-drag-handle" id="ai-popup-drag-handle">
+                    <i class="fas fa-grip"></i>
+                </div>
+                <input 
+                    type="text" 
+                    id="ai-custom-question" 
+                    class="ai-custom-input" 
+                    placeholder="Ask AI about the selected text..."
+                    autocomplete="off"
+                />
+                <button class="ai-submit-btn" title="Submit (Enter)">
+                    <i class="fas fa-arrow-up"></i>
+                </button>
+            </div>
+            <div class="ai-response-area hidden" id="ai-response-area">
+                <div class="ai-response-content"></div>
+            </div>
+        </div>
+    </div>
+
+        <!-- Settings Panel -->
+        <div id="settings-panel" class="settings-panel hidden">
+            <div class="settings-header">
+                <h3>Settings</h3>
+                <button id="close-settings" class="close-settings">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="settings-content">
+                <div class="settings-tabs">
+                    <button class="settings-tab active" data-tab="general">General</button>
+                    <button class="settings-tab" data-tab="history">History</button>
+                    <button class="settings-tab" data-tab="shortcuts">Shortcuts</button>
+                </div>
+                
+                <!-- General Settings Tab -->
+                <div class="settings-tab-content active" id="general-tab">
+                     <div class="setting-group">
+                         <h4>Privacy & Security</h4>
+                         <div class="setting-item">
+                             <label>
+                                 <input type="checkbox" id="block-trackers">
+                                 Block trackers
+                             </label>
+                         </div>
+                         <div class="setting-item">
+                             <label>
+                                 <input type="checkbox" id="block-ads">
+                                 Block ads
+                             </label>
+                         </div>
+                         <div class="setting-item">
+                             <label>
+                                 <input type="checkbox" id="private-mode">
+                                 Enhanced private mode
+                             </label>
+                         </div>
+                     </div>
+                    <div class="settings-actions">
+                        <button id="save-settings" class="save-btn hidden">Save Changes</button>
+                    </div>
+                </div>
+                
+                <!-- History Tab -->
+                <div class="settings-tab-content" id="history-tab">
+                    <div class="history-controls">
+                        <input type="text" id="history-search" placeholder="Search history..." class="history-search">
+                        <button id="clear-history" class="clear-btn" title="Clear All History">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                    <div class="history-content">
+                        <div id="history-list" class="history-list">
+                            <!-- History items will be populated here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Keyboard Shortcuts Tab -->
+                <div class="settings-tab-content" id="shortcuts-tab">
+                    <div class="shortcut-group">
+                        <h4>Navigation</h4>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + T</span>
+                            <span class="shortcut-desc">New Tab</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + W</span>
+                            <span class="shortcut-desc">Close Tab</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + Z</span>
+                            <span class="shortcut-desc">Recover Closed Tab</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + R</span>
+                            <span class="shortcut-desc">Refresh Page</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + L</span>
+                            <span class="shortcut-desc">Focus URL Bar</span>
+                        </div>
+                    </div>
+                    
+                    <div class="shortcut-group">
+                        <h4>Tab Management</h4>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + 1-9</span>
+                            <span class="shortcut-desc">Switch to tab 1-9</span>
+                        </div>
+                    </div>
+                    
+                    <div class="shortcut-group">
+                        <h4>Panels & Menus</h4>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + B</span>
+                            <span class="shortcut-desc">Toggle Sidebar</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + Y</span>
+                            <span class="shortcut-desc">Open History</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + J</span>
+                            <span class="shortcut-desc">Open Downloads</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + F</span>
+                            <span class="shortcut-desc">Find in Page</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + ,</span>
+                            <span class="shortcut-desc">Open Settings</span>
+                        </div>
+                    </div>
+                    
+                    <div class="shortcut-group">
+                        <h4>Zoom Controls</h4>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + +</span>
+                            <span class="shortcut-desc">Zoom In</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + -</span>
+                            <span class="shortcut-desc">Zoom Out</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + 0</span>
+                            <span class="shortcut-desc">Reset Zoom</span>
+                        </div>
+                    </div>
+                    
+                    <div class="shortcut-group">
+                        <h4>Data Management</h4>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">⌘ + Shift + H</span>
+                            <span class="shortcut-desc">Clear History</span>
+                        </div>
+                    </div>
+                    
+                    <div class="shortcut-group">
+                        <h4>Browser Controls</h4>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">←</span>
+                            <span class="shortcut-desc">Go Back</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">→</span>
+                            <span class="shortcut-desc">Go Forward</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Escape</span>
+                            <span class="shortcut-desc">Close Search/Modals</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Library Panel -->
+        <div id="downloads-panel" class="downloads-panel hidden">
+            <div class="downloads-header">
+                <h3>Library</h3>
+                <button id="close-downloads" class="close-settings">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="downloads-content">
+                <div id="downloads-list" class="downloads-list">
+                    <!-- Download items will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Notes Panel -->
+        <div id="notes-panel" class="notes-panel hidden">
+            <div class="notes-header">
+                <h3>Notes</h3>
+                    <button id="close-notes" class="close-settings">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            
+            <!-- Create New Note Section -->
+            <div class="notes-create-section">
+                <button id="new-note-btn" class="new-note-btn-large">
+                    <div class="new-note-icon">
+                        <i class="fas fa-plus"></i>
+                    </div>
+                    <div class="new-note-text">
+                        <span class="new-note-title">Create New Note</span>
+                        <span class="new-note-subtitle">Start writing your thoughts</span>
+                    </div>
+                </button>
+            </div>
+            
+            <!-- Search Section -->
+            <div class="notes-search">
+                <input type="text" id="notes-search-input" placeholder="Search notes...">
+            </div>
+            
+            <!-- Saved Notes Section -->
+            <div class="notes-saved-section">
+                <div class="notes-section-header">
+                    <h4>Saved Notes</h4>
+                    <span id="notes-count" class="notes-count">0 notes</span>
+            </div>
+            <div class="notes-content">
+                <div id="notes-list">
+                    <!-- Notes will be populated here -->
+                </div>
+                <div id="no-notes" class="no-notes hidden">
+                        <i class="fas fa-sticky-note"></i>
+                    <p>No notes yet</p>
+                        <p>Create your first note to get started</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Note Editor Modal -->
+        <div id="note-editor-modal" class="note-editor-modal hidden">
+            <div class="note-editor-content">
+                <div class="note-editor-header">
+                    <input type="text" id="note-title-input" class="note-title-input" placeholder="Note title...">
+                    <div class="note-editor-actions">
+                        <button id="save-note-btn" class="save-note-btn" title="Save (Ctrl+S)">
+                            <i class="fas fa-save"></i>
+                        </button>
+                        <button id="close-note-editor" class="close-note-editor" title="Close (Esc)">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="note-editor-body">
+                    <textarea id="note-content-textarea" class="note-content-textarea" placeholder="Start writing your note..."></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Security Panel -->
+        <div id="security-panel" class="security-panel hidden">
+            <div class="security-panel-content">
+                <div class="security-header">
+                    <div class="security-status">
+                        <i id="security-icon" class="fas fa-lock"></i>
+                        <div class="security-info">
+                            <h3 id="security-title">Secure Connection</h3>
+                            <p id="security-subtitle">Your connection is encrypted</p>
+                        </div>
+                    </div>
+                    <button id="close-security" class="close-settings">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="security-content">
+                    <div class="security-details">
+                        <div class="security-item">
+                            <label>Website</label>
+                            <span id="security-website">example.com</span>
+                        </div>
+                        <div class="security-item">
+                            <label>Certificate</label>
+                            <span id="security-certificate">Valid</span>
+                        </div>
+                        <div class="security-item">
+                            <label>Encryption</label>
+                            <span id="security-encryption">TLS 1.3</span>
+                        </div>
+                        <div class="security-item">
+                            <label>Connection</label>
+                            <span id="security-connection">Secure</span>
+                        </div>
+                    </div>
+                    <div class="security-actions">
+                        <button id="view-certificate" class="security-btn">
+                            <i class="fas fa-certificate"></i>
+                            View Certificate
+                        </button>
+                        <button id="security-settings" class="security-btn">
+                            <i class="fas fa-cog"></i>
+                            Security Settings
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- File Preview Window -->
+        <div id="file-preview-backdrop" class="file-preview-backdrop hidden">
+            <div id="file-preview-window" class="file-preview-window">
+                <div class="file-preview-header">
+                    <div class="file-preview-title">
+                        <span id="file-preview-name"></span>
+                        <span class="file-preview-time" id="file-preview-time"></span>
+                    </div>
+                    <div class="file-preview-actions">
+                        <button class="file-preview-nav-btn" id="file-preview-prev" disabled title="Previous item">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <button class="file-preview-nav-btn" id="file-preview-next" disabled title="Next item">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                        <button class="file-preview-close-btn" id="file-preview-close" title="Close">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <button class="file-preview-open-btn" id="file-preview-open">
+                            Open in Preview <i class="fas fa-arrow-up-right"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="file-preview-content" id="file-preview-content">
+                    <!-- Preview content will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
