@@ -216,7 +216,7 @@
         <!-- Backdrop for modals -->
         <div id="modal-backdrop" class="modal-backdrop hidden"></div>
     
-    <!-- Tab Context Menu -->
+    <!-- Tab Context Menu (order matches native tab menu) -->
     <div id="tab-context-menu" class="context-menu hidden">
         <div class="context-menu-item" id="rename-tab-option">
             <i class="fas fa-edit"></i>
@@ -234,6 +234,11 @@
             <i id="mute-tab-icon" class="fas fa-volume-mute"></i>
             <span id="mute-tab-text">Mute Tab</span>
         </div>
+        <div class="context-menu-item" id="change-tab-icon-option">
+            <i class="fas fa-icons"></i>
+            <span>Change Icon</span>
+        </div>
+        <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="close-tab-option">
             <i class="fas fa-times"></i>
             <span>Close Tab</span>
@@ -253,6 +258,10 @@
         <div class="context-menu-item" id="change-tab-group-color-option">
             <i class="fas fa-palette"></i>
             <span>Change Color</span>
+        </div>
+        <div class="context-menu-item" id="change-tab-group-icon-option">
+            <i class="fas fa-icons"></i>
+            <span>Change Icon</span>
         </div>
         <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="delete-tab-group-option">
@@ -285,7 +294,7 @@
         </div>
     </div>
     
-    <!-- Sidebar Context Menu -->
+    <!-- Sidebar Context Menu (order matches native sidebar menu) -->
     <div id="sidebar-context-menu" class="context-menu hidden">
         <div class="context-menu-item" id="sidebar-new-tab-option">
             <i class="fas fa-plus"></i>
@@ -295,7 +304,15 @@
             <i class="fas fa-layer-group"></i>
             <span>New Tab Group</span>
         </div>
+        <div class="context-menu-item" id="sidebar-new-incognito-option">
+            <i class="fas fa-mask"></i>
+            <span>New Incognito Tab</span>
+        </div>
         <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="sidebar-toggle-option">
+            <i class="fas fa-sidebar"></i>
+            <span>Toggle Sidebar</span>
+        </div>
         <div class="context-menu-item" id="sidebar-position-option">
             <i class="fas fa-arrows-alt-h"></i>
             <span id="sidebar-position-context-text">Move Sidebar Right</span>
@@ -320,9 +337,9 @@
         </div>
     </div>
     
-    <!-- Webpage Context Menu -->
+    <!-- Webpage Context Menu (order matches native page menu: link → image → nav → edit → selection → page) -->
     <div id="webpage-context-menu" class="context-menu webpage-context-menu hidden">
-        <!-- Link options (shown when right-clicking a link) -->
+        <!-- Link -->
         <div class="context-menu-item link-option" id="webpage-open-link-new-tab">
             <i class="fas fa-external-link-alt"></i>
             <span>Open Link in New Tab</span>
@@ -332,8 +349,8 @@
             <span>Copy Link Address</span>
         </div>
         <div class="context-menu-separator link-option"></div>
-        
-        <!-- Image options (shown when right-clicking an image) -->
+
+        <!-- Image -->
         <div class="context-menu-item image-option" id="webpage-open-image-new-tab">
             <i class="fas fa-image"></i>
             <span>Open Image in New Tab</span>
@@ -347,8 +364,8 @@
             <span>Copy Image Address</span>
         </div>
         <div class="context-menu-separator image-option"></div>
-        
-        <!-- Navigation options -->
+
+        <!-- Navigation -->
         <div class="context-menu-item nav-option" id="webpage-back">
             <i class="fas fa-arrow-left"></i>
             <span>Back</span>
@@ -362,8 +379,8 @@
             <span>Reload</span>
         </div>
         <div class="context-menu-separator"></div>
-        
-        <!-- Edit options -->
+
+        <!-- Edit -->
         <div class="context-menu-item edit-option" id="webpage-cut">
             <i class="fas fa-cut"></i>
             <span>Cut</span>
@@ -376,23 +393,35 @@
             <i class="fas fa-paste"></i>
             <span>Paste</span>
         </div>
+        <div class="context-menu-item" id="webpage-paste-match-style">
+            <i class="fas fa-paste"></i>
+            <span>Paste and Match Style</span>
+        </div>
         <div class="context-menu-item" id="webpage-select-all">
             <i class="fas fa-check-square"></i>
             <span>Select All</span>
         </div>
         <div class="context-menu-separator"></div>
-        
-        <!-- Selection options -->
+
+        <!-- Selection -->
         <div class="context-menu-item selection-option" id="webpage-search-selection">
             <i class="fas fa-search"></i>
             <span>Search for "<span class="selection-text"></span>"</span>
         </div>
         <div class="context-menu-separator selection-option"></div>
-        
-        <!-- Page options -->
+
+        <!-- Page -->
         <div class="context-menu-item" id="webpage-copy-url">
             <i class="fas fa-globe"></i>
             <span>Copy Page URL</span>
+        </div>
+        <div class="context-menu-item" id="webpage-copy-url-markdown">
+            <i class="fa-brands fa-markdown"></i>
+            <span>Copy URL as Markdown</span>
+        </div>
+        <div class="context-menu-item" id="webpage-print">
+            <i class="fas fa-print"></i>
+            <span>Print…</span>
         </div>
         <div class="context-menu-item" id="webpage-inspect">
             <i class="fas fa-code"></i>
