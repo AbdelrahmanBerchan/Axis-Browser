@@ -11,6 +11,13 @@
             height: 100%;
             overflow: hidden;
         }
+        /* Match Chromium window backgroundColor to avoid white flash before body paints */
+        html {
+            background-color: #f5f5f7;
+        }
+        @media (prefers-color-scheme: dark) {
+            html { background-color: #1e1e1e; }
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
             font-size: 13px;
@@ -747,6 +754,8 @@
                 { action: 'spotlight-search', label: 'New Tab' },
                 { action: 'close-tab', label: 'Close Tab' },
                 { action: 'new-tab', label: 'New Window' },
+                { action: 'next-tab', label: 'Show Next Tab' },
+                { action: 'previous-tab', label: 'Show Previous Tab' },
                 { action: 'recover-tab', label: 'Recover Tab' },
                 { action: 'refresh', label: 'Refresh' },
                 { action: 'focus-url', label: 'Focus URL Bar' },
@@ -756,6 +765,7 @@
                 { action: 'paste-match-style', label: 'Paste and Match Style' },
                 { action: 'print', label: 'Print Page' },
                 { action: 'copy-url', label: 'Copy URL' },
+                { action: 'copy-url-markdown', label: 'Copy URL as Markdown' },
                 { action: 'pin-tab', label: 'Pin Tab' },
                 { action: 'toggle-mute-tab', label: 'Mute / Unmute Tab' },
                 { action: 'zoom-in', label: 'Zoom In' },
