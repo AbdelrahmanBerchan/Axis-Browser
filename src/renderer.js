@@ -146,6 +146,8 @@ function getShortcutEditorActions() {
         { action: 'spotlight-search', label: 'New Tab / Spotlight' },
         { action: 'close-tab', label: 'Close Tab' },
         { action: 'new-tab', label: 'New Window' },
+        { action: 'next-tab', label: 'Show Next Tab' },
+        { action: 'previous-tab', label: 'Show Previous Tab' },
         { action: 'recover-tab', label: 'Recover Closed Tab' },
         { action: 'refresh', label: 'Refresh Page' },
         { action: 'focus-url', label: 'Focus URL Bar' },
@@ -155,6 +157,7 @@ function getShortcutEditorActions() {
         { action: 'paste-match-style', label: 'Paste and Match Style' },
         { action: 'print', label: 'Print Page' },
         { action: 'copy-url', label: 'Copy Current URL' },
+        { action: 'copy-url-markdown', label: 'Copy URL as Markdown' },
         { action: 'pin-tab', label: 'Pin / Unpin Tab' },
         { action: 'toggle-mute-tab', label: 'Mute / Unmute Tab' },
         { action: 'zoom-in', label: 'Zoom In' },
@@ -233,6 +236,8 @@ class AxisBrowser {
         this.webviewListenersSetup = new WeakMap(); // Start with no tabs
         this.tabs = new Map(); // Start with empty tabs
         this.tabGroups = new Map(); // Store tab groups: { id, name, tabIds: [], open: true, color: '#FF6B6B' }
+        /** During `syncSidebarFromTabGroups`, empty group that will run close animation (last tab dragged out). */
+        this._pendingEmptyGroupCollapseId = null;
         this.pendingTabGroupColor = null; // Color selected for new tab group
         this.settings = {};
         this.selectedSearchEngine = null; // Track selected search engine shortcut
@@ -360,9 +365,8 @@ class AxisBrowser {
     }
 
     async init() {
-        // Load settings first and apply theme immediately
-        await this.loadSettings();
-        await this.refreshShortcutCache();
+        // Load settings + shortcut cache in parallel (faster first interaction)
+        await Promise.all([this.loadSettings(), this.refreshShortcutCache()]);
         this._lastJavascriptEnabled = this.settings?.javascriptEnabled !== false;
         this.syncTransparentSitesUi();
 
@@ -1151,6 +1155,11 @@ class AxisBrowser {
             this.hideTabContextMenu();
         });
 
+        document.getElementById('change-tab-icon-option')?.addEventListener('click', () => {
+            void this.showIconPicker('tab');
+            this.hideTabContextMenu();
+        });
+
         document.getElementById('close-tab-option').addEventListener('click', () => {
             this.closeCurrentTab();
             this.hideTabContextMenu();
@@ -1180,6 +1189,31 @@ class AxisBrowser {
                     break;
             }
         });
+
+        // Sidebar context menu (DOM template — order matches native menu)
+        document.getElementById('sidebar-new-tab-option')?.addEventListener('click', () => {
+            this.createNewTab();
+            this.hideSidebarContextMenu();
+        });
+        document.getElementById('sidebar-new-tab-group-option')?.addEventListener('click', () => {
+            this.showTabGroupColorPicker((color) => {
+                this.createNewTabGroup(color);
+                this.hideTabGroupColorPicker();
+            });
+            this.hideSidebarContextMenu();
+        });
+        document.getElementById('sidebar-new-incognito-option')?.addEventListener('click', () => {
+            window.electronAPI?.openIncognitoWindow?.();
+            this.hideSidebarContextMenu();
+        });
+        document.getElementById('sidebar-toggle-option')?.addEventListener('click', () => {
+            this.toggleSidebar();
+            this.hideSidebarContextMenu();
+        });
+        document.getElementById('sidebar-position-option')?.addEventListener('click', () => {
+            this.toggleSidebarPosition();
+            this.hideSidebarContextMenu();
+        });
         
         // Listen for webpage context menu actions from main process
         window.electronAPI.onWebpageContextMenuAction((action, data) => {
@@ -1208,11 +1242,13 @@ class AxisBrowser {
                 case 'select-all':
                     this.selectAll();
                     break;
-                case 'search-selection':
-                    if (data && data.selectionText) {
-                        this.createNewTab();
+                case 'search-selection': {
+                    const q = data && data.selectionText ? String(data.selectionText).trim() : '';
+                    if (q) {
+                        this.createNewTab(this.getSearchUrl(q));
                     }
                     break;
+                }
                 case 'speech-start':
                     if (data && data.selectionText) {
                         this.startSpeakingSelection(data.selectionText);
@@ -1257,6 +1293,9 @@ class AxisBrowser {
                 case 'copy-url':
                     this.copyCurrentUrl();
                     break;
+                case 'copy-url-markdown':
+                    void this.copyCurrentUrlAsMarkdown();
+                    break;
                 case 'print':
                     this.printPage();
                     break;
@@ -1293,8 +1332,16 @@ class AxisBrowser {
                     this.showIconPicker('tab');
                     break;
                 case 'add-to-tab-group':
-                    if (this.contextMenuTabId && data && data.tabGroupId != null && this.tabGroups.has(data.tabGroupId)) {
-                        this.addTabToTabGroup(this.contextMenuTabId, data.tabGroupId);
+                case 'move-to-tab-group':
+                    if (this.contextMenuTabId && data && data.tabGroupId != null) {
+                        const gid = this.findTabGroupKey(data.tabGroupId);
+                        if (gid != null) this.addTabToTabGroup(this.contextMenuTabId, gid);
+                    }
+                    break;
+                case 'remove-from-tab-group':
+                    if (this.contextMenuTabId && data && data.tabGroupId != null) {
+                        const gid = this.findTabGroupKey(data.tabGroupId);
+                        if (gid != null) this.removeTabFromTabGroup(this.contextMenuTabId, gid);
                     }
                     break;
             }
@@ -1379,6 +1426,16 @@ class AxisBrowser {
                 this.hideTabGroupContextMenu();
             });
         });
+        }
+
+        const changeTabGroupIconOption = document.getElementById('change-tab-group-icon-option');
+        if (changeTabGroupIconOption) {
+            changeTabGroupIconOption.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void this.showIconPicker('tab-group');
+                this.hideTabGroupContextMenu();
+            });
         }
 
         if (deleteTabGroupOption) {
@@ -1627,6 +1684,12 @@ class AxisBrowser {
             this.hideWebpageContextMenu();
         });
 
+        document.getElementById('webpage-paste-match-style')?.addEventListener('click', (e) => {
+            if (e.target.closest('.disabled')) return;
+            void this.pasteMatchStyle();
+            this.hideWebpageContextMenu();
+        });
+
         document.getElementById('webpage-select-all')?.addEventListener('click', () => {
             this.selectAll();
             this.hideWebpageContextMenu();
@@ -1634,8 +1697,9 @@ class AxisBrowser {
 
         document.getElementById('webpage-search-selection')?.addEventListener('click', () => {
             const ctx = this.webviewContextInfo || {};
-            if (ctx.selectionText) {
-                this.createNewTab();
+            const q = ctx.selectionText ? String(ctx.selectionText).trim() : '';
+            if (q) {
+                this.createNewTab(this.getSearchUrl(q));
             }
             this.hideWebpageContextMenu();
         });
@@ -1688,6 +1752,16 @@ class AxisBrowser {
         // Page options
         document.getElementById('webpage-copy-url')?.addEventListener('click', async () => {
             await this.copyCurrentUrl();
+            this.hideWebpageContextMenu();
+        });
+
+        document.getElementById('webpage-copy-url-markdown')?.addEventListener('click', async () => {
+            await this.copyCurrentUrlAsMarkdown();
+            this.hideWebpageContextMenu();
+        });
+
+        document.getElementById('webpage-print')?.addEventListener('click', () => {
+            this.printPage();
             this.hideWebpageContextMenu();
         });
         
@@ -1755,7 +1829,14 @@ class AxisBrowser {
                     break;
                 case 'paste-match-style':
                     input.focus();
-                    void this.pasteMatchStyle();
+                    void (async () => {
+                        try {
+                            const text = await navigator.clipboard.readText();
+                            this.insertTextInInput(input, text ?? '');
+                        } catch (_) {
+                            document.execCommand('paste');
+                        }
+                    })();
                     break;
                 case 'select-all':
                     input.focus();
@@ -1932,6 +2013,20 @@ class AxisBrowser {
             case 'refresh':
                 this.refresh();
                 break;
+            case 'go-back':
+                this.goBack();
+                break;
+            case 'go-forward':
+                this.goForward();
+                break;
+            case 'stop-loading': {
+                const wv = this.getActiveWebview();
+                if (!wv) break;
+                try {
+                    wv.stop();
+                } catch (_) {}
+                break;
+            }
             case 'focus-url':
                 // Focus the new webview URL bar input
                 const urlBarInput = document.getElementById('url-bar-input');
@@ -1949,6 +2044,12 @@ class AxisBrowser {
                 break;
             case 'new-tab':
                 this.createNewTab();
+                break;
+            case 'next-tab':
+                this.switchToAdjacentTab(1);
+                break;
+            case 'previous-tab':
+                this.switchToAdjacentTab(-1);
                 break;
             case 'duplicate-tab':
                 this.duplicateCurrentTab();
@@ -1985,6 +2086,9 @@ class AxisBrowser {
                 break;
             case 'copy-url':
                 this.copyCurrentUrl();
+                break;
+            case 'copy-url-markdown':
+                void this.copyCurrentUrlAsMarkdown();
                 break;
             case 'clear-history':
                 this.clearAllHistory();
@@ -4488,6 +4592,11 @@ class AxisBrowser {
         }
         
         this.tabs.set(tabId, tab);
+
+        const h = tabElement._pinnedCloseHandlers;
+        if (h && typeof h.updateIcon === 'function') {
+            h.updateIcon();
+        }
     }
     
     setupPinnedTabCloseButton(tabElement, tabId) {
@@ -4505,14 +4614,14 @@ class AxisBrowser {
             }
         }
         
-        // Function to update icon based on active state
+        // Minus = pinned tab with an open webview; × = empty pinned slot (no webview)
         const updateIcon = () => {
-            if (tabElement.classList.contains('active')) {
-                // Active pinned tabs always show minus
+            const tab = this.tabs.get(tabId);
+            const open = !!(tab && tab.webview);
+            if (open) {
                 icon.classList.remove('fa-times');
                 icon.classList.add('fa-minus');
             } else {
-                // Inactive pinned tabs show times
                 icon.classList.remove('fa-minus');
                 icon.classList.add('fa-times');
             }
@@ -4521,7 +4630,7 @@ class AxisBrowser {
         // Update icon immediately based on current state
         updateIcon();
         
-        // Watch for changes to active state
+        // Class changes (e.g. closed) and active swaps can accompany webview attach/detach
         const observer = new MutationObserver(() => {
             updateIcon();
         });
@@ -5395,6 +5504,18 @@ class AxisBrowser {
                 const tabId = parseInt(tabElement.dataset.tabId, 10);
             this.switchToTab(tabId);
         }
+    }
+
+    /** Cycle active tab by DOM order (sidebar / tab groups). */
+    switchToAdjacentTab(delta) {
+        const tabElements = Array.from(document.querySelectorAll('.tab'));
+        if (tabElements.length === 0) return;
+        const ids = tabElements.map((el) => parseInt(el.dataset.tabId, 10));
+        let idx = ids.indexOf(this.currentTab);
+        if (idx < 0) idx = 0;
+        const n = ids.length;
+        const nextIdx = (((idx + delta) % n) + n) % n;
+        this.switchToTab(ids[nextIdx]);
     }
 
     closeTab(tabId) {
@@ -11373,8 +11494,13 @@ class AxisBrowser {
             }
         }, true);
 
-        // Right-click for context menu - use capture phase to run before sidebar handler
+        // Right-click for context menu - use capture phase to run before sidebar handler.
+        // Tabs inside .tab-group-content must keep the tab context menu (don't intercept).
         tabGroupElement.addEventListener('contextmenu', (e) => {
+            const tabEl = e.target.closest('.tab');
+            if (tabEl && tabGroupContent.contains(tabEl)) {
+                return;
+            }
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation(); // Stop all other handlers
@@ -11415,6 +11541,68 @@ class AxisBrowser {
 
     }
 
+    /**
+     * Same collapse animation as the manual "close group" branch in toggleTabGroup.
+     * @param {number|string} tabGroupId
+     */
+    runTabGroupCollapseAnimation(tabGroupId) {
+        const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
+        if (!tabGroupElement) return;
+        const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
+        if (!tabGroupContent) return;
+        if (!tabGroupElement.classList.contains('toggling')) {
+            tabGroupElement.classList.add('toggling');
+        }
+
+        const TAB_GROUP_ANIM_MS = 200;
+        const closeEase = 'cubic-bezier(0.4, 0, 0.2, 1)';
+        const transitionClose = `max-height ${TAB_GROUP_ANIM_MS}ms ${closeEase}, padding ${TAB_GROUP_ANIM_MS}ms ${closeEase}`;
+
+        const finishClose = () => {
+            tabGroupContent.style.transition = 'none';
+            tabGroupContent.style.display = 'none';
+            tabGroupContent.style.visibility = 'hidden';
+            tabGroupContent.classList.remove('open');
+            tabGroupContent.style.maxHeight = '';
+            tabGroupContent.style.padding = '';
+            tabGroupContent.style.opacity = '';
+            tabGroupContent.style.transition = '';
+            tabGroupElement.classList.remove('toggling');
+        };
+
+        const lockedH = Math.round(tabGroupContent.scrollHeight);
+        const cs = getComputedStyle(tabGroupContent);
+        const padPinned = `${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft}`;
+
+        tabGroupContent.style.display = 'flex';
+        tabGroupContent.style.visibility = 'visible';
+        tabGroupContent.style.opacity = '1';
+        tabGroupContent.style.transition = 'none';
+        tabGroupContent.style.maxHeight = `${lockedH}px`;
+        tabGroupContent.style.padding = padPinned;
+        void tabGroupContent.offsetHeight;
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                tabGroupContent.style.transition = transitionClose;
+                tabGroupContent.style.maxHeight = '0px';
+                tabGroupContent.style.padding = '0 6px';
+
+                const onEnd = (e) => {
+                    if (e.target !== tabGroupContent || e.propertyName !== 'max-height') return;
+                    tabGroupContent.removeEventListener('transitionend', onEnd);
+                    finishClose();
+                };
+                tabGroupContent.addEventListener('transitionend', onEnd);
+                setTimeout(() => {
+                    if (!tabGroupElement.classList.contains('toggling')) return;
+                    tabGroupContent.removeEventListener('transitionend', onEnd);
+                    finishClose();
+                }, TAB_GROUP_ANIM_MS + 80);
+            });
+        });
+    }
+
     toggleTabGroup(tabGroupId) {
         const tabGroup = this.tabGroups.get(tabGroupId);
         if (!tabGroup) return;
@@ -11437,6 +11625,22 @@ class AxisBrowser {
         // Check if tab group has tabs - only open if it has content
         const hasTabs = tabGroup.tabIds.length > 0;
         
+        const TAB_GROUP_ANIM_MS = 200;
+        const TAB_GROUP_EASE = 'cubic-bezier(0.22, 1, 0.32, 1)';
+        const transitionOpen = `max-height ${TAB_GROUP_ANIM_MS}ms ${TAB_GROUP_EASE}, opacity ${Math.round(TAB_GROUP_ANIM_MS * 0.8)}ms ease-out, padding ${TAB_GROUP_ANIM_MS}ms ${TAB_GROUP_EASE}`;
+
+        const finishOpen = () => {
+            tabGroupContent.style.transition = 'none';
+            tabGroupContent.style.maxHeight = 'none';
+            tabGroupContent.style.opacity = '';
+            tabGroupContent.style.visibility = '';
+            tabGroupContent.style.display = '';
+            requestAnimationFrame(() => {
+                tabGroupContent.style.transition = '';
+                tabGroupElement.classList.remove('toggling');
+            });
+        };
+
         if (isOpening) {
             // Don't open if tab group is empty
             if (!hasTabs) {
@@ -11449,72 +11653,68 @@ class AxisBrowser {
                 this.saveTabGroups();
                 return;
             }
-            
-            // Opening: measure full content height + buffer so we never clip (no snap at end)
+
+            // Measure with .open so padding + gap match the expanded state (avoids end snap / magic +48)
             tabGroupContent.style.display = 'flex';
-            tabGroupContent.style.visibility = 'visible';
-            tabGroupContent.style.maxHeight = 'none';
             tabGroupContent.style.transition = 'none';
+            tabGroupContent.style.visibility = 'hidden';
+            tabGroupContent.style.opacity = '0';
+            tabGroupContent.classList.add('open');
+            tabGroupContent.style.maxHeight = 'none';
+            const targetH = tabGroupContent.scrollHeight;
+
+            tabGroupContent.classList.remove('open');
+            tabGroupContent.style.maxHeight = '0px';
+            void tabGroupContent.offsetHeight;
+
             requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    const raw = tabGroupContent.scrollHeight;
-                    const height = raw + 48;
-                    tabGroupContent.style.maxHeight = '0px';
-                    tabGroupContent.style.opacity = '0';
-                    tabGroupContent.style.transition = 'max-height 0.3s cubic-bezier(0.33, 1, 0.68, 1), opacity 0.26s cubic-bezier(0.33, 1, 0.68, 1), padding 0.3s cubic-bezier(0.33, 1, 0.68, 1)';
-                    requestAnimationFrame(() => {
-                        tabGroupContent.classList.add('open');
-                        tabGroupContent.style.maxHeight = height + 'px';
-                        tabGroupContent.style.opacity = '1';
-                        setTimeout(() => {
-                            tabGroupContent.style.transition = 'none';
-                            tabGroupContent.style.maxHeight = '9999px';
-                            tabGroupElement.classList.remove('toggling');
-                            tabGroupContent.style.transition = '';
-                        }, 320);
-                        });
-                });
+                tabGroupContent.style.transition = transitionOpen;
+                tabGroupContent.classList.add('open');
+                tabGroupContent.style.visibility = 'visible';
+                tabGroupContent.style.maxHeight = `${targetH}px`;
+                tabGroupContent.style.opacity = '1';
+
+                const onEnd = (e) => {
+                    if (e.target !== tabGroupContent || e.propertyName !== 'max-height') return;
+                    tabGroupContent.removeEventListener('transitionend', onEnd);
+                    finishOpen();
+                };
+                tabGroupContent.addEventListener('transitionend', onEnd);
+                setTimeout(() => {
+                    if (!tabGroupElement.classList.contains('toggling')) return;
+                    tabGroupContent.removeEventListener('transitionend', onEnd);
+                    finishOpen();
+                }, TAB_GROUP_ANIM_MS + 100);
             });
         } else {
-            // Closing: collapse only (no fade) – tabs stay visible until clipped by shrinking height
-            const currentHeight = tabGroupContent.scrollHeight;
-            tabGroupContent.style.display = 'flex';
-            tabGroupContent.style.visibility = 'visible';
-            tabGroupContent.style.maxHeight = currentHeight + 'px';
-            tabGroupContent.style.opacity = '1';
-            tabGroupContent.style.transition = 'max-height 0.3s linear';
-            requestAnimationFrame(() => {
-                tabGroupContent.style.maxHeight = '0px';
-                setTimeout(() => {
-                    tabGroupContent.classList.remove('open');
-                    tabGroupContent.style.display = 'none';
-                    tabGroupContent.style.visibility = 'hidden';
-                    tabGroupContent.style.maxHeight = '';
-                    tabGroupContent.style.transition = '';
-                    tabGroupElement.classList.remove('toggling');
-                }, 320);
-            });
+            this.runTabGroupCollapseAnimation(tabGroupId);
         }
-        
+
         this.saveTabGroups();
     }
 
     addTabToTabGroup(tabId, tabGroupId, skipUndo = false, insertIndex = undefined) {
         const tab = this.tabs.get(tabId);
-        const tabGroup = this.tabGroups.get(tabGroupId);
+        const resolvedId = this.findTabGroupKey(tabGroupId);
+        const tabGroup = resolvedId != null ? this.tabGroups.get(resolvedId) : null;
         if (!tab || !tabGroup) return;
 
         if (!skipUndo) {
-            this.tabUndoStack.push({ type: 'add_to_group', tabId, tabGroupId });
+            this.tabUndoStack.push({ type: 'add_to_group', tabId, tabGroupId: resolvedId });
             if (this.tabUndoStack.length > 15) this.tabUndoStack = this.tabUndoStack.slice(-15);
         }
 
         for (const [id, tg] of this.tabGroups) {
-            if (id !== tabGroupId && tg.tabIds.includes(tabId)) {
-                tg.tabIds = tg.tabIds.filter(tid => tid !== tabId);
-                this.tabGroups.set(id, tg);
-                break;
+            if (String(id) === String(resolvedId)) continue;
+            if (!tg.tabIds.includes(tabId)) continue;
+            tg.tabIds = tg.tabIds.filter((tid) => tid !== tabId);
+            if (tg.tabIds.length === 0) {
+                tg.open = false;
+                if (this.settings?.autoCollapseEmptyTabGroup !== false) {
+                    this._pendingEmptyGroupCollapseId = id;
+                }
             }
+            this.tabGroups.set(id, tg);
         }
 
         if (!tabGroup.tabIds.includes(tabId)) {
@@ -11523,18 +11723,28 @@ class AxisBrowser {
             } else {
                 tabGroup.tabIds.push(tabId);
             }
-            this.tabGroups.set(tabGroupId, tabGroup);
         }
+        tabGroup.open = true;
+        this.tabGroups.set(resolvedId, tabGroup);
 
-        tab.tabGroupId = tabGroupId;
+        tab.tabGroupId = resolvedId;
         tab.pinned = tabGroup.pinned !== false;
         this.tabs.set(tabId, tab);
 
         this.syncSidebarFromTabGroups();
+
+        if (this._pendingEmptyGroupCollapseId != null) {
+            const gid = this._pendingEmptyGroupCollapseId;
+            this._pendingEmptyGroupCollapseId = null;
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => this.runTabGroupCollapseAnimation(gid));
+            });
+        }
     }
 
     removeTabFromTabGroup(tabId, tabGroupId, skipUndo = false) {
-        const tabGroup = this.tabGroups.get(tabGroupId);
+        const resolvedId = this.findTabGroupKey(tabGroupId);
+        const tabGroup = resolvedId != null ? this.tabGroups.get(resolvedId) : null;
         if (!tabGroup) return;
 
         const indexInGroup = tabGroup.tabIds.indexOf(tabId);
@@ -11546,8 +11756,11 @@ class AxisBrowser {
         tabGroup.tabIds = tabGroup.tabIds.filter(id => id !== tabId);
         if (tabGroup.tabIds.length === 0) {
             tabGroup.open = false;
+            if (this.settings?.autoCollapseEmptyTabGroup !== false) {
+                this._pendingEmptyGroupCollapseId = resolvedId;
+            }
         }
-        this.tabGroups.set(tabGroupId, tabGroup);
+        this.tabGroups.set(resolvedId, tabGroup);
 
         const tab = this.tabs.get(tabId);
         if (tab) {
@@ -11556,6 +11769,14 @@ class AxisBrowser {
         }
 
         this.syncSidebarFromTabGroups();
+
+        if (this._pendingEmptyGroupCollapseId != null) {
+            const gid = this._pendingEmptyGroupCollapseId;
+            this._pendingEmptyGroupCollapseId = null;
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => this.runTabGroupCollapseAnimation(gid));
+            });
+        }
     }
 
     deleteTabGroup(tabGroupId) {
@@ -11661,6 +11882,33 @@ class AxisBrowser {
         } catch (error) {
             console.error('Error loading tab groups:', error);
         }
+    }
+
+    /**
+     * Detached tab nodes are not found by document.querySelector; keep moved tabs here until re-parented.
+     */
+    getTabElementPool() {
+        let p = document.getElementById('tab-element-pool');
+        if (!p) {
+            p = document.createElement('div');
+            p.id = 'tab-element-pool';
+            p.setAttribute('aria-hidden', 'true');
+            p.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;';
+            document.body.appendChild(p);
+        }
+        return p;
+    }
+
+    /** Resolve Map key for tab groups (IPC may send number or string). */
+    findTabGroupKey(tabGroupId) {
+        if (tabGroupId == null) return null;
+        if (this.tabGroups.has(tabGroupId)) return tabGroupId;
+        const n = Number(tabGroupId);
+        if (!Number.isNaN(n) && this.tabGroups.has(n)) return n;
+        for (const k of this.tabGroups.keys()) {
+            if (String(k) === String(tabGroupId)) return k;
+        }
+        return null;
     }
 
     getOrCreateTabElement(tabId) {
@@ -11790,11 +12038,13 @@ class AxisBrowser {
 
         const ensureContentOrder = (container) => {
             if (!container) return;
-            const groupIdSet = new Set(group.tabIds);
-            Array.from(container.children).forEach(child => {
+            const groupIdSet = new Set(group.tabIds.map((tid) => Number(tid)));
+            Array.from(container.children).forEach((child) => {
                 if (child.classList && child.classList.contains('tab')) {
                     const id = parseInt(child.dataset.tabId, 10);
-                    if (!isNaN(id) && !groupIdSet.has(id)) child.remove();
+                    if (!isNaN(id) && !groupIdSet.has(id)) {
+                        this.getTabElementPool().appendChild(child);
+                    }
                 }
             });
             group.tabIds.forEach(tabId => {
@@ -11813,11 +12063,29 @@ class AxisBrowser {
                     tabEl.classList.toggle('pinned', group.pinned !== false);
                 }
             });
-            const isOpen = group.open && group.tabIds.length > 0;
-            container.classList.toggle('open', isOpen);
-            container.style.display = group.tabIds.length ? 'flex' : 'none';
-            container.style.maxHeight = isOpen ? '9999px' : '0';
-            container.style.opacity = isOpen ? '1' : '0';
+            if (group.tabIds.length === 0) {
+                if (this._pendingEmptyGroupCollapseId === group.id) {
+                    container.style.transition = 'none';
+                    container.classList.add('open');
+                    container.style.display = 'flex';
+                    container.style.visibility = 'visible';
+                    container.style.opacity = '1';
+                    container.style.maxHeight = 'none';
+                    container.style.padding = '';
+                } else {
+                    container.classList.remove('open');
+                    container.style.display = 'none';
+                    container.style.visibility = 'hidden';
+                    container.style.maxHeight = '0';
+                    container.style.opacity = '0';
+                }
+            } else {
+                const isOpen = group.open && group.tabIds.length > 0;
+                container.classList.toggle('open', isOpen);
+                container.style.display = 'flex';
+                container.style.maxHeight = isOpen ? '9999px' : '0';
+                container.style.opacity = isOpen ? '1' : '0';
+            }
         };
 
         if (el && content) {
@@ -12083,6 +12351,7 @@ class AxisBrowser {
             isPinned: tab?.pinned || false,
             isMuted: tab?.isMuted || false,
             tabGroups: tabGroupsList,
+            tabGroupId: tab?.tabGroupId != null ? tab.tabGroupId : undefined,
             isIncognito: this.isIncognitoWindow
         };
         this.contextMenuTabId = tabId;
@@ -12324,11 +12593,16 @@ class AxisBrowser {
         const ctx = this.webviewContextInfo || {};
         const webview = this.getActiveWebview();
         
-        // Check if webview can go back/forward and whether speech is currently playing
+        // Back/forward are sync. Speech state: only query guest JS when the menu will show Speech
+        // (selection + speech on); otherwise skip — first executeJavaScript can stall seconds on cold webview.
         let canGoBack = false;
         let canGoForward = false;
         let isSpeaking = false;
         const speechEnabled = this.settings?.speechEnabled !== false;
+        const needsSpeechState =
+            speechEnabled &&
+            !!ctx.hasSelection &&
+            !!(ctx.selectionText && String(ctx.selectionText).trim().length);
         if (webview) {
             try {
                 canGoBack = webview.canGoBack();
@@ -12336,19 +12610,17 @@ class AxisBrowser {
             } catch (e) {
                 // Ignore errors
             }
-            try {
-                // Query page speech state so we can grey out Stop Speaking when idle
-                isSpeaking = speechEnabled ? await webview.executeJavaScript(`
-                    (function() {
-                        try {
-                            return !!(window.speechSynthesis && window.speechSynthesis.speaking);
-                        } catch (e) {
-                            return false;
-                        }
-                    })();
-                `) : false;
-            } catch (e) {
-                isSpeaking = false;
+            if (needsSpeechState) {
+                const speechScript = `(function(){try{return !!(window.speechSynthesis&&window.speechSynthesis.speaking);}catch(e){return false;}})();`;
+                const SPEECH_QUERY_BUDGET_MS = 90;
+                try {
+                    isSpeaking = await Promise.race([
+                        webview.executeJavaScript(speechScript),
+                        new Promise((resolve) => setTimeout(() => resolve(false), SPEECH_QUERY_BUDGET_MS))
+                    ]);
+                } catch (e) {
+                    isSpeaking = false;
+                }
             }
         }
         
@@ -12456,6 +12728,9 @@ class AxisBrowser {
     selectAll() {
         const webview = this.getActiveWebview();
         if (!webview) return;
+        try {
+            webview.focus();
+        } catch (_) {}
         webview.executeJavaScript(`
             (function() {
                 try {
@@ -12477,13 +12752,40 @@ class AxisBrowser {
     cut() {
         const webview = this.getActiveWebview();
         if (!webview) return;
-        webview.executeJavaScript('document.execCommand("cut")');
+        try {
+            webview.focus();
+        } catch (_) {}
+        webview.executeJavaScript(`
+            (function() {
+                try {
+                    return document.execCommand('cut');
+                } catch (e) { return false; }
+            })();
+        `);
     }
 
     copy() {
         const webview = this.getActiveWebview();
         if (!webview) return;
-        webview.executeJavaScript('document.execCommand("copy")');
+        try {
+            webview.focus();
+        } catch (_) {}
+        webview
+            .executeJavaScript(`
+            (function() {
+                try {
+                    if (document.execCommand('copy')) return '';
+                    var sel = window.getSelection && window.getSelection();
+                    return sel ? String(sel.toString() || '') : '';
+                } catch (e) { return ''; }
+            })();
+        `)
+            .then((fallbackText) => {
+                if (fallbackText && String(fallbackText).length > 0) {
+                    navigator.clipboard.writeText(String(fallbackText)).catch(() => {});
+                }
+            })
+            .catch(() => {});
     }
 
     async copyCurrentUrl() {
@@ -12535,10 +12837,157 @@ class AxisBrowser {
         }
     }
 
+    /** Copy `[title](url)` for the current page (title from tab / webview; URL escaped when needed). */
+    async copyCurrentUrlAsMarkdown() {
+        if (this.currentTab) {
+            const tab = this.tabs.get(this.currentTab);
+            if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+                const md = '[Settings](axis://settings)';
+                try {
+                    await navigator.clipboard.writeText(md);
+                    this.showNotification('Markdown link copied to clipboard', 'success');
+                } catch (e) {
+                    this.showNotification('Failed to copy', 'error');
+                }
+                return;
+            }
+        }
+
+        let url = null;
+        const webview = this.getActiveWebview();
+
+        if (webview) {
+            try {
+                url = webview.getURL();
+            } catch (e) {
+                // Fallback to tab URL
+            }
+        }
+
+        if (!url || url === 'about:blank') {
+            if (this.currentTab) {
+                const tab = this.tabs.get(this.currentTab);
+                if (tab && tab.url && tab.url !== 'about:blank') {
+                    url = tab.url;
+                }
+            }
+        }
+
+        if (!url || url === 'about:blank') {
+            this.showNotification('No URL to copy', 'error');
+            return;
+        }
+
+        let title = '';
+        if (this.currentTab && this.tabs.has(this.currentTab)) {
+            const tab = this.tabs.get(this.currentTab);
+            if (tab && tab.title) title = String(tab.title).trim();
+        }
+        if (webview) {
+            try {
+                const t = webview.getTitle();
+                if (t && String(t).trim()) title = String(t).trim();
+            } catch (e) {
+                /* keep tab title */
+            }
+        }
+        if (!title) {
+            try {
+                const u = new URL(url);
+                title = u.hostname.replace(/^www\./i, '') || u.pathname || 'Link';
+            } catch (e) {
+                title = 'Link';
+            }
+        }
+        title = title.replace(/\s+/g, ' ');
+
+        const escMdLinkText = (s) =>
+            String(s).replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+        const mdDest = (u) => {
+            if (/[\s()]/.test(u)) {
+                return `<${u.replace(/\\/g, '\\\\').replace(/</g, '\\<').replace(/>/g, '\\>')}>`;
+            }
+            return u;
+        };
+        const md = `[${escMdLinkText(title)}](${mdDest(url)})`;
+
+        try {
+            await navigator.clipboard.writeText(md);
+            this.showNotification('Markdown link copied to clipboard', 'success');
+        } catch (err) {
+            const textArea = document.createElement('textarea');
+            textArea.value = md;
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                this.showNotification('Markdown link copied to clipboard', 'success');
+            } catch (fallbackErr) {
+                this.showNotification('Failed to copy', 'error');
+            }
+            document.body.removeChild(textArea);
+        }
+    }
+
     paste() {
         const webview = this.getActiveWebview();
         if (!webview) return;
-        webview.executeJavaScript('document.execCommand("paste")');
+        try {
+            webview.focus();
+        } catch (_) {}
+        void this.pastePlainIntoWebview(webview);
+    }
+
+    /**
+     * Paste plain text into the guest focused field (execCommand('paste') is unreliable in webviews).
+     * @param {string} [textIfKnown] — if omitted, reads the system clipboard.
+     */
+    async pastePlainIntoWebview(webview, textIfKnown) {
+        let text = textIfKnown;
+        if (text === undefined) {
+            try {
+                text = await navigator.clipboard.readText();
+            } catch (e) {
+                webview
+                    .executeJavaScript(`
+                    (function(){ try { return document.execCommand('paste'); } catch (x) { return false; } })();
+                `)
+                    .catch(() => {});
+                return;
+            }
+        }
+        if (text == null) text = '';
+        const payload = JSON.stringify(text);
+        try {
+            webview.focus();
+        } catch (_) {}
+        webview
+            .executeJavaScript(`
+            (function() {
+                var text = ${payload};
+                try {
+                    var el = document.activeElement;
+                    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+                        var start = el.selectionStart != null ? el.selectionStart : 0;
+                        var end = el.selectionEnd != null ? el.selectionEnd : 0;
+                        var v = el.value;
+                        el.value = v.slice(0, start) + text + v.slice(end);
+                        var pos = start + text.length;
+                        el.selectionStart = el.selectionEnd = pos;
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        return;
+                    }
+                    if (el && el.isContentEditable) {
+                        document.execCommand('insertText', false, text);
+                        return;
+                    }
+                    document.execCommand('insertText', false, text);
+                } catch (e) {}
+            })();
+        `)
+            .catch(() => {});
     }
 
     /** Paste plain text from the clipboard (no rich formatting), matching destination style. */
@@ -12566,30 +13015,7 @@ class AxisBrowser {
 
         const webview = this.getActiveWebview();
         if (!webview) return;
-        const payload = JSON.stringify(text);
-        webview.executeJavaScript(`
-            (function() {
-                var text = ${payload};
-                try {
-                    var el = document.activeElement;
-                    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
-                        var start = el.selectionStart != null ? el.selectionStart : 0;
-                        var end = el.selectionEnd != null ? el.selectionEnd : 0;
-                        var v = el.value;
-                        el.value = v.slice(0, start) + text + v.slice(end);
-                        var pos = start + text.length;
-                        el.selectionStart = el.selectionEnd = pos;
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        return;
-                    }
-                    if (el && el.isContentEditable) {
-                        document.execCommand('insertText', false, text);
-                        return;
-                    }
-                    document.execCommand('insertText', false, text);
-                } catch (e) {}
-            })();
-        `);
+        void this.pastePlainIntoWebview(webview, text);
     }
 
     closeCurrentActiveTab() {
@@ -13902,6 +14328,45 @@ class AxisBrowser {
             }
         };
 
+        /** Pinned/unpinned band: separator + optional incognito row + “+ New Tab” — same drag shift as a unit */
+        const clearPinnedUnpinnedBandTransforms = () => {
+            const sep = this.elements.tabsSeparator;
+            if (sep && sep.parentNode) {
+                sep.style.removeProperty('transform');
+                sep.style.transition = '';
+            }
+            const nt = this.elements.sidebarNewTabBtn;
+            if (nt && nt.parentNode) {
+                nt.style.removeProperty('transform');
+                nt.style.transition = '';
+            }
+            const inc = document.getElementById('incognito-indicator');
+            if (inc && inc.parentNode) {
+                inc.style.removeProperty('transform');
+                inc.style.transition = '';
+            }
+        };
+
+        const setPinnedUnpinnedBandShift = (sy) => {
+            const y = Math.round(sy * 100) / 100;
+            const tf = `translate3d(0, ${y}px, 0)`;
+            const sep = this.elements.tabsSeparator;
+            if (sep && sep.parentNode) {
+                sep.style.transition = '';
+                sep.style.setProperty('transform', tf, 'important');
+            }
+            const nt = this.elements.sidebarNewTabBtn;
+            if (nt && nt.parentNode) {
+                nt.style.transition = '';
+                nt.style.setProperty('transform', tf, 'important');
+            }
+            const inc = document.getElementById('incognito-indicator');
+            if (inc && inc.parentNode) {
+                inc.style.transition = '';
+                inc.style.setProperty('transform', tf, 'important');
+            }
+        };
+
         // Force cleanup - emergency reset
         const forceCleanup = () => {
             cancelMoveRaf();
@@ -13923,11 +14388,7 @@ class AxisBrowser {
                     });
                 }
                 if (drag.container && drag.container.id === 'tabs-container') {
-                    const sep = this.elements.tabsSeparator;
-                    if (sep && sep.parentNode) {
-                        sep.style.removeProperty('transform');
-                        sep.style.transition = '';
-                    }
+                    clearPinnedUnpinnedBandTransforms();
                 }
                 removePreviewBox();
                 document.querySelectorAll('.tab-group.drag-over-tab-group').forEach(el => el.classList.remove('drag-over-tab-group'));
@@ -14041,6 +14502,8 @@ class AxisBrowser {
                 smoothedSiblingShifts: new Map(),
                 smoothedSepShift: 0,
                 _slideSmoothLastT: 0,
+                /** Viewport Y of dragged row center at drag start; used to clamp in-group sliding. */
+                draggedPosCenter: draggedPos.center,
             };
         };
 
@@ -14196,11 +14659,7 @@ class AxisBrowser {
                     drag.smoothedSepShift = 0;
                     drag._slideSmoothLastT = 0;
                     if (drag.container.id === 'tabs-container') {
-                        const sep = this.elements.tabsSeparator;
-                        if (sep && sep.parentNode) {
-                            sep.style.removeProperty('transform');
-                            sep.style.transition = '';
-                        }
+                        clearPinnedUnpinnedBandTransforms();
                     }
                 }
                 if (drag.previewBox) {
@@ -14234,11 +14693,7 @@ class AxisBrowser {
                     drag.smoothedSepShift = 0;
                     drag._slideSmoothLastT = 0;
                     if (drag.container.id === 'tabs-container') {
-                        const sep = this.elements.tabsSeparator;
-                        if (sep && sep.parentNode) {
-                            sep.style.removeProperty('transform');
-                            sep.style.transition = '';
-                        }
+                        clearPinnedUnpinnedBandTransforms();
                     }
                     drag.isHorizontalDrag = false;
                 } else {
@@ -14255,11 +14710,32 @@ class AxisBrowser {
                 }
             }
             
+            // Vertical clamp: tab-group = full content box; main list = top of scroll port only (see tabListTop).
+            let slideOffsetY = offsetY;
+            let draggedCenter = mouseY - drag.mouseOffsetFromCenter;
+            if (typeof drag.draggedPosCenter === 'number') {
+                const half = drag.draggedHeight * 0.5;
+                const pad = 2;
+                const tabListTop = tabsContainer.getBoundingClientRect().top;
+                if (container.classList.contains('tab-group-content')) {
+                    const cr = container.getBoundingClientRect();
+                    const minC = Math.max(cr.top, tabListTop) + half + pad;
+                    const maxC = cr.bottom - half - pad;
+                    if (maxC >= minC) {
+                        draggedCenter = Math.max(minC, Math.min(maxC, draggedCenter));
+                    }
+                    slideOffsetY = draggedCenter - drag.draggedPosCenter;
+                } else if (container.id === 'tabs-container') {
+                    const minTopCenter = tabListTop + half + pad;
+                    draggedCenter = Math.max(minTopCenter, draggedCenter);
+                    slideOffsetY = draggedCenter - drag.draggedPosCenter;
+                }
+            }
+
             // Slide: compositor-friendly move (!important beats inactive-tab rules)
-            drag.element.style.setProperty('transform', `translate3d(0, ${offsetY}px, 0)`, 'important');
+            drag.element.style.setProperty('transform', `translate3d(0, ${slideOffsetY}px, 0)`, 'important');
 
             // Target index from dragged visual center; use separator boundary when crossing pinned/unpinned
-            const draggedCenter = mouseY - drag.mouseOffsetFromCenter;
             const targetOpts = (drag.separatorCenter != null && drag.firstUnpinnedIndex >= 0)
                 ? { separatorCenter: drag.separatorCenter, firstUnpinnedIndex: drag.firstUnpinnedIndex }
                 : undefined;
@@ -14331,33 +14807,45 @@ class AxisBrowser {
                     el.style.setProperty('transform', `translate3d(0, ${y}px, 0)`, 'important');
                 }
             }
-            // Separator: same shift as first sibling after it in DOM
+            // Separator: same vertical shift as the row at the pinned/unpinned boundary. When the first
+            // unpinned row *is* the dragged item, the old “first sibling after sep” logic skipped (j ===
+            // currentDragIdx), so the separator stayed put until drop — use the last pinned row’s shift.
             if (container.id === 'tabs-container') {
                 const sep = this.elements.tabsSeparator;
                 if (sep && sep.parentNode === container) {
                     const children = Array.from(container.children);
                     const sepIdx = children.indexOf(sep);
-                    let sepTarget = 0;
+                    let anchorJ = -1;
                     for (let j = 0; j < numSiblings; j++) {
                         if (children.indexOf(currentSiblings[j]) > sepIdx) {
-                            if (j !== currentDragIdx) {
-                                if (effectiveTarget < currentDragIdx && j >= effectiveTarget && j < currentDragIdx) sepTarget = shiftHeight;
-                                else if (effectiveTarget > currentDragIdx && j > currentDragIdx && j <= effectiveTarget) sepTarget = -shiftHeight;
-                            }
+                            anchorJ = j;
                             break;
                         }
                     }
-                    sep.style.transition = '';
+                    const sepShiftForIndex = (j) => {
+                        if (j < 0 || j === currentDragIdx) return 0;
+                        if (effectiveTarget < currentDragIdx && j >= effectiveTarget && j < currentDragIdx) return shiftHeight;
+                        if (effectiveTarget > currentDragIdx && j > currentDragIdx && j <= effectiveTarget) return -shiftHeight;
+                        return 0;
+                    };
+                    let sepTarget = 0;
+                    if (anchorJ >= 0) {
+                        const fu = drag.firstUnpinnedIndex;
+                        if (anchorJ === currentDragIdx && typeof fu === 'number' && fu > 0) {
+                            sepTarget = sepShiftForIndex(fu - 1);
+                        } else if (anchorJ !== currentDragIdx) {
+                            sepTarget = sepShiftForIndex(anchorJ);
+                        }
+                    }
                     let sepSmooth = drag.smoothedSepShift;
                     sepSmooth += (sepTarget - sepSmooth) * slideAlpha;
                     if (Math.abs(sepTarget - sepSmooth) < 0.4) sepSmooth = sepTarget;
                     drag.smoothedSepShift = sepSmooth;
                     if (Math.abs(sepSmooth) < 0.08 && sepTarget === 0) {
                         drag.smoothedSepShift = 0;
-                        sep.style.removeProperty('transform');
+                        clearPinnedUnpinnedBandTransforms();
                     } else {
-                        const sy = Math.round(sepSmooth * 100) / 100;
-                        sep.style.setProperty('transform', `translate3d(0, ${sy}px, 0)`, 'important');
+                        setPinnedUnpinnedBandShift(sepSmooth);
                     }
                 }
             }
@@ -14409,11 +14897,7 @@ class AxisBrowser {
                 }
             }
             if (container && container.id === 'tabs-container') {
-                const sep = this.elements.tabsSeparator;
-                if (sep && sep.parentNode) {
-                    sep.style.removeProperty('transform');
-                    sep.style.transition = '';
-                }
+                clearPinnedUnpinnedBandTransforms();
             }
 
             element.classList.remove('smooth-dragging');
