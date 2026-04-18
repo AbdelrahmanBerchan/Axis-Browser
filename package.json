@@ -16,7 +16,8 @@
     "ajv": "^8.18.0",
     "minimatch": "^10.2.3",
     "picomatch": "4.0.4",
-    "@xmldom/xmldom": "0.8.12"
+    "@xmldom/xmldom": "0.8.12",
+    "file-type": ">=21.3.1"
   },
   "keywords": [
     "browser",
@@ -26,9 +27,6 @@
   ],
   "author": "Axis Browser Team",
   "license": "SEE LICENSE IN LICENSE.md",
-  "engines": {
-    "node": ">=20"
-  },
   "devDependencies": {
     "electron": "39.8.5",
     "electron-builder": "^26.4.0",
@@ -39,7 +37,6 @@
   },
   "dependencies": {
     "electron-store": "^8.1.0",
-    "file-type": "^21.3.4",
     "jimp": "^1.6.1",
     "qrcode": "^1.5.4"
   },
