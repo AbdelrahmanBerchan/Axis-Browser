@@ -33,11 +33,11 @@ function applySquircleAlphaToJimp(image) {
   const n = 4;
   const halfW = w * 0.5;
   const halfH = h * 0.5;
-  image.scan(0, 0, w, h, function (x, y, idx) {
+  image.scan(0, 0, w, h, (x, y, idx) => {
     const u = (x + 0.5 - halfW) / halfW;
     const v = (y + 0.5 - halfH) / halfH;
     if (Math.abs(u) ** n + Math.abs(v) ** n > 1) {
-      this.bitmap.data[idx + 3] = 0;
+      image.bitmap.data[idx + 3] = 0;
     }
   });
 }
@@ -45,9 +45,9 @@ function applySquircleAlphaToJimp(image) {
 function getDockSquircleCachePath() {
   try {
     // Bump filename when squircle pipeline changes so stale cache is not reused.
-    return path.join(app.getPath('userData'), 'dock-squircle-cache-v4.png');
+    return path.join(app.getPath('userData'), 'dock-squircle-cache-v3.png');
   } catch (_) {
-    return path.join(os.tmpdir(), 'axis-browser-dock-squircle-cache-v4.png');
+    return path.join(os.tmpdir(), 'axis-browser-dock-squircle-cache-v3.png');
   }
 }
 
@@ -74,9 +74,9 @@ async function getMacSquircleIconNativeImage() {
   let Jimp;
   let JimpMime;
   try {
-    const jimpPkg = require('jimp');
-    Jimp = jimpPkg.Jimp;
-    JimpMime = jimpPkg.JimpMime;
+    const jimpModule = require('jimp');
+    Jimp = jimpModule.Jimp;
+    JimpMime = jimpModule.JimpMime;
   } catch (_) {
     return getAppIconNativeImage();
   }
