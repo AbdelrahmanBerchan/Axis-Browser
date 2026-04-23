@@ -181,6 +181,63 @@ function cleanSitePermissionOverrides(raw) {
   return out;
 }
 
+/** Notify every window (main + Settings) so UIs reload store-backed state (e.g. site permissions). */
+function broadcastSettingsUpdated() {
+  try {
+    applyMainWindowVibrancyFromStore();
+  } catch (_) {}
+  try {
+    refreshSettingsWindowChrome();
+  } catch (_) {}
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed()) continue;
+    try {
+      w.webContents.send('settings-updated');
+    } catch (_) {
+      /* window gone */
+    }
+  }
+}
+
+/**
+ * When the session auto-grants a permission (no per-site override), persist that
+ * decision so Settings → Site permission overrides reflects reality.
+ * @param {string} origin
+ * @param {string} permission Electron permission id
+ * @param {Record<string, unknown> | undefined} details `mediaTypes` for `media` requests
+ */
+function recordSitePermissionAllowance(origin, permission, details) {
+  if (!origin || typeof origin !== 'string') return;
+
+  if (permission === 'geolocation' || permission === 'notifications') {
+    const raw = store.get('sitePermissionOverrides', {});
+    const base = raw && typeof raw === 'object' ? raw : {};
+    const site = { ...(base[origin] || {}) };
+    site[permission] = 'allow';
+    const next = { ...base, [origin]: site };
+    store.set('sitePermissionOverrides', cleanSitePermissionOverrides(next));
+    broadcastSettingsUpdated();
+    return;
+  }
+
+  if (permission === 'media') {
+    const types = details && Array.isArray(details.mediaTypes) ? details.mediaTypes : ['video', 'audio'];
+    const raw = store.get('sitePermissionOverrides', {});
+    const base = raw && typeof raw === 'object' ? raw : {};
+    const site = { ...(base[origin] || {}) };
+    if (types.length === 0) {
+      site.camera = 'allow';
+      site.microphone = 'allow';
+    } else {
+      if (types.includes('video')) site.camera = 'allow';
+      if (types.includes('audio')) site.microphone = 'allow';
+    }
+    const next = { ...base, [origin]: site };
+    store.set('sitePermissionOverrides', cleanSitePermissionOverrides(next));
+    broadcastSettingsUpdated();
+  }
+}
+
 /** @param {string|null} origin @param {string} permission Electron permission id */
 function getSitePermissionDecision(origin, permission) {
   const overrides = store.get('sitePermissionOverrides', {});
@@ -241,7 +298,15 @@ function permissionRequestHandler(webContents, permission, callback, details) {
     'fileSystem'
   ];
 
-  callback(allowedPermissions.includes(permission));
+  const grant = allowedPermissions.includes(permission);
+  if (grant) {
+    try {
+      recordSitePermissionAllowance(origin, permission, details);
+    } catch (err) {
+      console.warn('recordSitePermissionAllowance failed:', err);
+    }
+  }
+  callback(grant);
 }
 
 function permissionCheckHandler(webContents, permission, requestingOrigin, details) {
@@ -284,7 +349,6 @@ function configureSession() {
   setImmediate(() => {
     try {
       mainSession.clearHostResolverCache();
-      mainSession.setSpellCheckerDictionaryDownloadURL('');
     } catch (_) {}
   });
 
@@ -296,11 +360,219 @@ function configureSession() {
     console.warn('Could not attach permission handlers to incognito session');
   }
 
+  configureSpellChecker(mainSession);
+  try { configureSpellChecker(session.fromPartition('persist:main')); } catch (_) {}
+  try { configureSpellChecker(session.fromPartition('incognito')); } catch (_) {}
+
   // Trust all certificates for every session (default, persist:main, incognito)
   const certBypass = (request, callback) => callback(0);
   mainSession.setCertificateVerifyProc(certBypass);
   try { session.fromPartition('persist:main').setCertificateVerifyProc(certBypass); } catch (_) {}
   try { session.fromPartition('incognito').setCertificateVerifyProc(certBypass); } catch (_) {}
+
+  attachDownloadActivityTracking(mainSession);
+  try {
+    attachDownloadActivityTracking(session.fromPartition('persist:main'));
+  } catch (_) {}
+  try {
+    attachDownloadActivityTracking(session.fromPartition('incognito'));
+  } catch (_) {}
+}
+
+/** In-flight downloads from any Axis session — drives URL-bar + popup activity animations in renderer. */
+let axisActiveDownloadCount = 0;
+
+function broadcastAxisDownloadActivity() {
+  const active = axisActiveDownloadCount > 0;
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed()) continue;
+    try {
+      w.webContents.send('axis-download-activity', { active });
+    } catch (_) {
+      /* window gone */
+    }
+  }
+}
+
+/**
+ * Enable Chromium spellchecker on a session. macOS uses the native OS spellchecker (no
+ * dictionary download); Windows/Linux uses Hunspell and downloads dictionaries from the
+ * default Chromium URL — do NOT call setSpellCheckerDictionaryDownloadURL('') or downloads
+ * are disabled and nothing gets flagged. Languages default to the app locale + en-US as a
+ * fallback so words are flagged on first right-click in a text field.
+ */
+function configureSpellChecker(sess) {
+  if (!sess) return;
+  try {
+    let langs = [];
+    try {
+      if (typeof sess.availableSpellCheckerLanguages !== 'undefined') {
+        langs = Array.isArray(sess.availableSpellCheckerLanguages)
+          ? sess.availableSpellCheckerLanguages
+          : [];
+      }
+    } catch (_) {}
+    const preferred = [];
+    try {
+      const locale = app.getLocale && app.getLocale();
+      if (locale) {
+        preferred.push(locale);
+        const short = String(locale).split('-')[0];
+        if (short && short !== locale) preferred.push(short);
+      }
+    } catch (_) {}
+    if (!preferred.includes('en-US')) preferred.push('en-US');
+    if (!preferred.includes('en-GB')) preferred.push('en-GB');
+    const isMac = process.platform === 'darwin';
+    const chosen = isMac || !langs.length
+      ? preferred
+      : preferred.filter((l) => langs.includes(l));
+    const final = chosen.length ? chosen : ['en-US'];
+    if (typeof sess.setSpellCheckerLanguages === 'function') {
+      sess.setSpellCheckerLanguages(final);
+    }
+    if (typeof sess.setSpellCheckerEnabled === 'function') {
+      sess.setSpellCheckerEnabled(true);
+    }
+  } catch (error) {
+    console.warn('configureSpellChecker failed:', error);
+  }
+}
+
+/**
+ * Manual Hunspell (nspell + dictionary-en) as a workaround for a longstanding Electron
+ * bug where `context-menu` params on `<webview>` guests come back with an empty
+ * `misspelledWord` / `dictionarySuggestions` on macOS even when the session spell
+ * checker is active. We run our own check against the same word the user right-clicked
+ * on, extracted from the guest via `executeJavaScript`, and inject suggestions into
+ * the native context menu from the main process.
+ */
+let axisSpellEngine = null;
+let axisSpellEngineLoading = null;
+function ensureSpellEngineLoaded() {
+  if (axisSpellEngine) return Promise.resolve(axisSpellEngine);
+  if (axisSpellEngineLoading) return axisSpellEngineLoading;
+  axisSpellEngineLoading = new Promise((resolve) => {
+    try {
+      const nspell = require('nspell');
+      const dictDir = path.dirname(require.resolve('dictionary-en'));
+      const aff = fs.readFileSync(path.join(dictDir, 'index.aff'));
+      const dic = fs.readFileSync(path.join(dictDir, 'index.dic'));
+      axisSpellEngine = nspell(aff, dic);
+      resolve(axisSpellEngine);
+    } catch (error) {
+      console.warn('[axis:spell] failed to load nspell + dictionary-en:', error);
+      resolve(null);
+    }
+  });
+  return axisSpellEngineLoading;
+}
+
+/** In-memory set of user-added dictionary words, applied on top of nspell's dictionary. */
+const axisCustomDictionary = new Set();
+
+/** True iff the nspell engine flags `word` as misspelled (after custom dictionary). */
+function isWordMisspelled(word) {
+  if (!word || !axisSpellEngine) return false;
+  if (axisCustomDictionary.has(word) || axisCustomDictionary.has(word.toLowerCase())) return false;
+  try { return !axisSpellEngine.correct(word); } catch (_) { return false; }
+}
+
+/** Top-N suggestions from the nspell engine; empty when engine is not ready. */
+function getSpellSuggestions(word, max) {
+  if (!word || !axisSpellEngine) return [];
+  try {
+    const list = axisSpellEngine.suggest(word) || [];
+    return list.slice(0, max || 6);
+  } catch (_) { return []; }
+}
+
+/**
+ * Ask the guest WebContents for the word under the click position. Uses
+ * `caretPositionFromPoint` for contenteditable / textNode targets and falls back to
+ * the `<input>`/`<textarea>` `value` + `selectionStart` for form controls. The `x`
+ * / `y` arguments are GUEST-local (from `context-menu` event `params.x` / `.y`).
+ */
+async function getWordAtGuestPoint(guest, x, y) {
+  if (!guest || guest.isDestroyed()) return '';
+  const px = Number.isFinite(x) ? Number(x) : 0;
+  const py = Number.isFinite(y) ? Number(y) : 0;
+  const js = `(function(){
+    try {
+      var x = ${px}, y = ${py};
+      var el = document.elementFromPoint(x, y);
+      var WORD = /[A-Za-z\\u00C0-\\u024F\\u0370-\\u03FF'\\-]/;
+      var isWord = function(ch){ return WORD.test(ch || ''); };
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+        var v = (el.value != null ? String(el.value) : '');
+        var pos = (typeof el.selectionStart === 'number') ? el.selectionStart : v.length;
+        pos = Math.max(0, Math.min(v.length, pos));
+        var s = pos, e = pos;
+        while (s > 0 && isWord(v.charAt(s-1))) s--;
+        while (e < v.length && isWord(v.charAt(e))) e++;
+        return (v.substring(s, e) || '').replace(/^['\\-]+|['\\-]+$/g, '');
+      }
+      var range = null;
+      if (typeof document.caretPositionFromPoint === 'function') {
+        var p = document.caretPositionFromPoint(x, y);
+        if (p && p.offsetNode) {
+          range = document.createRange();
+          range.setStart(p.offsetNode, p.offset);
+          range.collapse(true);
+        }
+      } else if (typeof document.caretRangeFromPoint === 'function') {
+        range = document.caretRangeFromPoint(x, y);
+      }
+      if (range && range.startContainer && range.startContainer.nodeType === 3) {
+        var text = String(range.startContainer.textContent || '');
+        var off = range.startOffset;
+        var s2 = off, e2 = off;
+        while (s2 > 0 && isWord(text.charAt(s2-1))) s2--;
+        while (e2 < text.length && isWord(text.charAt(e2))) e2++;
+        return (text.substring(s2, e2) || '').replace(/^['\\-]+|['\\-]+$/g, '');
+      }
+      return '';
+    } catch (err) { return ''; }
+  })();`;
+  try {
+    const word = await guest.executeJavaScript(js, true);
+    return typeof word === 'string' ? word.trim() : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+/** Add a word to every known session's custom dictionary + our nspell overlay so it sticks across main + incognito. */
+function addWordToAllSpellCheckerDictionaries(word) {
+  const w = String(word || '').trim();
+  if (!w) return false;
+  axisCustomDictionary.add(w);
+  axisCustomDictionary.add(w.toLowerCase());
+  if (axisSpellEngine && typeof axisSpellEngine.add === 'function') {
+    try { axisSpellEngine.add(w); } catch (_) {}
+  }
+  let added = true;
+  const targets = [];
+  try { targets.push(session.defaultSession); } catch (_) {}
+  try { targets.push(session.fromPartition('persist:main')); } catch (_) {}
+  try { targets.push(session.fromPartition('incognito')); } catch (_) {}
+  for (const sess of targets) {
+    if (!sess || typeof sess.addWordToSpellCheckerDictionary !== 'function') continue;
+    try { sess.addWordToSpellCheckerDictionary(w); } catch (_) {}
+  }
+  return added;
+}
+
+function attachDownloadActivityTracking(sess) {
+  if (!sess || typeof sess.on !== 'function') return;
+  sess.on('will-download', (_event, item) => {
+    axisActiveDownloadCount += 1;
+    broadcastAxisDownloadActivity();
+    item.on('done', () => {
+      axisActiveDownloadCount = Math.max(0, axisActiveDownloadCount - 1);
+      broadcastAxisDownloadActivity();
+    });
+  });
 }
 
 /** macOS: vibrancy shows desktop through the window; turn it off when settings “Window glass brightness” is 0 (fully opaque chrome). */
@@ -329,19 +601,38 @@ let settingsWindow = null;
 let isQuitConfirmed = false;
 let isUserQuitting = false;
 
-/** macOS frameless + hiddenInset: corner inset when sidebar is left; mirrors to top-right when sidebar is right. */
+/** macOS frameless + hiddenInset: inset from the content (client) edge — must match setWindowButtonPosition docs. */
 const MACOS_TRAFFIC_LIGHT_INSET = 16;
 /**
- * Cluster width for right placement: same math as left uses inset 16 — (x + cluster) ≈ width − 16.
+ * Horizontal span of the close + minimize + zoom cluster in **points** (AppKit layout; varies slightly by OS).
+ * `setWindowButtonPosition({x})` sets the **close** button's left edge (LTR). For the right sidebar we need
+ * `x + cluster ≈ clientWidth − inset` so the zoom button clears the edge by the same inset as the left case.
+ * 52pt was tight for Big Sur+ button sizes; ~60pt matches measured layouts on recent macOS.
  */
-const MACOS_TRAFFIC_LIGHT_CLUSTER_WIDTH_RIGHT = 52;
+const MACOS_TRAFFIC_LIGHT_CLUSTER_WIDTH = 60;
+
+function getBrowserWindowClientWidth(browserWindow) {
+  try {
+    const b = browserWindow.getContentBounds();
+    if (b && Number.isFinite(b.width) && b.width > 0) return Math.round(b.width);
+  } catch (_) {}
+  try {
+    const b = browserWindow.getBounds();
+    if (b && Number.isFinite(b.width) && b.width > 0) return Math.round(b.width);
+  } catch (_) {}
+  return 0;
+}
 
 function positionMacTrafficLights(browserWindow, sidebarOnRight) {
   if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
-  const { width } = browserWindow.getBounds();
+  const width = getBrowserWindowClientWidth(browserWindow);
+  if (width <= 0) return;
   const inset = MACOS_TRAFFIC_LIGHT_INSET;
   if (sidebarOnRight) {
-    const x = Math.max(8, Math.round(width - MACOS_TRAFFIC_LIGHT_CLUSTER_WIDTH_RIGHT - inset));
+    const x = Math.max(
+      8,
+      Math.round(width - MACOS_TRAFFIC_LIGHT_CLUSTER_WIDTH - inset)
+    );
     browserWindow.setWindowButtonPosition({ x, y: inset });
   } else {
     browserWindow.setWindowButtonPosition({ x: inset, y: inset });
@@ -350,9 +641,19 @@ function positionMacTrafficLights(browserWindow, sidebarOnRight) {
 
 function attachMacTrafficLightResize(browserWindow) {
   if (process.platform !== 'darwin' || !browserWindow) return;
-  browserWindow.on('resize', () => {
-    positionMacTrafficLights(browserWindow, !!browserWindow.__axisSidebarRight);
-  });
+  const schedule = () => {
+    if (browserWindow.__axisTrafficReflowTimer) {
+      clearTimeout(browserWindow.__axisTrafficReflowTimer);
+    }
+    browserWindow.__axisTrafficReflowTimer = setTimeout(() => {
+      browserWindow.__axisTrafficReflowTimer = null;
+      if (browserWindow.isDestroyed()) return;
+      positionMacTrafficLights(browserWindow, !!browserWindow.__axisSidebarRight);
+    }, 16);
+  };
+  browserWindow.on('resize', schedule);
+  browserWindow.on('enter-full-screen', schedule);
+  browserWindow.on('leave-full-screen', schedule);
 }
 
 // ========== Keyboard Shortcuts (Global Functions) ==========
@@ -491,13 +792,10 @@ const unregisterShortcuts = () => {
   app.commandLine.appendSwitch('enable-partial-raster');
   app.commandLine.appendSwitch('enable-lcd-text');
 
-  app.commandLine.appendSwitch('disable-background-timer-throttling');
-  app.commandLine.appendSwitch('disable-renderer-backgrounding');
-  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+  /* Allow Chromium to throttle timers/RAF when the window is occluded/minimized — lower idle CPU. */
+  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=1024 --max-semi-space-size=64 --no-expose-gc');
 
-  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=2048 --max-semi-space-size=64 --no-expose-gc');
-
-  app.commandLine.appendSwitch('renderer-process-limit', '25');
+  app.commandLine.appendSwitch('renderer-process-limit', '16');
   app.commandLine.appendSwitch('max-active-webgl-contexts', '8');
   app.commandLine.appendSwitch('disable-hang-monitor');
   app.commandLine.appendSwitch('disable-background-networking');
@@ -567,7 +865,7 @@ function createWindow() {
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: false,
+      backgroundThrottling: true,
       offscreen: false,
       experimentalFeatures: true,
       v8CacheOptions: 'code',
@@ -600,7 +898,11 @@ function createWindow() {
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
     if (process.platform === 'darwin' && mainWindow && !mainWindow.isDestroyed()) {
-      positionMacTrafficLights(mainWindow, !!mainWindow.__axisSidebarRight);
+      const side = !!mainWindow.__axisSidebarRight;
+      positionMacTrafficLights(mainWindow, side);
+      setImmediate(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) positionMacTrafficLights(mainWindow, side);
+      });
     }
     applyMainWindowVibrancyFromStore();
     mainWindow.show();
@@ -655,10 +957,36 @@ function createWindow() {
 
 function getSettingsWindowBackgroundColor() {
   try {
+    // Match the settings window to the in-app `uiTheme` setting (same source of
+    // truth as the renderer's `data-ui-theme`) so there's no light/dark flash
+    // before `settings.html` reads the setting itself. Fall back to the OS scheme
+    // only if the setting is missing / invalid.
+    const uiTheme = store.get('uiTheme', null);
+    if (uiTheme === 'light') return '#f5f5f7';
+    if (uiTheme === 'dark') return '#1e1e1e';
     return nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#f5f5f7';
   } catch (_) {
     return '#f5f5f7';
   }
+}
+
+/** Windows `titleBarOverlay` + background color when the Settings `BrowserWindow` is open. */
+function refreshSettingsWindowChrome() {
+  if (!settingsWindow || settingsWindow.isDestroyed()) return;
+  const bg = getSettingsWindowBackgroundColor();
+  try {
+    settingsWindow.setBackgroundColor(bg);
+  } catch (_) {}
+  if (process.platform !== 'win32') return;
+  if (typeof settingsWindow.setTitleBarOverlay !== 'function') return;
+  try {
+    const light = String(bg).toLowerCase() === '#f5f5f7';
+    settingsWindow.setTitleBarOverlay({
+      color: light ? '#f5f5f7' : '#1e1e1e',
+      symbolColor: light ? '#1a1a1a' : '#e8e8ed',
+      height: 32
+    });
+  } catch (_) {}
 }
 
 function openSettingsWindow(tab = null) {
@@ -683,12 +1011,24 @@ function openSettingsWindow(tab = null) {
       preload: path.join(__dirname, 'preload.js')
     }
   };
+  // macOS: replace the system title bar (often dark when OS is dark) with `hiddenInset`
+  // + an in-page strip in `settings.html`. Windows: recolor the caption with
+  // `titleBarOverlay` so `uiTheme: light` matches a light top bar.
+  if (process.platform === 'darwin') {
+    windowOptions.titleBarStyle = 'hiddenInset';
+  } else if (process.platform === 'win32') {
+    windowOptions.titleBarStyle = 'hidden';
+    const bg0 = getSettingsWindowBackgroundColor();
+    const light = String(bg0).toLowerCase() === '#f5f5f7';
+    windowOptions.titleBarOverlay = {
+      color: light ? '#f5f5f7' : '#1e1e1e',
+      symbolColor: light ? '#1a1a1a' : '#e8e8ed',
+      height: 32
+    };
+  }
   settingsWindow = new BrowserWindow(windowOptions);
   const onThemeUpdated = () => {
-    if (!settingsWindow || settingsWindow.isDestroyed()) return;
-    try {
-      settingsWindow.setBackgroundColor(getSettingsWindowBackgroundColor());
-    } catch (_) {}
+    refreshSettingsWindowChrome();
   };
   nativeTheme.on('updated', onThemeUpdated);
   const settingsPath = path.join(__dirname, 'settings.html');
@@ -741,7 +1081,7 @@ function openUrlInNewBrowserWindow(url) {
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: false,
+      backgroundThrottling: true,
       offscreen: false,
       experimentalFeatures: true,
       v8CacheOptions: 'code',
@@ -796,7 +1136,11 @@ function openUrlInNewBrowserWindow(url) {
 
   win.once('ready-to-show', () => {
     if (process.platform === 'darwin' && !win.isDestroyed()) {
-      positionMacTrafficLights(win, !!win.__axisSidebarRight);
+      const side = !!win.__axisSidebarRight;
+      positionMacTrafficLights(win, side);
+      setImmediate(() => {
+        if (!win.isDestroyed()) positionMacTrafficLights(win, side);
+      });
     }
     applyVibrancyToWindow(win);
     win.show();
@@ -1194,7 +1538,7 @@ function createIncognitoWindow(initialUrl = null) {
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: false,
+      backgroundThrottling: true,
       offscreen: false,
       experimentalFeatures: true,
       enableBlinkFeatures: 'CSSColorSchemeUARendering',
@@ -1237,7 +1581,11 @@ function createIncognitoWindow(initialUrl = null) {
 
   incognitoWindow.once('ready-to-show', () => {
     if (process.platform === 'darwin' && !incognitoWindow.isDestroyed()) {
-      positionMacTrafficLights(incognitoWindow, !!incognitoWindow.__axisSidebarRight);
+      const side = !!incognitoWindow.__axisSidebarRight;
+      positionMacTrafficLights(incognitoWindow, side);
+      setImmediate(() => {
+        if (!incognitoWindow.isDestroyed()) positionMacTrafficLights(incognitoWindow, side);
+      });
     }
     incognitoWindow.show();
   });
@@ -1329,9 +1677,59 @@ function warmUpMainProcessNativePaths() {
 app.whenReady().then(async () => {
   app.on('web-contents-created', (_event, contents) => {
     contents.setMaxListeners(0);
+
+    let isGuest = false;
+    try { isGuest = typeof contents.getType === 'function' && contents.getType() === 'webview'; } catch (_) {}
+
+    // Cache the freshest `context-menu` params on EVERY webContents (guest or host).
+    // The <webview> DOM `context-menu` event in the renderer can arrive with
+    // `misspelledWord` / `dictionarySuggestions` stripped; reading them straight off
+    // the native event in main always works. Installed unconditionally so it covers
+    // any guest regardless of what `getType()` reports.
+    contents.__axisLastContextMenuParams = null;
+    contents.on('context-menu', (_e, params) => {
+      const ps = params || {};
+      contents.__axisLastContextMenuParams = {
+        misspelledWord: typeof ps.misspelledWord === 'string' ? ps.misspelledWord : '',
+        dictionarySuggestions: Array.isArray(ps.dictionarySuggestions)
+          ? ps.dictionarySuggestions.slice()
+          : [],
+        isEditable: !!ps.isEditable,
+        x: Number(ps.x) || 0,
+        y: Number(ps.y) || 0,
+        selectionText: typeof ps.selectionText === 'string' ? ps.selectionText : '',
+        at: Date.now()
+      };
+    });
+
+    // Belt-and-suspenders: make sure spellcheck is enabled on EVERY session a
+    // webContents touches (default, persist:main, incognito, + any custom partitions).
+    try { configureSpellChecker(contents.session); } catch (_) {}
+
+    if (!isGuest) return;
+
+    // <webview> guests: stop Electron from opening a blank Axis BrowserWindow
+    // for window.open() / target=_blank (file downloads, etc.).
+    contents.setWindowOpenHandler((details) => {
+      const url = details && details.url;
+      if (typeof url === 'string' && url) {
+        const lower = url.toLowerCase();
+        const blocked = lower.startsWith('javascript:') || lower.startsWith('vbscript:') || lower.startsWith('file:');
+        if (!blocked) {
+          // Fire after handler returns; sync loadURL inside the handler can race the deny.
+          setImmediate(() => {
+            if (!contents.isDestroyed()) {
+              contents.loadURL(url).catch(() => {});
+            }
+          });
+        }
+      }
+      return { action: 'deny' };
+    });
   });
 
   configureSession();
+  ensureSpellEngineLoaded();
   warmUpMainProcessNativePaths();
   createWindow();
   updateDockMenu();
@@ -1420,10 +1818,7 @@ ipcMain.handle('set-window-title', (event, title) => {
 });
 
 ipcMain.on('settings-updated', () => {
-  applyMainWindowVibrancyFromStore();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('settings-updated');
-  }
+  broadcastSettingsUpdated();
 });
 
 ipcMain.handle('print-page', (event, webContentsId) => {
@@ -1451,6 +1846,7 @@ ipcMain.handle('get-site-permission-overrides', () => {
 ipcMain.handle('set-site-permission-overrides', (event, obj) => {
   const cleaned = cleanSitePermissionOverrides(obj);
   store.set('sitePermissionOverrides', cleaned);
+  broadcastSettingsUpdated();
   return cleaned;
 });
 
@@ -1800,10 +2196,124 @@ ipcMain.handle('show-sidebar-context-menu', async (event, x, y, isRight) => {
   return true;
 });
 
-// Webpage context menu — link → image → navigation → edit → selection tools → page
+// Persist a custom dictionary word across every Axis session so it survives restarts and
+// applies to both normal and incognito windows.
+ipcMain.handle('add-to-spellcheck-dictionary', async (_event, word) => {
+  return addWordToAllSpellCheckerDictionaries(word);
+});
+
+// Webpage context menu — spelling (editable) → link → image → navigation → edit → selection tools → page
 ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => {
   const ctx = contextInfo || {};
   const template = [];
+
+  // Pull the freshest cached `context-menu` params from any guest <webview> that
+  // belongs to the caller. Electron's `context-menu` event on macOS webview guests
+  // returns empty `misspelledWord` / `dictionarySuggestions` even when Chromium is
+  // flagging a word, so we also run our own nspell check below.
+  let guest = null;
+  let cached = null;
+  try {
+    const { webContents } = require('electron');
+    const guestId = Number(ctx.guestWebContentsId || 0);
+    if (guestId > 0) {
+      const specific = webContents.fromId(guestId);
+      if (specific && !specific.isDestroyed()) {
+        guest = specific;
+        if (specific.__axisLastContextMenuParams) cached = specific.__axisLastContextMenuParams;
+      }
+    }
+    if (!guest || !cached) {
+      const all = webContents.getAllWebContents();
+      let bestWc = null;
+      let bestAt = 0;
+      for (const wc of all) {
+        if (!wc || wc.isDestroyed() || !wc.__axisLastContextMenuParams) continue;
+        const host = wc.hostWebContents;
+        if (host && host.id === event.sender.id) {
+          const at = wc.__axisLastContextMenuParams.at || 0;
+          if (at > bestAt) { bestWc = wc; bestAt = at; }
+        }
+      }
+      if (bestWc) {
+        guest = guest || bestWc;
+        cached = cached || bestWc.__axisLastContextMenuParams;
+      }
+    }
+    if (cached && Date.now() - (cached.at || 0) < 2500) {
+      if (cached.isEditable) ctx.isEditable = true;
+      if (!ctx.misspelledWord && cached.misspelledWord) ctx.misspelledWord = cached.misspelledWord;
+      if ((!Array.isArray(ctx.dictionarySuggestions) || ctx.dictionarySuggestions.length === 0)
+          && Array.isArray(cached.dictionarySuggestions) && cached.dictionarySuggestions.length) {
+        ctx.dictionarySuggestions = cached.dictionarySuggestions.slice();
+      }
+      if (typeof cached.x === 'number') ctx.x = cached.x;
+      if (typeof cached.y === 'number') ctx.y = cached.y;
+      if (!ctx.selectionText && cached.selectionText) ctx.selectionText = cached.selectionText;
+    }
+  } catch (_) {}
+
+  // Manual spellcheck fallback: when editable + no flagged word from Chromium, extract
+  // the word under the cursor from the guest and check it with nspell + dictionary-en.
+  // `__axisReplaceWord` is carried along so `replace-misspelling` knows which word to
+  // swap if the menu item is clicked.
+  ctx.__axisReplaceWord = '';
+  try {
+    if (ctx.isEditable && guest && !guest.isDestroyed()) {
+      const haveNativeMisspell = typeof ctx.misspelledWord === 'string' && ctx.misspelledWord.trim().length > 0;
+      if (!haveNativeMisspell) {
+        await ensureSpellEngineLoaded();
+        if (axisSpellEngine) {
+          const cx = Number(ctx.x) || 0;
+          const cy = Number(ctx.y) || 0;
+          let candidate = (typeof ctx.selectionText === 'string' ? ctx.selectionText.trim() : '');
+          if (!candidate || /\s/.test(candidate)) {
+            candidate = await getWordAtGuestPoint(guest, cx, cy);
+          }
+          const cleaned = String(candidate || '').replace(/^[^A-Za-z'\-]+|[^A-Za-z'\-]+$/g, '');
+          if (cleaned && /[A-Za-z]/.test(cleaned) && isWordMisspelled(cleaned)) {
+            ctx.misspelledWord = cleaned;
+            ctx.dictionarySuggestions = getSpellSuggestions(cleaned, 6);
+            ctx.__axisReplaceWord = cleaned;
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('[axis:spell] manual check failed:', error);
+  }
+
+  // --- Spelling suggestions (editable field + misspelled word)
+  const misspelled = typeof ctx.misspelledWord === 'string' ? ctx.misspelledWord.trim() : '';
+  const suggestions = Array.isArray(ctx.dictionarySuggestions) ? ctx.dictionarySuggestions : [];
+  const manualReplaceWord = typeof ctx.__axisReplaceWord === 'string' ? ctx.__axisReplaceWord : '';
+  if (ctx.isEditable && misspelled) {
+    if (suggestions.length > 0) {
+      const MAX_SUGGESTIONS = 6;
+      for (const suggestion of suggestions.slice(0, MAX_SUGGESTIONS)) {
+        const replacement = String(suggestion || '');
+        if (!replacement) continue;
+        template.push({
+          label: replacement,
+          click: () => {
+            event.sender.send('webpage-context-menu-action', 'replace-misspelling', {
+              replacement,
+              manualReplaceWord
+            });
+          }
+        });
+      }
+    } else {
+      template.push({ label: 'No spelling suggestions', enabled: false });
+    }
+    template.push({
+      label: 'Add to Dictionary',
+      click: () => {
+        event.sender.send('webpage-context-menu-action', 'add-to-dictionary', { word: misspelled });
+      }
+    });
+    template.push({ type: 'separator' });
+  }
 
   // --- Link (target hit is a link)
   if (ctx.linkURL && ctx.linkURL.length > 0) {
