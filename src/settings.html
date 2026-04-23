@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light dark">
+    <meta name="color-scheme" content="light" id="axis-settings-color-scheme">
     <title>Settings</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -15,22 +15,64 @@
         html {
             background-color: #f5f5f7;
         }
-        @media (prefers-color-scheme: dark) {
-            html { background-color: #1e1e1e; }
-        }
+                html.axis-dark { background-color: #1e1e1e; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
             font-size: 13px;
             color: #1d1d1f;
             background: #f5f5f7;
             display: flex;
-            flex-direction: row;
+            flex-direction: column;
             align-items: stretch;
             min-height: 0;
             -webkit-font-smoothing: antialiased;
         }
-        @media (prefers-color-scheme: dark) {
-            body { color: #f5f5f7; background: #1e1e1e; }
+                html.axis-dark body { color: #f5f5f7; background: #1e1e1e; }
+        .settings-wrap {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+            width: 100%;
+            align-items: stretch;
+        }
+        html.macos .settings-wrap {
+            flex-direction: column;
+        }
+        html:not(.macos) .settings-wrap {
+            flex-direction: row;
+        }
+        /* macOS + hiddenInset: in-window strip matches `uiTheme` (avoids OS-dark native title) */
+        html.macos .settings-window-chrome {
+            display: flex;
+            flex-shrink: 0;
+            align-items: center;
+            height: 40px;
+            min-height: 32px;
+            box-sizing: border-box;
+            padding: 0 12px 0 78px;
+            -webkit-app-region: drag;
+            background: #f5f5f7;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(0, 0, 0, 0.4);
+            user-select: none;
+        }
+        html.macos.axis-dark .settings-window-chrome {
+            background: #1e1e1e;
+            border-bottom-color: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.45);
+        }
+        html:not(.macos) .settings-window-chrome {
+            display: none;
+        }
+        .settings-content-row {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+            width: 100%;
+            flex-direction: row;
+            align-items: stretch;
         }
         
         /* Source list sidebar - macOS style */
@@ -44,9 +86,7 @@
             overflow-y: auto;
             overflow-x: hidden;
         }
-        @media (prefers-color-scheme: dark) {
-            .sidebar { background: rgba(30,30,30,0.95); border-right-color: rgba(255,255,255,0.08); }
-        }
+                html.axis-dark .sidebar { background: rgba(30,30,30,0.95); border-right-color: rgba(255,255,255,0.08); }
         .sidebar-item {
             display: flex;
             align-items: center;
@@ -59,16 +99,12 @@
             font-size: 13px;
         }
         .sidebar-item:hover { background: rgba(0,0,0,0.05); }
-        @media (prefers-color-scheme: dark) {
-            .sidebar-item:hover { background: rgba(255,255,255,0.08); }
-        }
+                html.axis-dark .sidebar-item:hover { background: rgba(255,255,255,0.08); }
         .sidebar-item.active {
             background: rgba(0,122,255,0.15);
             color: #007aff;
         }
-        @media (prefers-color-scheme: dark) {
-            .sidebar-item.active { background: rgba(10,132,255,0.25); color: #0a84ff; }
-        }
+                html.axis-dark .sidebar-item.active { background: rgba(10,132,255,0.25); color: #0a84ff; }
         .sidebar-item svg { width: 16px; height: 16px; opacity: 0.8; }
         .sidebar-item.active svg { opacity: 1; }
         
@@ -103,9 +139,7 @@
             margin-bottom: 8px;
             padding: 0 4px;
         }
-        @media (prefers-color-scheme: dark) {
-            .group-title { color: #98989d; }
-        }
+                html.axis-dark .group-title { color: #98989d; }
         .group-content {
             background: #fff;
             border-radius: 10px;
@@ -113,13 +147,9 @@
             border: 1px solid rgba(0,0,0,0.06);
             box-shadow: 0 8px 24px rgba(0,0,0,0.06);
         }
-        @media (prefers-color-scheme: dark) {
-            .group-content {
-                background: #2c2c2e;
+                html.axis-dark .group-content { background: #2c2c2e;
                 border-color: rgba(255,255,255,0.08);
-                box-shadow: 0 12px 30px rgba(0,0,0,0.7);
-            }
-        }
+                box-shadow: 0 12px 30px rgba(0,0,0,0.7); }
         .row {
             display: flex;
             align-items: center;
@@ -128,16 +158,12 @@
             min-height: 40px;
             border-bottom: 1px solid rgba(0,0,0,0.06);
         }
-        @media (prefers-color-scheme: dark) {
-            .row { border-bottom-color: rgba(255,255,255,0.06); }
-        }
+                html.axis-dark .row { border-bottom-color: rgba(255,255,255,0.06); }
         .row:last-child { border-bottom: none; }
         .row-label { flex: 1; }
         .row-title { font-size: 13px; font-weight: 600; }
         .row-desc { font-size: 11px; color: #86868b; margin-top: 2px; }
-        @media (prefers-color-scheme: dark) {
-            .row-desc { color: #98989d; }
-        }
+                html.axis-dark .row-desc { color: #98989d; }
         
         /* Native form controls */
         select, input[type="text"], input[type="search"] {
@@ -151,12 +177,8 @@
             min-width: 120px;
             color: inherit;
         }
-        @media (prefers-color-scheme: dark) {
-            select, input[type="text"], input[type="search"] {
-                border-color: rgba(255,255,255,0.2);
-                background-color: #3a3a3c;
-            }
-        }
+                html.axis-dark select, html.axis-dark input[type="text"], html.axis-dark input[type="search"] { border-color: rgba(255,255,255,0.2);
+                background-color: #3a3a3c; }
         input[type="search"] {
             background-image: none;
             padding: 6px 12px;
@@ -173,26 +195,20 @@
             cursor: pointer;
             background: transparent;
         }
-        @media (prefers-color-scheme: dark) {
-            input[type="color"] { border-color: rgba(255,255,255,0.2); }
-        }
+                html.axis-dark input[type="color"] { border-color: rgba(255,255,255,0.2); }
         input[type="checkbox"] {
             width: 18px;
             height: 18px;
             accent-color: #007aff;
         }
-        @media (prefers-color-scheme: dark) {
-            input[type="checkbox"] { accent-color: #0a84ff; }
-        }
+                html.axis-dark input[type="checkbox"] { accent-color: #0a84ff; }
         input[type="range"] {
             width: 140px;
             max-width: 40vw;
             min-height: 24px;
             accent-color: #007aff;
         }
-        @media (prefers-color-scheme: dark) {
-            input[type="range"] { accent-color: #0a84ff; }
-        }
+                html.axis-dark input[type="range"] { accent-color: #0a84ff; }
         .ambient-volume-wrap {
             display: flex;
             align-items: center;
@@ -215,9 +231,7 @@
             color: #86868b;
             max-width: 200px;
         }
-        @media (prefers-color-scheme: dark) {
-            .window-chrome-light-stack .window-chrome-light-value { color: #98989d; }
-        }
+                html.axis-dark .window-chrome-light-stack .window-chrome-light-value { color: #98989d; }
         .ambient-volume-value {
             font-size: 12px;
             font-variant-numeric: tabular-nums;
@@ -225,9 +239,7 @@
             text-align: right;
             color: #86868b;
         }
-        @media (prefers-color-scheme: dark) {
-            .ambient-volume-value { color: #98989d; }
-        }
+                html.axis-dark .ambient-volume-value { color: #98989d; }
         button {
             font-family: inherit;
             font-size: 13px;
@@ -238,17 +250,11 @@
             color: inherit;
             cursor: pointer;
         }
-        @media (prefers-color-scheme: dark) {
-            button { background: #3a3a3c; border-color: rgba(255,255,255,0.2); }
-        }
+                html.axis-dark button { background: #3a3a3c; border-color: rgba(255,255,255,0.2); }
         button:hover { background: rgba(0,0,0,0.05); }
-        @media (prefers-color-scheme: dark) {
-            button:hover { background: rgba(255,255,255,0.08); }
-        }
+                html.axis-dark button:hover { background: rgba(255,255,255,0.08); }
         button.destructive { color: #ff3b30; }
-        @media (prefers-color-scheme: dark) {
-            button.destructive { color: #ff453a; }
-        }
+                html.axis-dark button.destructive { color: #ff453a; }
         
         .row-controls { display: flex; gap: 12px; align-items: center; }
         .shortcut-input {
@@ -264,9 +270,7 @@
             border-radius: 6px;
             border: 1px solid rgba(0,0,0,0.15);
         }
-        @media (prefers-color-scheme: dark) {
-            .theme-preview { border-color: rgba(255,255,255,0.15); }
-        }
+                html.axis-dark .theme-preview { border-color: rgba(255,255,255,0.15); }
         .history-toolbar { display: flex; gap: 12px; margin-bottom: 16px; }
         .history-list { display: flex; flex-direction: column; gap: 2px; }
         .history-item {
@@ -278,16 +282,12 @@
             cursor: pointer;
         }
         .history-item:hover { background: rgba(0,0,0,0.05); }
-        @media (prefers-color-scheme: dark) {
-            .history-item:hover { background: rgba(255,255,255,0.06); }
-        }
+                html.axis-dark .history-item:hover { background: rgba(255,255,255,0.06); }
         .history-favicon { width: 16px; height: 16px; border-radius: 3px; flex-shrink: 0; }
         .history-info { flex: 1; min-width: 0; overflow: hidden; }
         .history-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .history-url { font-size: 11px; color: #86868b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        @media (prefers-color-scheme: dark) {
-            .history-url { color: #98989d; }
-        }
+                html.axis-dark .history-url { color: #98989d; }
         .history-time { font-size: 11px; color: #86868b; flex-shrink: 0; }
         .history-delete {
             padding: 4px 8px;
@@ -304,9 +304,7 @@
             padding: 8px 16px;
             border-bottom: 1px solid rgba(0,0,0,0.06);
         }
-        @media (prefers-color-scheme: dark) {
-            .shortcut-row { border-bottom-color: rgba(255,255,255,0.06); }
-        }
+                html.axis-dark .shortcut-row { border-bottom-color: rgba(255,255,255,0.06); }
         .shortcut-row:last-child { border-bottom: none; }
         .shortcut-row .shortcut-row-main { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
         .shortcut-row .shortcut-row-main span { font-size: 13px; }
@@ -320,13 +318,9 @@
             cursor: pointer;
             white-space: nowrap;
         }
-        @media (prefers-color-scheme: dark) {
-            .shortcut-action-btn { border-color: rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); }
-        }
+                html.axis-dark .shortcut-action-btn { border-color: rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); }
         .shortcuts-subheading { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #86868b; margin: 16px 0 8px; padding: 0 16px; }
-        @media (prefers-color-scheme: dark) {
-            .shortcuts-subheading { color: #98989d; }
-        }
+                html.axis-dark .shortcuts-subheading { color: #98989d; }
         .shortcut-row.shortcut-row-disabled .shortcut-input { opacity: 0.55; pointer-events: none; }
         .gradient-rows { display: none; }
         .gradient-rows.visible { display: flex; flex-direction: column; }
@@ -349,16 +343,12 @@
             border-color: rgba(0,122,255,0.6);
             box-shadow: 0 0 0 2px rgba(0,122,255,0.15);
         }
-        @media (prefers-color-scheme: dark) {
-            .settings-search {
-                background: #3a3a3c;
+                html.axis-dark .settings-search { background: #3a3a3c;
                 border-color: rgba(255,255,255,0.16);
             }
             .settings-search:focus {
                 border-color: rgba(10,132,255,0.7);
-                box-shadow: 0 0 0 2px rgba(10,132,255,0.2);
-            }
-        }
+                box-shadow: 0 0 0 2px rgba(10,132,255,0.2); }
         .settings-search-empty {
             display: none;
             text-align: center;
@@ -373,9 +363,7 @@
             padding: 10px 18px 4px;
             margin: 0;
         }
-        @media (prefers-color-scheme: dark) {
-            .perm-intro { color: #98989d; }
-        }
+                html.axis-dark .perm-intro { color: #98989d; }
         .perm-add-row {
             display: flex;
             flex-wrap: wrap;
@@ -384,9 +372,7 @@
             padding: 10px 18px 14px;
             border-bottom: 1px solid rgba(0,0,0,0.06);
         }
-        @media (prefers-color-scheme: dark) {
-            .perm-add-row { border-bottom-color: rgba(255,255,255,0.06); }
-        }
+                html.axis-dark .perm-add-row { border-bottom-color: rgba(255,255,255,0.06); }
         .perm-add-row input[type="text"] {
             flex: 1;
             min-width: 180px;
@@ -397,20 +383,14 @@
             background: #fff;
             color: inherit;
         }
-        @media (prefers-color-scheme: dark) {
-            .perm-add-row input[type="text"] {
-                background: #3a3a3c;
-                border-color: rgba(255,255,255,0.2);
-            }
-        }
+                html.axis-dark .perm-add-row input[type="text"] { background: #3a3a3c;
+                border-color: rgba(255,255,255,0.2); }
         .perm-add-error {
             font-size: 11px;
             color: #ff3b30;
             flex-basis: 100%;
         }
-        @media (prefers-color-scheme: dark) {
-            .perm-add-error { color: #ff453a; }
-        }
+                html.axis-dark .perm-add-error { color: #ff453a; }
         .perm-table-wrap {
             overflow-x: auto;
             max-width: 100%;
@@ -431,17 +411,13 @@
             border-bottom: 1px solid rgba(0,0,0,0.08);
             white-space: nowrap;
         }
-        @media (prefers-color-scheme: dark) {
-            .perm-table th { color: #98989d; border-bottom-color: rgba(255,255,255,0.08); }
-        }
+                html.axis-dark .perm-table th { color: #98989d; border-bottom-color: rgba(255,255,255,0.08); }
         .perm-table td {
             padding: 8px 10px;
             border-bottom: 1px solid rgba(0,0,0,0.06);
             vertical-align: middle;
         }
-        @media (prefers-color-scheme: dark) {
-            .perm-table td { border-bottom-color: rgba(255,255,255,0.06); }
-        }
+                html.axis-dark .perm-table td { border-bottom-color: rgba(255,255,255,0.06); }
         .perm-table td.perm-origin {
             font-family: 'SF Mono', Monaco, ui-monospace, monospace;
             font-size: 11px;
@@ -464,12 +440,118 @@
             font-size: 12px;
             padding: 24px 16px !important;
         }
-        @media (prefers-color-scheme: dark) {
-            .perm-empty { color: #98989d; }
+                html.axis-dark .perm-empty { color: #98989d; }
+
+        /* —— Light `uiTheme` only: Chromium was still using dark *native* form chrome (black
+           select rings, checkboxes, scrollbars) when the OS is dark, because `light dark`
+           + `prefers-color-scheme` overrode our pale page background. */
+        html:not(.axis-dark) {
+            color-scheme: light;
+        }
+        html.axis-dark {
+            color-scheme: dark;
+        }
+        html:not(.axis-dark) .main::-webkit-scrollbar,
+        html:not(.axis-dark) .sidebar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        html:not(.axis-dark) .main::-webkit-scrollbar-track,
+        html:not(.axis-dark) .sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        html:not(.axis-dark) .main::-webkit-scrollbar-thumb,
+        html:not(.axis-dark) .sidebar::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.18);
+            border-radius: 4px;
+        }
+        html:not(.axis-dark) .main::-webkit-scrollbar-thumb:hover,
+        html:not(.axis-dark) .sidebar::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 0, 0, 0.28);
+        }
+        html:not(.axis-dark) .sidebar-item:not(.active) {
+            color: rgba(0, 0, 0, 0.55);
+        }
+        html:not(.axis-dark) .sidebar-item:not(.active) svg {
+            color: rgba(0, 0, 0, 0.45);
+        }
+        html:not(.axis-dark) select,
+        html:not(.axis-dark) .perm-table select {
+            border: 1px solid rgba(0, 0, 0, 0.12);
+            background-color: #fff;
+            color: #1d1d1f;
+        }
+        html:not(.axis-dark) .settings-search {
+            border-color: rgba(0, 0, 0, 0.12);
+        }
+        html:not(.axis-dark) input[type="checkbox"] {
+            accent-color: #007aff;
         }
     </style>
+    <script>
+        // Apply the in-app `uiTheme` setting to this settings window. The stylesheet
+        // uses `html.axis-dark ...` selectors everywhere (no `@media
+        // (prefers-color-scheme: dark)` anymore), so toggling this class is the
+        // single source of truth for dark vs light in this window. We race:
+        // 1) fall back to OS scheme immediately so the first paint isn't wrong,
+        // 2) then override with the real setting as soon as the IPC returns.
+        (function applyInitialAxisTheme() {
+            const setFromValue = (v) => {
+                const isDark = v !== 'light';
+                document.documentElement.classList.toggle('axis-dark', isDark);
+                try {
+                    if (window.electronAPI && window.electronAPI.platform === 'darwin') {
+                        document.documentElement.classList.add('macos');
+                    }
+                } catch (_) {}
+                try {
+                    document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+                    const meta = document.getElementById('axis-settings-color-scheme');
+                    if (meta) {
+                        meta.setAttribute('content', isDark ? 'dark' : 'light');
+                    }
+                } catch (_) {}
+            };
+            try {
+                if (window.electronAPI && window.electronAPI.platform === 'darwin') {
+                    document.documentElement.classList.add('macos');
+                }
+            } catch (_) {}
+            try {
+                if (window.electronAPI && typeof window.electronAPI.getSettings === 'function') {
+                    window.electronAPI.getSettings().then((s) => {
+                        if (s && typeof s.uiTheme !== 'undefined') setFromValue(s.uiTheme);
+                    }).catch(() => {});
+                }
+            } catch (_) {}
+            // Live-update when the user flips the Appearance dropdown in this window
+            // (the main form `change` handler runs later — we listen here to update
+            // the class immediately without waiting for the round-trip).
+            document.addEventListener('change', (e) => {
+                const t = e.target;
+                if (t && t.id === 'ui-theme') setFromValue(t.value);
+            }, true);
+            // If `uiTheme` gets toggled from the in-app settings panel (not this
+            // window) while this window is open, refresh from the store so both
+            // UIs stay in sync.
+            try {
+                if (window.electronAPI && typeof window.electronAPI.onSettingsUpdated === 'function') {
+                    window.electronAPI.onSettingsUpdated(() => {
+                        try {
+                            window.electronAPI.getSettings().then((s) => {
+                                if (s && typeof s.uiTheme !== 'undefined') setFromValue(s.uiTheme);
+                            }).catch(() => {});
+                        } catch (_) {}
+                    });
+                }
+            } catch (_) {}
+        })();
+    </script>
 </head>
 <body>
+  <div class="settings-wrap">
+    <header class="settings-window-chrome" translate="no">Settings</header>
+    <div class="settings-content-row">
     <nav class="sidebar">
         <div class="sidebar-item active" data-section="customization">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
@@ -548,6 +630,16 @@
             <div class="group">
                 <div class="group-title">Theme</div>
                 <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Appearance</div>
+                            <div class="row-desc">Light or dark mode for the Axis UI (tabs, sidebar, popups). Does not affect the window frame or your theme color.</div>
+                        </div>
+                        <select id="ui-theme">
+                            <option value="dark">Dark</option>
+                            <option value="light">Light</option>
+                        </select>
+                    </div>
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title">Theme Color</div>
@@ -746,10 +838,12 @@
         </div>
         </div>
     </main>
+  </div>
+  </div>
     
     <script>
         (async function() {
-            const THEME_KEYS = ['themeColor', 'gradientColor', 'gradientEnabled', 'gradientDirection', 'transparentSites', 'windowChromeLight'];
+            const THEME_KEYS = ['themeColor', 'gradientColor', 'gradientEnabled', 'gradientDirection', 'transparentSites', 'windowChromeLight', 'uiTheme'];
             const SHORTCUT_ACTIONS = [
                 { action: 'spotlight-search', label: 'New Tab' },
                 { action: 'close-tab', label: 'Close Tab' },
@@ -845,6 +939,7 @@
             } catch (e) { console.error(e); }
             
             // Populate form
+            document.getElementById('ui-theme').value = settings.uiTheme === 'light' ? 'light' : 'dark';
             document.getElementById('sidebar-position').value = settings.sidebarPosition || 'left';
             document.getElementById('search-engine').value = settings.searchEngine || 'google';
             document.getElementById('always-show-full-url').checked = !!settings.alwaysShowFullUrl;
@@ -1087,6 +1182,14 @@
                 }
             });
             loadSitePermissionOverrides();
+            // When the main process records a grant from a site (or another window saves overrides), reload the table.
+            try {
+                if (window.electronAPI && typeof window.electronAPI.onSettingsUpdated === 'function') {
+                    window.electronAPI.onSettingsUpdated(() => {
+                        loadSitePermissionOverrides();
+                    });
+                }
+            } catch (_) {}
 
             // Settings search (instant filter)
             const settingsSearchInput = document.getElementById('settings-search');
@@ -1163,6 +1266,10 @@
                 ambientVolLabel.textContent = parseInt(e.target.value, 10) + '%';
             });
             ambientVolInput.addEventListener('change', e => saveSetting('ambientAudioVolume', parseInt(e.target.value, 10), false));
+            document.getElementById('ui-theme').addEventListener('change', e => {
+                const v = e.target.value === 'light' ? 'light' : 'dark';
+                saveSetting('uiTheme', v, true);
+            });
             document.getElementById('theme-color').addEventListener('input', e => {
                 saveSetting('themeColor', e.target.value, true);
                 updateThemePreview();
