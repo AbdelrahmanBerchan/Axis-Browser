@@ -1,7 +1,7 @@
 {
   "name": "axis",
   "productName": "Axis",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "A minimalistic, customizable, and beautiful browser built on Electron",
   "main": "src/main.js",
   "scripts": {
@@ -16,7 +16,7 @@
     "ajv": "^8.18.0",
     "minimatch": "^10.2.3",
     "picomatch": "4.0.4",
-    "@xmldom/xmldom": "0.8.12",
+    "@xmldom/xmldom": "0.8.13",
     "file-type": ">=21.3.1"
   },
   "keywords": [
@@ -36,8 +36,10 @@
     "tar": "^7.5.10"
   },
   "dependencies": {
+    "dictionary-en": "^4.0.0",
     "electron-store": "^8.1.0",
     "jimp": "^1.6.1",
+    "nspell": "^2.1.5",
     "qrcode": "^1.5.4"
   },
   "build": {
