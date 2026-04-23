@@ -40,7 +40,7 @@ html, body {
     --button-text: #ccc;
     --button-text-hover: #fff;
     --sidebar-background: rgba(17, 17, 17, 0.05);
-    --sidebar-slide-out-background: rgba(28, 28, 28, 0.28);
+    --sidebar-slide-out-background: rgb(28, 28, 28);
     --url-bar-background: #111;
     --url-bar-focus-background: #1a1a1a;
     --url-bar-text: #fff;
@@ -81,6 +81,571 @@ html, body {
     --animation-border-hover: rgba(255, 255, 255, 0.2);
     --animation-focus-ring: rgba(255, 255, 255, 0.15);
     --animation-focus-ring-light: rgba(255, 255, 255, 0.1);
+}
+
+/*
+ * Light-mode OVERLAYS (:root[data-ui-theme="light"]) — driven by the `uiTheme` setting.
+ *
+ * SCOPE: only secondary / overlay surfaces are flipped — popups, menus, Cmd+F modal,
+ * security panel, AI chat sidebar panel, new-tab-page inner cards, zoom indicator,
+ * context menus, notes / history / downloads / bookmark panels.
+ *
+ * The MAIN SHELL (tabs, sidebar, url bar strip, nav buttons, background gradient) is
+ * deliberately UNTOUCHED in both modes. The user's theme color drives those surfaces
+ * identically in dark and light mode — this file never overrides shell backgrounds,
+ * shell text colors, `--background-color`, `--sidebar-background`, `--tab-*`,
+ * `--url-bar-*`, `--theme-color`, `--gradient-color`, `--primary-gradient`, or
+ * `--accent-color`. The macOS window frame / vibrancy is OS-owned and also untouched.
+ * Webview content is a separate document and never inherits these rules.
+ */
+
+/* Surface flip for overlay panels / popups / menus / modals. Narrow list — anything
+ * that renders *on top of* the shell (and is hardcoded dark in the base stylesheet)
+ * gets a light glass fill. Main shell classes (.tab, .sidebar-section, .url-bar,
+ * .nav-btn, etc.) are NOT included here. */
+:root[data-ui-theme="light"] .downloads-popup,
+:root[data-ui-theme="light"] .history-popup,
+:root[data-ui-theme="light"] .downloads-panel,
+:root[data-ui-theme="light"] .history-panel,
+:root[data-ui-theme="light"] .notes-panel,
+:root[data-ui-theme="light"] .ai-chat-panel,
+:root[data-ui-theme="light"] .spotlight-overlay,
+:root[data-ui-theme="light"] .spotlight-input,
+:root[data-ui-theme="light"] .bookmark-popup,
+:root[data-ui-theme="light"] .bookmark-panel,
+:root[data-ui-theme="light"] .nav-menu,
+:root[data-ui-theme="light"] .context-menu,
+:root[data-ui-theme="light"] .find-bar,
+:root[data-ui-theme="light"] .tab-preview-box,
+:root[data-ui-theme="light"] .settings-panel {
+    background: rgba(248, 248, 250, 0.95) !important;
+    backdrop-filter: blur(24px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/*
+ * Zoom indicator is a two-element widget: `.zoom-indicator` is the absolutely
+ * positioned wrapper with no border / background, `.zoom-content` is the rounded
+ * pill (border-radius 12px, dark glass fill). The previous light-mode rule
+ * painted the wrapper glass too, which showed as a square edge behind the
+ * rounded pill. We only flip the inner `.zoom-content` here so the outer wrapper
+ * stays fully transparent.
+ */
+:root[data-ui-theme="light"] .zoom-content {
+    background: rgba(248, 248, 250, 0.95) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    color: rgba(0, 0, 0, 0.92) !important;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Text flip ONLY inside those overlay surfaces + the in-app new-tab-page / empty state.
+ * Shell classes (.tab, .sidebar, .nav-btn, .url-bar) are deliberately absent so they
+ * keep their dark-mode text color on the theme-colored shell. */
+:root[data-ui-theme="light"] .nav-menu,
+:root[data-ui-theme="light"] .nav-menu *,
+:root[data-ui-theme="light"] .downloads-popup,
+:root[data-ui-theme="light"] .downloads-popup *:not(.download-progress):not(.download-icon),
+:root[data-ui-theme="light"] .history-popup,
+:root[data-ui-theme="light"] .history-popup *,
+:root[data-ui-theme="light"] .bookmark-popup,
+:root[data-ui-theme="light"] .bookmark-popup *,
+:root[data-ui-theme="light"] .context-menu,
+:root[data-ui-theme="light"] .context-menu *,
+:root[data-ui-theme="light"] .webpage-context-menu,
+:root[data-ui-theme="light"] .webpage-context-menu *,
+:root[data-ui-theme="light"] .find-bar,
+:root[data-ui-theme="light"] .find-bar *,
+:root[data-ui-theme="light"] .tab-preview-box,
+:root[data-ui-theme="light"] .tab-preview-loading,
+:root[data-ui-theme="light"] .empty-state,
+:root[data-ui-theme="light"] .empty-state-title,
+:root[data-ui-theme="light"] .empty-state-subtitle,
+:root[data-ui-theme="light"] .empty-state-btn,
+:root[data-ui-theme="light"] .empty-state-icon,
+:root[data-ui-theme="light"] .new-tab-page,
+:root[data-ui-theme="light"] .new-tab-page-content,
+:root[data-ui-theme="light"] .new-tab-input,
+:root[data-ui-theme="light"] .new-tab-search-icon,
+:root[data-ui-theme="light"] .new-tab-mode-btn,
+:root[data-ui-theme="light"] .new-tab-suggestions,
+:root[data-ui-theme="light"] .new-tab-suggestion,
+:root[data-ui-theme="light"] .new-tab-ask-messages {
+    color: #1a1a1a !important;
+}
+
+/* Placeholder flip only inside overlay / new-tab surfaces — shell inputs are
+ * themed and inherit --url-bar-text-muted. */
+:root[data-ui-theme="light"] .new-tab-input::placeholder,
+:root[data-ui-theme="light"] .new-tab-ask-input::placeholder,
+:root[data-ui-theme="light"] .ai-chat-input::placeholder,
+:root[data-ui-theme="light"] #search-input::placeholder,
+:root[data-ui-theme="light"] .spotlight-input::placeholder,
+:root[data-ui-theme="light"] .notes-search input::placeholder,
+:root[data-ui-theme="light"] .downloads-search input::placeholder,
+:root[data-ui-theme="light"] .history-search::placeholder {
+    color: #6a6a6a !important;
+    opacity: 1;
+}
+
+/* Border flip for overlay chrome only. */
+:root[data-ui-theme="light"] [class*="-popup"]:not([class*="color-picker"]),
+:root[data-ui-theme="light"] [class*="-panel"]:not([class*="color-picker"]) {
+    border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/*
+ * New-tab-page light surfaces. `.new-tab-page` is a div inside `#app` (NOT a
+ * webview), so overriding its hardcoded `background:#000` / `#0a0a0a` + the
+ * rgba-white overlays in the search card, mode toggle, and suggestions card
+ * lands cleanly without touching any webpage content.
+ */
+/*
+ * `.new-tab-page` default is `background: #000`. In light mode we need an actual
+ * light surface (not `transparent`) — otherwise the shell's theme-colored bg
+ * shows through and the page looks dark. We keep the surface neutral and light
+ * so the page doesn't inherit the theme color (which would be "theme affecting
+ * the new tab page") and so the inner search / ask cards read correctly.
+ */
+:root[data-ui-theme="light"] .new-tab-page {
+    background: rgba(244, 244, 246, 0.98) !important;
+}
+
+/*
+ * When the new-tab-page is LIGHT, the `.webview-url-bar.new-tab-page` top bar
+ * sitting above it also has to flip — otherwise the black bar (with white icons)
+ * looks jarring against the light page underneath. Base rule sets:
+ *   --url-bar-bg: #000000;
+ *   --url-bar-border: rgba(255,255,255,0.1);
+ *   --url-bar-text: rgba(255,255,255,0.96);
+ *   --url-bar-text-muted: rgba(255,255,255,0.55);
+ *   --url-bar-btn-hover: rgba(255,255,255,0.12);
+ * We flip each to the black-alpha complement. Transparent-sites-mode has its
+ * own stylesheet branch; we only need to override the non-transparent one.
+ */
+:root[data-ui-theme="light"] .webview-url-bar.new-tab-page {
+    --url-bar-bg: rgba(244, 244, 246, 0.98) !important;
+    --url-bar-border: rgba(0, 0, 0, 0.08) !important;
+    --url-bar-text: rgba(0, 0, 0, 0.9) !important;
+    --url-bar-text-muted: rgba(0, 0, 0, 0.55) !important;
+    --url-bar-btn-hover: rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-ui-theme="light"] .new-tab-search-wrapper {
+    background: var(--axis-nt-search-bg, rgba(244, 245, 247, 0.96)) !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06),
+                inset 0 1px 0 rgba(0, 0, 0, 0.02) !important;
+}
+:root[data-ui-theme="light"] .new-tab-search-wrapper:hover {
+    border-color: rgba(0, 0, 0, 0.14) !important;
+}
+:root[data-ui-theme="light"] .new-tab-search-wrapper:focus-within {
+    border-color: rgba(0, 0, 0, 0.22) !important;
+    box-shadow: 0 4px 28px rgba(0, 0, 0, 0.08),
+                0 0 0 1px rgba(0, 0, 0, 0.08),
+                inset 0 1px 0 rgba(0, 0, 0, 0.03) !important;
+}
+:root[data-ui-theme="light"] .new-tab-search-icon {
+    color: rgba(0, 0, 0, 0.42) !important;
+}
+:root[data-ui-theme="light"] .new-tab-search-wrapper:focus-within .new-tab-search-icon {
+    color: rgba(0, 0, 0, 0.62) !important;
+}
+:root[data-ui-theme="light"] .new-tab-input {
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .new-tab-input::placeholder {
+    color: rgba(0, 0, 0, 0.42) !important;
+}
+:root[data-ui-theme="light"] .new-tab-mode-toggle {
+    background: var(--axis-nt-toggle-bg, rgba(0, 0, 0, 0.05)) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-ui-theme="light"] .new-tab-mode-btn {
+    color: rgba(0, 0, 0, 0.6) !important;
+}
+:root[data-ui-theme="light"] .new-tab-mode-btn.active {
+    background: rgba(0, 0, 0, 0.08) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .new-tab-suggestions {
+    border-top-color: rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-ui-theme="light"] .new-tab-search-wrapper.ask-chat {
+    background: var(--axis-nt-ask-bg, rgba(248, 249, 251, 0.97)) !important;
+}
+
+/*
+ * New-tab "Ask" chat bubbles, input, timestamps, send button. Hardcoded
+ * rgba(255,255,255,…) on `.new-tab-ask-bubble` / `.new-tab-ask-input` /
+ * `.new-tab-ask-time` / `.new-tab-ask-input-row` — all flipped to black-alpha
+ * for light mode so user + assistant messages and the composer are readable.
+ */
+:root[data-ui-theme="light"] .new-tab-ask-messages {
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .new-tab-ask-bubble {
+    background: rgba(0, 0, 0, 0.06) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-ui-theme="light"] .new-tab-ask-message.user .new-tab-ask-bubble {
+    background: rgba(0, 0, 0, 0.12) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .new-tab-ask-time {
+    color: rgba(0, 0, 0, 0.5) !important;
+}
+:root[data-ui-theme="light"] .new-tab-ask-input-row {
+    border-top-color: rgba(0, 0, 0, 0.08) !important;
+    background: rgba(0, 0, 0, 0.04) !important;
+}
+:root[data-ui-theme="light"] .new-tab-ask-input {
+    border-color: rgba(0, 0, 0, 0.16) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+    background: transparent !important;
+}
+:root[data-ui-theme="light"] .new-tab-ask-input::placeholder {
+    color: rgba(0, 0, 0, 0.5) !important;
+}
+:root[data-ui-theme="light"] .new-tab-ask-send-btn {
+    background: rgba(0, 0, 0, 0.16) !important;
+    color: rgba(255, 255, 255, 0.95) !important;
+}
+:root[data-ui-theme="light"] .new-tab-ask-send-btn:hover {
+    background: rgba(0, 0, 0, 0.24) !important;
+}
+:root[data-ui-theme="light"] .new-tab-suggestions .spotlight-suggestion-item {
+    color: rgba(0, 0, 0, 0.9) !important;
+}
+:root[data-ui-theme="light"] .new-tab-suggestions .spotlight-suggestion-text,
+:root[data-ui-theme="light"] .new-tab-suggestions .spotlight-suggestion-action,
+:root[data-ui-theme="light"] .new-tab-suggestions .spotlight-suggestion-icon {
+    color: rgba(0, 0, 0, 0.9) !important;
+}
+
+/*
+ * AI chat sidebar panel. Everything inside is painted in rgba(255,255,255,…)
+ * with `--chat-panel-bg: #000`, `--chat-panel-text`, `--chat-panel-border`,
+ * `--chat-panel-text-muted`. Redefine those custom properties on the panel
+ * itself + override hardcoded inline rgba-white colors on the hot path.
+ */
+:root[data-ui-theme="light"] .ai-chat-panel {
+    --chat-panel-bg: rgba(248, 248, 250, 0.96) !important;
+    --chat-panel-text: rgba(0, 0, 0, 0.96) !important;
+    --chat-panel-text-muted: rgba(0, 0, 0, 0.55) !important;
+    --chat-panel-border: rgba(0, 0, 0, 0.08) !important;
+    background: rgba(248, 248, 250, 0.96) !important;
+    border-left-color: rgba(0, 0, 0, 0.08) !important;
+    box-shadow: -16px 0 56px rgba(0, 0, 0, 0.08),
+                -4px 0 24px rgba(0, 0, 0, 0.04) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-panel *,
+:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-message-content,
+:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-message-body,
+:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-quote-text,
+:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-message-time,
+:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-quote-icon,
+:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-input {
+    color: rgba(0, 0, 0, 0.92) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-message.user .ai-chat-message-content {
+    background: rgba(0, 0, 0, 0.12) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-message.assistant .ai-chat-message-content {
+    background: rgba(0, 0, 0, 0.05) !important;
+    border-color: rgba(0, 0, 0, 0.06) !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-message-quote {
+    background: rgba(0, 0, 0, 0.06) !important;
+    border-left-color: rgba(0, 0, 0, 0.25) !important;
+    color: rgba(0, 0, 0, 0.82) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-message-loading {
+    background: rgba(0, 0, 0, 0.05) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+    color: rgba(0, 0, 0, 0.7) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-message-loading i {
+    color: rgba(0, 0, 0, 0.5) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-quote-bar {
+    background: rgba(0, 0, 0, 0.04) !important;
+    border-top-color: rgba(0, 0, 0, 0.05) !important;
+    border-bottom-color: rgba(0, 0, 0, 0.05) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-quote-dismiss {
+    color: rgba(0, 0, 0, 0.55) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-quote-dismiss:hover {
+    background: rgba(0, 0, 0, 0.08) !important;
+    color: rgba(0, 0, 0, 0.9) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-input-container {
+    background: rgba(0, 0, 0, 0.04) !important;
+    border-top-color: rgba(0, 0, 0, 0.05) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-input {
+    background: rgba(0, 0, 0, 0.05) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+    color: rgba(0, 0, 0, 0.95) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-input::placeholder {
+    color: rgba(0, 0, 0, 0.42) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-input:focus {
+    background: rgba(0, 0, 0, 0.06) !important;
+    border-color: rgba(0, 0, 0, 0.14) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-send-btn {
+    background: rgba(0, 0, 0, 0.08) !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    color: rgba(0, 0, 0, 0.85) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-send-btn:hover {
+    background: rgba(0, 0, 0, 0.14) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-close-btn {
+    color: rgba(0, 0, 0, 0.5) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-close-btn:hover {
+    background: rgba(0, 0, 0, 0.08) !important;
+    color: rgba(0, 0, 0, 0.9) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-messages::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.16) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-messages::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.24) !important;
+}
+:root[data-ui-theme="light"] .ai-chat-resize-handle:hover::after,
+:root[data-ui-theme="light"] .ai-chat-resize-handle:active::after {
+    background: rgba(0, 0, 0, 0.22) !important;
+}
+
+/*
+ * Security popup (`.security-panel` + header + status + details + action btns).
+ * Everything had hardcoded `#fff` / `#999` / `#2d2d2d` / `#383838`. Flipped to
+ * light surfaces; status icon colors (`.fa-lock` / `.fa-unlock` / `.fa-info-circle`
+ * green / amber / gray) are NOT touched so the security state reads correctly.
+ */
+:root[data-ui-theme="light"] .security-panel {
+    background: rgba(248, 248, 250, 0.98) !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .security-header {
+    border-bottom-color: rgba(0, 0, 0, 0.1) !important;
+}
+:root[data-ui-theme="light"] .security-info h3 {
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .security-info p {
+    color: rgba(0, 0, 0, 0.55) !important;
+}
+:root[data-ui-theme="light"] .security-item {
+    background: rgba(0, 0, 0, 0.04) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-ui-theme="light"] .security-item label {
+    color: rgba(0, 0, 0, 0.55) !important;
+}
+:root[data-ui-theme="light"] .security-item span {
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .security-btn {
+    background: rgba(0, 0, 0, 0.04) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+    color: rgba(0, 0, 0, 0.72) !important;
+}
+:root[data-ui-theme="light"] .security-btn:hover {
+    background: rgba(0, 0, 0, 0.08) !important;
+    border-color: rgba(0, 0, 0, 0.14) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+
+/*
+ * Cmd+F find/search modal (`.search-modal` + `.search-container` + `#search-input`
+ * + `.search-btn`). Background was `rgba(10, 10, 12, 0.86)` + white-alpha borders;
+ * input was `#1a1a1a`. Flipped to a bright light surface.
+ */
+:root[data-ui-theme="light"] .search-modal {
+    background: rgba(248, 248, 250, 0.96) !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-ui-theme="light"] #search-input {
+    background: rgba(0, 0, 0, 0.04) !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+}
+:root[data-ui-theme="light"] #search-input::placeholder {
+    color: rgba(0, 0, 0, 0.5) !important;
+}
+:root[data-ui-theme="light"] .search-btn {
+    color: rgba(0, 0, 0, 0.6) !important;
+}
+:root[data-ui-theme="light"] .search-btn:hover {
+    background: rgba(0, 0, 0, 0.08) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .search-btn:active {
+    background: rgba(0, 0, 0, 0.12) !important;
+}
+
+/*
+ * Zoom indicator text / icons. `.zoom-content` already gets dark text from the
+ * surface rule above; the child `i` icon and `.zoom-percentage` span still need
+ * explicit overrides because the base stylesheet hardcodes `rgba(255,255,255,…)`
+ * on them.
+ */
+:root[data-ui-theme="light"] .zoom-content i,
+:root[data-ui-theme="light"] .zoom-indicator.zoom-in .zoom-content i,
+:root[data-ui-theme="light"] .zoom-indicator.zoom-out .zoom-content i,
+:root[data-ui-theme="light"] .zoom-percentage {
+    color: rgba(0, 0, 0, 0.92) !important;
+}
+
+/*
+ * Context menu (chrome + webpage right-click). `.context-menu` hardcodes
+ * `background: rgba(15, 15, 15, 0.98) !important` + white-alpha borders;
+ * `.context-menu-separator` uses `#444`; disabled items set
+ * `color: rgba(255, 255, 255, 0.25) !important`. Flipped here.
+ */
+:root[data-ui-theme="light"] .context-menu,
+:root[data-ui-theme="light"] .webpage-context-menu {
+    background: rgba(248, 248, 250, 0.98) !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1) !important;
+}
+:root[data-ui-theme="light"] .context-menu-item {
+    color: rgba(0, 0, 0, 0.82) !important;
+}
+:root[data-ui-theme="light"] .context-menu-item:hover {
+    background: rgba(0, 0, 0, 0.07) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .context-menu-separator {
+    background: rgba(0, 0, 0, 0.1) !important;
+}
+:root[data-ui-theme="light"] .webpage-context-menu .context-menu-item.disabled,
+:root[data-ui-theme="light"] .context-menu-item.disabled {
+    color: rgba(0, 0, 0, 0.3) !important;
+}
+
+/*
+ * Notes / History / Downloads / Bookmarks panel chrome — backgrounds flip via
+ * the main panel rule above; text + search inputs + section headers + items
+ * need their own flip since they use hardcoded rgba(255,255,255,…) + `#333` /
+ * `#383838` borders.
+ */
+:root[data-ui-theme="light"] .notes-panel,
+:root[data-ui-theme="light"] .notes-panel *,
+:root[data-ui-theme="light"] .history-panel,
+:root[data-ui-theme="light"] .history-panel *,
+:root[data-ui-theme="light"] .downloads-panel,
+:root[data-ui-theme="light"] .downloads-panel *,
+:root[data-ui-theme="light"] .bookmark-panel,
+:root[data-ui-theme="light"] .bookmark-panel * {
+    color: rgba(0, 0, 0, 0.9) !important;
+}
+:root[data-ui-theme="light"] .notes-search input,
+:root[data-ui-theme="light"] .downloads-search input,
+:root[data-ui-theme="light"] .history-search {
+    background: rgba(0, 0, 0, 0.04) !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    color: rgba(0, 0, 0, 0.96) !important;
+}
+:root[data-ui-theme="light"] .notes-search input::placeholder,
+:root[data-ui-theme="light"] .downloads-search input::placeholder,
+:root[data-ui-theme="light"] .history-search::placeholder {
+    color: rgba(0, 0, 0, 0.5) !important;
+}
+:root[data-ui-theme="light"] .history-header,
+:root[data-ui-theme="light"] .downloads-panel .downloads-header,
+:root[data-ui-theme="light"] .notes-header {
+    border-bottom-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+/*
+ * Settings panel (in-app modal opened from the gear icon). The outer
+ * `.settings-panel` bg already flips via the overlay glass rule above; all the
+ * inner content — sidebar tabs, active tab, headers, labels, section titles,
+ * close button, scrollbars, input / select / toggle surrounds — was painted in
+ * hardcoded `rgba(255,255,255,…)` / `#2a2a2a` / `#1a1a1a`. We flip every text
+ * node and the common surface / border / hover patterns so the whole modal
+ * reads as light. Elements with `.color-preview` / inline `--theme-color` /
+ * `--accent-color` / the gradient preview strips are deliberately untouched so
+ * the actual theme color swatches still paint the user's picked color.
+ */
+:root[data-ui-theme="light"] .settings-panel,
+:root[data-ui-theme="light"] .settings-panel *:not(.color-preview):not([style*="--theme-color"]):not([style*="--accent-color"]):not([style*="--primary-gradient"]):not([style*="--gradient-color"]) {
+    color: rgba(0, 0, 0, 0.9) !important;
+}
+:root[data-ui-theme="light"] .settings-header,
+:root[data-ui-theme="light"] .settings-tabs {
+    background: rgba(0, 0, 0, 0.03) !important;
+    border-bottom-color: rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-ui-theme="light"] .settings-tab {
+    color: rgba(0, 0, 0, 0.55) !important;
+    border-bottom-color: transparent !important;
+}
+:root[data-ui-theme="light"] .settings-tab:hover {
+    color: rgba(0, 0, 0, 0.85) !important;
+    background: rgba(0, 0, 0, 0.04) !important;
+}
+:root[data-ui-theme="light"] .settings-tab.active {
+    color: rgba(0, 0, 0, 0.95) !important;
+    background: rgba(0, 0, 0, 0.06) !important;
+    border-bottom-color: rgba(0, 0, 0, 0.25) !important;
+}
+:root[data-ui-theme="light"] .settings-tab-content::-webkit-scrollbar-thumb,
+:root[data-ui-theme="light"] .settings-content::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.18) !important;
+}
+:root[data-ui-theme="light"] .settings-tab-content::-webkit-scrollbar-thumb:hover,
+:root[data-ui-theme="light"] .settings-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.28) !important;
+}
+:root[data-ui-theme="light"] .close-settings {
+    background: rgba(0, 0, 0, 0.04) !important;
+    color: rgba(0, 0, 0, 0.6) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-ui-theme="light"] .close-settings:hover {
+    background: rgba(0, 0, 0, 0.08) !important;
+    color: rgba(0, 0, 0, 0.95) !important;
+    border-color: rgba(0, 0, 0, 0.14) !important;
+}
+:root[data-ui-theme="light"] .settings-panel input[type="text"],
+:root[data-ui-theme="light"] .settings-panel input[type="search"],
+:root[data-ui-theme="light"] .settings-panel input[type="url"],
+:root[data-ui-theme="light"] .settings-panel input[type="number"],
+:root[data-ui-theme="light"] .settings-panel select,
+:root[data-ui-theme="light"] .settings-panel textarea {
+    background: rgba(0, 0, 0, 0.04) !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    color: rgba(0, 0, 0, 0.95) !important;
+}
+:root[data-ui-theme="light"] .settings-panel input::placeholder,
+:root[data-ui-theme="light"] .settings-panel textarea::placeholder {
+    color: rgba(0, 0, 0, 0.5) !important;
+}
+:root[data-ui-theme="light"] .settings-panel button:not(.color-preview):not(.close-settings):not(.settings-tab) {
+    background: rgba(0, 0, 0, 0.04) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-ui-theme="light"] .settings-panel button:not(.color-preview):not(.close-settings):not(.settings-tab):hover {
+    background: rgba(0, 0, 0, 0.08) !important;
 }
 
 /* Reset and base styles - Optimized */
@@ -607,7 +1172,7 @@ body.theme-switching *::after {
     display: flex !important;
     flex-direction: column !important;
     gap: 8px !important;
-    background: var(--sidebar-slide-out-background, rgba(28, 28, 28, 0.28)) !important;
+    background: var(--sidebar-slide-out-background, rgb(28, 28, 28)) !important;
     backdrop-filter: blur(26px) saturate(148%) !important;
     -webkit-backdrop-filter: blur(26px) saturate(148%) !important;
     border-radius: 0 !important;
@@ -630,7 +1195,7 @@ body.theme-switching *::after {
 }
 
 body.light-theme #sidebar.slide-out {
-    background: var(--sidebar-slide-out-background, rgba(252, 252, 252, 0.42)) !important;
+    background: var(--sidebar-slide-out-background, rgb(252, 252, 252)) !important;
 }
 
 /* Sidebar Resize Handle – thin separator line */
@@ -2396,11 +2961,11 @@ body.incognito-window #main-area.sidebar-right .webview-container {
     visibility: hidden;
 }
 
-/* All webviews should have transparent background */
+/* All webviews should have transparent background — no opacity transition (tab switch is instant in JS). */
 webview {
     background: transparent !important;
     position: relative;
-    transition: opacity 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+    transition: none;
 }
 
 /* Glass overlay for inactive webviews */
@@ -2418,7 +2983,7 @@ webview::before {
     pointer-events: none;
     z-index: 1000;
     opacity: 0;
-    transition: opacity 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+    transition: none;
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
     mix-blend-mode: overlay;
 }
@@ -3258,7 +3823,7 @@ body.light-theme {
     --button-text: #666;
     --button-text-hover: #333;
     --sidebar-background: #fff;
-    --sidebar-slide-out-background: rgba(252, 252, 252, 0.42);
+    --sidebar-slide-out-background: rgb(252, 252, 252);
     --url-bar-background: #f8f8f8;
     --url-bar-text: #333;
     --url-bar-text-muted: #666;
@@ -7472,6 +8037,84 @@ body.light-theme .btn-primary {
     pointer-events: none;
 }
 
+/* Blocks hit-testing over page content so outside-dismiss works (guest <webview> does not bubble). */
+.downloads-popup-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 55;
+    background: transparent;
+    pointer-events: none;
+}
+
+.downloads-popup-backdrop:not(.hidden) {
+    pointer-events: auto;
+}
+
+/* In-flight download: URL bar icon + open popup rim */
+body.axis-download-activity .url-bar-downloads-btn i {
+    animation: axis-download-urlbar-icon 0.95s ease-in-out infinite;
+    transform-origin: center 60%;
+}
+
+body.axis-download-activity .downloads-popup:not(.hidden) {
+    animation: axis-download-popup-rim 1.4s ease-in-out infinite;
+}
+
+body.axis-download-activity .downloads-popup:not(.hidden) .downloads-popup-empty i {
+    animation: axis-download-popup-empty-icon 1.1s ease-in-out infinite;
+}
+
+@keyframes axis-download-urlbar-icon {
+    0%,
+    100% {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+    }
+    45% {
+        transform: translateY(2px) scale(1.06);
+        opacity: 0.88;
+    }
+}
+
+@keyframes axis-download-popup-rim {
+    0%,
+    100% {
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+    }
+    50% {
+        box-shadow:
+            0 10px 26px rgba(0, 0, 0, 0.45),
+            0 0 0 1px rgba(120, 190, 255, 0.28);
+    }
+}
+
+@keyframes axis-download-popup-empty-icon {
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 0.85;
+    }
+    50% {
+        transform: scale(1.08);
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.axis-download-activity .url-bar-downloads-btn i,
+    body.axis-download-activity .downloads-popup:not(.hidden),
+    body.axis-download-activity .downloads-popup:not(.hidden) .downloads-popup-empty i {
+        animation: none !important;
+    }
+
+    body.axis-download-activity .downloads-popup-thumbnail-inner.downloads-popup-thumbnail-loading {
+        animation: downloads-popup-thumb-load 0.85s ease-in-out infinite !important;
+    }
+}
+
 .downloads-popup-list {
     padding: 2px 2px 4px;
     overflow: hidden;
@@ -7542,6 +8185,12 @@ body.light-theme .btn-primary {
     animation: downloads-popup-thumb-load 0.85s ease-in-out infinite;
 }
 
+body.axis-download-activity .downloads-popup-thumbnail-inner.downloads-popup-thumbnail-loading {
+    animation:
+        downloads-popup-thumb-load 0.85s ease-in-out infinite,
+        downloads-popup-thumb-sweep 1.25s linear infinite;
+}
+
 @keyframes downloads-popup-thumb-load {
     0%,
     100% {
@@ -7549,6 +8198,18 @@ body.light-theme .btn-primary {
     }
     50% {
         opacity: 0.95;
+    }
+}
+
+@keyframes downloads-popup-thumb-sweep {
+    0% {
+        filter: brightness(1);
+    }
+    50% {
+        filter: brightness(1.25);
+    }
+    100% {
+        filter: brightness(1);
     }
 }
 
