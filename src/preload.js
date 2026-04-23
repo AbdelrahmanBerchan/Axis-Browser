@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getFileThumbnailDataUrl: (filePath, maxSize) => ipcRenderer.invoke('get-file-thumbnail-data-url', filePath, maxSize),
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
   onDownloadsPopupAction: (callback) => ipcRenderer.on('downloads-popup-action', (event, action, data) => callback(action, data)),
+  onAxisDownloadActivity: (callback) =>
+    ipcRenderer.on('axis-download-activity', (_event, payload) => callback(payload)),
   showDownloadsItemContextMenu: (x, y, filePath) => ipcRenderer.invoke('show-downloads-item-context-menu', x, y, filePath),
   
   // Event listeners
@@ -89,6 +91,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Webpage context menu
   showWebpageContextMenu: (x, y, contextInfo) => ipcRenderer.invoke('show-webpage-context-menu', x, y, contextInfo),
   onWebpageContextMenuAction: (callback) => ipcRenderer.on('webpage-context-menu-action', (event, action, data) => callback(action, data)),
+  addToSpellCheckerDictionary: (word) => ipcRenderer.invoke('add-to-spellcheck-dictionary', word),
   
   // URL bar context menu
   showUrlBarContextMenu: (x, y, contextInfo) => ipcRenderer.invoke('show-urlbar-context-menu', x, y, contextInfo),
