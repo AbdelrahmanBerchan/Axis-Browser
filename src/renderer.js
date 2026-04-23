@@ -182,7 +182,7 @@ function getShortcutEditorActions() {
  */
 const AXIS_SHELL_CHROME_OPAQUE = {
     glassAlpha: 0.34,
-    slideOutAlpha: 0.9,
+    slideOutAlpha: 1,
     popupAlpha: 0.52,
     urlBarAlpha: 0.42,
     blurMain: 72,
@@ -206,7 +206,7 @@ const AXIS_SHELL_CHROME_OPAQUE = {
 };
 const AXIS_SHELL_CHROME_TRANSPARENT = {
     glassAlpha: 0.045,
-    slideOutAlpha: 0.28,
+    slideOutAlpha: 1,
     popupAlpha: 0.18,
     urlBarAlpha: 0.08,
     blurMain: 26,
@@ -289,6 +289,8 @@ class AxisBrowser {
         this.currentPreviewIndex = -1; // Index of current file in library items
         this.previewListenersSetup = false; // Track if preview listeners are set up
         this.aiChatMessages = []; // Store chat message history
+        /** Whether the AI chat panel is open, keyed by normalized tab id (per-tab UI state). */
+        this.aiChatPanelOpenByTabId = new Map();
         this.aiChatApiKey = ''; // Groq API key for chat
         this.pipTabId = null; // Tab ID that has PIP active
         this.pipVideoIndex = 0; // Index of video element in webview
@@ -369,6 +371,11 @@ class AxisBrowser {
         await Promise.all([this.loadSettings(), this.refreshShortcutCache()]);
         this._lastJavascriptEnabled = this.settings?.javascriptEnabled !== false;
         this.syncTransparentSitesUi();
+
+        // Set `data-ui-theme` before any theme apply so CSS fallback rules for the light
+        // shell land on the first paint (incognito stays dark regardless).
+        const initialUiTheme = !this.isIncognitoWindow && this.settings?.uiTheme === 'light' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-ui-theme', initialUiTheme);
 
         if (window.electronAPI?.platform === 'darwin') {
             document.documentElement.classList.add('platform-darwin');
@@ -1093,6 +1100,10 @@ class AxisBrowser {
         window.electronAPI.onDownloadsPopupAction((action, data) => {
             this.handleDownloadsPopupAction(action, data);
         });
+
+        window.electronAPI?.onAxisDownloadActivity?.((payload) => {
+            document.body.classList.toggle('axis-download-activity', !!payload?.active);
+        });
         
         // Clear history button
         const clearHistoryBtn = document.getElementById('clear-history');
@@ -1216,7 +1227,7 @@ class AxisBrowser {
         });
         
         // Listen for webpage context menu actions from main process
-        window.electronAPI.onWebpageContextMenuAction((action, data) => {
+        window.electronAPI.onWebpageContextMenuAction(async (action, data) => {
             switch (action) {
                 case 'back':
                     this.goBack();
@@ -1305,6 +1316,93 @@ class AxisBrowser {
                         webview.openDevTools();
                     }
                     break;
+                case 'replace-misspelling': {
+                    const replacement = data && typeof data.replacement === 'string' ? data.replacement : '';
+                    const manualWord = data && typeof data.manualReplaceWord === 'string' ? data.manualReplaceWord : '';
+                    const activeWebview = this.getActiveWebview();
+                    if (!replacement || !activeWebview) break;
+                    if (manualWord) {
+                        const wordJson = JSON.stringify(manualWord);
+                        const replJson = JSON.stringify(replacement);
+                        const js = `(function(){
+                            try {
+                              var el = document.activeElement;
+                              if (!el) return false;
+                              var target = String(${wordJson});
+                              var repl = String(${replJson});
+                              if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                                var v = String(el.value || '');
+                                var start = (typeof el.selectionStart === 'number') ? el.selectionStart : v.length;
+                                var WORD = /[A-Za-z\\u00C0-\\u024F\\u0370-\\u03FF'\\-]/;
+                                var s = Math.max(0, Math.min(v.length, start));
+                                var e = s;
+                                while (s > 0 && WORD.test(v.charAt(s-1))) s--;
+                                while (e < v.length && WORD.test(v.charAt(e))) e++;
+                                var slice = v.substring(s, e);
+                                if (slice.toLowerCase() !== target.toLowerCase()) {
+                                  var idx = v.toLowerCase().lastIndexOf(target.toLowerCase(), start);
+                                  if (idx >= 0) { s = idx; e = idx + target.length; }
+                                  else return false;
+                                }
+                                var proto = el.tagName === 'INPUT'
+                                  ? window.HTMLInputElement.prototype
+                                  : window.HTMLTextAreaElement.prototype;
+                                var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                                setter.call(el, v.substring(0, s) + repl + v.substring(e));
+                                try { el.setSelectionRange(s + repl.length, s + repl.length); } catch (err) {}
+                                el.dispatchEvent(new Event('input', { bubbles: true }));
+                                el.dispatchEvent(new Event('change', { bubbles: true }));
+                                return true;
+                              }
+                              var sel = window.getSelection();
+                              if (!sel || sel.rangeCount === 0) return false;
+                              var range = sel.getRangeAt(0).cloneRange();
+                              var node = range.startContainer;
+                              if (!node || node.nodeType !== 3) return false;
+                              var text = String(node.textContent || '');
+                              var off = range.startOffset;
+                              var WORD2 = /[A-Za-z\\u00C0-\\u024F\\u0370-\\u03FF'\\-]/;
+                              var s2 = off, e2 = off;
+                              while (s2 > 0 && WORD2.test(text.charAt(s2-1))) s2--;
+                              while (e2 < text.length && WORD2.test(text.charAt(e2))) e2++;
+                              var slice2 = text.substring(s2, e2);
+                              if (slice2.toLowerCase() !== target.toLowerCase()) {
+                                var idx2 = text.toLowerCase().lastIndexOf(target.toLowerCase(), off);
+                                if (idx2 >= 0) { s2 = idx2; e2 = idx2 + target.length; }
+                                else return false;
+                              }
+                              var r2 = document.createRange();
+                              r2.setStart(node, s2);
+                              r2.setEnd(node, e2);
+                              sel.removeAllRanges();
+                              sel.addRange(r2);
+                              document.execCommand('insertText', false, repl);
+                              return true;
+                            } catch (err) { return false; }
+                          })();`;
+                        try {
+                            await activeWebview.executeJavaScript(js, true);
+                        } catch (err) {
+                            console.warn('manual replaceMisspelling failed:', err);
+                        }
+                    } else if (typeof activeWebview.replaceMisspelling === 'function') {
+                        try {
+                            activeWebview.replaceMisspelling(replacement);
+                        } catch (err) {
+                            console.warn('replaceMisspelling failed:', err);
+                        }
+                    }
+                    break;
+                }
+                case 'add-to-dictionary': {
+                    const word = data && typeof data.word === 'string' ? data.word.trim() : '';
+                    if (word && window.electronAPI?.addToSpellCheckerDictionary) {
+                        window.electronAPI.addToSpellCheckerDictionary(word).catch((err) => {
+                            console.warn('addToSpellCheckerDictionary failed:', err);
+                        });
+                    }
+                    break;
+                }
             }
         });
         
@@ -2268,12 +2366,6 @@ class AxisBrowser {
             }
             
             if (!isActiveTab() || this.isBenchmarking) return;
-            
-            // Auto-tinting disabled - using custom theme colors instead
-            // const currentUrl = webview.getURL();
-            // if (currentUrl && currentUrl !== 'about:blank') {
-            //     this.extractAndApplyWebpageColors(webview);
-            // }
         };
         webview.__eventHandlers.domReady = domReadyHandler;
         webview.addEventListener('dom-ready', domReadyHandler);
@@ -2351,9 +2443,6 @@ class AxisBrowser {
             if (tabElement) {
                 this.updateTabFavicon(tabId, tabElement);
             }
-            
-            // Auto-tinting disabled - using custom theme colors instead
-            // this.extractAndApplyWebpageColors(webview);
             
             // Lightweight: disable lazy loading once (no observers or intervals to avoid slowing pages)
             try {
@@ -2475,13 +2564,6 @@ class AxisBrowser {
         webview.__eventHandlers.didFailLoad = didFailLoadHandler;
         webview.addEventListener('did-fail-load', didFailLoadHandler);
 
-        const newWindowHandler = (event) => {
-            event.preventDefault();
-            this.navigate(event.url);
-        };
-        webview.__eventHandlers.newWindow = newWindowHandler;
-        webview.addEventListener('new-window', newWindowHandler);
-
         const willNavigateHandler = (event) => {
             if (!isActiveTab()) return;
             const nextUrl = event.url || '';
@@ -2593,7 +2675,7 @@ class AxisBrowser {
 
         const contextMenuHandler = (e) => {
             if (!isActiveTab()) return;
-            
+
             this.webviewContextInfo = {
                 hasSelection: e.params?.selectionText?.length > 0,
                 selectionText: e.params?.selectionText || '',
@@ -2605,6 +2687,10 @@ class AxisBrowser {
                 canCopy: e.params?.editFlags?.canCopy || false,
                 canPaste: e.params?.editFlags?.canPaste || false,
                 canSelectAll: e.params?.editFlags?.canSelectAll || false,
+                misspelledWord: e.params?.misspelledWord || '',
+                dictionarySuggestions: Array.isArray(e.params?.dictionarySuggestions)
+                    ? e.params.dictionarySuggestions.slice()
+                    : [],
                 x: e.params?.x || 0,
                 y: e.params?.y || 0
             };
@@ -2673,7 +2759,7 @@ class AxisBrowser {
                     } catch (e) {
                         // Ignore errors
                     }
-                }, 500);
+                }, 900);
                 
                 const settingsNavCleanup = () => {
                     if (webview.__settingsPollInterval) {
@@ -2702,7 +2788,6 @@ class AxisBrowser {
             didStopLoading:    'did-stop-loading',
             consoleMessage:    'console-message',
             didFailLoad:       'did-fail-load',
-            newWindow:         'new-window',
             willNavigate:      'will-navigate',
             didNavigate:       'did-navigate',
             didNavigateInPage: 'did-navigate-in-page',
@@ -2923,92 +3008,6 @@ class AxisBrowser {
         // Disable DNS prefetch and resource preloading entirely - they hurt Speedometer benchmarks
         // by causing unnecessary network and DOM work during benchmark execution
     }
-
-    // Removed broken preloading methods that were slowing things down
-
-    preloadDNS() {
-        // Aggressive DNS prefetch for maximum speed
-        const commonDomains = [
-            'google.com', 'youtube.com', 'github.com', 'stackoverflow.com', 'reddit.com',
-            'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'amazon.com',
-            'netflix.com', 'spotify.com', 'discord.com', 'twitch.tv', 'wikipedia.org',
-            'microsoft.com', 'apple.com', 'adobe.com', 'cloudflare.com', 'jsdelivr.net',
-            'cdnjs.cloudflare.com', 'unpkg.com', 'fonts.googleapis.com', 'fonts.gstatic.com'
-        ];
-        
-        commonDomains.forEach(domain => {
-            const dnsLink = document.createElement('link');
-            dnsLink.rel = 'dns-prefetch';
-            dnsLink.href = `//${domain}`;
-            document.head.appendChild(dnsLink);
-            
-            // Also prefetch with preconnect for faster loading
-            const preconnectLink = document.createElement('link');
-            preconnectLink.rel = 'preconnect';
-            preconnectLink.href = `https://${domain}`;
-            document.head.appendChild(preconnectLink);
-        });
-    }
-
-    preloadCriticalResources() {
-        // Preload critical resources for maximum speed
-        const criticalResources = [
-            'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
-            'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
-        ];
-        
-        criticalResources.forEach(resource => {
-            const link = document.createElement('link');
-            link.rel = 'preload';
-            link.as = 'style';
-            link.href = resource;
-            link.onload = function() {
-                this.rel = 'stylesheet';
-            };
-            document.head.appendChild(link);
-        });
-        
-        // Aggressive resource preloading
-        this.preloadCommonResources();
-        this.setupResourceCache();
-    }
-
-    preloadCommonResources() {
-        // Preload common CDN resources for maximum speed
-        const commonResources = [
-            'https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js',
-            'https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js',
-            'https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js',
-            'https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js'
-        ];
-        
-        commonResources.forEach(resource => {
-            const link = document.createElement('link');
-            link.rel = 'preload';
-            link.as = 'script';
-            link.href = resource;
-            document.head.appendChild(link);
-        });
-    }
-
-    setupResourceCache() {
-        // Enable aggressive caching
-        if ('caches' in window) {
-            caches.open('axis-browser-cache-v1').then(cache => {
-                // Cache common resources
-                const resourcesToCache = [
-                    '/',
-                    '/src/index.html',
-                    '/src/styles.css',
-                    '/src/renderer.js'
-                ];
-                
-                cache.addAll(resourcesToCache).catch(() => {});
-            });
-        }
-    }
-
-
 
     setupColorWheel(wheel, handle) {
         let isDragging = false;
@@ -3398,484 +3397,6 @@ class AxisBrowser {
         return false;
     }
     
-    // Cache theme colors for a domain
-    cacheThemeForDomain(url, colors) {
-        const domain = this.getDomainFromUrl(url);
-        if (domain && colors) {
-            this.themeCache.set(domain, colors);
-            // Limit cache size to 100 domains
-            if (this.themeCache.size > 100) {
-                const firstKey = this.themeCache.keys().next().value;
-                this.themeCache.delete(firstKey);
-            }
-        }
-    }
-
-    extractAndApplyWebpageColors(webview, retryCount = 0) {
-        try {
-            if (!webview) {
-                this.resetToBlackTheme();
-                return;
-            }
-            
-            const url = webview.getURL();
-            
-            // Reset to black theme if no valid page
-            if (!url || url === 'about:blank' || url.startsWith('data:') || url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
-                this.resetToBlackTheme();
-                return;
-            }
-            
-            // Check if webview is ready
-            if (!webview.isLoading && webview.getURL() === 'about:blank') {
-                // Webview not ready yet, retry very quickly (single RAF for speed)
-                if (retryCount < 1) {
-                    requestAnimationFrame(() => {
-                        this.extractAndApplyWebpageColors(webview, retryCount + 1);
-                    });
-                } else {
-                    this.resetToBlackTheme();
-                }
-                return;
-            }
-            
-            // Extract colors from webpage - try multiple times to ensure it works
-            const extractColors = () => {
-                try {
-                    webview.executeJavaScript(`
-                        (function() {
-                            try {
-                                const body = document.body;
-                                const html = document.documentElement;
-                                
-                                if (!body || !html) {
-                                    return null;
-                                }
-                                
-                                // Helper to convert rgba/rgb to hex
-                                function rgbToHex(rgb) {
-                                    if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') {
-                                        return null;
-                                    }
-                                    const match = rgb.match(/\\d+/g);
-                                    if (match && match.length >= 3) {
-                                        const r = parseInt(match[0]);
-                                        const g = parseInt(match[1]);
-                                        const b = parseInt(match[2]);
-                                        // If alpha is very low, treat as transparent
-                                        if (match.length >= 4 && parseFloat(match[3]) < 0.1) {
-                                            return null;
-                                        }
-                                        return '#' + 
-                                            r.toString(16).padStart(2, '0') +
-                                            g.toString(16).padStart(2, '0') +
-                                            b.toString(16).padStart(2, '0');
-                                    }
-                                    return null;
-                                }
-                                
-                                // Helper to convert hex to RGB
-                                function hexToRgb(hex) {
-                                    const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
-                                    return result ? {
-                                        r: parseInt(result[1], 16),
-                                        g: parseInt(result[2], 16),
-                                        b: parseInt(result[3], 16)
-                                    } : null;
-                                }
-                                
-                                // Calculate color distance (Euclidean distance in RGB space)
-                                function colorDistance(hex1, hex2) {
-                                    const rgb1 = hexToRgb(hex1);
-                                    const rgb2 = hexToRgb(hex2);
-                                    if (!rgb1 || !rgb2) return Infinity;
-                                    const dr = rgb1.r - rgb2.r;
-                                    const dg = rgb1.g - rgb2.g;
-                                    const db = rgb1.b - rgb2.b;
-                                    return Math.sqrt(dr * dr + dg * dg + db * db);
-                                }
-                                
-                                // Check if color is too close to white/black (more lenient)
-                                function isNeutralColor(hex) {
-                                    if (!hex) return true;
-                                    const rgb = hexToRgb(hex);
-                                    if (!rgb) return true;
-                                    // Only filter out pure white (all channels > 250)
-                                    if (rgb.r > 250 && rgb.g > 250 && rgb.b > 250) return true;
-                                    // Only filter out pure black (all channels < 5)
-                                    if (rgb.r < 5 && rgb.g < 5 && rgb.b < 5) return true;
-                                    // Allow light and dark colors, only filter very gray ones
-                                    const max = Math.max(rgb.r, rgb.g, rgb.b);
-                                    const min = Math.min(rgb.r, rgb.g, rgb.b);
-                                    const saturation = max === 0 ? 0 : (max - min) / max;
-                                    // Only filter if it's extremely gray (saturation < 0.05)
-                                    if (saturation < 0.05) return true;
-                                    return false;
-                                }
-                                
-                                // Calculate color brightness (0-255)
-                                function getBrightness(hex) {
-                                    const rgb = hexToRgb(hex);
-                                    if (!rgb) return 128;
-                                    return (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
-                                }
-                                
-                                // Calculate color saturation
-                                function getSaturation(hex) {
-                                    const rgb = hexToRgb(hex);
-                                    if (!rgb) return 0;
-                                    const max = Math.max(rgb.r, rgb.g, rgb.b);
-                                    const min = Math.min(rgb.r, rgb.g, rgb.b);
-                                    return max === 0 ? 0 : (max - min) / max;
-                                }
-                                
-                                // Get meta theme-color first (most reliable)
-                                const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-                                let themeColor = null;
-                                if (themeColorMeta) {
-                                    themeColor = themeColorMeta.getAttribute('content');
-                                    // Convert to hex if needed
-                                    if (themeColor && themeColor.startsWith('rgb')) {
-                                        themeColor = rgbToHex(themeColor);
-                                    } else if (themeColor && !themeColor.startsWith('#')) {
-                                        // Try to parse as hex without #
-                                        if (/^[0-9A-Fa-f]{6}$/.test(themeColor)) {
-                                            themeColor = '#' + themeColor;
-                                        }
-                                    }
-                                }
-                                
-                                // Priority selectors (check these first for better accuracy)
-                                const prioritySelectors = [
-                                    'main', '[role="main"]', '.main', '#main',
-                                    '.content', '#content', '.container', '.page', '.app',
-                                    'article', 'section', '[class*="content"]', '[class*="container"]',
-                                    '[id*="content"]', '[id*="container"]', '[id*="main"]'
-                                ];
-                                
-                                // Secondary selectors
-                                const secondarySelectors = [
-                                    'header', 'nav', '.header', '.nav', '.navbar', '.navigation',
-                                    '.card', '.panel', '.box', '.widget', '.tile', '.item',
-                                    '[class*="bg"]', '[class*="background"]', '[class*="theme"]',
-                                    'body', 'html'
-                                ];
-                                
-                                // Sample colors with weights (priority selectors get higher weight)
-                                const colorSamples = [];
-                                const colorWeights = {};
-                                
-                                // Sample from priority selectors first
-                                for (const selector of prioritySelectors) {
-                                    try {
-                                        const elements = document.querySelectorAll(selector);
-                                        for (let i = 0; i < Math.min(elements.length, 3); i++) {
-                                            const element = elements[i];
-                                            if (!element) continue;
-                                            
-                                            // Skip if element is not visible
-                                            const rect = element.getBoundingClientRect();
-                                            if (rect.width === 0 || rect.height === 0) continue;
-                                            
-                                            const style = window.getComputedStyle(element);
-                                            
-                                            // Sample background color (weight: 3 for priority)
-                                            const bg = style.backgroundColor;
-                                            if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
-                                                const hex = rgbToHex(bg);
-                                                if (hex) {
-                                                    // Don't filter neutral colors here, just collect them
-                                                    if (!colorWeights[hex]) {
-                                                        colorSamples.push(hex);
-                                                        colorWeights[hex] = 3; // Higher weight for priority
-                                                    } else {
-                                                        colorWeights[hex] += 3;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } catch (e) {
-                                        // Continue if selector fails
-                                    }
-                                }
-                                
-                                // Sample from secondary selectors
-                                for (const selector of secondarySelectors) {
-                                    try {
-                                        const elements = document.querySelectorAll(selector);
-                                        for (let i = 0; i < Math.min(elements.length, 2); i++) {
-                                            const element = elements[i];
-                                            if (!element) continue;
-                                            
-                                            const rect = element.getBoundingClientRect();
-                                            if (rect.width === 0 || rect.height === 0) continue;
-                                            
-                                            const style = window.getComputedStyle(element);
-                                            
-                                            // Sample background color (weight: 1 for secondary)
-                                            const bg = style.backgroundColor;
-                                            if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
-                                                const hex = rgbToHex(bg);
-                                                if (hex) {
-                                                    if (!colorWeights[hex]) {
-                                                        colorSamples.push(hex);
-                                                        colorWeights[hex] = 1;
-                                                    } else {
-                                                        colorWeights[hex] += 1;
-                                                    }
-                                                }
-                                            }
-                                            
-                                            // Sample border color (weight: 1)
-                                            const border = style.borderColor;
-                                            if (border && border !== 'transparent') {
-                                                const hex = rgbToHex(border);
-                                                if (hex) {
-                                                    if (!colorWeights[hex]) {
-                                                        colorSamples.push(hex);
-                                                        colorWeights[hex] = 1;
-                                                    } else {
-                                                        colorWeights[hex] += 1;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } catch (e) {
-                                        // Continue if selector fails
-                                    }
-                                }
-                                
-                                // Use meta theme-color if available and valid
-                                if (themeColor && !isNeutralColor(themeColor)) {
-                                    dominantColor = themeColor;
-                                } else {
-                                    // Find the most common color by clustering similar colors with weights
-                                    if (colorSamples.length > 0) {
-                                        // Group similar colors together (within 40 units distance - more lenient)
-                                        const clusters = {};
-                                        const clusterWeights = {};
-                                        const clusterThreshold = 40;
-                                        
-                                        for (const color of colorSamples) {
-                                            let foundCluster = false;
-                                            for (const clusterColor in clusters) {
-                                                if (colorDistance(color, clusterColor) < clusterThreshold) {
-                                                    clusters[clusterColor]++;
-                                                    clusterWeights[clusterColor] += (colorWeights[color] || 1);
-                                                    foundCluster = true;
-                                                    break;
-                                                }
-                                            }
-                                            if (!foundCluster) {
-                                                clusters[color] = 1;
-                                                clusterWeights[color] = colorWeights[color] || 1;
-                                            }
-                                        }
-                                        
-                                        // Find the cluster with the highest weighted score
-                                        // Score = count * weight * saturation (prefer more saturated colors)
-                                        let maxScore = 0;
-                                        for (const clusterColor in clusters) {
-                                            const count = clusters[clusterColor];
-                                            const weight = clusterWeights[clusterColor];
-                                            const saturation = getSaturation(clusterColor);
-                                            const brightness = getBrightness(clusterColor);
-                                            
-                                            // Prefer colors that are not too bright or too dark
-                                            // But allow a wider range (brightness 20-235)
-                                            const brightnessScore = (brightness >= 20 && brightness <= 235) ? 1 : 0.3;
-                                            
-                                            // Calculate score: prioritize weighted count, saturation, and good brightness
-                                            const score = count * weight * (0.5 + saturation * 0.5) * brightnessScore;
-                                            
-                                            if (score > maxScore) {
-                                                maxScore = score;
-                                                dominantColor = clusterColor;
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                // Fallback: try to find main container background (more thorough)
-                                let bgColor = dominantColor;
-                                if (!bgColor || isNeutralColor(bgColor)) {
-                                    const mainSelectors = [
-                                        'main', '[role="main"]', '.main', '#main', 
-                                        '.content', '#content', '.container', '.page', '.app', 
-                                        'article', 'section', '[class*="content"]', '[class*="container"]',
-                                        '[id*="content"]', '[id*="container"]', '[id*="main"]'
-                                    ];
-                                    
-                                    for (const selector of mainSelectors) {
-                                        const element = document.querySelector(selector);
-                                        if (element) {
-                                            const style = window.getComputedStyle(element);
-                                            const bg = style.backgroundColor;
-                                            if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
-                                                const hex = rgbToHex(bg);
-                                                if (hex) {
-                                                    // Accept any color that's not pure white/black
-                                                    if (!isNeutralColor(hex)) {
-                                                        bgColor = hex;
-                                                        break;
-                                                    } else {
-                                                        // Even if neutral, use it as fallback if we have nothing
-                                                        if (!bgColor) {
-                                                            bgColor = hex;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Last resort: check body/html (accept any color)
-                                    if (!bgColor || isNeutralColor(bgColor)) {
-                                        const bodyStyle = window.getComputedStyle(body);
-                                        const bodyBg = bodyStyle.backgroundColor;
-                                        if (bodyBg && bodyBg !== 'transparent' && bodyBg !== 'rgba(0, 0, 0, 0)') {
-                                            const hex = rgbToHex(bodyBg);
-                                            if (hex) {
-                                                bgColor = hex;
-                                            }
-                                        }
-                                        
-                                        // Try html element too
-                                        if (!bgColor || isNeutralColor(bgColor)) {
-                                            const htmlStyle = window.getComputedStyle(html);
-                                            const htmlBg = htmlStyle.backgroundColor;
-                                            if (htmlBg && htmlBg !== 'transparent' && htmlBg !== 'rgba(0, 0, 0, 0)') {
-                                                const hex = rgbToHex(htmlBg);
-                                                if (hex) {
-                                                    bgColor = hex;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                // Extract text color
-                                let textColor = null;
-                                const bodyStyle = window.getComputedStyle(body);
-                                const bodyTextColor = bodyStyle.color;
-                                if (bodyTextColor) {
-                                    textColor = rgbToHex(bodyTextColor);
-                                }
-                                
-                                return {
-                                    backgroundColor: bgColor,
-                                    textColor: textColor,
-                                    themeColor: themeColor
-                                };
-                            } catch (e) {
-                                return null;
-                            }
-                        })();
-                    `).then((colors) => {
-                        // Prioritize theme-color meta tag, then background color
-                        const currentUrl = webview.getURL();
-                        if (colors && colors.themeColor) {
-                            // Use theme color from meta tag (most reliable)
-                            const themeColors = this.applyWebpageTheme({ themeColor: colors.themeColor, backgroundColor: colors.themeColor, textColor: colors.textColor });
-                            // Cache the theme for this domain
-                            if (themeColors && currentUrl) {
-                                this.cacheThemeForDomain(currentUrl, themeColors);
-                            }
-                        } else if (colors && colors.backgroundColor && colors.backgroundColor !== '#ffffff' && colors.backgroundColor !== '#000000') {
-                            // Use extracted background color
-                            const themeColors = this.applyWebpageTheme(colors);
-                            // Cache the theme for this domain
-                            if (themeColors && currentUrl) {
-                                this.cacheThemeForDomain(currentUrl, themeColors);
-                            }
-                        } else if (retryCount < 1) {
-                            // Retry once quickly (single RAF for speed)
-                            requestAnimationFrame(() => {
-                                this.extractAndApplyWebpageColors(webview, retryCount + 1);
-                            });
-                        } else {
-                            // Only reset to black if we truly can't find colors
-                            this.resetToBlackTheme();
-                        }
-                    }).catch((error) => {
-                        // Only log if it's not a common error
-                        if (!error.message || (!error.message.includes('Object has been destroyed') && !error.message.includes('WebContents'))) {
-                            console.error('Error executing JavaScript for color extraction:', error);
-                        }
-                        // Retry once quickly (single RAF for speed)
-                        if (retryCount < 1) {
-                            requestAnimationFrame(() => {
-                                this.extractAndApplyWebpageColors(webview, retryCount + 1);
-                            });
-                        } else {
-                            this.resetToBlackTheme();
-                        }
-                    });
-                } catch (error) {
-                    console.error('Error in extractColors:', error);
-                    if (retryCount < 1) {
-                        requestAnimationFrame(() => {
-                            this.extractAndApplyWebpageColors(webview, retryCount + 1);
-                        });
-                    } else {
-                        this.resetToBlackTheme();
-                    }
-                }
-            };
-            
-            extractColors();
-        } catch (error) {
-            console.error('Error extracting webpage colors:', error);
-            if (retryCount < 1) {
-                requestAnimationFrame(() => {
-                    this.extractAndApplyWebpageColors(webview, retryCount + 1);
-                });
-            } else {
-                this.resetToBlackTheme();
-            }
-        }
-    }
-    
-    applyWebpageTheme(webpageColors) {
-        let primary = webpageColors.themeColor || webpageColors.backgroundColor || '#1a1a1a';
-        
-        // Make theme a bit darker than website colors
-        const isDark = this.isDarkColor(primary);
-        if (isDark) {
-            // For dark colors, darken them a bit
-            primary = this.darkenColor(primary, 0.05);
-        } else {
-            // For light colors, darken a bit more
-            primary = this.darkenColor(primary, 0.08);
-        }
-        
-        // Use minimal variations for secondary and accent (darker)
-        const secondary = this.darkenColor(primary, 0.02);
-        const accent = this.darkenColor(primary, 0.03);
-        
-        // Get readable text color based on contrast ratio (WCAG AA standard)
-        const text = this.getReadableTextColor(primary, 4.5);
-        const isTextDark = text === '#000000';
-        
-        // Calculate secondary and muted text colors with good contrast
-        const textSecondary = isTextDark ? '#333333' : '#cccccc';
-        const textMuted = isTextDark ? '#666666' : '#999999';
-        
-        const colors = {
-            primary: primary,
-            secondary: secondary,
-            accent: accent,
-            text: text,
-            textSecondary: textSecondary,
-            textMuted: textMuted,
-            border: isTextDark ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)',
-            borderLight: isTextDark ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255, 255, 255, 0.12)'
-        };
-        
-        this.applyCustomTheme(colors);
-        return colors; // Return colors for caching
-    }
-    
     resetToBlackTheme() {
         // Incognito: always true black theme, unchangable
         if (this.isIncognitoWindow) {
@@ -3911,14 +3432,6 @@ class AxisBrowser {
         this.applyCustomTheme(colors);
     }
     
-    lightenColor(color, amount) {
-        const hex = color.replace('#', '');
-        const r = Math.min(255, parseInt(hex.slice(0, 2), 16) + Math.round(255 * amount));
-        const g = Math.min(255, parseInt(hex.slice(2, 4), 16) + Math.round(255 * amount));
-        const b = Math.min(255, parseInt(hex.slice(4, 6), 16) + Math.round(255 * amount));
-        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-    }
-
     applyCustomTheme(colors) {
         // Ensure document.body exists before applying theme
         if (!document.body) {
@@ -3941,21 +3454,34 @@ class AxisBrowser {
         
         // Disable transitions for instant theme switching
         document.body.classList.add('theme-switching');
-        
+
+        // `uiTheme` flips ONLY the overlay/secondary surfaces (popups, menus, Cmd+F,
+        // security panel, AI chat panel, new-tab-page inner cards, zoom indicator,
+        // context menus, notes/history/downloads/bookmark panels) via the
+        // `data-ui-theme="light"` attribute + targeted CSS in styles.css. The main
+        // shell (tabs, sidebar, url bar strip, nav buttons, background gradient) and
+        // every theme-color-driven variable (`--theme-color`, `--gradient-color`,
+        // `--primary-gradient`, `--accent-color`, `--primary-color`, shell glass,
+        // tab hover/active) are IDENTICAL in both modes so the user's theme color
+        // is never visually altered. Incognito ignores this flag (forced black below).
+        const preferLightUi = this.settings?.uiTheme === 'light' && !this.isIncognitoWindow;
+        document.documentElement.setAttribute('data-ui-theme', preferLightUi ? 'light' : 'dark');
+
         // Pre-calculate all color values once to avoid repeated calculations
         const darkerPrimary = colors.primary;
-        const headerBg = this.darkenColor(colors.primary, 0.03);
-        const urlBarBg = this.darkenColor(colors.primary, 0.08);
-        const urlBarFocusBg = this.darkenColor(colors.primary, 0.03);
-        const tabHoverBg = this.darkenColor(colors.primary, 0.03);
-        const tabActiveBg = this.darkenColor(colors.primary, 0.02);
-        const buttonHoverBg = this.darkenColor(colors.primary, 0.05);
-        const secondaryColor = this.darkenColor(colors.primary, 0.02);
+        const shellBase = darkerPrimary;
+        const headerBg = this.darkenColor(shellBase, 0.03);
+        const urlBarBg = this.darkenColor(shellBase, 0.08);
+        const urlBarFocusBg = this.darkenColor(shellBase, 0.03);
+        const tabHoverBg = this.darkenColor(shellBase, 0.03);
+        const tabActiveBg = this.darkenColor(shellBase, 0.02);
+        const buttonHoverBg = this.darkenColor(shellBase, 0.05);
+        const secondaryColor = this.darkenColor(darkerPrimary, 0.02);
         const isDark = this.isDarkColor(colors.primary);
         const textSecondary = colors.textSecondary || colors.text;
         const borderColor = colors.border || 'rgba(255, 255, 255, 0.08)';
         const borderColorLight = colors.borderLight || 'rgba(255, 255, 255, 0.12)';
-        
+
         // Batch all CSS variable updates using setProperty for maximum performance
         // Using setProperty is faster than individual style updates and doesn't overwrite other styles
         const root = document.documentElement;
@@ -3969,7 +3495,8 @@ class AxisBrowser {
                 ? colors.gradientColor || this.settings.gradientColor || '#2a2a2a'
                 : null;
         const gradientEnabled = !!gradientColorResolved;
-        
+        const shellGradientSecondary = gradientColorResolved;
+
         // Incognito: force solid black surfaces (chrome blur still uses transmission = 0 / opaque endpoint)
         const forceOpaqueBlack = this.isIncognitoWindow;
         const chrome = this.getShellChromeStyle();
@@ -3982,36 +3509,35 @@ class AxisBrowser {
         if (!forceOpaqueBlack && gradientEnabled) {
             const bgGrad = this.smoothGradient(
                 gradientDirection,
-                this.hexToRgba(darkerPrimary, chrome.glassAlpha),
-                this.hexToRgba(gradientColorResolved, chrome.glassAlpha)
+                this.hexToRgba(shellBase, chrome.glassAlpha),
+                this.hexToRgba(shellGradientSecondary, chrome.glassAlpha)
             );
             style.setProperty('--background-color', bgGrad);
         } else if (!forceOpaqueBlack) {
-            style.setProperty('--background-color', this.hexToRgba(darkerPrimary, chrome.glassAlpha));
+            style.setProperty('--background-color', this.hexToRgba(shellBase, chrome.glassAlpha));
         }
         style.setProperty('--text-color', colors.text);
         style.setProperty('--text-color-secondary', textSecondary);
         style.setProperty('--text-color-muted', colors.textMuted || colors.text);
-        // Use a glassy, semi-transparent version of the primary color for app surfaces (skip in incognito)
+        // Use a glassy, semi-transparent version of the shell base color for app surfaces (skip in incognito)
         let glassSidebarBg;
         let sidebarSlideOutBg;
         if (forceOpaqueBlack) {
             glassSidebarBg = '#000000';
             sidebarSlideOutBg = '#000000';
         } else if (gradientEnabled) {
-            const primaryRgba = this.hexToRgba(darkerPrimary, chrome.glassAlpha);
-            const gradientRgba = this.hexToRgba(gradientColorResolved, chrome.glassAlpha);
+            const primaryRgba = this.hexToRgba(shellBase, chrome.glassAlpha);
+            const gradientRgba = this.hexToRgba(shellGradientSecondary, chrome.glassAlpha);
             glassSidebarBg = this.smoothGradient(gradientDirection, primaryRgba, gradientRgba);
-            const primarySlide = this.hexToRgba(darkerPrimary, chrome.slideOutAlpha);
-            const gradientSlide = this.hexToRgba(gradientColorResolved, chrome.slideOutAlpha);
+            const primarySlide = this.hexToRgba(shellBase, chrome.slideOutAlpha);
+            const gradientSlide = this.hexToRgba(shellGradientSecondary, chrome.slideOutAlpha);
             sidebarSlideOutBg = this.smoothGradient(gradientDirection, primarySlide, gradientSlide);
         } else {
-            glassSidebarBg = this.hexToRgba(darkerPrimary, chrome.glassAlpha) || `rgba(20, 20, 20, ${chrome.glassAlpha})`;
-            sidebarSlideOutBg = this.hexToRgba(darkerPrimary, chrome.slideOutAlpha) || `rgba(28, 28, 28, ${chrome.slideOutAlpha})`;
+            glassSidebarBg = this.hexToRgba(shellBase, chrome.glassAlpha) || `rgba(20, 20, 20, ${chrome.glassAlpha})`;
+            sidebarSlideOutBg = this.hexToRgba(shellBase, chrome.slideOutAlpha) || `rgb(28, 28, 28)`;
         }
-        // Popups use subtle dominant color (primary color, even if gradient)
-        // Extract primary color and make it subtle for popups
-        const popupBgRgba = this.hexToRgba(darkerPrimary, chrome.popupAlpha);
+        // Popups use subtle dominant color (shell base, even if gradient)
+        const popupBgRgba = this.hexToRgba(shellBase, chrome.popupAlpha);
         style.setProperty('--popup-background-subtle', popupBgRgba);
         style.setProperty('--popup-header', headerBg);
         style.setProperty('--button-background', 'transparent');
@@ -4120,10 +3646,10 @@ class AxisBrowser {
         }
             
         if (app) {
-                // Use semi-transparent background for frosted glass effect
-                const appBg = gradientEnabled ? 
-                    this.smoothGradient(gradientDirection, this.hexToRgba(darkerPrimary, chrome.glassAlpha), this.hexToRgba(gradientColorResolved, chrome.glassAlpha)) : 
-                    this.hexToRgba(darkerPrimary, chrome.glassAlpha);
+                // Use semi-transparent background for frosted glass effect (shell base, not theme color)
+                const appBg = gradientEnabled ?
+                    this.smoothGradient(gradientDirection, this.hexToRgba(shellBase, chrome.glassAlpha), this.hexToRgba(shellGradientSecondary, chrome.glassAlpha)) :
+                    this.hexToRgba(shellBase, chrome.glassAlpha);
                 app.style.setProperty('background', appBg, 'important');
             app.style.setProperty('backdrop-filter', chrome.backdropMain, 'important');
             app.style.setProperty('-webkit-backdrop-filter', chrome.backdropMain, 'important');
@@ -4137,11 +3663,11 @@ class AxisBrowser {
                 mainArea.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
             }
             
-            // Also apply to app element
+            // Also apply to app element (shell base so light mode stays light regardless of theme color)
             if (app) {
-                const appBg = gradientEnabled ? 
-                    this.smoothGradient(gradientDirection, this.hexToRgba(darkerPrimary, chrome.glassAlpha), this.hexToRgba(gradientColorResolved, chrome.glassAlpha)) : 
-                    this.hexToRgba(darkerPrimary, chrome.glassAlpha);
+                const appBg = gradientEnabled ?
+                    this.smoothGradient(gradientDirection, this.hexToRgba(shellBase, chrome.glassAlpha), this.hexToRgba(shellGradientSecondary, chrome.glassAlpha)) :
+                    this.hexToRgba(shellBase, chrome.glassAlpha);
                 app.style.setProperty('background', appBg, 'important');
                 app.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
                 app.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
@@ -4196,7 +3722,13 @@ class AxisBrowser {
 
     getShellChromeStyle() {
         const t = this.getShellChromeTransmissionT();
-        /** Slider 0: solid theme colors, no blur — `AXIS_SHELL_CHROME_OPAQUE` is still partly translucent for the old “opaque” *blend endpoint* at t>0. */
+        // Light mode re-tones the new-tab search/ask/toggle cards; webpages inside webviews
+        // are untouched, this only affects the in-app `#new-tab-page` overlay.
+        const lightUi = this.settings?.uiTheme === 'light' && !this.isIncognitoWindow;
+        const ntSearchRGB = lightUi ? '244, 245, 247' : '14, 15, 18';
+        const ntAskRGB = lightUi ? '248, 249, 251' : '10, 11, 14';
+        const ntToggleRGB = lightUi ? '0, 0, 0' : '255, 255, 255';
+        /** Slider 0: solid theme colors, no blur — `AXIS_SHELL_CHROME_OPAQUE` is still partly translucent for the old "opaque" *blend endpoint* at t>0. */
         if (t <= 0) {
             const none = 'none';
             return {
@@ -4215,13 +3747,13 @@ class AxisBrowser {
                 urlBarTintDefault: 1,
                 urlBarTintDark: 1,
                 urlBarTintLight: 1,
-                newTabSearchBg: 'rgba(14, 15, 18, 1)',
+                newTabSearchBg: `rgba(${ntSearchRGB}, 1)`,
                 newTabSearchBlur: 0,
                 newTabSearchSat: 100,
-                newTabToggleBg: 'rgba(255, 255, 255, 1)',
+                newTabToggleBg: `rgba(${ntToggleRGB}, ${lightUi ? 0.06 : 1})`,
                 newTabToggleBlur: 0,
                 newTabToggleSat: 100,
-                newTabAskBg: 'rgba(10, 11, 14, 1)',
+                newTabAskBg: `rgba(${ntAskRGB}, 1)`,
                 newTabAskBlur: 0,
                 newTabAskSat: 100,
             };
@@ -4243,10 +3775,13 @@ class AxisBrowser {
         const urlBarTintDark = L(o.urlBarTintDark, tr.urlBarTintDark);
         const urlBarTintLight = L(o.urlBarTintLight, tr.urlBarTintLight);
         const ntS = L(o.newTabSearchAlpha, tr.newTabSearchAlpha);
-        const newTabSearchBg = `rgba(14, 15, 18, ${ntS.toFixed(3)})`;
-        const newTabToggleBg = `rgba(255, 255, 255, ${L(o.newTabToggleAlpha, tr.newTabToggleAlpha).toFixed(3)})`;
+        const newTabSearchBg = `rgba(${ntSearchRGB}, ${ntS.toFixed(3)})`;
+        // In dark mode the toggle uses white overlay; in light mode flip to a black overlay
+        // with a lower alpha so the in-app new tab page matches the rest of the shell.
+        const ntTogA = L(o.newTabToggleAlpha, tr.newTabToggleAlpha);
+        const newTabToggleBg = `rgba(${ntToggleRGB}, ${(lightUi ? Math.min(ntTogA, 0.12) : ntTogA).toFixed(3)})`;
         const ntA = L(o.newTabAskAlpha, tr.newTabAskAlpha);
-        const newTabAskBg = `rgba(10, 11, 14, ${ntA.toFixed(3)})`;
+        const newTabAskBg = `rgba(${ntAskRGB}, ${ntA.toFixed(3)})`;
         const newTabSearchBlur = Math.round(L(o.newTabSearchBlur, tr.newTabSearchBlur));
         const newTabSearchSat = Math.round(L(o.newTabSearchSat, tr.newTabSearchSat));
         const newTabToggleBlur = Math.round(L(o.newTabToggleBlur, tr.newTabToggleBlur));
@@ -4387,7 +3922,7 @@ class AxisBrowser {
 
     getTabWebpreferencesString() {
         const base =
-            'contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false';
+            'contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes';
         return this.settings?.javascriptEnabled === false ? `${base},javascript=no` : base;
     }
 
@@ -4740,6 +4275,7 @@ class AxisBrowser {
                     this.updateEmptyState();
                     this.updateUrlBar();
                     this.updateNavigationButtons();
+                    this.syncAIChatPanelForCurrentTab();
                 }
             return;
         }
@@ -4777,6 +4313,7 @@ class AxisBrowser {
         // CRITICAL: Update current tab immediately (must be before updateEmptyState so empty state hides)
         this.currentTab = tabId;
         this.updateEmptyState();
+        this.syncAIChatPanelForCurrentTab();
 
         // CRITICAL: Add active to new tab instantly
         if (activeTab) {
@@ -5518,9 +5055,101 @@ class AxisBrowser {
         this.switchToTab(ids[nextIdx]);
     }
 
+    /** Pinned empty slots are not a valid focus target; unpinned rows always are. */
+    _canFocusTabAsActive(tabId) {
+        const t = this.tabs.get(tabId);
+        if (!t) return false;
+        if (!t.pinned) return true;
+        const el = document.querySelector(`[data-tab-id="${tabId}"]`);
+        if (el?.classList.contains('closed')) return false;
+        return !!t.webview;
+    }
+
+    /**
+     * Prefer the tab to the right of the closing tab, then to the left (Chrome-like),
+     * using flat DOM order for sidebar + tab groups.
+     */
+    _findNeighborTabToActivate(closedTabId) {
+        const ids = Array.from(document.querySelectorAll('.tab'))
+            .map((el) => parseInt(el.dataset.tabId, 10))
+            .filter((n) => !Number.isNaN(n));
+        const i = ids.indexOf(closedTabId);
+        if (i < 0) return null;
+        for (let k = i + 1; k < ids.length; k++) {
+            if (ids[k] !== closedTabId && this._canFocusTabAsActive(ids[k])) return ids[k];
+        }
+        for (let k = i - 1; k >= 0; k--) {
+            if (ids[k] !== closedTabId && this._canFocusTabAsActive(ids[k])) return ids[k];
+        }
+        return null;
+    }
+
+    /**
+     * After a tab is removed or demoted, pick the next active tab: neighbor, then last unpinned,
+     * then first remaining pinned with an open webview, else empty state.
+     */
+    _applyFocusAfterTabClose(neighborPref) {
+        this.currentTab = null;
+        if (neighborPref != null && this.tabs.has(neighborPref) && this._canFocusTabAsActive(neighborPref)) {
+            this.switchToTab(neighborPref);
+            return;
+        }
+        const remainingUnpinned = Array.from(this.tabs.keys()).filter((id) => {
+            const t = this.tabs.get(id);
+            return t && !t.pinned;
+        });
+        if (remainingUnpinned.length > 0 && this.tabs.has(remainingUnpinned[remainingUnpinned.length - 1])) {
+            this.switchToTab(remainingUnpinned[remainingUnpinned.length - 1]);
+            return;
+        }
+        const remainingPinnedActive = Array.from(this.tabs.keys()).filter((id) => {
+            const t = this.tabs.get(id);
+            return t && t.pinned && t.webview;
+        });
+        if (remainingPinnedActive.length > 0 && this.tabs.has(remainingPinnedActive[0])) {
+            this.switchToTab(remainingPinnedActive[0]);
+            return;
+        }
+        const webview = document.getElementById('webview');
+        if (webview) webview.src = 'about:blank';
+        this.resetToBlackTheme();
+        this.updateEmptyState();
+        this.updateUrlBar();
+        this.updateNavigationButtons();
+        this.syncAIChatPanelForCurrentTab();
+    }
+
+    /** Normalize tab id for Map keys (dataset uses strings; internal ids are numbers). */
+    _normalizeTabIdForChatState(tabId) {
+        if (tabId == null || tabId === '') return null;
+        const n = typeof tabId === 'number' ? tabId : parseInt(String(tabId), 10);
+        return Number.isFinite(n) ? n : tabId;
+    }
+
+    /**
+     * Show or hide the AI chat panel from per-tab remembered state.
+     * Chat stays open only on tabs where the user opened it; switching tabs applies that tab's preference.
+     */
+    syncAIChatPanelForCurrentTab() {
+        const chatPanel = document.getElementById('ai-chat-panel');
+        const contentArea = document.getElementById('content-area');
+        if (!chatPanel) return;
+        const tid = this._normalizeTabIdForChatState(this.currentTab);
+        const wantOpen = tid != null && this.aiChatPanelOpenByTabId.get(tid) === true;
+        if (wantOpen) {
+            chatPanel.classList.remove('hidden');
+            contentArea?.classList.add('chat-open');
+        } else {
+            chatPanel.classList.add('hidden');
+            contentArea?.classList.remove('chat-open');
+        }
+    }
+
     closeTab(tabId) {
         // Save pinned tabs before closing (in case it was pinned)
         this.savePinnedTabs();
+        const tidChat = this._normalizeTabIdForChatState(tabId);
+        if (tidChat != null) this.aiChatPanelOpenByTabId.delete(tidChat);
         const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
         const tab = this.tabs.get(tabId);
         
@@ -5533,6 +5162,8 @@ class AxisBrowser {
             const isInactive = !tab.webview || tabElement?.classList.contains('closed');
             
             if (isInactive) {
+                const closingCurrent = this.currentTab === tabId;
+                const neighborPref = closingCurrent ? this._findNeighborTabToActivate(tabId) : null;
                 // Completely remove inactive pinned tabs
                 // Remove from tab groups first (sync may move the tab element)
                 this.tabGroups.forEach((tabGroup, tabGroupId) => {
@@ -5545,23 +5176,8 @@ class AxisBrowser {
                 if (elToRemove) elToRemove.remove();
                 this.tabs.delete(tabId);
                 
-                // If this was the current tab, switch only to an unpinned tab; if none left, show empty state
-                if (this.currentTab === tabId) {
-                    this.currentTab = null;
-                    const remainingUnpinned = Array.from(this.tabs.keys()).filter(id => {
-                        const t = this.tabs.get(id);
-                        return t && !t.pinned && t.webview;
-                    });
-                    if (remainingUnpinned.length > 0) {
-                        this.switchToTab(remainingUnpinned[remainingUnpinned.length - 1]);
-                    } else {
-                        const webview = document.getElementById('webview');
-                        if (webview) webview.src = 'about:blank';
-                        this.resetToBlackTheme();
-                        this.updateEmptyState();
-                        this.updateUrlBar();
-                        this.updateNavigationButtons();
-                    }
+                if (closingCurrent) {
+                    this._applyFocusAfterTabClose(neighborPref);
                 }
                 
                 // Save pinned tabs after removal and update separator immediately
@@ -5573,6 +5189,8 @@ class AxisBrowser {
             }
             
             // Active pinned tab - just close the webview but keep the tab
+            const closingPinnedActive = this.currentTab === tabId;
+            const neighborPinnedPref = closingPinnedActive ? this._findNeighborTabToActivate(tabId) : null;
             // Remove the tab's webview
             if (tab && tab.webview) {
                 try {
@@ -5595,23 +5213,8 @@ class AxisBrowser {
             
             this.updatePinnedTabClosedState(tabId);
             
-            // If we closed the active tab, switch only to an unpinned tab; if none left, don't open any tab
-            if (this.currentTab === tabId) {
-                this.currentTab = null;
-                const remainingUnpinned = Array.from(this.tabs.keys()).filter(id => {
-                    const t = this.tabs.get(id);
-                    return t && !t.pinned && t.webview;
-                });
-                if (remainingUnpinned.length > 0 && this.tabs.has(remainingUnpinned[remainingUnpinned.length - 1])) {
-                    this.switchToTab(remainingUnpinned[remainingUnpinned.length - 1]);
-                } else {
-                    const webview = document.getElementById('webview');
-                    if (webview) webview.src = 'about:blank';
-                    this.resetToBlackTheme();
-                    this.updateEmptyState();
-                    this.updateUrlBar();
-                    this.updateNavigationButtons();
-                }
+            if (closingPinnedActive) {
+                this._applyFocusAfterTabClose(neighborPinnedPref);
             }
             this.savePinnedTabs();
             this.updatePinnedSeparatorVisibility();
@@ -5621,6 +5224,8 @@ class AxisBrowser {
         
         // For non-pinned tabs, proceed with normal close behavior
         const tabGroupIdForUndo = tab && tab.tabGroupId;
+        const closingUnpinnedCurrent = this.currentTab === tabId;
+        const neighborUnpinnedPref = closingUnpinnedCurrent ? this._findNeighborTabToActivate(tabId) : null;
         // Remove from tab group first (without recording undo) so group state stays consistent
         if (tab && tab.tabGroupId) {
             this.removeTabFromTabGroup(tabId, tab.tabGroupId, true);
@@ -5671,31 +5276,8 @@ class AxisBrowser {
         // Delete the tab FIRST to get accurate remaining tabs count
         this.tabs.delete(tabId);
         
-        // If we closed the active tab, switch to another tab: prefer unpinned, then pinned; only show empty state if none left
-        if (this.currentTab === tabId) {
-            this.currentTab = null;
-            const remainingUnpinned = Array.from(this.tabs.keys()).filter(id => {
-                const t = this.tabs.get(id);
-                return t && !t.pinned;
-            });
-            if (remainingUnpinned.length > 0 && this.tabs.has(remainingUnpinned[remainingUnpinned.length - 1])) {
-                this.switchToTab(remainingUnpinned[remainingUnpinned.length - 1]);
-            } else {
-                const remainingPinnedActive = Array.from(this.tabs.keys()).filter(id => {
-                    const t = this.tabs.get(id);
-                    return t && t.pinned && t.webview;
-                });
-                if (remainingPinnedActive.length > 0 && this.tabs.has(remainingPinnedActive[0])) {
-                    this.switchToTab(remainingPinnedActive[0]);
-                } else {
-                    const webview = document.getElementById('webview');
-                    if (webview) webview.src = 'about:blank';
-                    this.resetToBlackTheme();
-                    this.updateEmptyState();
-                    this.updateUrlBar();
-                    this.updateNavigationButtons();
-                }
-            }
+        if (closingUnpinnedCurrent) {
+            this._applyFocusAfterTabClose(neighborUnpinnedPref);
         }
         this.applyAmbientFromSettings();
     }
@@ -7226,6 +6808,16 @@ class AxisBrowser {
                         </div>
                         <div class="setting-row">
                             <div class="setting-row-content">
+                                <div class="setting-row-title">Appearance</div>
+                                <div class="setting-row-desc">Light or dark mode for the Axis UI. Does not affect the window frame or your theme color.</div>
+                            </div>
+                            <select class="setting-select" id="ui-theme">
+                                <option value="dark" ${this.settings.uiTheme !== 'light' ? 'selected' : ''}>Dark</option>
+                                <option value="light" ${this.settings.uiTheme === 'light' ? 'selected' : ''}>Light</option>
+                            </select>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-row-content">
                                 <div class="setting-row-title">Theme Color</div>
                                 <div class="setting-row-desc">Choose your primary theme color</div>
                             </div>
@@ -7440,6 +7032,14 @@ class AxisBrowser {
         if (javascriptEnabledEl) {
             javascriptEnabledEl.addEventListener('change', (e) => {
                 console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'javascriptEnabled', value: e.target.checked }));
+            });
+        }
+
+        const uiThemeEl = document.getElementById('ui-theme');
+        if (uiThemeEl) {
+            uiThemeEl.addEventListener('change', (e) => {
+                const v = e.target.value === 'light' ? 'light' : 'dark';
+                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'uiTheme', value: v }));
             });
         }
         
@@ -8221,8 +7821,8 @@ class AxisBrowser {
                 // Apply setting changes immediately
                 if (key === 'sidebarPosition') {
                     this.applySidebarPosition();
-                } else if (key === 'themeColor' || key === 'gradientColor' || key === 'gradientEnabled' || key === 'gradientDirection') {
-                    // Apply theme colors immediately
+                } else if (key === 'themeColor' || key === 'gradientColor' || key === 'gradientEnabled' || key === 'gradientDirection' || key === 'uiTheme') {
+                    // Apply theme / light-dark shell immediately
                     this.applyCustomThemeFromSettings();
                 }
                 // Theme mode and autoTheme changes will take effect on next page load
@@ -9344,21 +8944,6 @@ class AxisBrowser {
         };
     }
 
-    // Enhanced success feedback
-    showSuccessFeedback(element, message = 'Success!') {
-        if (!element) return;
-        
-        const originalContent = element.innerHTML;
-        element.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 12px; padding: 20px;">
-                <div class="success-checkmark"></div>
-                <span>${message}</span>
-            </div>
-        `;
-        
-        // Removed timeout for speed
-    }
-
     // Enhanced error feedback
     showErrorFeedback(element, message = 'Error occurred') {
         if (!element) return;
@@ -9470,7 +9055,7 @@ class AxisBrowser {
             clearInterval(webview.__audioCheckInterval);
         }
         
-        // Poll every 500ms to check if audio is playing
+        // Poll to check if audio is playing (balance responsiveness vs idle work)
         webview.__audioCheckInterval = setInterval(async () => {
             try {
                 const tab = this.tabs.get(tabId);
@@ -9525,7 +9110,7 @@ class AxisBrowser {
                     clearInterval(webview.__audioCheckInterval);
                 }
             }
-        }, 500);
+        }, 750);
         
         // Clean up on webview destruction
         webview.addEventListener('destroyed', () => {
@@ -9871,6 +9456,10 @@ class AxisBrowser {
         if (window.electronAPI && window.electronAPI.setWindowButtonVisibility) {
             window.electronAPI.setWindowButtonVisibility(!isHidden);
         }
+        // Showing traffic lights again can reset custom inset; re-apply left/right mirror (main resize also does this).
+        if (!isHidden) {
+            this.syncMacOSTrafficLayout();
+        }
     }
 
     toggleSidebarPosition() {
@@ -9999,6 +9588,7 @@ class AxisBrowser {
             if (window.electronAPI?.setWindowButtonVisibility) {
                 window.electronAPI.setWindowButtonVisibility(true);
             }
+            this.syncMacOSTrafficLayout();
 
             const computedStyle = getComputedStyle(document.documentElement);
             const sidebarBg = computedStyle.getPropertyValue('--sidebar-background').trim();
@@ -10061,15 +9651,19 @@ class AxisBrowser {
             }
         });
 
-        // Close downloads popup when clicking outside
-        document.addEventListener('click', (e) => {
-            const popup = document.getElementById('downloads-popup');
-            const btn = this.elements?.downloadsBtnFooter;
-            if (!popup || popup.classList.contains('hidden')) return;
-            if (popup.contains(e.target)) return;
-            if (btn && btn.contains(e.target)) return;
-            this.hideDownloadsPopup();
-        });
+        // Close downloads popup on outside mousedown (capture: sidebar + web content; <webview> does not bubble)
+        document.addEventListener(
+            'mousedown',
+            (e) => {
+                const popup = document.getElementById('downloads-popup');
+                const btn = this.elements?.downloadsBtnFooter;
+                if (!popup || popup.classList.contains('hidden')) return;
+                if (popup.contains(e.target)) return;
+                if (btn && btn.contains(e.target)) return;
+                this.hideDownloadsPopup();
+            },
+            true
+        );
     }
 
     setupAISelectionDetection() {
@@ -10242,10 +9836,9 @@ class AxisBrowser {
             this.aiSelectionState.pollingInterval = null;
         }
 
-        // Poll every 200ms for text selection
         this.aiSelectionState.pollingInterval = setInterval(() => {
             this.checkTextSelection();
-        }, 200);
+        }, 300);
     }
 
     stopAISelectionPolling() {
@@ -10384,6 +9977,10 @@ class AxisBrowser {
         if (chatPanel.classList.contains('hidden')) {
             chatPanel.classList.remove('hidden');
             if (contentArea) contentArea.classList.add('chat-open');
+        }
+        const tid = this._normalizeTabIdForChatState(this.currentTab);
+        if (tid != null) {
+            this.aiChatPanelOpenByTabId.set(tid, true);
         }
 
         // Show quote bar with preview (plain text for display, may be truncated by CSS)
@@ -10768,6 +10365,10 @@ class AxisBrowser {
             if (contentArea) {
                 contentArea.classList.remove('chat-open');
             }
+        }
+        const tid = this._normalizeTabIdForChatState(this.currentTab);
+        if (tid != null) {
+            this.aiChatPanelOpenByTabId.set(tid, !chatPanel.classList.contains('hidden'));
         }
     }
 
@@ -12624,16 +12225,24 @@ class AxisBrowser {
             }
         }
         
-        // Prepare context info for native menu
+        let guestWebContentsId = 0;
+        try {
+            if (webview && typeof webview.getWebContentsId === 'function') {
+                guestWebContentsId = webview.getWebContentsId() || 0;
+            }
+        } catch (_) {
+            guestWebContentsId = 0;
+        }
+
         const contextInfo = {
             ...ctx,
             canGoBack,
             canGoForward,
             isSpeaking,
-            speechEnabled
+            speechEnabled,
+            guestWebContentsId
         };
         
-        // Show native OS context menu
         await window.electronAPI.showWebpageContextMenu(e.clientX, e.clientY, contextInfo);
     }
 
@@ -13291,6 +12900,13 @@ class AxisBrowser {
 
         popup.classList.remove('hidden');
 
+        const backdrop = document.getElementById('downloads-popup-backdrop');
+        if (backdrop) {
+            backdrop.classList.remove('hidden');
+            backdrop.setAttribute('aria-hidden', 'false');
+        }
+        document.body.classList.add('downloads-popup-open');
+
         const openFolderBtn = document.getElementById('downloads-popup-open-folder');
         openFolderBtn?.addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -13304,6 +12920,12 @@ class AxisBrowser {
 
     hideDownloadsPopup() {
         const popup = document.getElementById('downloads-popup');
+        const backdrop = document.getElementById('downloads-popup-backdrop');
+        if (backdrop) {
+            backdrop.classList.add('hidden');
+            backdrop.setAttribute('aria-hidden', 'true');
+        }
+        document.body.classList.remove('downloads-popup-open');
         if (!popup) return;
         popup.classList.add('hidden');
     }
@@ -17808,7 +17430,7 @@ class AxisBrowser {
             } catch (e) {
                 // Webview may be gone or navigating
             }
-        }, 400);
+        }, 700);
     }
     
     stopPIPLeaveCheck() {
