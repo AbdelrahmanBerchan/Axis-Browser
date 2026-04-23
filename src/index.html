@@ -135,7 +135,7 @@
                         <webview id="webview" 
                                  src="about:blank" 
                                  allowpopups 
-                                 webpreferences="contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false"
+                                 webpreferences="contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes"
                                  partition="persist:main"
                                  autosize="true"
                                  style="opacity:0;visibility:hidden;pointer-events:none;">
@@ -203,6 +203,8 @@
                                 </button>
                             </div>
                         </div>
+                        <!-- Captures clicks over page content (<webview> does not bubble to document) -->
+                        <div id="downloads-popup-backdrop" class="downloads-popup-backdrop hidden" aria-hidden="true"></div>
                     </div>
             </div>
         </div>
