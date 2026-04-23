@@ -1714,7 +1714,11 @@ app.whenReady().then(async () => {
       const url = details && details.url;
       if (typeof url === 'string' && url) {
         const lower = url.toLowerCase();
-        const blocked = lower.startsWith('javascript:') || lower.startsWith('vbscript:') || lower.startsWith('file:');
+        const blocked =
+          lower.startsWith('javascript:') ||
+          lower.startsWith('data:') ||
+          lower.startsWith('vbscript:') ||
+          lower.startsWith('file:');
         if (!blocked) {
           // Fire after handler returns; sync loadURL inside the handler can race the deny.
           setImmediate(() => {
