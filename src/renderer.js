@@ -59,86 +59,46 @@ header, footer, [role="banner"], [role="contentinfo"] {
  * YouTube tokens + Google ids + generic sweep: large opaque layers (any host) get cleared.
  * Skips modals, media, form controls, ytd-* hosts (tokens handle those).
  */
-const AXIS_TRANSPARENT_SITES_DOM_PATCH = [
-    '(function(){',
-    'try{',
-    'var NS="__axisTransparentV4";',
-    'var st=window[NS]||(window[NS]={mo:null,t:0,idle:null,sweepTO:null});',
-    'var T="transparent";',
-    'var IMP="important";',
-    'function ytVarNames(){return["--yt-spec-base-background","--yt-spec-general-background-a","--yt-spec-general-background-b","--yt-spec-general-background-c","--yt-spec-brand-background-solid","--yt-spec-brand-background-primary","--yt-spec-brand-background-secondary","--yt-raised-background","--yt-spec-menu-background","--yt-spec-feed-background-a","--yt-spec-feed-background-b","--yt-spec-static-background","--yt-spec-static-overlay-background-solid","--yt-spec-10-percent-layer","--yt-spec-themed-blue","--yt-spec-themed-green"];}',
-    'function applyYt(){',
-    'var r=document.documentElement;',
-    'ytVarNames().forEach(function(n){',
-    'var v=T;',
-    'if(n.indexOf("overlay")>=0)v="rgba(0,0,0,0.18)";',
-    'if(n.indexOf("blue")>=0||n.indexOf("green")>=0||n.indexOf("percent-layer")>=0)return;',
-    'try{r.style.setProperty(n,v,IMP);}catch(e){}});',
-    'try{',
-    'var app=document.querySelector("ytd-app");',
-    'if(app){app.style.setProperty("background",T,IMP);app.style.setProperty("background-color",T,IMP);}',
-    'document.querySelectorAll("ytd-browse,ytd-watch-flexy,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer").forEach(function(el){',
-    'try{el.style.setProperty("background",T,IMP);el.style.setProperty("background-color",T,IMP);}catch(e){}});',
-    '}catch(e){}',
-    '}',
-    'function googleIds(){return["viewport","cnt","gsr","main","center_col","rcnt","rhs","rhscol","lhcol","islsp","islmp","iur","isr_m","iry","rso","searchform","tsf","layout","arc_tp","appbar","main-content","search","before-appbar","sfcnt","top_nav","yDmH0d","scb","eUDTde","MAmRG","lfooter","tw-container","analytics-ddh"];}',
-    'function applyGoogle(){',
-    'googleIds().forEach(function(id){try{var el=document.getElementById(id);if(el){el.style.setProperty("background-color",T,IMP);el.style.setProperty("background-image","none",IMP);}}catch(e){}});',
-    'try{var main=document.querySelector(\'[role="main"]\');if(main){main.style.setProperty("background-color",T,IMP);main.style.setProperty("background-image","none",IMP);}}catch(e){}',
-    '}',
-    'function sweepLargeOpaqueLayers(){',
-    'var b=document.body;if(!b)return;',
-    'var sk={IMG:1,VIDEO:1,AUDIO:1,CANVAS:1,IFRAME:1,SVG:1,PICTURE:1,OBJECT:1,EMBED:1,STYLE:1,SCRIPT:1,LINK:1,META:1,NOSCRIPT:1,TEMPLATE:1,INPUT:1,TEXTAREA:1,SELECT:1,BUTTON:1,OPTION:1,LABEL:1};',
-    'var n=0,mx=6500,vh=window.innerHeight||800,vw=window.innerWidth||1200,vA=Math.max(1,vh*vw);',
-    'if(typeof NodeFilter==="undefined")return;',
-    'var w=document.createTreeWalker(b,NodeFilter.SHOW_ELEMENT,null),el;',
-    'while((el=w.nextNode())&&n<mx){n++;var t=el.tagName;if(sk[t])continue;',
-    'if(t&&t.indexOf("-")>0){var q=t.toLowerCase();if(q.slice(0,4)==="ytd-"||q.slice(0,3)==="yt-")continue;}',
-    'try{if(el.closest(\'[aria-modal="true"],[role="dialog"],dialog,[data-radix-portal],.modal,.Modal,[class*="modal_root"]\'))continue;}catch(e){}',
-    'try{',
-    'var cs=getComputedStyle(el);',
-    'if(cs.display==="none"||cs.visibility==="hidden"||(cs.position==="fixed"&&parseFloat(cs.opacity||"1")<0.04))continue;',
-    'var bg=cs.backgroundColor;if(!bg||bg==="transparent"||bg==="rgba(0, 0, 0, 0)")continue;',
-    'var a=1;if(bg.indexOf("rgba")===0){var i=bg.lastIndexOf(",");if(i>0){var tail=bg.slice(i+1,-1).trim();var pv=parseFloat(tail);if(!isNaN(pv))a=pv;}}',
-    'if(a<0.12)continue;',
-    'var r=el.getBoundingClientRect();if(r.width<24||r.height<22)continue;',
-    'var f=r.width*r.height/vA,tl=r.height>Math.min(340,vh*0.38),tb=r.width>vw*0.86&&r.height>90;',
-    'if(f<0.032&&!tl&&!tb)continue;',
-    'el.style.setProperty("background-color",T,IMP);',
-    'var bi=cs.backgroundImage;if(bi&&bi!=="none"&&bi.indexOf("url(")<0&&(bi.indexOf("gradient")>=0||bi.indexOf("linear-gradient")>=0))el.style.setProperty("background-image","none",IMP);',
-    '}catch(e2){}',
-    '}',
-    '}',
-    'function scheduleSweep(){',
-    'if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}',
-    'if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}',
-    'var go=function(){st.idle=null;st.sweepTO=null;try{sweepLargeOpaqueLayers();}catch(e){}};',
-    'if(window.requestIdleCallback)st.idle=window.requestIdleCallback(go,{timeout:950});',
-    'else st.sweepTO=setTimeout(go,200);',
-    '}',
-    'function run(){',
-    'var host=(String(location.hostname||"")).toLowerCase();',
-    'var isYt=host.indexOf("youtube.com")>=0||host==="youtu.be";',
-    'var isGo=host.indexOf("google.")>=0;',
-    'if(isYt)applyYt();',
-    'if(isGo)applyGoogle();',
-    'try{',
-    'document.documentElement.style.setProperty("background-color",T,IMP);',
-    'if(document.body){document.body.style.setProperty("background-color",T,IMP);document.body.style.setProperty("background-image","none",IMP);}',
-    '}catch(e){}',
-    'scheduleSweep();',
-    '}',
-    'run();',
-    'if(!st.mo&&document.body){',
-    'st.mo=new MutationObserver(function(){clearTimeout(st.t);st.t=setTimeout(run,155);});',
-    'st.mo.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["style","class","data-darkreader-inline-bgcolor"]});',
-    '}else{run();}',
-    '}catch(e){}',
-    '})();'
-].join('');
+const AXIS_TRANSPARENT_SITES_DOM_PATCH = `
+(function(){
+try{
+var OLD_NS="__axisTransparentV4";
+var NS="__axisTransparentV5";
+var T="transparent";
+var IMP="important";
+function ytVarNames(){return["--yt-spec-base-background","--yt-spec-general-background-a","--yt-spec-general-background-b","--yt-spec-general-background-c","--yt-spec-brand-background-solid","--yt-spec-brand-background-primary","--yt-spec-brand-background-secondary","--yt-raised-background","--yt-spec-menu-background","--yt-spec-feed-background-a","--yt-spec-feed-background-b","--yt-spec-static-background","--yt-spec-static-overlay-background-solid","--yt-spec-10-percent-layer","--yt-spec-themed-blue","--yt-spec-themed-green"];}
+function stopOld(){var st=window[OLD_NS];if(!st)return false;try{if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}}catch(e){}delete window[OLD_NS];return true;}
+function cleanupOldInline(){try{ytVarNames().forEach(function(n){var v=document.documentElement.style.getPropertyValue(n);if(v==="transparent"||v.indexOf("rgba(0,0,0,0.18)")>=0)document.documentElement.style.removeProperty(n);});var sel="html,body,#viewport,#cnt,#gsr,#main,#center_col,#rcnt,#rhs,#rhscol,#lhcol,#islsp,#islmp,#iur,#isr_m,#iry,#rso,#searchform,#tsf,#layout,#arc_tp,#appbar,#main-content,#search,#before-appbar,#sfcnt,#top_nav,#yDmH0d,#scb,#eUDTde,#MAmRG,#lfooter,#tw-container,#analytics-ddh,[role='main'],ytd-app,ytd-browse,ytd-watch-flexy,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer,[style]";document.querySelectorAll(sel).forEach(function(el){try{["background-color","background","background-image"].forEach(function(p){var v=el.style.getPropertyValue(p);var pr=el.style.getPropertyPriority(p);if(pr==="important"&&(v==="transparent"||v==="rgba(0, 0, 0, 0)"||v==="none"))el.style.removeProperty(p);});}catch(e){}});}catch(e){}}
+if(stopOld())cleanupOldInline();
+var st=window[NS]||(window[NS]={mo:null,t:0,idle:null,sweepTO:null,records:[]});
+function remember(el,prop){if(!el||!el.style)return;var key="__axisTransparentV5Props";var seen=el[key]||(el[key]={});if(seen[prop])return;seen[prop]=1;var val=el.style.getPropertyValue(prop);var priority=el.style.getPropertyPriority(prop);st.records.push({el:el,prop:prop,value:val,priority:priority,had:!!(val||priority)});}
+function setStyle(el,prop,value){try{remember(el,prop);el.style.setProperty(prop,value,IMP);}catch(e){}}
+function applyYt(){var r=document.documentElement;ytVarNames().forEach(function(n){var v=T;if(n.indexOf("overlay")>=0)v="rgba(0,0,0,0.18)";if(n.indexOf("blue")>=0||n.indexOf("green")>=0||n.indexOf("percent-layer")>=0)return;setStyle(r,n,v);});try{var app=document.querySelector("ytd-app");if(app){setStyle(app,"background",T);setStyle(app,"background-color",T);}document.querySelectorAll("ytd-browse,ytd-watch-flexy,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer").forEach(function(el){setStyle(el,"background",T);setStyle(el,"background-color",T);});}catch(e){}}
+function googleIds(){return["viewport","cnt","gsr","main","center_col","rcnt","rhs","rhscol","lhcol","islsp","islmp","iur","isr_m","iry","rso","searchform","tsf","layout","arc_tp","appbar","main-content","search","before-appbar","sfcnt","top_nav","yDmH0d","scb","eUDTde","MAmRG","lfooter","tw-container","analytics-ddh"];}
+function applyGoogle(){googleIds().forEach(function(id){try{var el=document.getElementById(id);if(el){setStyle(el,"background-color",T);setStyle(el,"background-image","none");}}catch(e){}});try{var main=document.querySelector('[role="main"]');if(main){setStyle(main,"background-color",T);setStyle(main,"background-image","none");}}catch(e){}}
+function sweepLargeOpaqueLayers(){var b=document.body;if(!b)return;var sk={IMG:1,VIDEO:1,AUDIO:1,CANVAS:1,IFRAME:1,SVG:1,PICTURE:1,OBJECT:1,EMBED:1,STYLE:1,SCRIPT:1,LINK:1,META:1,NOSCRIPT:1,TEMPLATE:1,INPUT:1,TEXTAREA:1,SELECT:1,BUTTON:1,OPTION:1,LABEL:1};var n=0,mx=6500,vh=window.innerHeight||800,vw=window.innerWidth||1200,vA=Math.max(1,vh*vw);if(typeof NodeFilter==="undefined")return;var w=document.createTreeWalker(b,NodeFilter.SHOW_ELEMENT,null),el;while((el=w.nextNode())&&n<mx){n++;var t=el.tagName;if(sk[t])continue;if(t&&t.indexOf("-")>0){var q=t.toLowerCase();if(q.slice(0,4)==="ytd-"||q.slice(0,3)==="yt-")continue;}try{if(el.closest('[aria-modal="true"],[role="dialog"],dialog,[data-radix-portal],.modal,.Modal,[class*="modal_root"]'))continue;}catch(e){}try{var cs=getComputedStyle(el);if(cs.display==="none"||cs.visibility==="hidden"||(cs.position==="fixed"&&parseFloat(cs.opacity||"1")<0.04))continue;var bg=cs.backgroundColor;if(!bg||bg==="transparent"||bg==="rgba(0, 0, 0, 0)")continue;var a=1;if(bg.indexOf("rgba")===0){var i=bg.lastIndexOf(",");if(i>0){var tail=bg.slice(i+1,-1).trim();var pv=parseFloat(tail);if(!isNaN(pv))a=pv;}}if(a<0.12)continue;var r=el.getBoundingClientRect();if(r.width<24||r.height<22)continue;var f=r.width*r.height/vA,tl=r.height>Math.min(340,vh*0.38),tb=r.width>vw*0.86&&r.height>90;if(f<0.032&&!tl&&!tb)continue;setStyle(el,"background-color",T);var bi=cs.backgroundImage;if(bi&&bi!=="none"&&bi.indexOf("url(")<0&&(bi.indexOf("gradient")>=0||bi.indexOf("linear-gradient")>=0))setStyle(el,"background-image","none");}catch(e2){}}}
+function scheduleSweep(){if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}var go=function(){st.idle=null;st.sweepTO=null;try{sweepLargeOpaqueLayers();}catch(e){}};if(window.requestIdleCallback)st.idle=window.requestIdleCallback(go,{timeout:950});else st.sweepTO=setTimeout(go,200);}
+function run(){var host=(String(location.hostname||"")).toLowerCase();var isYt=host.indexOf("youtube.com")>=0||host==="youtu.be";var isGo=host.indexOf("google.")>=0;if(isYt)applyYt();if(isGo)applyGoogle();try{setStyle(document.documentElement,"background-color",T);if(document.body){setStyle(document.body,"background-color",T);setStyle(document.body,"background-image","none");}}catch(e){}scheduleSweep();}
+run();
+if(!st.mo&&document.body){st.mo=new MutationObserver(function(){clearTimeout(st.t);st.t=setTimeout(run,155);});st.mo.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["style","class","data-darkreader-inline-bgcolor"]});}else{run();}
+}catch(e){}
+})();
+`.replace(/\s+/g, ' ').trim();
 
-const AXIS_TRANSPARENT_SITES_DOM_PATCH_CLEANUP =
-    '(function(){try{var st=window.__axisTransparentV4;if(st){if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}}delete window.__axisTransparentV4;}catch(e){}})();';
+const AXIS_TRANSPARENT_SITES_DOM_PATCH_CLEANUP = `
+(function(){
+try{
+var NS="__axisTransparentV5";
+var OLD_NS="__axisTransparentV4";
+function ytVarNames(){return["--yt-spec-base-background","--yt-spec-general-background-a","--yt-spec-general-background-b","--yt-spec-general-background-c","--yt-spec-brand-background-solid","--yt-spec-brand-background-primary","--yt-spec-brand-background-secondary","--yt-raised-background","--yt-spec-menu-background","--yt-spec-feed-background-a","--yt-spec-feed-background-b","--yt-spec-static-background","--yt-spec-static-overlay-background-solid"];}
+function stop(ns){var st=window[ns];if(!st)return false;try{if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}if(st.records){for(var i=st.records.length-1;i>=0;i--){var r=st.records[i];try{if(!r||!r.el||!r.el.style)continue;if(r.had)r.el.style.setProperty(r.prop,r.value,r.priority||"");else r.el.style.removeProperty(r.prop);if(r.el.__axisTransparentV5Props)delete r.el.__axisTransparentV5Props[r.prop];}catch(e){}}}}catch(e){}delete window[ns];return true;}
+function cleanupOldInline(){try{ytVarNames().forEach(function(n){var v=document.documentElement.style.getPropertyValue(n);if(v==="transparent"||v.indexOf("rgba(0,0,0,0.18)")>=0)document.documentElement.style.removeProperty(n);});var sel="html,body,#viewport,#cnt,#gsr,#main,#center_col,#rcnt,#rhs,#rhscol,#lhcol,#islsp,#islmp,#iur,#isr_m,#iry,#rso,#searchform,#tsf,#layout,#arc_tp,#appbar,#main-content,#search,#before-appbar,#sfcnt,#top_nav,#yDmH0d,#scb,#eUDTde,#MAmRG,#lfooter,#tw-container,#analytics-ddh,[role='main'],ytd-app,ytd-browse,ytd-watch-flexy,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer,[style]";document.querySelectorAll(sel).forEach(function(el){try{["background-color","background","background-image"].forEach(function(p){var v=el.style.getPropertyValue(p);var pr=el.style.getPropertyPriority(p);if(pr==="important"&&(v==="transparent"||v==="rgba(0, 0, 0, 0)"||v==="none"))el.style.removeProperty(p);});}catch(e){}});}catch(e){}}
+var hadV5=stop(NS);
+var hadV4=stop(OLD_NS);
+if(!hadV5&&hadV4)cleanupOldInline();
+}catch(e){}
+})();
+`.replace(/\s+/g, ' ').trim();
 
 /** Keyboard shortcut editor rows (must match settings.html SHORTCUT_ACTIONS). */
 function getShortcutEditorActions() {
@@ -177,7 +137,7 @@ function getShortcutEditorActions() {
 }
 
 /**
- * Shell chrome interpolation: Settings ▸ windowChromeLight — 0 = opaque (handled in getShellChromeStyle),
+ * Shell chrome interpolation: Settings ▸ Window transparency (`windowChromeLight`) — 0 = opaque (handled in getShellChromeStyle),
  * 50 = default blend, 100 = most light. These structs are the dense vs airy *blend endpoints* for t∈(0,1], not slider 0.
  */
 const AXIS_SHELL_CHROME_OPAQUE = {
@@ -228,6 +188,65 @@ const AXIS_SHELL_CHROME_TRANSPARENT = {
     newTabAskBlur: 12,
     newTabAskSat: 120,
 };
+
+/** Extension id from a Chrome Web Store listing URL (must match main-process `parseChromeWebStoreExtensionId`). */
+function axisParseChromeWebStoreExtensionId(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return null;
+    const compact = s.replace(/\s+/g, '');
+    const onlyId = /^([a-p]{32})$/i.exec(compact);
+    if (onlyId) return onlyId[1].toLowerCase();
+    try {
+        const u = new URL(compact.includes('://') ? compact : `https://${compact}`);
+        const host = (u.hostname || '').toLowerCase();
+        const isStore = host === 'chromewebstore.google.com' || host === 'chrome.google.com';
+        if (!isStore) return null;
+        const parts = u.pathname.split('/').filter(Boolean);
+        for (let i = parts.length - 1; i >= 0; i--) {
+            const seg = parts[i];
+            if (seg && /^[a-p]{32}$/i.test(seg)) return seg.toLowerCase();
+        }
+    } catch (_) {
+        /* ignore */
+    }
+    return null;
+}
+
+/** Mozilla add-on slug from an AMO URL or plain slug (mirrors main `parseFirefoxAmoAddonKey`). */
+function axisParseFirefoxAmoAddonKey(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return null;
+    const compact = s.replace(/\s+/g, '');
+    try {
+        const u = new URL(compact.includes('://') ? compact : `https://${compact}`);
+        const host = (u.hostname || '').replace(/^www\./i, '').toLowerCase();
+        if (host === 'addons.mozilla.org') {
+            const parts = u.pathname.split('/').filter(Boolean);
+            const ai = parts.indexOf('addon');
+            if (ai >= 0 && parts[ai + 1]) {
+                const key = decodeURIComponent(parts[ai + 1]);
+                if (key && /^[a-zA-Z0-9._-]+$/.test(key)) return key;
+            }
+        }
+    } catch (_) {
+        /* ignore */
+    }
+    if (/[:/]/i.test(compact)) return null;
+    if (/^[a-p]{32}$/i.test(compact)) return null;
+    if (/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,249}$/.test(compact)) return compact;
+    return null;
+}
+
+/** Dismiss the extension-store install bar in the guest (`token`: Chrome id or `amo:slug`). */
+function axisNotifyExtensionStoreBarDismissed(webview, token) {
+    const t = typeof token === 'string' ? token.trim() : '';
+    if (!t || !webview || typeof webview.send !== 'function') return;
+    try {
+        webview.send('axis-cws-install-succeeded', t);
+    } catch (_) {
+        /* webview may be destroyed or not ready */
+    }
+}
 
 class AxisBrowser {
     constructor() {
@@ -302,6 +321,8 @@ class AxisBrowser {
         this._ambientAudioChain = null;
         this._ambientPreset = null;
         this._shortcutCache = {};
+        /** Absolute path to `webview-preload-cws.js` (set in `init`). */
+        this._webviewCwsPreloadPath = null;
 
         this.isIncognitoWindow = (window.location.hash === '#incognito');
         
@@ -361,7 +382,10 @@ class AxisBrowser {
             urlBarDisplay: document.getElementById('url-bar-display'),
             urlBarInput: document.getElementById('url-bar-input'),
             urlBarSecurity: document.getElementById('url-bar-security'),
+            urlBarAdblock: document.getElementById('url-bar-adblock'),
             urlBarCopy: document.getElementById('url-bar-copy'),
+            urlBarCwsInstall: document.getElementById('url-bar-cws-install'),
+            urlBarExtensions: document.getElementById('url-bar-extensions'),
             urlBarChat: document.getElementById('url-bar-chat')
         };
     }
@@ -369,8 +393,21 @@ class AxisBrowser {
     async init() {
         // Load settings + shortcut cache in parallel (faster first interaction)
         await Promise.all([this.loadSettings(), this.refreshShortcutCache()]);
+        try {
+            this._webviewCwsPreloadPath = (await window.electronAPI.getWebviewCwsPreloadPath?.()) || null;
+        } catch (_) {
+            this._webviewCwsPreloadPath = null;
+        }
+        if (this._webviewCwsPreloadPath && this.elements?.webview) {
+            try {
+                this.elements.webview.setAttribute('preload', this._webviewCwsPreloadPath);
+            } catch (_) {
+                /* ignore */
+            }
+        }
         this._lastJavascriptEnabled = this.settings?.javascriptEnabled !== false;
         this.syncTransparentSitesUi();
+        this.syncAdBlockerUrlBarState();
 
         // Set `data-ui-theme` before any theme apply so CSS fallback rules for the light
         // shell land on the first paint (incognito stays dark regardless).
@@ -436,7 +473,8 @@ class AxisBrowser {
         this.setupTabSearch();
         this.setupLoadingScreen();
         this.setupSidebarResize();
-        
+        this.setupWebviewGuestResizeSync();
+
         // Load pinned tabs and tab groups (skip in incognito – start fresh)
         if (!this.isIncognitoWindow) {
             await this.loadPinnedTabs();
@@ -692,11 +730,44 @@ class AxisBrowser {
      * Avoids transparent pages briefly compositing over another tab’s pixels (ordering bugs, missed updates).
      */
     _prepareWebviewsForTabSwitch(targetTabId) {
-        if (targetTabId == null) return;
+        const tid = this._normalizeTabMapKey(targetTabId);
+        if (tid == null) return;
         this.tabs.forEach((tab, id) => {
-            if (!tab?.webview || id === targetTabId) return;
+            if (!tab?.webview || id === tid) return;
             this._styleInactiveTabWebview(tab.webview);
         });
+    }
+
+    /**
+     * Remove guest webviews that no longer have a tab row (e.g. close raced a stale Map key, or DOM drift).
+     * Prevents “sidebar updated but last page stays on screen”.
+     */
+    _purgeStaleWebviewsInContainer() {
+        const container = document.getElementById('webviews-container');
+        if (!container) return;
+        for (const wv of Array.from(container.querySelectorAll('webview'))) {
+            const nid = this._normalizeTabMapKey(wv.dataset.tabId);
+            if (nid == null || !this.tabs.has(nid)) {
+                try {
+                    this.cleanupWebviewListeners(wv);
+                    try {
+                        wv.src = 'about:blank';
+                    } catch (_) {}
+                } catch (_) {}
+                try {
+                    wv.remove();
+                } catch (_) {}
+            }
+        }
+    }
+
+    /** After any close, drop orphan guests and fix `currentTab` if it points at a removed id. */
+    _syncAfterTabClose() {
+        this._purgeStaleWebviewsInContainer();
+        const ct = this._normalizeTabMapKey(this.currentTab);
+        if (ct != null && !this.tabs.has(ct)) {
+            this._applyFocusAfterTabClose(null);
+        }
     }
 
     _scheduleTransparentSitesTouchForBackgroundWebview(webview) {
@@ -1102,7 +1173,29 @@ class AxisBrowser {
         });
 
         window.electronAPI?.onAxisDownloadActivity?.((payload) => {
-            document.body.classList.toggle('axis-download-activity', !!payload?.active);
+            const active = !!payload?.active;
+            document.body.classList.toggle('axis-download-activity', active);
+            const dlBtn = document.getElementById('downloads-btn-footer');
+            if (dlBtn) {
+                dlBtn.setAttribute('aria-busy', active ? 'true' : 'false');
+                if (!active) {
+                    document.body.classList.remove('axis-download-indeterminate');
+                    dlBtn.style.removeProperty('--axis-dl-pct');
+                    dlBtn.removeAttribute('title');
+                    dlBtn.setAttribute('title', 'Downloads');
+                } else {
+                    const p = payload.progress;
+                    const hasPct = typeof p === 'number' && Number.isFinite(p);
+                    if (hasPct) {
+                        document.body.classList.remove('axis-download-indeterminate');
+                        dlBtn.style.setProperty('--axis-dl-pct', String(Math.max(0, Math.min(1, p))));
+                    } else {
+                        document.body.classList.add('axis-download-indeterminate');
+                        dlBtn.style.removeProperty('--axis-dl-pct');
+                    }
+                    dlBtn.setAttribute('title', 'Downloading…');
+                }
+            }
         });
         
         // Clear history button
@@ -2002,9 +2095,29 @@ class AxisBrowser {
                 this.applyAppThemeToUrlBar();
             }
             this.applyAmbientFromSettings();
+            this.syncAdBlockerUrlBarState();
+            const emp = document.getElementById('extensions-menu-panel');
+            if (emp && !emp.classList.contains('hidden')) {
+                void this.populateExtensionsMenu();
+            }
         } catch (e) {
             console.error('applySettingsUpdateFromMain failed', e);
         }
+    }
+
+    /** Store default: on unless explicitly false. */
+    isAdBlockerEnabled() {
+        return this.settings?.adBlockerEnabled !== false;
+    }
+
+    syncAdBlockerUrlBarState() {
+        const btn = this.elements?.urlBarAdblock;
+        if (!btn) return;
+        const on = this.isAdBlockerEnabled();
+        btn.classList.toggle('url-bar-adblock-on', on);
+        btn.classList.toggle('url-bar-adblock-off', !on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.title = on ? 'Ad blocker on — click to disable' : 'Ad blocker off — click to enable';
     }
     
     // Copy the current tab's URL to clipboard
@@ -2254,7 +2367,6 @@ class AxisBrowser {
         
         webview.__eventHandlers = {};
         
-        webview.style.willChange = 'transform';
         webview.style.transform = 'translateZ(0)';
         webview.style.backfaceVisibility = 'hidden';
         
@@ -2708,8 +2820,46 @@ class AxisBrowser {
         webview.addEventListener('context-menu', contextMenuHandler);
         
         const ipcMessageHandler = (event) => {
-            if (!isActiveTab()) return;
             const { channel, args } = event;
+            if (channel === 'axis-cws-add-to-chrome') {
+                if (!isActiveTab()) return;
+                const id = args && args[0];
+                if (!id || typeof id !== 'string') return;
+                void (async () => {
+                    try {
+                        await window.electronAPI.installExtensionFromWebStore(id);
+                        axisNotifyExtensionStoreBarDismissed(webview, id.trim().toLowerCase());
+                        this.showNotification('Extension installed', 'success');
+                        this.updateUrlBar(webview);
+                    } catch (e) {
+                        this.showNotification(
+                            e && e.message ? e.message : 'Could not install this extension.',
+                            'error'
+                        );
+                    }
+                })();
+                return;
+            }
+            if (channel === 'axis-amo-install-in-axis') {
+                if (!isActiveTab()) return;
+                const slug = args && args[0];
+                if (!slug || typeof slug !== 'string') return;
+                void (async () => {
+                    try {
+                        await window.electronAPI.installExtensionFromWebStore(slug.trim());
+                        axisNotifyExtensionStoreBarDismissed(webview, `amo:${slug.trim().toLowerCase()}`);
+                        this.showNotification('Extension installed', 'success');
+                        this.updateUrlBar(webview);
+                    } catch (e) {
+                        this.showNotification(
+                            e && e.message ? e.message : 'Could not install this extension.',
+                            'error'
+                        );
+                    }
+                })();
+                return;
+            }
+            if (!isActiveTab()) return;
             if (channel === 'settings-message') {
                 this.onEmbeddedMessage({ data: args[0] });
             }
@@ -3906,7 +4056,7 @@ class AxisBrowser {
     // Refresh popup themes when they're opened
     refreshPopupThemes() {
         // Reapply theme to all popup elements
-        const popupElements = document.querySelectorAll('.downloads-panel, .settings-panel, .nav-menu, .context-menu, .quit-modal-card');
+        const popupElements = document.querySelectorAll('.downloads-panel, .extensions-menu-panel, .settings-panel, .nav-menu, .context-menu, .quit-modal-card');
         popupElements.forEach(popup => {
             if (!popup.classList.contains('hidden')) {
                 // Force re-theme visible popups
@@ -3960,6 +4110,13 @@ class AxisBrowser {
         webview.dataset.tabId = String(tabId);
         webview.setAttribute('allowpopups', '');
         webview.setAttribute('webpreferences', this.getTabWebpreferencesString());
+        if (this._webviewCwsPreloadPath) {
+            try {
+                webview.setAttribute('preload', this._webviewCwsPreloadPath);
+            } catch (_) {
+                /* ignore */
+            }
+        }
         webview.setAttribute('partition', this.isIncognitoWindow ? 'incognito' : 'persist:main');
         // Let Electron use its real Chromium version in the UA string;
         // hardcoding an old Chrome version can cause sites to refuse loading.
@@ -3972,7 +4129,6 @@ class AxisBrowser {
             bottom: 0;
             width: 100%;
             height: 100%;
-            will-change: transform;
             transform: translateZ(0);
             backface-visibility: hidden;
             opacity: 0;
@@ -3984,6 +4140,83 @@ class AxisBrowser {
         container.appendChild(webview);
         this.setupWebviewEventListeners(webview, tabId);
         return webview;
+    }
+
+    /**
+     * Cheap layout poke so Electron’s guest embedding matches settled host bounds (post-resize /
+     * tab switch only — not during active edge drag; we avoid that workload entirely there).
+     */
+    _nudgeWebviewGuestLayout() {
+        const container = document.getElementById('webviews-container');
+        if (container) {
+            try {
+                void container.offsetHeight;
+                void container.getBoundingClientRect();
+            } catch (_) {}
+        }
+        const active = this.getActiveWebview();
+        if (active) {
+            try {
+                void active.offsetWidth;
+                void active.offsetHeight;
+                void active.getBoundingClientRect();
+            } catch (_) {}
+        }
+        const legacy = document.getElementById('webview');
+        if (legacy && legacy !== active) {
+            try {
+                void legacy.getBoundingClientRect();
+            } catch (_) {}
+        }
+    }
+
+    /** Dispatch window `resize` inside the active guest for pages that listen on `window`. */
+    _syncGuestWindowResizeEvent() {
+        const wv = this.getActiveWebview();
+        if (!wv || typeof wv.executeJavaScript !== 'function') return;
+        try {
+            wv.executeJavaScript(
+                "(function(){try{if(typeof window!==\"undefined\")window.dispatchEvent(new Event(\"resize\"));}catch(e){}})();",
+                true
+            ).catch(() => {});
+        } catch (_) {}
+    }
+
+    /**
+     * Guest `<webview>` sizing is handled by Chromium (`autosize`). We only poke layout + fire
+     * `resize` in the page **after** resizing settles — doing it during every frame of a window
+     * drag was the main source of jank (forced layout + IPC into the guest repeatedly).
+     *
+     * `ResizeObserver` on `#webviews-container` covers **sidebar width** drags (no `window` resize),
+     * debounced to the same idle handler as `window.resize`.
+     */
+    setupWebviewGuestResizeSync() {
+        const IDLE_MS = 120;
+        /** @type {ReturnType<typeof setTimeout> | null} */
+        let idleFlushTimer = null;
+
+        const deferredGuestSync = () => {
+            this._nudgeWebviewGuestLayout();
+            this._syncGuestWindowResizeEvent();
+        };
+
+        const scheduleIdleFlush = () => {
+            if (idleFlushTimer != null) clearTimeout(idleFlushTimer);
+            idleFlushTimer = setTimeout(() => {
+                idleFlushTimer = null;
+                deferredGuestSync();
+            }, IDLE_MS);
+        };
+
+        const container = document.getElementById('webviews-container');
+        try {
+            if (typeof ResizeObserver !== 'undefined' && container) {
+                const ro = new ResizeObserver(() => scheduleIdleFlush());
+                ro.observe(container);
+            }
+        } catch (_) {}
+        window.addEventListener('resize', scheduleIdleFlush, { passive: true });
+        queueMicrotask(deferredGuestSync);
     }
 
     getActiveWebview() {
@@ -4265,11 +4498,24 @@ class AxisBrowser {
         });
     }
 
-    switchToTab(tabId) {
-        if (!tabId || !this.tabs.has(tabId)) {
-            // If trying to switch to invalid tab and we have no current tab
+    switchToTab(rawTabId) {
+        const tabId = this._normalizeTabMapKey(rawTabId);
+        if (tabId == null || !this.tabs.has(tabId)) {
             if (this.tabs.size === 0) {
+                this.currentTab = null;
+                this.resetToBlackTheme();
+                this.updateNewTabPageVisibility(false);
+                this.updateEmptyState();
+                this.updateUrlBar();
+                this.updateNavigationButtons();
+                this.syncAIChatPanelForCurrentTab();
+            } else {
+                const fallback = Array.from(this.tabs.keys()).find((id) => this._canFocusTabAsActive(id));
+                if (fallback != null) {
+                    this.switchToTab(fallback);
+                } else {
                     this.currentTab = null;
+                    this._purgeStaleWebviewsInContainer();
                     this.resetToBlackTheme();
                     this.updateNewTabPageVisibility(false);
                     this.updateEmptyState();
@@ -4277,14 +4523,17 @@ class AxisBrowser {
                     this.updateNavigationButtons();
                     this.syncAIChatPanelForCurrentTab();
                 }
+            }
             return;
         }
 
+        const prevCur = this._normalizeTabMapKey(this.currentTab);
+
         // Save new-tab-page state for the tab we're leaving (so each new tab keeps its own content)
-        if (this.currentTab && this.currentTab !== tabId && this.tabs.has(this.currentTab)) {
-            const prevTab = this.tabs.get(this.currentTab);
+        if (prevCur != null && prevCur !== tabId && this.tabs.has(prevCur)) {
+            const prevTab = this.tabs.get(prevCur);
             if (prevTab && prevTab.url === this.NEWTAB_URL) {
-                this.saveNewTabPageStateToTab(this.currentTab);
+                this.saveNewTabPageStateToTab(prevCur);
             }
         }
 
@@ -4292,8 +4541,8 @@ class AxisBrowser {
         const activeTab = document.querySelector(`[data-tab-id="${tabId}"]`);
         const tab = this.tabs.get(tabId);
 
-        const prevTabId = this.currentTab;
-        if (prevTabId && prevTabId !== tabId) {
+        const prevTabId = prevCur;
+        if (prevTabId != null && prevTabId !== tabId) {
             const prevTab = this.tabs.get(prevTabId);
             if (prevTab?.webview) {
                 this.checkAndShowPIP(prevTabId, prevTab.webview);
@@ -4420,6 +4669,15 @@ class AxisBrowser {
                 }
                 
                 // Now make webview visible so Chromium paints the content
+                webview.classList.remove('inactive');
+                // Empty-state used to set `opacity: 0.3 !important` on every webview; clear it so
+                // the now-active guest paints fully when we hand focus back from no-tabs to a tab.
+                try {
+                    webview.style.removeProperty('opacity');
+                    webview.style.removeProperty('visibility');
+                    webview.style.removeProperty('pointer-events');
+                    webview.style.removeProperty('background');
+                } catch (_) {}
                 if (tab.url === this.NEWTAB_URL) {
                     webview.style.opacity = '1';
                     webview.style.visibility = 'visible';
@@ -4431,9 +4689,7 @@ class AxisBrowser {
                     webview.style.visibility = 'visible';
                     webview.style.pointerEvents = 'auto';
                     webview.style.zIndex = '2';
-                    webview.classList.remove('inactive');
-                    webview.style.willChange = 'transform'; // Only active webview keeps will-change (saves RAM)
-                    this.updateNewTabPageVisibility(false);
+                    webview.style.zIndex = '2';
                 }
                 
                 this.elements.webview = webview;
@@ -4445,6 +4701,8 @@ class AxisBrowser {
         
         // DEFER non-critical updates to not block tab switching
         requestAnimationFrame(() => {
+            this._nudgeWebviewGuestLayout();
+            this._syncGuestWindowResizeEvent();
             if (activeTab) {
                 this.updateTabFavicon(tabId, activeTab);
             }
@@ -4930,8 +5188,14 @@ class AxisBrowser {
         if (!emptyState) return;
 
         const emptyContent = document.getElementById('empty-state-empty');
-        
-        if (this.tabs.size === 0 || this.currentTab === null) {
+        // Only the real zero-tab window gets the dimmed placeholder webviews. Using
+        // `currentTab === null` here was wrong: during focus handoff (or edge cases with
+        // tabs still in the map) we poisoned every guest with `opacity: 0.3 !important`
+        // + `inactive`, which sticks under non-!important clears and triggers the
+        // heavy `webview::before` blur overlay — "new tab looks blurred".
+        const trulyNoTabs = this.tabs.size === 0;
+
+        if (trulyNoTabs) {
             document.body.classList.add('chrome-no-tabs');
             this.updateNewTabPageVisibility(false);
             emptyState.classList.remove('hidden');
@@ -4979,11 +5243,12 @@ class AxisBrowser {
                 webviewContainer.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
             }
             
-            /* Dimmed glass frame on placeholder webview(s) — same for transparent sites (no background tabs to leak) */
+            /* No tabs: hide every guest fully — webview area must paint nothing. */
             const webviews = document.querySelectorAll('webview');
             webviews.forEach(wv => {
-                wv.style.setProperty('opacity', '0.3', 'important');
-                wv.style.setProperty('visibility', 'visible', 'important');
+                wv.style.setProperty('opacity', '0', 'important');
+                wv.style.setProperty('visibility', 'hidden', 'important');
+                wv.style.setProperty('pointer-events', 'none', 'important');
                 wv.style.setProperty('background', 'transparent', 'important');
                 wv.classList.add('inactive');
             });
@@ -5056,7 +5321,9 @@ class AxisBrowser {
     }
 
     /** Pinned empty slots are not a valid focus target; unpinned rows always are. */
-    _canFocusTabAsActive(tabId) {
+    _canFocusTabAsActive(rawTabId) {
+        const tabId = this._normalizeTabMapKey(rawTabId);
+        if (tabId == null) return false;
         const t = this.tabs.get(tabId);
         if (!t) return false;
         if (!t.pinned) return true;
@@ -5070,16 +5337,18 @@ class AxisBrowser {
      * using flat DOM order for sidebar + tab groups.
      */
     _findNeighborTabToActivate(closedTabId) {
+        const closed = this._normalizeTabMapKey(closedTabId);
+        if (closed == null) return null;
         const ids = Array.from(document.querySelectorAll('.tab'))
-            .map((el) => parseInt(el.dataset.tabId, 10))
-            .filter((n) => !Number.isNaN(n));
-        const i = ids.indexOf(closedTabId);
+            .map((el) => this._normalizeTabMapKey(el.dataset.tabId))
+            .filter((n) => n != null);
+        const i = ids.indexOf(closed);
         if (i < 0) return null;
         for (let k = i + 1; k < ids.length; k++) {
-            if (ids[k] !== closedTabId && this._canFocusTabAsActive(ids[k])) return ids[k];
+            if (ids[k] !== closed && this._canFocusTabAsActive(ids[k])) return ids[k];
         }
         for (let k = i - 1; k >= 0; k--) {
-            if (ids[k] !== closedTabId && this._canFocusTabAsActive(ids[k])) return ids[k];
+            if (ids[k] !== closed && this._canFocusTabAsActive(ids[k])) return ids[k];
         }
         return null;
     }
@@ -5089,34 +5358,65 @@ class AxisBrowser {
      * then first remaining pinned with an open webview, else empty state.
      */
     _applyFocusAfterTabClose(neighborPref) {
-        this.currentTab = null;
-        if (neighborPref != null && this.tabs.has(neighborPref) && this._canFocusTabAsActive(neighborPref)) {
-            this.switchToTab(neighborPref);
+        const tryFocus = (raw) => {
+            const id = this._normalizeTabMapKey(raw);
+            if (id == null || !this.tabs.has(id) || !this._canFocusTabAsActive(id)) return false;
+            this.switchToTab(id);
+            return true;
+        };
+
+        if (tryFocus(neighborPref)) {
+            this._purgeStaleWebviewsInContainer();
             return;
         }
+
         const remainingUnpinned = Array.from(this.tabs.keys()).filter((id) => {
             const t = this.tabs.get(id);
             return t && !t.pinned;
         });
-        if (remainingUnpinned.length > 0 && this.tabs.has(remainingUnpinned[remainingUnpinned.length - 1])) {
-            this.switchToTab(remainingUnpinned[remainingUnpinned.length - 1]);
-            return;
+        for (let i = remainingUnpinned.length - 1; i >= 0; i--) {
+            if (tryFocus(remainingUnpinned[i])) {
+                this._purgeStaleWebviewsInContainer();
+                return;
+            }
         }
         const remainingPinnedActive = Array.from(this.tabs.keys()).filter((id) => {
             const t = this.tabs.get(id);
             return t && t.pinned && t.webview;
         });
-        if (remainingPinnedActive.length > 0 && this.tabs.has(remainingPinnedActive[0])) {
-            this.switchToTab(remainingPinnedActive[0]);
+        if (remainingPinnedActive.length > 0 && tryFocus(remainingPinnedActive[0])) {
+            this._purgeStaleWebviewsInContainer();
             return;
         }
+
+        const domIds = Array.from(document.querySelectorAll('.tab'))
+            .map((el) => this._normalizeTabMapKey(el.dataset.tabId))
+            .filter((id) => id != null);
+        for (let i = domIds.length - 1; i >= 0; i--) {
+            if (tryFocus(domIds[i])) {
+                this._purgeStaleWebviewsInContainer();
+                return;
+            }
+        }
+
+        this.currentTab = null;
+        this._purgeStaleWebviewsInContainer();
         const webview = document.getElementById('webview');
         if (webview) webview.src = 'about:blank';
         this.resetToBlackTheme();
+        this.updateNewTabPageVisibility(false);
         this.updateEmptyState();
         this.updateUrlBar();
         this.updateNavigationButtons();
         this.syncAIChatPanelForCurrentTab();
+    }
+
+    /** Canonical numeric id for `this.tabs` Map keys (avoids string/number shadow entries). */
+    _normalizeTabMapKey(tabId) {
+        if (tabId == null || tabId === '') return null;
+        if (typeof tabId === 'number' && Number.isFinite(tabId)) return tabId;
+        const n = parseInt(String(tabId), 10);
+        return Number.isFinite(n) ? n : null;
     }
 
     /** Normalize tab id for Map keys (dataset uses strings; internal ids are numbers). */
@@ -5145,13 +5445,17 @@ class AxisBrowser {
         }
     }
 
-    closeTab(tabId) {
+    closeTab(rawCloseId) {
+        const tid = this._normalizeTabMapKey(rawCloseId);
+        if (tid == null) return;
+
         // Save pinned tabs before closing (in case it was pinned)
         this.savePinnedTabs();
-        const tidChat = this._normalizeTabIdForChatState(tabId);
+        const tidChat = this._normalizeTabIdForChatState(tid);
         if (tidChat != null) this.aiChatPanelOpenByTabId.delete(tidChat);
-        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
-        const tab = this.tabs.get(tabId);
+        const tabElement = document.querySelector(`[data-tab-id="${tid}"]`);
+        const tab = this.tabs.get(tid);
+        const cur = this._normalizeTabMapKey(this.currentTab);
         
         // Check if this is a pinned tab
         const isPinned = tab && tab.pinned;
@@ -5162,19 +5466,19 @@ class AxisBrowser {
             const isInactive = !tab.webview || tabElement?.classList.contains('closed');
             
             if (isInactive) {
-                const closingCurrent = this.currentTab === tabId;
-                const neighborPref = closingCurrent ? this._findNeighborTabToActivate(tabId) : null;
+                const closingCurrent = cur === tid;
+                const neighborPref = closingCurrent ? this._findNeighborTabToActivate(tid) : null;
                 // Completely remove inactive pinned tabs
                 // Remove from tab groups first (sync may move the tab element)
                 this.tabGroups.forEach((tabGroup, tabGroupId) => {
-                    if (tabGroup.tabIds.includes(tabId)) {
-                        this.removeTabFromTabGroup(tabId, tabGroupId);
+                    if (tabGroup.tabIds.includes(tid)) {
+                        this.removeTabFromTabGroup(tid, tabGroupId);
                     }
                 });
                 // Re-query in case sync moved the element
-                const elToRemove = document.querySelector(`[data-tab-id="${tabId}"]`);
+                const elToRemove = document.querySelector(`[data-tab-id="${tid}"]`);
                 if (elToRemove) elToRemove.remove();
-                this.tabs.delete(tabId);
+                this.tabs.delete(tid);
                 
                 if (closingCurrent) {
                     this._applyFocusAfterTabClose(neighborPref);
@@ -5184,13 +5488,14 @@ class AxisBrowser {
                 this.savePinnedTabs();
                 this.updatePinnedSeparatorVisibility();
                 this.updateEmptyState();
+                this._syncAfterTabClose();
                 this.applyAmbientFromSettings();
                 return;
             }
             
             // Active pinned tab - just close the webview but keep the tab
-            const closingPinnedActive = this.currentTab === tabId;
-            const neighborPinnedPref = closingPinnedActive ? this._findNeighborTabToActivate(tabId) : null;
+            const closingPinnedActive = cur === tid;
+            const neighborPinnedPref = closingPinnedActive ? this._findNeighborTabToActivate(tid) : null;
             // Remove the tab's webview
             if (tab && tab.webview) {
                 try {
@@ -5201,7 +5506,7 @@ class AxisBrowser {
                         tab.webview.parentNode.removeChild(tab.webview);
                     }
                     tab.webview = null;
-                    this.tabs.set(tabId, tab);
+                    this.tabs.set(tid, tab);
                 } catch (e) {
                     console.error('Error removing webview:', e);
                 }
@@ -5211,29 +5516,30 @@ class AxisBrowser {
                 tabElement.classList.remove('active');
             }
             
-            this.updatePinnedTabClosedState(tabId);
+            this.updatePinnedTabClosedState(tid);
             
             if (closingPinnedActive) {
                 this._applyFocusAfterTabClose(neighborPinnedPref);
             }
             this.savePinnedTabs();
             this.updatePinnedSeparatorVisibility();
+            this._syncAfterTabClose();
             this.applyAmbientFromSettings();
             return;
         }
         
         // For non-pinned tabs, proceed with normal close behavior
         const tabGroupIdForUndo = tab && tab.tabGroupId;
-        const closingUnpinnedCurrent = this.currentTab === tabId;
-        const neighborUnpinnedPref = closingUnpinnedCurrent ? this._findNeighborTabToActivate(tabId) : null;
+        const closingUnpinnedCurrent = cur === tid;
+        const neighborUnpinnedPref = closingUnpinnedCurrent ? this._findNeighborTabToActivate(tid) : null;
         // Remove from tab group first (without recording undo) so group state stays consistent
         if (tab && tab.tabGroupId) {
-            this.removeTabFromTabGroup(tabId, tab.tabGroupId, true);
+            this.removeTabFromTabGroup(tid, tab.tabGroupId, true);
         }
         // Store closed tab for recovery (only if it's not a new tab)
         if (tab && tab.url && tab.url !== 'about:blank') {
             this.closedTabs.unshift({
-                id: tabId,
+                id: tid,
                 title: tab.title || 'Untitled',
                 url: tab.url,
                 customTitle: tab.customTitle,
@@ -5274,11 +5580,14 @@ class AxisBrowser {
         }
 
         // Delete the tab FIRST to get accurate remaining tabs count
-        this.tabs.delete(tabId);
+        this.tabs.delete(tid);
         
         if (closingUnpinnedCurrent) {
             this._applyFocusAfterTabClose(neighborUnpinnedPref);
+        } else if (cur != null && this.tabs.has(cur)) {
+            this._prepareWebviewsForTabSwitch(cur);
         }
+        this._syncAfterTabClose();
         this.applyAmbientFromSettings();
     }
 
@@ -5429,6 +5738,12 @@ class AxisBrowser {
 
             // Ensure the webview is fully interactive for real pages
             if (!isNewTabUrl) {
+                webview.classList.remove('inactive');
+                try {
+                    webview.style.removeProperty('opacity');
+                    webview.style.removeProperty('visibility');
+                    webview.style.removeProperty('background');
+                } catch (_) {}
                 webview.style.opacity = '1';
                 webview.style.visibility = 'visible';
                 webview.style.pointerEvents = 'auto';
@@ -8361,6 +8676,8 @@ class AxisBrowser {
         const downloadsPanel = document.getElementById('downloads-panel');
         const securityPanel = document.getElementById('security-panel');
         const backdrop = document.getElementById('modal-backdrop');
+
+        this.closeExtensionsMenu();
         
         // Close other panels with animation
         if (!settingsPanel.classList.contains('hidden')) {
@@ -9651,16 +9968,24 @@ class AxisBrowser {
             }
         });
 
-        // Close downloads popup on outside mousedown (capture: sidebar + web content; <webview> does not bubble)
+        // Close URL bar popups on outside mousedown (capture; <webview> does not bubble to document)
         document.addEventListener(
             'mousedown',
             (e) => {
                 const popup = document.getElementById('downloads-popup');
-                const btn = this.elements?.downloadsBtnFooter;
-                if (!popup || popup.classList.contains('hidden')) return;
-                if (popup.contains(e.target)) return;
-                if (btn && btn.contains(e.target)) return;
-                this.hideDownloadsPopup();
+                const dlBtn = this.elements?.downloadsBtnFooter;
+                if (popup && !popup.classList.contains('hidden')) {
+                    if (!popup.contains(e.target) && !(dlBtn && dlBtn.contains(e.target))) {
+                        this.hideDownloadsPopup();
+                    }
+                }
+                const extPanel = document.getElementById('extensions-menu-panel');
+                const extBtn = document.getElementById('url-bar-extensions');
+                if (extPanel && !extPanel.classList.contains('hidden')) {
+                    if (!extPanel.contains(e.target) && !(extBtn && extBtn.contains(e.target))) {
+                        this.closeExtensionsMenu();
+                    }
+                }
             },
             true
         );
@@ -12804,6 +13129,8 @@ class AxisBrowser {
             return;
         }
 
+        this.closeExtensionsMenu();
+
         // Load recent files from system Downloads folder
         let downloads = [];
         try {
@@ -13048,6 +13375,8 @@ class AxisBrowser {
         const settingsPanel = document.getElementById('settings-panel');
         const securityPanel = document.getElementById('security-panel');
         const backdrop = document.getElementById('modal-backdrop');
+
+        this.closeExtensionsMenu();
         
         // Mark as explicitly opened
         this.libraryExplicitlyOpened = downloadsPanel.classList.contains('hidden');
@@ -13089,6 +13418,172 @@ class AxisBrowser {
             // Use consistent close animation
             this.closePanelWithAnimation(downloadsPanel);
             this.libraryExplicitlyOpened = false;
+        }
+    }
+
+    positionExtensionsMenu() {
+        const panel = document.getElementById('extensions-menu-panel');
+        const btn = document.getElementById('url-bar-extensions');
+        if (!panel || !btn) return;
+        const rect = btn.getBoundingClientRect();
+        const margin = 8;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+        const popupWidth = Math.min(340, viewportWidth - margin * 2);
+        panel.style.width = `${popupWidth}px`;
+        let left = rect.left;
+        if (left + popupWidth + margin > viewportWidth) {
+            left = viewportWidth - popupWidth - margin;
+        }
+        if (left < margin) left = margin;
+        panel.style.left = `${left}px`;
+        panel.style.top = `${rect.bottom + margin}px`;
+        panel.style.right = 'auto';
+    }
+
+    closeExtensionsMenu() {
+        const panel = document.getElementById('extensions-menu-panel');
+        const backdrop = document.getElementById('extensions-menu-backdrop');
+        if (backdrop) {
+            backdrop.classList.add('hidden');
+            backdrop.setAttribute('aria-hidden', 'true');
+        }
+        document.body.classList.remove('extensions-menu-open');
+        if (panel) panel.classList.add('hidden');
+    }
+
+    async toggleExtensionsMenu() {
+        const panel = document.getElementById('extensions-menu-panel');
+        if (!panel) return;
+        if (!panel.classList.contains('hidden')) {
+            this.closeExtensionsMenu();
+            return;
+        }
+
+        const dp = document.getElementById('downloads-popup');
+        if (dp && !dp.classList.contains('hidden')) {
+            this.hideDownloadsPopup();
+        }
+
+        const settingsPanel = document.getElementById('settings-panel');
+        const downloadsPanel = document.getElementById('downloads-panel');
+        const securityPanel = document.getElementById('security-panel');
+        const notesPanel = document.getElementById('notes-panel');
+        const backdrop = document.getElementById('modal-backdrop');
+
+        if (settingsPanel && !settingsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(settingsPanel);
+        }
+        if (downloadsPanel && !downloadsPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(downloadsPanel);
+        }
+        if (securityPanel && !securityPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(securityPanel);
+        }
+        if (notesPanel && !notesPanel.classList.contains('hidden')) {
+            this.closePanelWithAnimation(notesPanel);
+        }
+        if (backdrop && !backdrop.classList.contains('hidden')) {
+            backdrop.classList.add('hidden');
+            backdrop.style.opacity = '';
+            backdrop.style.transition = '';
+        }
+
+        await this.populateExtensionsMenu();
+        this.positionExtensionsMenu();
+        const extBackdrop = document.getElementById('extensions-menu-backdrop');
+        if (extBackdrop) {
+            extBackdrop.classList.remove('hidden');
+            extBackdrop.setAttribute('aria-hidden', 'false');
+        }
+        document.body.classList.add('extensions-menu-open');
+        panel.classList.remove('hidden');
+    }
+
+    async populateExtensionsMenu() {
+        const list = document.getElementById('extensions-menu-list');
+        if (!list) return;
+        let exts = [];
+        try {
+            exts = await window.electronAPI.getExtensions();
+        } catch (_) {
+            list.innerHTML = `
+                <div class="extensions-menu-empty">
+                    <i class="fas fa-exclamation-circle" aria-hidden="true"></i>
+                    <p>Could not load extensions.</p>
+                </div>`;
+            return;
+        }
+        if (!exts.length) {
+            list.innerHTML = `
+                <div class="extensions-menu-empty">
+                    <i class="fas fa-puzzle-piece" aria-hidden="true"></i>
+                    <p>No extensions installed</p>
+                    <p>Use Manage extensions to add some.</p>
+                </div>`;
+            return;
+        }
+        list.innerHTML = '';
+        const browser = this;
+        for (const ext of exts) {
+            const row = document.createElement('div');
+            const canOpen =
+                ext.enabled !== false &&
+                ext.loaded &&
+                (ext.popupUrl || ext.optionsUrl);
+            row.className = `extensions-menu-item${canOpen ? '' : ' extensions-menu-item-disabled'}`;
+            const initial = (ext.name || 'E').trim().charAt(0).toUpperCase();
+            const iconHtml = ext.iconUrl
+                ? `<img class="extensions-menu-icon" src="${browser.escapeHtml(ext.iconUrl)}" alt="">`
+                : `<div class="extensions-menu-icon extensions-menu-icon-fallback" aria-hidden="true">${browser.escapeHtml(initial)}</div>`;
+            let meta = '';
+            if (ext.enabled === false) meta = 'Off';
+            else if (!ext.loaded) meta = ext.error ? 'Not loaded' : 'Loading…';
+            else if (ext.popupUrl) meta = 'Click to open popup';
+            else if (ext.optionsUrl) meta = 'Click to open options';
+            else meta = 'No popup or options page';
+            row.innerHTML = `
+                ${iconHtml}
+                <div class="extensions-menu-body">
+                    <div class="extensions-menu-name">${browser.escapeHtml(ext.name || 'Extension')}</div>
+                    <div class="extensions-menu-meta">${browser.escapeHtml(meta)}</div>
+                </div>
+                <button type="button" class="extensions-menu-remove" title="Remove extension" aria-label="Remove extension">
+                    <i class="fas fa-trash-alt" aria-hidden="true"></i>
+                </button>
+            `;
+            const removeBtn = row.querySelector('.extensions-menu-remove');
+            removeBtn.addEventListener('click', async (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (!confirm(`Remove ${ext.name || 'this extension'}?`)) return;
+                try {
+                    await window.electronAPI.removeExtension(ext.id);
+                    await browser.populateExtensionsMenu();
+                    browser.showNotification?.('Extension removed', 'success');
+                } catch (err) {
+                    browser.showNotification?.(
+                        err && err.message ? err.message : 'Could not remove extension.',
+                        'error'
+                    );
+                }
+            });
+            row.addEventListener('click', async () => {
+                if (!canOpen) return;
+                try {
+                    if (ext.popupUrl) {
+                        await window.electronAPI.openExtensionPopup(ext.id);
+                    } else if (ext.optionsUrl) {
+                        await window.electronAPI.openExtensionOptions(ext.id);
+                    }
+                    browser.closeExtensionsMenu();
+                } catch (err) {
+                    browser.showNotification?.(
+                        err && err.message ? err.message : 'Could not open extension.',
+                        'error'
+                    );
+                }
+            });
+            list.appendChild(row);
         }
     }
 
@@ -15097,6 +15592,8 @@ class AxisBrowser {
         const settingsPanel = document.getElementById('settings-panel');
         const downloadsPanel = document.getElementById('downloads-panel');
         const backdrop = document.getElementById('modal-backdrop');
+
+        this.closeExtensionsMenu();
         
         // Close other panels with animation
         if (!settingsPanel.classList.contains('hidden')) {
@@ -15221,7 +15718,8 @@ class AxisBrowser {
 
     closeAllPopups() {
         // Close all popups smoothly with consistent animations
-        
+        this.closeExtensionsMenu();
+
         // Close panels (downloads, security, notes)
         const downloadsPanel = document.getElementById('downloads-panel');
         const securityPanel = document.getElementById('security-panel');
@@ -15361,13 +15859,8 @@ class AxisBrowser {
                 this.toggleSettings();
                 return;
             }
-            
-            let searchUrl;
-            if (this.isValidUrl(query)) {
-                searchUrl = query.startsWith('http') ? query : `https://${query}`;
-            } else {
-                searchUrl = this.getSearchUrl(query, selectedEngine);
-            }
+
+            const searchUrl = this.sanitizeUrl(query) || this.getSearchUrl(query, selectedEngine);
 
             const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
             const onNewTabPage = tab && tab.url === this.NEWTAB_URL;
@@ -16591,6 +17084,19 @@ class AxisBrowser {
         );
     }
 
+    /**
+     * True when a parsed hostname is safe to treat as navigation (user typed host/path without a scheme).
+     * Rejects single-label hosts like `cats` so those stay as search queries.
+     */
+    _hostnameAllowsBareNavigation(hostname) {
+        if (!hostname || typeof hostname !== 'string') return false;
+        const h = hostname.toLowerCase();
+        if (h === 'localhost') return true;
+        if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(h)) return true;
+        if (h.startsWith('[') && h.endsWith(']')) return true;
+        return h.includes('.');
+    }
+
     sanitizeUrl(input) {
         if (!input || typeof input !== 'string') {
             return null;
@@ -16612,13 +17118,32 @@ class AxisBrowser {
             return null;
         }
 
+        // Spaces (and similar) mean a natural-language query, not a navigable URL — unless a full
+        // http(s) URL was pasted (URL() can otherwise turn "site.com/foo bar" into path %20 spam).
+        if (/\s/.test(url) && !/^https?:\/\//i.test(url) && !/^axis:\/\//i.test(url)) {
+            return this.getSearchUrl(url);
+        }
+
         // Handle protocol addition with proper validation
-        if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('about:')) {
-            // Check if it looks like a domain (more strict validation)
-            if (this.isValidDomain(url)) {
+        if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('about:') && !url.startsWith('chrome-extension://')) {
+            // `isValidDomain` matches only hostnames; try https + full string so paths/query work (e.g. site.com/foo).
+            let resolvedBare = false;
+            try {
+                const prefixed = 'https://' + url.replace(/^\/+/, '');
+                const u = new URL(prefixed);
+                if (
+                    (u.protocol === 'http:' || u.protocol === 'https:') &&
+                    this._hostnameAllowsBareNavigation(u.hostname)
+                ) {
+                    url = u.toString();
+                    resolvedBare = true;
+                }
+            } catch (_) {
+                /* Fall through */
+            }
+            if (!resolvedBare && this.isValidDomain(url)) {
                 url = 'https://' + url;
-            } else {
-                // Treat as search query with proper encoding
+            } else if (!resolvedBare && !this.isValidDomain(url)) {
                 return this.getSearchUrl(url);
             }
         }
@@ -16627,8 +17152,8 @@ class AxisBrowser {
         try {
             const urlObj = new URL(url);
             
-            // Only allow http, https, and about protocols
-            if (!['http:', 'https:', 'about:'].includes(urlObj.protocol)) {
+            // Only allow web, about, and installed extension pages.
+            if (!['http:', 'https:', 'about:', 'chrome-extension:'].includes(urlObj.protocol)) {
                 return null;
             }
             
@@ -16670,8 +17195,8 @@ class AxisBrowser {
         }
         try {
             const url = new URL(string);
-            // Only allow http, https, and about protocols
-            return ['http:', 'https:', 'about:'].includes(url.protocol);
+            // Only allow web, about, and installed extension pages.
+            return ['http:', 'https:', 'about:', 'chrome-extension:'].includes(url.protocol);
         } catch (_) {
             return false;
         }
@@ -16879,6 +17404,71 @@ class AxisBrowser {
             });
         }
         
+        // Ad blocker toggle (EasyList + EasyPrivacy-style rules via main process)
+        if (el.urlBarAdblock) {
+            el.urlBarAdblock.addEventListener('click', async () => {
+                const next = !this.isAdBlockerEnabled();
+                await this.saveSetting('adBlockerEnabled', next);
+                try {
+                    window.electronAPI.sendSettingsUpdated();
+                } catch (_) {}
+                this.syncAdBlockerUrlBarState();
+            });
+        }
+
+        if (el.urlBarExtensions) {
+            el.urlBarExtensions.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                this.toggleExtensionsMenu();
+            });
+        }
+        document.getElementById('extensions-menu-close')?.addEventListener('click', () => this.closeExtensionsMenu());
+        document.getElementById('extensions-menu-manage')?.addEventListener('click', async () => {
+            this.closeExtensionsMenu();
+            try {
+                await window.electronAPI?.openSettingsWindow?.('extensions');
+            } catch (_) {}
+        });
+        window.addEventListener('resize', () => {
+            const p = document.getElementById('extensions-menu-panel');
+            if (p && !p.classList.contains('hidden')) this.positionExtensionsMenu();
+        });
+
+        if (el.urlBarCwsInstall) {
+            el.urlBarCwsInstall.addEventListener('click', async (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const wv = this.getActiveWebview();
+                let listingUrl = '';
+                try {
+                    listingUrl = wv && typeof wv.getURL === 'function' ? wv.getURL() || '' : '';
+                } catch (_) {
+                    listingUrl = '';
+                }
+                if (!axisParseChromeWebStoreExtensionId(listingUrl) && !axisParseFirefoxAmoAddonKey(listingUrl)) {
+                    this.showNotification('Open an extension page on the Chrome Web Store or Mozilla Add-ons first.', 'info');
+                    return;
+                }
+                const btn = el.urlBarCwsInstall;
+                if (btn) btn.disabled = true;
+                try {
+                    await window.electronAPI.installExtensionFromWebStore(listingUrl);
+                    const moz = axisParseFirefoxAmoAddonKey(listingUrl);
+                    const dismissToken = moz ? `amo:${moz.toLowerCase()}` : (axisParseChromeWebStoreExtensionId(listingUrl) || '');
+                    if (dismissToken) axisNotifyExtensionStoreBarDismissed(wv, dismissToken);
+                    this.showNotification('Extension installed', 'success');
+                } catch (e) {
+                    this.showNotification(
+                        e && e.message ? e.message : 'Could not install this extension.',
+                        'error'
+                    );
+                } finally {
+                    if (btn) btn.disabled = false;
+                }
+            });
+        }
+
         // Copy URL button
         if (el.urlBarCopy) {
             el.urlBarCopy.addEventListener('click', async () => {
@@ -16995,6 +17585,10 @@ class AxisBrowser {
             if (el.urlBarDisplay) el.urlBarDisplay.textContent = '';
             if (el.urlBarBack) el.urlBarBack.disabled = true;
             if (el.urlBarForward) el.urlBarForward.disabled = true;
+            if (el.urlBarCwsInstall) {
+                el.urlBarCwsInstall.classList.add('hidden');
+                el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
+            }
             return;
         }
         
@@ -17010,6 +17604,10 @@ class AxisBrowser {
         if (!webview || !this.currentTab || !this.tabs.has(this.currentTab)) {
             el.webviewUrlBar.classList.add('hidden');
             el.webviewUrlBar.classList.remove('new-tab-page');
+            if (el.urlBarCwsInstall) {
+                el.urlBarCwsInstall.classList.add('hidden');
+                el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
+            }
             return;
         }
         
@@ -17037,6 +17635,10 @@ class AxisBrowser {
         if (isSpecialPage) {
             el.webviewUrlBar.classList.add('hidden');
             el.webviewUrlBar.classList.remove('new-tab-page');
+            if (el.urlBarCwsInstall) {
+                el.urlBarCwsInstall.classList.add('hidden');
+                el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
+            }
             return;
         }
         
@@ -17063,6 +17665,21 @@ class AxisBrowser {
         }
         if (el.urlBarForward) {
             el.urlBarForward.disabled = !webview || !webview.canGoForward();
+        }
+
+        if (el.urlBarCwsInstall) {
+            const cwsId = axisParseChromeWebStoreExtensionId(currentUrl);
+            const amoKey = axisParseFirefoxAmoAddonKey(currentUrl);
+            if (cwsId || amoKey) {
+                el.urlBarCwsInstall.classList.remove('hidden');
+                el.urlBarCwsInstall.setAttribute('aria-hidden', 'false');
+                el.urlBarCwsInstall.title = amoKey
+                    ? 'Install this Firefox add-on in Axis (from this Mozilla page)'
+                    : 'Install this Chrome extension in Axis (same tab — no copy/paste)';
+            } else {
+                el.urlBarCwsInstall.classList.add('hidden');
+                el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
+            }
         }
         
         // Update input field with current URL
