@@ -68,17 +68,6 @@
                     <span>New Incognito Tab</span>
                 </div>
             </div>
-            
-            <!-- Downloads Popup - in-app high quality panel -->
-            <div id="downloads-popup" class="downloads-popup hidden">
-                <div id="downloads-popup-list" class="downloads-popup-list">
-                    <!-- Download items will be populated here -->
-                </div>
-                <button id="downloads-popup-open-folder" class="downloads-popup-footer" title="Open Downloads folder">
-                    <i class="fas fa-folder-open"></i>
-                    <span>Open Downloads</span>
-                </button>
-            </div>
             </aside>
 
             <!-- Web Content Area -->
@@ -89,8 +78,14 @@
                         <!-- Themed URL Bar -->
                         <div id="webview-url-bar" class="webview-url-bar">
                             <div class="url-bar-left">
-                                <button class="url-bar-btn url-bar-downloads-btn" id="downloads-btn-footer" title="Downloads">
-                                    <i class="far fa-circle-down"></i>
+                                <button type="button" class="url-bar-btn url-bar-downloads-btn" id="downloads-btn-footer" title="Downloads" aria-busy="false">
+                                    <span class="url-bar-downloads-btn-visual" aria-hidden="true">
+                                        <i class="far fa-circle-down url-bar-downloads-icon"></i>
+                                        <svg class="url-bar-downloads-ring" viewBox="0 0 24 24" width="18" height="18" focusable="false">
+                                            <circle class="url-bar-downloads-ring-track" cx="12" cy="12" r="9" fill="none" stroke-width="2.25" />
+                                            <circle class="url-bar-downloads-ring-fill" cx="12" cy="12" r="9" fill="none" stroke-width="2.25" stroke-linecap="round" transform="rotate(-90 12 12)" />
+                                        </svg>
+                                    </span>
                                 </button>
                                 <button class="url-bar-btn" id="url-bar-back" title="Go Back" disabled>
                                     <i class="fas fa-chevron-left"></i>
@@ -108,11 +103,20 @@
                                     <span class="url-bar-url" id="url-bar-display"></span>
                                 </div>
                                 <div class="url-bar-actions">
-                                    <button class="url-bar-btn url-bar-action-btn url-bar-copy-btn" id="url-bar-copy" title="Copy Link">
+                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-adblock-btn" id="url-bar-adblock" title="Ad blocker" aria-pressed="true">
+                                        <i class="fas fa-shield-halved" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-copy-btn" id="url-bar-copy" title="Copy Link">
                                         <i class="fas fa-link"></i>
                                     </button>
                                     <button class="url-bar-btn url-bar-action-btn" id="url-bar-security" title="Security Info">
                                         <i class="fas fa-lock"></i>
+                                    </button>
+                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-cws-install hidden" id="url-bar-cws-install" title="Install this extension in Axis" aria-hidden="true">
+                                        <i class="fas fa-download" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-extensions-btn" id="url-bar-extensions" title="Extensions">
+                                        <i class="fas fa-puzzle-piece" aria-hidden="true"></i>
                                     </button>
                                 </div>
                                 <div id="loading-bar" class="loading-bar" aria-hidden="true">
@@ -133,7 +137,7 @@
                         </div>
                         <!-- Legacy webview: placed first, z-index:0 in CSS - never blocks dynamic webviews -->
                         <webview id="webview" 
-                                 src="about:blank" 
+                                 src="data:text/html;charset=utf-8,%3C!DOCTYPE%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Cmeta%20name%3D%22color-scheme%22%20content%3D%22dark%20light%22%3E%3Cstyle%3Ehtml%2Cbody%7Bmargin%3A0%3Bmin-height%3A100%25%3Bbackground%3Atransparent!important%7D%3C%2Fstyle%3E%3C%2Fhead%3E%3Cbody%3E%3C!--axis-empty-guest--%3E%3C%2Fbody%3E%3C%2Fhtml%3E" 
                                  allowpopups 
                                  webpreferences="contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes"
                                  partition="persist:main"
@@ -145,14 +149,14 @@
                         <!-- New Tab Page (replaces spotlight - custom local page when opening new tab) -->
                         <div id="new-tab-page" class="new-tab-page hidden">
                             <div class="new-tab-page-content">
-                                <div class="new-tab-mode-toggle" id="new-tab-mode-toggle">
-                                    <button type="button" class="new-tab-mode-btn active" data-mode="search">Search</button>
-                                    <button type="button" class="new-tab-mode-btn" data-mode="ask">Ask</button>
+                                <div class="new-tab-mode-toggle" id="new-tab-mode-toggle" role="tablist" aria-label="New tab mode">
+                                    <button type="button" class="new-tab-mode-btn active" data-mode="search" role="tab" aria-selected="true">Search</button>
+                                    <button type="button" class="new-tab-mode-btn" data-mode="ask" role="tab" aria-selected="false">Ask</button>
                                 </div>
                                 <div class="new-tab-search-wrapper" id="new-tab-search-wrapper">
                                     <div class="new-tab-search-bar">
-                                        <i class="fas fa-search new-tab-search-icon"></i>
-                                        <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search, ask, or @-mention a tab" autocomplete="off">
+                                        <i class="fas fa-search new-tab-search-icon" aria-hidden="true"></i>
+                                        <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search or enter a URL" autocomplete="off" aria-label="Search or URL">
                                     </div>
                                     <div class="new-tab-suggestions" id="new-tab-suggestions"></div>
                                     <div class="new-tab-ask-messages hidden" id="new-tab-ask-messages"></div>
@@ -205,6 +209,7 @@
                         </div>
                         <!-- Captures clicks over page content (<webview> does not bubble to document) -->
                         <div id="downloads-popup-backdrop" class="downloads-popup-backdrop hidden" aria-hidden="true"></div>
+                        <div id="extensions-menu-backdrop" class="extensions-menu-backdrop hidden" aria-hidden="true"></div>
                     </div>
             </div>
         </div>
@@ -779,6 +784,34 @@
                     <!-- Preview content will be loaded here -->
                 </div>
             </div>
+        </div>
+
+        <!-- Last inside #app so z-index stacks below file-preview (2000); not under #sidebar (was breaking frosted read). -->
+        <div id="downloads-popup" class="downloads-popup hidden">
+            <div id="downloads-popup-list" class="downloads-popup-list">
+                <!-- Download items will be populated here -->
+            </div>
+            <button id="downloads-popup-open-folder" class="downloads-popup-footer" title="Open Downloads folder">
+                <i class="fas fa-folder-open"></i>
+                <span>Open Downloads</span>
+            </button>
+        </div>
+
+        <div id="extensions-menu-panel" class="extensions-menu-panel hidden" role="dialog" aria-label="Extensions">
+            <div class="extensions-menu-header">
+                <div class="extensions-menu-title">
+                    <i class="fas fa-puzzle-piece" aria-hidden="true"></i>
+                    <span>Extensions</span>
+                </div>
+                <button type="button" id="extensions-menu-close" class="extensions-menu-close-btn" title="Close">
+                    <i class="fas fa-times" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div id="extensions-menu-list" class="extensions-menu-list"></div>
+            <button type="button" id="extensions-menu-manage" class="downloads-popup-footer extensions-menu-manage-footer" title="Open extension settings">
+                <i class="fas fa-sliders-h" aria-hidden="true"></i>
+                <span>Manage extensions…</span>
+            </button>
         </div>
 
     </div>
