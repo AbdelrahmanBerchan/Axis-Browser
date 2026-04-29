@@ -81,6 +81,45 @@ html, body {
     --animation-border-hover: rgba(255, 255, 255, 0.2);
     --animation-focus-ring: rgba(255, 255, 255, 0.15);
     --animation-focus-ring-light: rgba(255, 255, 255, 0.1);
+    /* Frosted idle well behind the guest stack (inactive tabs, about:blank, gaps) — glass, not a flat color. */
+    --axis-webview-idle-well: linear-gradient(
+        145deg,
+        rgba(255, 255, 255, 0.052),
+        rgba(255, 255, 255, 0.018) 48%,
+        rgba(255, 255, 255, 0.035)
+    );
+    --axis-webview-idle-backdrop: blur(44px) saturate(185%);
+    --axis-webview-idle-well-inset:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.075),
+        inset 0 1px 0 rgba(255, 255, 255, 0.055),
+        inset 0 -18px 42px rgba(0, 0, 0, 0.08);
+    /* URL bar + webview stack + #content-area lift shadow: same right-edge radius so nothing looks squared when the guest is transparent. */
+    --axis-content-panel-radius: 6px;
+    /*
+     * Web panel elevation behind `#content-area::after`: all layers use (0, 0) blur — symmetric
+     * “ambient” depth, not a single offset that reads as light from one side. Stacked radii
+     * approximate a soft penumbra (tight ring → mid → falloff).
+     */
+    --axis-webview-elevation-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.05),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.045),
+        0 0 32px rgba(0, 0, 0, 0.11),
+        0 0 64px rgba(0, 0, 0, 0.075),
+        0 0 100px rgba(0, 0, 0, 0.05),
+        0 0 148px rgba(0, 0, 0, 0.035);
+}
+
+body.incognito-window {
+    --axis-webview-idle-well: linear-gradient(
+        145deg,
+        rgba(255, 255, 255, 0.042),
+        rgba(255, 255, 255, 0.014) 52%,
+        rgba(255, 255, 255, 0.025)
+    );
+    --axis-webview-idle-backdrop: blur(44px) saturate(145%) brightness(0.88);
+    --axis-webview-idle-well-inset:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.055),
+        inset 0 -18px 42px rgba(0, 0, 0, 0.12);
 }
 
 /*
@@ -104,6 +143,7 @@ html, body {
  * gets a light glass fill. Main shell classes (.tab, .sidebar-section, .url-bar,
  * .nav-btn, etc.) are NOT included here. */
 :root[data-ui-theme="light"] .downloads-popup,
+:root[data-ui-theme="light"] .extensions-menu-panel,
 :root[data-ui-theme="light"] .history-popup,
 :root[data-ui-theme="light"] .downloads-panel,
 :root[data-ui-theme="light"] .history-panel,
@@ -148,6 +188,8 @@ html, body {
 :root[data-ui-theme="light"] .nav-menu *,
 :root[data-ui-theme="light"] .downloads-popup,
 :root[data-ui-theme="light"] .downloads-popup *:not(.download-progress):not(.download-icon),
+:root[data-ui-theme="light"] .extensions-menu-panel,
+:root[data-ui-theme="light"] .extensions-menu-panel *:not(.download-progress):not(.download-icon),
 :root[data-ui-theme="light"] .history-popup,
 :root[data-ui-theme="light"] .history-popup *,
 :root[data-ui-theme="light"] .bookmark-popup,
@@ -210,7 +252,7 @@ html, body {
  * the new tab page") and so the inner search / ask cards read correctly.
  */
 :root[data-ui-theme="light"] .new-tab-page {
-    background: rgba(244, 244, 246, 0.98) !important;
+    background: transparent !important;
 }
 
 /*
@@ -1949,6 +1991,8 @@ body.resizing .ai-chat-resize-handle {
     overflow: visible;
     /* Truncated line end: small gap + ~Clear+chevron width (tune via this one variable) */
     --tabs-separator-short-right: calc(4px + 42px);
+    /* Horizontal inset from sidebar edges — smaller = longer line */
+    --tabs-separator-inset-inline: 8px;
 }
 
 /*
@@ -1960,7 +2004,7 @@ body.resizing .ai-chat-resize-handle {
     content: '';
     position: absolute;
     top: 50%;
-    left: 16px;
+    left: var(--tabs-separator-inset-inline);
     height: 0.5px;
     background: var(--border-color-light);
     transform: translateY(-50%);
@@ -1971,7 +2015,7 @@ body.resizing .ai-chat-resize-handle {
 
 /* Idle: full line between side insets */
 .tabs-separator::before {
-    right: 16px;
+    right: var(--tabs-separator-inset-inline);
     opacity: 1;
 }
 
@@ -2844,9 +2888,18 @@ body.incognito-window #main-area.sidebar-right .webview-container {
     margin-right: 0;
 }
 
+body.incognito-window #webviews-container {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+}
+
 /* Content Area */
 #content-area {
     flex: 1;
+    display: flex;
+    flex-direction: column;
     background: transparent;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -2856,6 +2909,7 @@ body.incognito-window #main-area.sidebar-right .webview-container {
     -webkit-app-region: drag;
     padding: 8px;
     min-width: 0;
+    min-height: 0;
     max-height: 100vh;
 }
 
@@ -2871,7 +2925,7 @@ body.incognito-window #main-area.sidebar-right .webview-container {
     z-index: 1;
 }
 
-/* Soft lift under the web panel (URL bar + webviews): inset matches padding so the shadow
+/* Ambient elevation under the web panel (URL bar + webviews): inset matches padding so the shadow
    isn’t clipped by .webview-container / #single-view overflow. */
 #content-area::after {
     content: '';
@@ -2882,10 +2936,8 @@ body.incognito-window #main-area.sidebar-right .webview-container {
     bottom: 8px;
     pointer-events: none;
     z-index: 0;
-    border-radius: 0 2px 2px 0;
-    box-shadow:
-        0 4px 18px rgba(0, 0, 0, 0.12),
-        0 2px 5px rgba(0, 0, 0, 0.07);
+    border-radius: var(--axis-content-panel-radius);
+    box-shadow: var(--axis-webview-elevation-shadow);
 }
 
 .webview-container {
@@ -2895,10 +2947,13 @@ body.incognito-window #main-area.sidebar-right .webview-container {
     --chat-panel-text-muted: rgba(255, 255, 255, 0.5);
     width: 100%;
     height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
     overflow: hidden;
     position: relative;
     background: transparent;
-    border-radius: 0 2px 2px 0; /* Match macOS window: sharp left (sidebar), slightly rounded right */
+    border-radius: var(--axis-content-panel-radius); /* All corners — matches shadow and window chrome */
     margin: 0;
     margin-left: -1px; /* Bring webview closer to sidebar */
     box-shadow: none;
@@ -2925,7 +2980,7 @@ body.incognito-window #main-area.sidebar-right .webview-container {
     right: 0;
     bottom: 0;
     pointer-events: none;
-    border-radius: 0 2px 2px 0; /* Match macOS window: sharp left (sidebar), slightly rounded right */
+    border-radius: var(--axis-content-panel-radius);
     overflow: hidden;
 }
 
@@ -2938,7 +2993,8 @@ body.incognito-window #main-area.sidebar-right .webview-container {
     min-width: 0;
     flex-shrink: 1;
     position: relative;
-    border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window */
+    /* Below URL bar: bottom-left + bottom-right; when bar is hidden, :has(.hidden) rounds all corners. */
+    border-radius: 0 0 var(--axis-content-panel-radius) var(--axis-content-panel-radius);
     max-width: 100%;
     max-height: 100%;
     outline: none;
@@ -2961,65 +3017,92 @@ body.incognito-window #main-area.sidebar-right .webview-container {
     visibility: hidden;
 }
 
-/* All webviews should have transparent background — no opacity transition (tab switch is instant in JS). */
+/* All webviews: no literal idle fill — guests stay transparent; stack shows shell / desktop. */
 webview {
     background: transparent !important;
     position: relative;
     transition: none;
 }
 
-/* Glass overlay for inactive webviews */
-webview::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(255, 255, 255, 0.25);
-    backdrop-filter: blur(40px) saturate(200%);
-    -webkit-backdrop-filter: blur(40px) saturate(200%);
-    border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window */
-    pointer-events: none;
-    z-index: 1000;
-    opacity: 0;
-    transition: none;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
-    mix-blend-mode: overlay;
+/* Normal browsing needs an opaque browser canvas behind pages whose root is transparent. */
+body:not(.transparent-sites-mode) #webviews-container webview:not(.inactive) {
+    background: #ffffff !important;
 }
 
-/* Show glass overlay when webview is inactive */
-webview.inactive::before,
-webview[style*="opacity: 0.3"]::before,
-webview[style*="opacity:0.3"]::before {
-    opacity: 1;
+/* Match #webviews-container corner radius so transparent guests don’t look squared vs shadow. */
+#webviews-container webview {
+    border-radius: 0 0 var(--axis-content-panel-radius) var(--axis-content-panel-radius);
+}
+
+.webview-container:has(.webview-url-bar.hidden) #webviews-container webview {
+    border-radius: var(--axis-content-panel-radius);
+}
+
+#webviews-container webview.inactive {
+    background: transparent !important;
+}
+
+body.incognito-window #webviews-container webview.inactive {
+    background: transparent !important;
+}
+
+/* No idle overlay over the webview region — we want nothing to show where the guest sits when it's not in use. */
+webview::before {
+    content: none;
+    display: none !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* Idle guests are hidden; the frosted well comes from #webviews-container, never about:blank white. */
+#webviews-container webview.inactive::before,
+#webviews-container webview[style*='opacity: 0.3']::before,
+#webviews-container webview[style*='opacity:0.3']::before {
+    display: none !important;
+    opacity: 0 !important;
 }
 
 /* Hide glass overlay for active webviews */
-webview:not(.inactive)[style*="opacity: 1"]::before,
-webview:not(.inactive)[style*="opacity:1"]::before {
+webview:not(.inactive)[style*='opacity: 1']::before,
+webview:not(.inactive)[style*='opacity:1']::before {
     opacity: 0;
 }
 
-/* Transparent sites: background tabs must not leak through the active page */
+/* Idle webview area is fully transparent — no frosted well, no fill, no inset shadow. */
+body.transparent-sites-mode #webviews-container,
+body.chrome-no-tabs #webviews-container {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+}
+
+/* Background tabs must not leak through the active page */
 body.transparent-sites-mode #webviews-container webview.inactive {
     opacity: 0 !important;
     visibility: hidden !important;
     pointer-events: none !important;
+    background: transparent !important;
 }
 
 body.transparent-sites-mode #webviews-container webview.inactive::before {
+    display: none !important;
     opacity: 0 !important;
 }
 
-/* No open tabs: restore glass frame (transparent mode would otherwise hide inactive webviews entirely) */
+/* No open tabs: do not reveal placeholder webviews; the container itself is the glass. */
 body.transparent-sites-mode.chrome-no-tabs #webviews-container webview.inactive {
-    opacity: 0.3 !important;
-    visibility: visible !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
     pointer-events: none !important;
 }
 body.transparent-sites-mode.chrome-no-tabs #webviews-container webview.inactive::before {
-    opacity: 1 !important;
+    display: none !important;
+    opacity: 0 !important;
 }
 
 /* Empty State Welcome Message */
@@ -3034,7 +3117,7 @@ body.transparent-sites-mode.chrome-no-tabs #webviews-container webview.inactive:
     justify-content: center;
     z-index: 2;
     background: transparent;
-    border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window */
+    border-radius: var(--axis-content-panel-radius);
     animation: emptyStateFadeIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
     pointer-events: auto;
     overflow: hidden;
@@ -5512,7 +5595,7 @@ body.light-theme .shortcut-desc {
     font-size: 14px;
 }
 
-/* New Tab Page - pure black, refined design */
+/* New Tab Page - local overlay; solid black canvas (not transparent — shell / vibrancy was bleeding through as gray). */
 .new-tab-page {
     position: absolute;
     top: 0;
@@ -5523,7 +5606,7 @@ body.light-theme .shortcut-desc {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #000;
+    background: #000000;
     -webkit-app-region: no-drag;
     overflow-y: auto;
     padding: 40px;
@@ -7016,11 +7099,10 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     transition: none !important;
 }
 
-/* Professional Loading Animation */
+/* Professional Loading Animation — do not override .webview-container border-radius. */
 .webview-container {
     position: relative;
     overflow: hidden;
-    border-radius: 6px;
 }
 
 .webview-container::before {
@@ -7036,7 +7118,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     opacity: 0;
     transition: opacity 0.3s ease;
     pointer-events: none;
-    border-radius: 6px;
+    border-radius: var(--axis-content-panel-radius);
 }
 
 .webview-container.loading::before {
@@ -7504,16 +7586,28 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     left: 0;
     right: 0;
     bottom: 0;
+    /* Idle webview area paints nothing — no frosted well, no inset shadow. Active guests
+       paint their own content on top; if nothing is loaded, the shell shows through. */
     background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
     overflow: hidden; /* Clip webview content to rounded corners */
-    border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window */
+    border-radius: 0 0 var(--axis-content-panel-radius) var(--axis-content-panel-radius);
     z-index: 2; /* Always above legacy #webview (z-index: 0) so dynamic webviews receive clicks */
 }
 
+/* Flex chain so webviews track window/sidebar size (`height:100%` alone can stick after resize). */
 #single-view {
     background: transparent;
     position: relative;
     z-index: 1;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    height: auto;
 }
 
 /* Enhanced focus states */
@@ -8037,8 +8131,259 @@ body.light-theme .btn-primary {
     pointer-events: none;
 }
 
+/* URL bar extensions menu — same frosted shell, shadow, and motion as .downloads-popup */
+.extensions-menu-panel {
+    position: fixed;
+    background: rgba(10, 10, 12, 0.86);
+    backdrop-filter: blur(20px) saturate(165%);
+    -webkit-backdrop-filter: blur(20px) saturate(165%);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 16px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+    z-index: 1002;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.97) translateY(-4px);
+    transition: opacity 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+                visibility 0.22s,
+                transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+    overflow: hidden;
+    will-change: opacity, transform;
+    padding: 8px 8px 2px;
+    box-sizing: border-box;
+    min-width: 268px;
+    max-width: 340px;
+    max-height: min(420px, calc(100vh - 80px));
+    display: flex;
+    flex-direction: column;
+}
+
+.extensions-menu-panel:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+    transform: scale(1) translateY(0);
+    pointer-events: auto;
+}
+
+.extensions-menu-panel.hidden {
+    display: block !important;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.97) translateY(-4px);
+    pointer-events: none;
+}
+
+.extensions-menu-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 6px 8px;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.extensions-menu-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.96);
+}
+
+.extensions-menu-title i {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.extensions-menu-close-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.72);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 12px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.extensions-menu-close-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.96);
+}
+
+.extensions-menu-close-btn:active {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.extensions-menu-list {
+    padding: 2px 2px 4px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    max-height: 260px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.extensions-menu-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.extensions-menu-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.extensions-menu-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 2px;
+}
+
+.extensions-menu-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.28);
+}
+
+.extensions-menu-empty {
+    padding: 20px 14px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.extensions-menu-empty i {
+    font-size: 20px;
+    margin-bottom: 8px;
+    opacity: 0.5;
+    display: block;
+}
+
+.extensions-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    margin: 0 4px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    user-select: none;
+}
+
+.extensions-menu-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.extensions-menu-item:active {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.extensions-menu-item.extensions-menu-item-disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.extensions-menu-item.extensions-menu-item-disabled:hover,
+.extensions-menu-item.extensions-menu-item-disabled:active {
+    background: transparent;
+}
+
+.extensions-menu-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.extensions-menu-icon-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.extensions-menu-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.25;
+}
+
+.extensions-menu-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.extensions-menu-meta {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.extensions-menu-remove {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.extensions-menu-item:hover .extensions-menu-remove {
+    opacity: 1;
+}
+
+.extensions-menu-remove:hover {
+    background: rgba(255, 80, 80, 0.2);
+    color: rgba(255, 160, 160, 0.95);
+}
+
+.extensions-menu-remove:active {
+    background: rgba(255, 80, 80, 0.28);
+}
+
+/* Reuse downloads footer row; extra class only adjusts copy */
+.extensions-menu-manage-footer.downloads-popup-footer {
+    margin-top: 2px;
+}
+
+:root[data-ui-theme="light"] .extensions-menu-meta {
+    color: rgba(0, 0, 0, 0.45) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .extensions-menu-panel {
+        transition-duration: 0.05s !important;
+    }
+}
+
 /* Blocks hit-testing over page content so outside-dismiss works (guest <webview> does not bubble). */
-.downloads-popup-backdrop {
+.downloads-popup-backdrop,
+.extensions-menu-backdrop {
     position: absolute;
     top: 0;
     left: 0;
@@ -8049,15 +8394,12 @@ body.light-theme .btn-primary {
     pointer-events: none;
 }
 
-.downloads-popup-backdrop:not(.hidden) {
+.downloads-popup-backdrop:not(.hidden),
+.extensions-menu-backdrop:not(.hidden) {
     pointer-events: auto;
 }
 
-/* In-flight download: URL bar icon + open popup rim */
-body.axis-download-activity .url-bar-downloads-btn i {
-    animation: axis-download-urlbar-icon 0.95s ease-in-out infinite;
-    transform-origin: center 60%;
-}
+/* In-flight download: URL bar uses ring (see `.url-bar-downloads-ring`); popup rim below */
 
 body.axis-download-activity .downloads-popup:not(.hidden) {
     animation: axis-download-popup-rim 1.4s ease-in-out infinite;
@@ -8065,18 +8407,6 @@ body.axis-download-activity .downloads-popup:not(.hidden) {
 
 body.axis-download-activity .downloads-popup:not(.hidden) .downloads-popup-empty i {
     animation: axis-download-popup-empty-icon 1.1s ease-in-out infinite;
-}
-
-@keyframes axis-download-urlbar-icon {
-    0%,
-    100% {
-        transform: translateY(0) scale(1);
-        opacity: 1;
-    }
-    45% {
-        transform: translateY(2px) scale(1.06);
-        opacity: 0.88;
-    }
 }
 
 @keyframes axis-download-popup-rim {
@@ -8104,7 +8434,11 @@ body.axis-download-activity .downloads-popup:not(.hidden) .downloads-popup-empty
 }
 
 @media (prefers-reduced-motion: reduce) {
-    body.axis-download-activity .url-bar-downloads-btn i,
+    body.axis-download-activity .url-bar-downloads-btn .url-bar-downloads-ring,
+    body.axis-download-indeterminate .url-bar-downloads-ring-fill {
+        animation: none !important;
+    }
+
     body.axis-download-activity .downloads-popup:not(.hidden),
     body.axis-download-activity .downloads-popup:not(.hidden) .downloads-popup-empty i {
         animation: none !important;
@@ -9434,7 +9768,7 @@ body:not(.light-theme) .ai-response-content {
     -webkit-app-region: no-drag;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
-    border-radius: 0 2px 2px 0;
+    border-radius: var(--axis-content-panel-radius);
     overflow: hidden;
 }
 
@@ -9881,7 +10215,7 @@ body:not(.light-theme) .ai-response-content {
     -webkit-backdrop-filter: none;
     border-bottom: 1px solid var(--url-bar-border, transparent);
     transition: background 0.4s ease, border-color 0.4s ease, opacity 0.3s ease, transform 0.3s ease;
-    border-radius: 0 2px 0 0; /* Only round top-right corner to match macOS window */
+    border-radius: var(--axis-content-panel-radius) var(--axis-content-panel-radius) 0 0;
     overflow: visible;
 }
 
@@ -9936,7 +10270,7 @@ body.transparent-sites-mode .webview-url-bar {
     -webkit-backdrop-filter: blur(var(--axis-ts-urlbar-blur, 26px)) saturate(var(--axis-ts-urlbar-sat, 148%));
 }
 
-/* New tab page is in-app HTML (not a webview) — use glass so shell theme shows through like sites */
+/* Glass mode: NTP canvas is transparent so shell / theme shows through (cards below keep frosted vars). */
 body.transparent-sites-mode .new-tab-page {
     background: transparent !important;
 }
@@ -10012,8 +10346,77 @@ body.transparent-sites-mode .new-tab-ask-input-row {
 #downloads-btn-footer.url-bar-downloads-btn:active:not(:disabled) {
     transform: scale(0.92);
 }
-#downloads-btn-footer.url-bar-downloads-btn i {
+#downloads-btn-footer.url-bar-downloads-btn .url-bar-downloads-icon {
     font-size: 13px;
+}
+
+/* Downloads button: idle icon ↔ in-flight circular progress (determinate or indeterminate). */
+.url-bar-downloads-btn-visual {
+    position: relative;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.url-bar-downloads-icon {
+    transition: opacity 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+        transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.url-bar-downloads-ring {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 18px;
+    height: 18px;
+    opacity: 0;
+    transform: scale(0.86);
+    transition: opacity 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+        transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    pointer-events: none;
+}
+
+.url-bar-downloads-ring-track {
+    stroke: currentColor;
+    opacity: 0.22;
+}
+
+.url-bar-downloads-ring-fill {
+    stroke: currentColor;
+    opacity: 0.95;
+    --axis-dl-circ: 56.55; /* 2πr, r=9 */
+    stroke-dasharray: var(--axis-dl-circ);
+    stroke-dashoffset: calc(var(--axis-dl-circ) * (1 - var(--axis-dl-pct, 0)));
+    transition: stroke-dashoffset 0.14s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+body.axis-download-activity .url-bar-downloads-btn .url-bar-downloads-icon {
+    opacity: 0;
+    transform: scale(0.82);
+}
+
+body.axis-download-activity .url-bar-downloads-btn .url-bar-downloads-ring {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* Unknown total size: ~¼ circle arc, continuous rotation */
+body.axis-download-indeterminate .url-bar-downloads-ring-fill {
+    stroke-dasharray: 14.25 42.3;
+    stroke-dashoffset: 0;
+    transition: none;
+}
+
+body.axis-download-indeterminate .url-bar-downloads-ring {
+    animation: axis-dl-ring-spin 0.9s linear infinite;
+}
+
+@keyframes axis-dl-ring-spin {
+    to {
+        transform: scale(1) rotate(360deg);
+    }
 }
 
 #url-bar-refresh i {
@@ -10140,6 +10543,40 @@ body.transparent-sites-mode .new-tab-ask-input-row {
 /* Copy button checkmark */
 .url-bar-copy-btn .fa-check {
     color: #34C759;
+}
+
+/* Ad blocker toggle (URL bar) */
+.url-bar-adblock-btn.url-bar-adblock-on {
+    color: #34C759;
+}
+
+.url-bar-adblock-btn.url-bar-adblock-on:hover {
+    color: #2fb350;
+}
+
+.url-bar-adblock-btn.url-bar-adblock-off {
+    color: var(--url-bar-text-muted, rgba(0, 0, 0, 0.45));
+    opacity: 0.75;
+}
+
+.webview-url-bar.dark-mode .url-bar-adblock-btn.url-bar-adblock-off {
+    opacity: 0.65;
+}
+
+.url-bar-extensions-btn {
+    font-size: 10.5px;
+}
+
+.url-bar-extensions-btn:hover {
+    color: var(--url-bar-text, rgba(0, 0, 0, 0.85));
+}
+
+.url-bar-cws-install:not(.hidden) {
+    color: #007aff;
+}
+
+.webview-url-bar.dark-mode .url-bar-cws-install:not(.hidden) {
+    color: #0a84ff;
 }
 
 .url-bar-url {
@@ -10270,14 +10707,18 @@ body.transparent-sites-mode .new-tab-ask-input-row {
     transition: top 0.3s ease,
                 right 0.42s cubic-bezier(0.32, 0.72, 0, 1); /* sync with chat panel slide */
     overflow: hidden; /* Clip webview content to rounded corners */
-    border-radius: 0 0 2px 0; /* Only round bottom-right corner to match macOS window - no top rounding since it's below URL bar */
+    border-radius: 0 0 var(--axis-content-panel-radius) var(--axis-content-panel-radius);
+    /* Webview area paints nothing when idle — no glass, no white. */
     background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
     z-index: 2; /* Above legacy #webview - dynamic webviews must receive clicks */
 }
 
 .webview-container:has(.webview-url-bar.hidden) #webviews-container {
     top: 0;
-    border-radius: 0 2px 2px 0; /* When URL bar is hidden, round top-right too to match macOS window */
+    border-radius: var(--axis-content-panel-radius);
 }
 
 /* Also adjust main webview */
@@ -10293,6 +10734,7 @@ body.transparent-sites-mode .new-tab-ask-input-row {
 
 .webview-container:has(.webview-url-bar.hidden) #webview {
     top: 0;
+    border-radius: var(--axis-content-panel-radius);
 }
 
 /* --------------------------------------------------------------------------
