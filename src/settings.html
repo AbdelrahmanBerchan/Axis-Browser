@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light" id="axis-settings-color-scheme">
+    <meta name="color-scheme" content="dark" id="axis-settings-color-scheme">
     <title>Settings</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -11,23 +11,30 @@
             height: 100%;
             overflow: hidden;
         }
-        /* Match Chromium window backgroundColor to avoid white flash before body paints */
+        /* Match Chromium window backgroundColor; default dark until sync `uiTheme` runs (store default). */
         html {
+            background-color: #1e1e1e;
+        }
+        html:not(.axis-dark) {
             background-color: #f5f5f7;
         }
-                html.axis-dark { background-color: #1e1e1e; }
+        html.axis-dark { background-color: #1e1e1e; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
             font-size: 13px;
-            color: #1d1d1f;
-            background: #f5f5f7;
+            color: #f5f5f7;
+            background: #1e1e1e;
             display: flex;
             flex-direction: column;
             align-items: stretch;
             min-height: 0;
             -webkit-font-smoothing: antialiased;
         }
-                html.axis-dark body { color: #f5f5f7; background: #1e1e1e; }
+        html:not(.axis-dark) body {
+            color: #1d1d1f;
+            background: #f5f5f7;
+        }
+        html.axis-dark body { color: #f5f5f7; background: #1e1e1e; }
         .settings-wrap {
             display: flex;
             flex: 1;
@@ -162,6 +169,25 @@
         .row:last-child { border-bottom: none; }
         .row-label { flex: 1; }
         .row-title { font-size: 13px; font-weight: 600; }
+        .row-title .axis-beta-label {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            vertical-align: middle;
+            margin-left: 8px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            line-height: 1.2;
+        }
+        html:not(.axis-dark) .row-title .axis-beta-label {
+            background: rgba(0, 0, 0, 0.06);
+            color: rgba(0, 0, 0, 0.5);
+        }
+        html.axis-dark .row-title .axis-beta-label {
+            background: rgba(255, 255, 255, 0.12);
+            color: rgba(255, 255, 255, 0.85);
+        }
         .row-desc { font-size: 11px; color: #86868b; margin-top: 2px; }
                 html.axis-dark .row-desc { color: #98989d; }
         
@@ -215,7 +241,7 @@
             gap: 10px;
             min-width: 200px;
         }
-        /* Window glass brightness: value above slider; range uses global width (140px / 40vw) */
+        /* Window transparency: value above slider; range uses global width (140px / 40vw) */
         .window-chrome-light-stack {
             display: flex;
             flex-direction: column;
@@ -296,6 +322,133 @@
         }
         .history-item:hover .history-delete { opacity: 1; }
         .empty-state { text-align: center; padding: 40px 20px; color: #86868b; }
+        .extensions-pane-lead {
+            font-size: 12px;
+            color: #86868b;
+            margin: 0 0 16px 0;
+            line-height: 1.45;
+            max-width: 720px;
+        }
+                html.axis-dark .extensions-pane-lead { color: #98989d; }
+        .extensions-section {
+            margin-bottom: 20px;
+        }
+        .extensions-section:last-of-type { margin-bottom: 0; }
+        .extensions-section-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #86868b;
+            margin: 0 0 8px 0;
+        }
+                html.axis-dark .extensions-section-label { color: #98989d; }
+        .extensions-store-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        .extensions-store-buttons button { min-height: 32px; padding: 6px 14px; }
+        .extensions-webstore-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+        .extensions-webstore-input {
+            flex: 1;
+            min-width: 220px;
+            min-height: 32px;
+        }
+        .extensions-hint {
+            font-size: 11px;
+            color: #86868b;
+            margin: 8px 0 0 0;
+            line-height: 1.4;
+        }
+                html.axis-dark .extensions-hint { color: #98989d; }
+        .extensions-file-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        .extensions-file-actions button { min-height: 32px; padding: 6px 14px; }
+        .extensions-list {
+            display: flex;
+            flex-direction: column;
+        }
+        .extension-card {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+        }
+                html.axis-dark .extension-card { border-bottom-color: rgba(255,255,255,0.06); }
+        .extension-card:last-child { border-bottom: none; }
+        .extension-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            flex-shrink: 0;
+            object-fit: cover;
+            background: rgba(0,0,0,0.06);
+        }
+                html.axis-dark .extension-icon { background: rgba(255,255,255,0.1); }
+        .extension-icon-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 700;
+            color: #007aff;
+        }
+        .extension-main { flex: 1; min-width: 0; }
+        .extension-title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+        .extension-title {
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .extension-version,
+        .extension-status {
+            font-size: 11px;
+            color: #86868b;
+            flex-shrink: 0;
+        }
+                html.axis-dark .extension-version, html.axis-dark .extension-status { color: #98989d; }
+        .extension-desc,
+        .extension-path,
+        .extension-error {
+            font-size: 11px;
+            color: #86868b;
+            margin-top: 3px;
+            overflow-wrap: anywhere;
+        }
+                html.axis-dark .extension-desc, html.axis-dark .extension-path { color: #98989d; }
+        .extension-error { color: #ff3b30; }
+                html.axis-dark .extension-error { color: #ff453a; }
+        .extension-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .extensions-empty {
+            padding: 18px;
+            font-size: 12px;
+            color: #86868b;
+        }
+                html.axis-dark .extensions-empty { color: #98989d; }
         .shortcuts-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
         .shortcut-row {
             display: flex;
@@ -489,15 +642,14 @@
         }
     </style>
     <script>
-        // Apply the in-app `uiTheme` setting to this settings window. The stylesheet
-        // uses `html.axis-dark ...` selectors everywhere (no `@media
-        // (prefers-color-scheme: dark)` anymore), so toggling this class is the
-        // single source of truth for dark vs light in this window. We race:
-        // 1) fall back to OS scheme immediately so the first paint isn't wrong,
-        // 2) then override with the real setting as soon as the IPC returns.
+        // Apply the in-app `uiTheme` from the store only (never OS appearance).
+        // Sync bootstrap runs before first paint; async getSettings confirms afterward.
         (function applyInitialAxisTheme() {
+            const normalizeUiTheme = (v) => (v === 'light' ? 'light' : 'dark');
+
             const setFromValue = (v) => {
-                const isDark = v !== 'light';
+                const mode = normalizeUiTheme(v);
+                const isDark = mode !== 'light';
                 document.documentElement.classList.toggle('axis-dark', isDark);
                 try {
                     if (window.electronAPI && window.electronAPI.platform === 'darwin') {
@@ -512,15 +664,21 @@
                     }
                 } catch (_) {}
             };
+
+            let boot = 'dark';
             try {
-                if (window.electronAPI && window.electronAPI.platform === 'darwin') {
-                    document.documentElement.classList.add('macos');
+                if (window.electronAPI && typeof window.electronAPI.getSettingsWindowBootstrap === 'function') {
+                    const b = window.electronAPI.getSettingsWindowBootstrap();
+                    if (b && typeof b.uiTheme === 'string') boot = normalizeUiTheme(b.uiTheme);
                 }
             } catch (_) {}
+            setFromValue(boot);
+
             try {
                 if (window.electronAPI && typeof window.electronAPI.getSettings === 'function') {
                     window.electronAPI.getSettings().then((s) => {
-                        if (s && typeof s.uiTheme !== 'undefined') setFromValue(s.uiTheme);
+                        const v = s && typeof s.uiTheme === 'string' ? s.uiTheme : 'dark';
+                        setFromValue(v);
                     }).catch(() => {});
                 }
             } catch (_) {}
@@ -539,7 +697,8 @@
                     window.electronAPI.onSettingsUpdated(() => {
                         try {
                             window.electronAPI.getSettings().then((s) => {
-                                if (s && typeof s.uiTheme !== 'undefined') setFromValue(s.uiTheme);
+                                const v = s && typeof s.uiTheme === 'string' ? s.uiTheme : 'dark';
+                                setFromValue(v);
                             }).catch(() => {});
                         } catch (_) {}
                     });
@@ -568,6 +727,10 @@
         <div class="sidebar-item" data-section="permissions">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
             <span>Site permissions</span>
+        </div>
+        <div class="sidebar-item" data-section="extensions">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-2 .9-2 2v3.8h1.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"/></svg>
+            <span>Extensions</span>
         </div>
     </nav>
     
@@ -617,6 +780,13 @@
                             <div class="row-desc">Ask before loading sites that use HTTP (not HTTPS). Localhost is always allowed.</div>
                         </div>
                         <input type="checkbox" id="https-only-mode">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Ad blocker</div>
+                            <div class="row-desc">Block ads and known trackers with filter lists (same as the shield in the URL bar). Reload a tab if a page was open before you changed this.</div>
+                        </div>
+                        <input type="checkbox" id="ad-blocker-enabled">
                     </div>
                     <div class="row">
                         <div class="row-label">
@@ -678,15 +848,15 @@
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Transparent sites (glass mode)</div>
+                            <div class="row-title">Transparent sites (glass mode) <span class="axis-beta-label">BETA</span></div>
                             <div class="row-desc">Clears common page shell backgrounds so the browser glass shows through; other tabs stay fully hidden so they do not bleed into the active page.</div>
                         </div>
                         <input type="checkbox" id="transparent-sites">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Window glass brightness</div>
-                            <div class="row-desc">How much your wallpaper or desktop shows through the browser frame (tabs bar, sidebar, blur). Left: opaque (solid). Right: most light (brightest / most transparent). The middle is the default.</div>
+                            <div class="row-title">Window transparency</div>
+                            <div class="row-desc">How much your wallpaper or desktop shows through the browser frame (tab strip, sidebar, blur). Left: fully opaque. Right: most transparent. The middle is the default.</div>
                         </div>
                         <div class="window-chrome-light-stack">
                             <span class="window-chrome-light-value" id="window-chrome-light-label">50</span>
@@ -813,6 +983,49 @@
                 </div>
             </div>
         </div>
+
+        <div class="pane" id="extensions-pane">
+            <div class="group">
+                <div class="group-title">Extensions</div>
+                <p class="extensions-pane-lead">
+                    Browse a store below, open an add-on’s page, then use the blue <strong>Install in Axis</strong> bar (or the URL bar install icon). You can also paste a link or ID here, use a <strong>.crx</strong> file, or an unpacked folder. Axis is Chromium-based — some Firefox-only add-ons won’t run; Electron supports a <strong>subset</strong> of extension APIs.
+                </p>
+
+                <div class="extensions-section">
+                    <h3 class="extensions-section-label">Browse stores</h3>
+                    <div class="extensions-store-buttons">
+                        <button type="button" id="extensions-open-chrome-webstore" title="Open Chrome Web Store in Axis">Chrome Web Store</button>
+                        <button type="button" id="extensions-open-firefox-addons" title="Open Mozilla add-ons for Firefox in Axis">Firefox add-ons</button>
+                    </div>
+                </div>
+
+                <div class="extensions-section">
+                    <h3 class="extensions-section-label">Install from URL or ID</h3>
+                    <div class="extensions-webstore-row">
+                        <input type="text" class="extensions-webstore-input" id="extension-webstore-input" placeholder="Store URL, Chrome extension ID, or Firefox slug (e.g. ublock-origin)…" autocomplete="off" spellcheck="false">
+                        <button type="button" id="install-extension-webstore">Install</button>
+                    </div>
+                    <p class="extensions-hint">Works with Chrome Web Store and Mozilla Add-ons listings. IDs and slugs are fetched inside Axis (no stray package downloads).</p>
+                </div>
+
+                <div class="extensions-section">
+                    <h3 class="extensions-section-label">Install from disk</h3>
+                    <div class="extensions-file-actions">
+                        <button type="button" id="install-extension-crx">Choose .crx file…</button>
+                        <button type="button" id="install-extension">Choose unpacked folder…</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="group">
+                <div class="group-title">Installed</div>
+                <div class="group-content">
+                    <div class="extensions-list" id="extensions-list">
+                        <div class="extensions-empty">No extensions installed</div>
+                    </div>
+                </div>
+            </div>
+        </div>
         
         <div class="pane" id="history-pane">
             <div class="group">
@@ -914,6 +1127,7 @@
                     key === 'searchEngine' ||
                     key === 'alwaysShowFullUrl' ||
                     key === 'httpsOnlyMode' ||
+                    key === 'adBlockerEnabled' ||
                     key === 'javascriptEnabled' ||
                     key === 'speechEnabled' ||
                     key === 'speechVoiceURI' ||
@@ -944,6 +1158,7 @@
             document.getElementById('search-engine').value = settings.searchEngine || 'google';
             document.getElementById('always-show-full-url').checked = !!settings.alwaysShowFullUrl;
             document.getElementById('https-only-mode').checked = !!settings.httpsOnlyMode;
+            document.getElementById('ad-blocker-enabled').checked = settings.adBlockerEnabled !== false;
             document.getElementById('javascript-enabled').checked = settings.javascriptEnabled !== false;
             document.getElementById('speech-enabled').checked = settings.speechEnabled !== false;
             document.getElementById('speech-rate').value = String(settings.speechRate || 1);
@@ -1182,11 +1397,162 @@
                 }
             });
             loadSitePermissionOverrides();
+
+            let extensionsCache = [];
+            function renderExtensions(list) {
+                extensionsCache = Array.isArray(list) ? list : [];
+                const container = document.getElementById('extensions-list');
+                if (!container) return;
+                if (extensionsCache.length === 0) {
+                    container.innerHTML = '<div class="extensions-empty">No extensions installed. Use Install from store, .crx, or an unpacked folder.</div>';
+                    applySettingsSearch(document.getElementById('settings-search')?.value || '');
+                    return;
+                }
+                container.innerHTML = extensionsCache.map((ext) => {
+                    const id = escapeHtml(ext.id);
+                    const name = escapeHtml(ext.name || 'Extension');
+                    const initial = escapeHtml((ext.name || 'E').trim().slice(0, 1).toUpperCase());
+                    const icon = ext.iconUrl
+                        ? `<img class="extension-icon" src="${escapeHtml(ext.iconUrl)}" alt="">`
+                        : `<div class="extension-icon extension-icon-fallback">${initial}</div>`;
+                    const desc = ext.description ? `<div class="extension-desc">${escapeHtml(ext.description)}</div>` : '';
+                    const err = ext.error ? `<div class="extension-error">${escapeHtml(ext.error)}</div>` : '';
+                    const pathText = ext.installPath ? `<div class="extension-path">${escapeHtml(ext.installPath)}</div>` : '';
+                    const optionsDisabled = ext.optionsUrl ? '' : ' disabled';
+                    return `
+                        <div class="extension-card" data-extension-id="${id}">
+                            ${icon}
+                            <div class="extension-main">
+                                <div class="extension-title-row">
+                                    <div class="extension-title">${name}</div>
+                                    <div class="extension-version">${escapeHtml(ext.version || '')}</div>
+                                    <div class="extension-status">${ext.loaded ? 'Loaded' : (ext.enabled ? 'Needs reload' : 'Off')}</div>
+                                </div>
+                                ${desc}
+                                ${err}
+                                ${pathText}
+                            </div>
+                            <div class="extension-actions">
+                                <input type="checkbox" data-extension-toggle="${id}" ${ext.enabled ? 'checked' : ''} title="Enable extension">
+                                <button type="button" data-extension-options="${id}"${optionsDisabled}>Options</button>
+                                <button type="button" class="destructive" data-extension-remove="${id}">Remove</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                container.querySelectorAll('[data-extension-toggle]').forEach((input) => {
+                    input.addEventListener('change', async () => {
+                        const id = input.getAttribute('data-extension-toggle');
+                        input.disabled = true;
+                        try {
+                            renderExtensions(await window.electronAPI.setExtensionEnabled(id, input.checked));
+                        } catch (e) {
+                            alert(e && e.message ? e.message : 'Could not update extension.');
+                            await loadExtensions();
+                        }
+                    });
+                });
+                container.querySelectorAll('[data-extension-options]').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        try {
+                            await window.electronAPI.openExtensionOptions(btn.getAttribute('data-extension-options'));
+                        } catch (e) {
+                            alert(e && e.message ? e.message : 'This extension does not provide an options page.');
+                        }
+                    });
+                });
+                container.querySelectorAll('[data-extension-remove]').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        const ext = extensionsCache.find((x) => x.id === btn.getAttribute('data-extension-remove'));
+                        if (!confirm(`Remove ${ext?.name || 'this extension'}?`)) return;
+                        renderExtensions(await window.electronAPI.removeExtension(btn.getAttribute('data-extension-remove')));
+                    });
+                });
+                applySettingsSearch(document.getElementById('settings-search')?.value || '');
+            }
+            async function loadExtensions() {
+                try {
+                    renderExtensions(await window.electronAPI.getExtensions());
+                } catch (e) {
+                    const container = document.getElementById('extensions-list');
+                    if (container) container.innerHTML = '<div class="extensions-empty">Could not load extensions.</div>';
+                }
+            }
+            document.getElementById('install-extension')?.addEventListener('click', async () => {
+                const btn = document.getElementById('install-extension');
+                if (btn) btn.disabled = true;
+                try {
+                    const result = await window.electronAPI.installExtension();
+                    if (result && !result.canceled) renderExtensions(result.extensions || []);
+                } catch (e) {
+                    alert(e && e.message ? e.message : 'Could not install this extension.');
+                    await loadExtensions();
+                } finally {
+                    if (btn) btn.disabled = false;
+                }
+            });
+            document.getElementById('install-extension-webstore')?.addEventListener('click', async () => {
+                const btn = document.getElementById('install-extension-webstore');
+                const input = document.getElementById('extension-webstore-input');
+                const raw = (input && input.value) ? String(input.value).trim() : '';
+                if (!raw) {
+                    alert('Paste a Chrome Web Store or Mozilla Add-ons URL, a Chrome extension ID, or a Firefox add-on slug.');
+                    return;
+                }
+                if (btn) btn.disabled = true;
+                try {
+                    const result = await window.electronAPI.installExtensionFromWebStore(raw);
+                    if (result && !result.canceled) renderExtensions(result.extensions || []);
+                    if (input) input.value = '';
+                } catch (e) {
+                    alert(e && e.message ? e.message : 'Could not install from the store.');
+                    await loadExtensions();
+                } finally {
+                    if (btn) btn.disabled = false;
+                }
+            });
+            document.getElementById('extension-webstore-input')?.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('install-extension-webstore')?.click();
+                }
+            });
+            document.getElementById('extensions-open-chrome-webstore')?.addEventListener('click', () => {
+                try {
+                    window.electronAPI.openUrlInBrowser('https://chromewebstore.google.com/');
+                } catch (_) {}
+            });
+            document.getElementById('extensions-open-firefox-addons')?.addEventListener('click', () => {
+                try {
+                    window.electronAPI.openUrlInBrowser('https://addons.mozilla.org/firefox/extensions/');
+                } catch (_) {}
+            });
+            document.getElementById('install-extension-crx')?.addEventListener('click', async () => {
+                const btn = document.getElementById('install-extension-crx');
+                if (btn) btn.disabled = true;
+                try {
+                    const result = await window.electronAPI.installExtensionCrx();
+                    if (result && !result.canceled) renderExtensions(result.extensions || []);
+                } catch (e) {
+                    alert(e && e.message ? e.message : 'Could not install this .crx file.');
+                    await loadExtensions();
+                } finally {
+                    if (btn) btn.disabled = false;
+                }
+            });
             // When the main process records a grant from a site (or another window saves overrides), reload the table.
             try {
                 if (window.electronAPI && typeof window.electronAPI.onSettingsUpdated === 'function') {
                     window.electronAPI.onSettingsUpdated(() => {
                         loadSitePermissionOverrides();
+                        loadExtensions();
+                        try {
+                            window.electronAPI.getSettings().then((s) => {
+                                const ab = document.getElementById('ad-blocker-enabled');
+                                if (ab && s) ab.checked = s.adBlockerEnabled !== false;
+                            }).catch(() => {});
+                        } catch (_) {}
                     });
                 }
             } catch (_) {}
@@ -1240,12 +1606,14 @@
                 if (settingsSearchEmpty) settingsSearchEmpty.style.display = hasAnyMatch ? 'none' : 'block';
             }
             settingsSearchInput?.addEventListener('input', (e) => applySettingsSearch(e.target.value));
+            loadExtensions();
             
             // Change handlers
             document.getElementById('sidebar-position').addEventListener('change', e => saveSetting('sidebarPosition', e.target.value, false));
             document.getElementById('search-engine').addEventListener('change', e => saveSetting('searchEngine', e.target.value, false));
             document.getElementById('always-show-full-url').addEventListener('change', e => saveSetting('alwaysShowFullUrl', e.target.checked, false));
             document.getElementById('https-only-mode').addEventListener('change', e => saveSetting('httpsOnlyMode', e.target.checked, false));
+            document.getElementById('ad-blocker-enabled').addEventListener('change', e => saveSetting('adBlockerEnabled', e.target.checked, false));
             document.getElementById('javascript-enabled').addEventListener('change', e => saveSetting('javascriptEnabled', e.target.checked, false));
             document.getElementById('speech-enabled').addEventListener('change', e => saveSetting('speechEnabled', e.target.checked, false));
             document.getElementById('speech-voice').addEventListener('change', e => {
