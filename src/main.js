@@ -6,6 +6,8 @@ const Store = require('electron-store');
 const fs = require('fs');
 const os = require('os');
 const { exec } = require('child_process');
+const AdmZip = require('adm-zip');
+const { pathToFileURL } = require('url');
 
 /** App branding image (project root). Used for windows, macOS Dock, About panel, and packaged .app icon. */
 const APP_ICON_PATH = path.join(__dirname, '..', 'Axis_logo.png');
@@ -147,10 +149,691 @@ async function showMacAboutDialog() {
 // Initialize settings store
 const store = new Store();
 
+// Electron defaults `nativeTheme.themeSource` to `system`, so when the OS switches
+// light/dark, Chromium's `prefers-color-scheme`, vibrancy materials, and native form
+// chrome follow — which fights Axis (user theme + in-app Appearance). Pin a stable
+// dark scheme for the whole app; light “Appearance” remains overlay/CSS (`data-ui-theme`)
+// and `settings.html`'s own `color-scheme`, not OS-driven.
+try {
+  nativeTheme.themeSource = 'dark';
+} catch (_) {}
+
 // Initialize history and downloads stores
 const historyStore = new Store({ name: 'history' });
 const downloadsStore = new Store({ name: 'downloads' });
 const notesStore = new Store({ name: 'notes' });
+
+const AXIS_EXTENSIONS_STORE_KEY = 'extensions';
+const axisExtensionRuntime = new Map();
+/** Small `BrowserWindow` instances opened for `default_popup` (keyed by our extension record id). */
+const axisExtensionPopupByRecordId = new Map();
+
+const AXIS_EXTENSION_SESSION_PARTITION = 'persist:main';
+
+function getAxisExtensionSession() {
+  return session.fromPartition(AXIS_EXTENSION_SESSION_PARTITION);
+}
+
+/**
+ * Must match tab `<webview>` guests (`renderer.js` `getTabWebpreferencesString`) so
+ * `chrome-extension://` popups run in the same kind of guest as the main browser.
+ */
+function getAxisExtensionPopupGuestWebpreferencesAttr() {
+  return [
+    'contextIsolation=false',
+    'nodeIntegration=false',
+    'webSecurity=true',
+    'accelerated2dCanvas=true',
+    'enableWebGL=true',
+    'enableWebGL2=true',
+    'enableGpuRasterization=true',
+    'enableZeroCopy=true',
+    'enableHardwareAcceleration=true',
+    'backgroundThrottling=true',
+    'offscreen=false',
+    'spellcheck=yes'
+  ].join(',');
+}
+
+/** Load popup inside a guest webview (reliable); plain `loadURL(chrome-extension:)` on the window often stays blank / never `ready-to-show`. */
+function buildAxisExtensionPopupBridgeDataUrl(popupUrl) {
+  if (!popupUrl || typeof popupUrl !== 'string') {
+    throw new Error('Invalid extension popup URL');
+  }
+  let parsed;
+  try {
+    parsed = new URL(popupUrl);
+  } catch (_) {
+    throw new Error('Invalid extension popup URL');
+  }
+  if (parsed.protocol !== 'chrome-extension:') {
+    throw new Error('Invalid extension popup URL');
+  }
+  const srcEsc = String(popupUrl).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const wp = getAxisExtensionPopupGuestWebpreferencesAttr().replace(/"/g, '&quot;');
+  const html =
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\';">' +
+    '<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#f5f5f5}' +
+    'webview{display:inline-flex;width:100%;height:100%;border:0}</style></head><body>' +
+    `<webview src="${srcEsc}" partition="${AXIS_EXTENSION_SESSION_PARTITION}" allowpopups ` +
+    `webpreferences="${wp}"></webview></body></html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+function attachAxisExtensionPopupShowHandlers(popupWin) {
+  let shown = false;
+  const reveal = () => {
+    if (shown || popupWin.isDestroyed()) return;
+    shown = true;
+    try {
+      popupWin.show();
+      popupWin.focus();
+    } catch (_) {
+      /* ignore */
+    }
+  };
+  popupWin.once('ready-to-show', reveal);
+  popupWin.webContents.once('did-finish-load', () => {
+    setImmediate(reveal);
+  });
+  popupWin.webContents.on('did-fail-load', (_event, _code, _desc, _url, isMainFrame) => {
+    if (isMainFrame) reveal();
+  });
+  setTimeout(reveal, 2000);
+}
+
+function getAxisExtensionsDir() {
+  return path.join(app.getPath('userData'), 'extensions');
+}
+
+function makeExtensionRecordId(name) {
+  const base = String(name || 'extension')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'extension';
+  return `${base}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getStoredAxisExtensions() {
+  const raw = store.get(AXIS_EXTENSIONS_STORE_KEY, []);
+  return Array.isArray(raw) ? raw.filter((x) => x && typeof x === 'object') : [];
+}
+
+function setStoredAxisExtensions(list) {
+  store.set(AXIS_EXTENSIONS_STORE_KEY, Array.isArray(list) ? list : []);
+}
+
+async function readAxisExtensionManifest(extensionPath) {
+  const manifestPath = path.join(extensionPath, 'manifest.json');
+  const text = await fs.promises.readFile(manifestPath, 'utf8');
+  const manifest = JSON.parse(text);
+  if (!manifest || typeof manifest !== 'object') {
+    throw new Error('Invalid manifest.json');
+  }
+  if (!manifest.name || !manifest.version || !manifest.manifest_version) {
+    throw new Error('manifest.json must include name, version, and manifest_version');
+  }
+  return manifest;
+}
+
+function getAxisManifestText(value, fallback = '') {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return fallback;
+}
+
+function getAxisExtensionOptionsPage(manifest) {
+  const page = manifest?.options_ui?.page || manifest?.options_page || '';
+  return typeof page === 'string' ? page.replace(/^\/+/, '') : '';
+}
+
+function getAxisExtensionDefaultPopup(manifest) {
+  if (!manifest || typeof manifest !== 'object') return '';
+  const action = manifest.action;
+  if (action && typeof action.default_popup === 'string' && action.default_popup.trim()) {
+    return action.default_popup.replace(/^\/+/, '');
+  }
+  const ba = manifest.browser_action;
+  if (ba && typeof ba.default_popup === 'string' && ba.default_popup.trim()) {
+    return ba.default_popup.replace(/^\/+/, '');
+  }
+  const pa = manifest.page_action;
+  if (pa && typeof pa.default_popup === 'string' && pa.default_popup.trim()) {
+    return pa.default_popup.replace(/^\/+/, '');
+  }
+  return '';
+}
+
+function getAxisExtensionIconUrl(extensionPath, manifest) {
+  const icons = manifest && manifest.icons && typeof manifest.icons === 'object' ? manifest.icons : null;
+  if (!icons) return '';
+  const sizes = Object.keys(icons)
+    .map((s) => Number(s))
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => b - a);
+  for (const size of sizes) {
+    const rel = icons[String(size)];
+    if (typeof rel !== 'string') continue;
+    const iconPath = path.join(extensionPath, rel);
+    try {
+      if (fs.existsSync(iconPath)) return pathToFileURL(iconPath).toString();
+    } catch (_) {}
+  }
+  return '';
+}
+
+function parseChromeWebStoreExtensionId(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const compact = s.replace(/\s+/g, '');
+  const onlyId = /^([a-p]{32})$/i.exec(compact);
+  if (onlyId) return onlyId[1].toLowerCase();
+  try {
+    const u = new URL(compact.includes('://') ? compact : `https://${compact}`);
+    const parts = u.pathname.split('/').filter(Boolean);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const seg = parts[i];
+      if (seg && /^[a-p]{32}$/i.test(seg)) return seg.toLowerCase();
+    }
+  } catch (_) {}
+  return null;
+}
+
+/** Mozilla Add-ons slug / numeric id from URL or plain slug (not used for 32-char Chrome IDs — caller handles that first). */
+function parseFirefoxAmoAddonKey(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const compact = s.replace(/\s+/g, '');
+  try {
+    const u = new URL(compact.includes('://') ? compact : `https://${compact}`);
+    const host = (u.hostname || '').replace(/^www\./i, '').toLowerCase();
+    if (host === 'addons.mozilla.org') {
+      const parts = u.pathname.split('/').filter(Boolean);
+      const ai = parts.indexOf('addon');
+      if (ai >= 0 && parts[ai + 1]) {
+        const key = decodeURIComponent(parts[ai + 1]);
+        if (key && /^[a-zA-Z0-9._-]+$/.test(key)) return key;
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  if (/[:/]/i.test(compact)) return null;
+  if (/^[a-p]{32}$/i.test(compact)) return null;
+  if (/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,249}$/.test(compact)) return compact;
+  return null;
+}
+
+async function fetchXpiBufferForFirefoxAmo(addonKey) {
+  const key = String(addonKey || '').trim();
+  if (!key) throw new Error('Invalid Firefox add-on');
+  const apiUrl = `https://addons.mozilla.org/api/v5/addons/addon/${encodeURIComponent(key)}/`;
+  const res = await fetch(apiUrl, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': `AxisBrowser/${app.getVersion?.() || '1.0'}`
+    }
+  });
+  if (!res.ok) {
+    throw new Error(
+      `Mozilla Add-ons API error (${res.status}). Check the add-on URL or slug — the listing may be missing or restricted.`
+    );
+  }
+  const data = await res.json();
+  const fileUrl = data?.current_version?.file?.url;
+  if (!fileUrl || typeof fileUrl !== 'string') {
+    throw new Error('This add-on has no public file URL (it may be Android-only or not approved).');
+  }
+  const xpiRes = await fetch(fileUrl, {
+    redirect: 'follow',
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+      Accept: 'application/x-xpinstall,*/*'
+    }
+  });
+  if (!xpiRes.ok) {
+    throw new Error(`XPI download failed (${xpiRes.status}). Try again or install an unpacked copy.`);
+  }
+  const buf = Buffer.from(await xpiRes.arrayBuffer());
+  if (buf.length < 200) {
+    throw new Error('Download was too small — the add-on file may be unavailable.');
+  }
+  return buf;
+}
+
+async function installAxisExtensionFromXpiBuffer(xpiBuffer) {
+  const tempRoot = path.join(os.tmpdir(), `axis-ext-xpi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const unpackedDir = path.join(tempRoot, 'unpacked');
+  await fs.promises.mkdir(unpackedDir, { recursive: true });
+  try {
+    const zip = new AdmZip(xpiBuffer);
+    zip.extractAllTo(unpackedDir, true);
+    return await commitAxisExtensionInstall(unpackedDir);
+  } finally {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function installExtensionFromStoreUrlOrId(rawInput) {
+  const s = String(rawInput || '').trim();
+  const compact = s.replace(/\s+/g, '');
+
+  if (/addons\.mozilla\.org/i.test(s)) {
+    const mozKey = parseFirefoxAmoAddonKey(rawInput);
+    if (!mozKey) {
+      throw new Error('Could not read the add-on slug from this Mozilla Add-ons URL.');
+    }
+    const xpi = await fetchXpiBufferForFirefoxAmo(mozKey);
+    return installAxisExtensionFromXpiBuffer(xpi);
+  }
+
+  if (/^[a-p]{32}$/i.test(compact)) {
+    const crx = await fetchCrxBufferForExtensionId(compact.toLowerCase());
+    return installAxisExtensionFromCrxBuffer(crx);
+  }
+
+  const firefoxKey = parseFirefoxAmoAddonKey(rawInput);
+  if (firefoxKey) {
+    const xpi = await fetchXpiBufferForFirefoxAmo(firefoxKey);
+    return installAxisExtensionFromXpiBuffer(xpi);
+  }
+
+  return installAxisExtensionFromChromeWebStoreInput(rawInput);
+}
+
+/** CRX2 / CRX3: payload after header is a ZIP of the unpacked extension. */
+function extractZipPayloadFromCrx(crxBuffer) {
+  if (!Buffer.isBuffer(crxBuffer) || crxBuffer.length < 16) {
+    throw new Error('Invalid .crx file (too small)');
+  }
+  const magic = crxBuffer.toString('utf8', 0, 4);
+  if (magic !== 'Cr24') {
+    throw new Error('Not a Chrome extension package (.crx). Expected Cr24 header.');
+  }
+  const ver = crxBuffer.readUInt32LE(4);
+  let zipStart;
+  if (ver === 2) {
+    const keySize = crxBuffer.readUInt32LE(8);
+    const sigSize = crxBuffer.readUInt32LE(12);
+    zipStart = 16 + keySize + sigSize;
+  } else if (ver === 3) {
+    const headerSize = crxBuffer.readUInt32LE(8);
+    zipStart = 12 + headerSize;
+  } else {
+    throw new Error(`Unsupported CRX version (${ver}). Try installing unpacked instead.`);
+  }
+  if (zipStart >= crxBuffer.length) {
+    throw new Error('Invalid .crx layout');
+  }
+  return crxBuffer.subarray(zipStart);
+}
+
+async function fetchCrxBufferForExtensionId(extensionId) {
+  const id = String(extensionId || '').toLowerCase();
+  if (!/^[a-p]{32}$/.test(id)) {
+    throw new Error('Invalid extension ID');
+  }
+  const chromeVer = process.versions.chrome || '131.0.0.0';
+  const params = new URLSearchParams({
+    response: 'redirect',
+    prodversion: chromeVer,
+    acceptformat: 'crx2,crx3',
+    x: `id=${id}&installsource=ondemand&uc`
+  });
+  const url = `https://clients2.google.com/service/update2/crx?${params.toString()}`;
+  const res = await fetch(url, {
+    redirect: 'follow',
+    headers: {
+      'User-Agent': `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`,
+      'Accept': '*/*'
+    }
+  });
+  if (!res.ok) {
+    throw new Error(
+      `Chrome Web Store download failed (${res.status}). The extension may be restricted, region-blocked, or the ID may be wrong.`
+    );
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length < 200) {
+    throw new Error('Download was too small. Google may have refused this request — try Install .crx or unpacked.');
+  }
+  return buf;
+}
+
+async function commitAxisExtensionInstall(sourceDir) {
+  const manifest = await readAxisExtensionManifest(sourceDir);
+  await fs.promises.mkdir(getAxisExtensionsDir(), { recursive: true });
+  const id = makeExtensionRecordId(manifest.name);
+  const destPath = path.join(getAxisExtensionsDir(), id);
+  await fs.promises.cp(sourceDir, destPath, {
+    recursive: true,
+    errorOnExist: false,
+    force: true
+  });
+  const record = {
+    id,
+    extensionId: '',
+    name: getAxisManifestText(manifest.name, 'Extension'),
+    version: getAxisManifestText(manifest.version),
+    description: getAxisManifestText(manifest.description),
+    manifestVersion: manifest.manifest_version,
+    enabled: true,
+    path: destPath,
+    iconUrl: getAxisExtensionIconUrl(destPath, manifest),
+    optionsPage: getAxisExtensionOptionsPage(manifest),
+    popupPage: getAxisExtensionDefaultPopup(manifest),
+    installedAt: Date.now()
+  };
+  const all = getStoredAxisExtensions();
+  all.push(record);
+  setStoredAxisExtensions(all);
+  const loaded = await loadAxisExtensionRecord(record);
+  if (loaded.error) {
+    await fs.promises.rm(destPath, { recursive: true, force: true }).catch(() => {});
+    setStoredAxisExtensions(getStoredAxisExtensions().filter((x) => x.id !== id));
+    throw new Error(loaded.error);
+  }
+  broadcastSettingsUpdated();
+  return { extension: loaded, extensions: await listAxisExtensions() };
+}
+
+async function installAxisExtensionFromCrxBuffer(crxBuffer) {
+  const zipBuf = extractZipPayloadFromCrx(crxBuffer);
+  const tempRoot = path.join(os.tmpdir(), `axis-ext-crx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const unpackedDir = path.join(tempRoot, 'unpacked');
+  await fs.promises.mkdir(unpackedDir, { recursive: true });
+  try {
+    const zip = new AdmZip(zipBuf);
+    zip.extractAllTo(unpackedDir, true);
+    return await commitAxisExtensionInstall(unpackedDir);
+  } finally {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function installAxisExtensionFromChromeWebStoreInput(rawInput) {
+  const extId = parseChromeWebStoreExtensionId(rawInput);
+  if (!extId) {
+    throw new Error(
+      'Paste a Chrome Web Store link (chromewebstore.google.com / chrome.google.com) or the 32-character extension ID (letters a–p only).'
+    );
+  }
+  const crx = await fetchCrxBufferForExtensionId(extId);
+  return installAxisExtensionFromCrxBuffer(crx);
+}
+
+function toAxisExtensionView(record) {
+  const rt = axisExtensionRuntime.get(record.id) || {};
+  const loadedId = rt.loadedId || record.extensionId || '';
+  const activeExtensionId = rt.loadedId || '';
+  const optionsPath = record.optionsPage || '';
+  const popupPath = record.popupPage || '';
+  return {
+    id: record.id,
+    extensionId: loadedId,
+    name: record.name || 'Extension',
+    version: record.version || '',
+    description: record.description || '',
+    enabled: record.enabled !== false,
+    loaded: !!rt.loadedId,
+    error: rt.error || '',
+    installPath: record.path || '',
+    iconUrl: record.iconUrl || '',
+    optionsUrl: activeExtensionId && optionsPath ? `chrome-extension://${activeExtensionId}/${optionsPath}` : '',
+    popupUrl: activeExtensionId && popupPath ? `chrome-extension://${activeExtensionId}/${popupPath}` : '',
+    installedAt: record.installedAt || 0,
+    manifestVersion: record.manifestVersion || null
+  };
+}
+
+async function loadAxisExtensionRecord(record) {
+  if (!record || record.enabled === false) return toAxisExtensionView(record);
+  const existing = axisExtensionRuntime.get(record.id);
+  if (existing?.loadedId) return toAxisExtensionView(record);
+
+  try {
+    const manifest = await readAxisExtensionManifest(record.path);
+    const ext = await session.fromPartition('persist:main').loadExtension(record.path, {
+      allowFileAccess: true
+    });
+    const next = {
+      ...record,
+      extensionId: ext.id,
+      name: getAxisManifestText(manifest.name, ext.name || record.name),
+      version: getAxisManifestText(manifest.version, record.version),
+      description: getAxisManifestText(manifest.description, record.description),
+      manifestVersion: manifest.manifest_version,
+      optionsPage: getAxisExtensionOptionsPage(manifest),
+      popupPage: getAxisExtensionDefaultPopup(manifest),
+      iconUrl: getAxisExtensionIconUrl(record.path, manifest)
+    };
+    axisExtensionRuntime.set(record.id, { loadedId: ext.id, error: '' });
+    const all = getStoredAxisExtensions();
+    const idx = all.findIndex((x) => x.id === record.id);
+    if (idx >= 0) {
+      all[idx] = next;
+      setStoredAxisExtensions(all);
+    }
+    return toAxisExtensionView(next);
+  } catch (error) {
+    axisExtensionRuntime.set(record.id, {
+      loadedId: '',
+      error: error && error.message ? error.message : String(error)
+    });
+    return toAxisExtensionView(record);
+  }
+}
+
+function unloadAxisExtensionRecord(record) {
+  if (!record) return;
+  const prevWin = axisExtensionPopupByRecordId.get(record.id);
+  if (prevWin && !prevWin.isDestroyed()) {
+    try {
+      prevWin.close();
+    } catch (_) {}
+    axisExtensionPopupByRecordId.delete(record.id);
+  }
+  const rt = axisExtensionRuntime.get(record.id);
+  const extensionId = rt?.loadedId || record.extensionId;
+  if (extensionId) {
+    try {
+      session.fromPartition('persist:main').removeExtension(extensionId);
+    } catch (_) {}
+  }
+  axisExtensionRuntime.set(record.id, { loadedId: '', error: '' });
+}
+
+async function loadStoredAxisExtensions() {
+  const all = getStoredAxisExtensions();
+  for (const record of all) {
+    if (record.enabled === false) continue;
+    await loadAxisExtensionRecord(record);
+  }
+}
+
+async function migrateAxisExtensionPopupPagesIfNeeded() {
+  const all = getStoredAxisExtensions();
+  let changed = false;
+  const out = await Promise.all(
+    all.map(async (rec) => {
+      if (rec.popupPage !== undefined) return rec;
+      changed = true;
+      try {
+        const manifest = await readAxisExtensionManifest(rec.path);
+        return {
+          ...rec,
+          popupPage: getAxisExtensionDefaultPopup(manifest) || ''
+        };
+      } catch (_) {
+        return { ...rec, popupPage: '' };
+      }
+    })
+  );
+  if (changed) setStoredAxisExtensions(out);
+}
+
+function listAxisExtensions() {
+  const all = getStoredAxisExtensions();
+  return all.map(toAxisExtensionView);
+}
+
+async function installAxisExtensionFromFolder(ownerWindow) {
+  const dialogOptions = {
+    title: 'Install Extension',
+    message: 'Choose an unpacked Chrome extension folder that contains manifest.json',
+    properties: ['openDirectory']
+  };
+  const result = ownerWindow
+    ? await dialog.showOpenDialog(ownerWindow, dialogOptions)
+    : await dialog.showOpenDialog(dialogOptions);
+  if (result.canceled || !result.filePaths || !result.filePaths[0]) {
+    return { canceled: true, extensions: await listAxisExtensions() };
+  }
+
+  const sourcePath = result.filePaths[0];
+  const out = await commitAxisExtensionInstall(sourcePath);
+  return { canceled: false, ...out };
+}
+
+async function installAxisExtensionFromCrxFile(ownerWindow) {
+  const dialogOptions = {
+    title: 'Install Extension from .crx',
+    message: 'Choose a Chrome extension package (.crx)',
+    properties: ['openFile'],
+    filters: [{ name: 'Chrome Extension', extensions: ['crx'] }, { name: 'All Files', extensions: ['*'] }]
+  };
+  const result = ownerWindow
+    ? await dialog.showOpenDialog(ownerWindow, dialogOptions)
+    : await dialog.showOpenDialog(dialogOptions);
+  if (result.canceled || !result.filePaths || !result.filePaths[0]) {
+    return { canceled: true, extensions: await listAxisExtensions() };
+  }
+  const crxBuf = await fs.promises.readFile(result.filePaths[0]);
+  const out = await installAxisExtensionFromCrxBuffer(crxBuf);
+  return { canceled: false, ...out };
+}
+
+async function setAxisExtensionEnabled(id, enabled) {
+  const all = getStoredAxisExtensions();
+  const idx = all.findIndex((x) => x.id === id);
+  if (idx < 0) throw new Error('Extension not found');
+  all[idx] = { ...all[idx], enabled: !!enabled };
+  setStoredAxisExtensions(all);
+  if (enabled) {
+    await loadAxisExtensionRecord(all[idx]);
+  } else {
+    unloadAxisExtensionRecord(all[idx]);
+  }
+  broadcastSettingsUpdated();
+  return listAxisExtensions();
+}
+
+async function removeAxisExtension(id) {
+  const all = getStoredAxisExtensions();
+  const record = all.find((x) => x.id === id);
+  if (!record) throw new Error('Extension not found');
+  unloadAxisExtensionRecord(record);
+  setStoredAxisExtensions(all.filter((x) => x.id !== id));
+  try {
+    const root = getAxisExtensionsDir();
+    const rel = path.relative(root, record.path || '');
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+      await fs.promises.rm(record.path, { recursive: true, force: true });
+    }
+  } catch (_) {}
+  axisExtensionRuntime.delete(id);
+  broadcastSettingsUpdated();
+  return listAxisExtensions();
+}
+
+async function openAxisExtensionOptions(id) {
+  const record = getStoredAxisExtensions().find((x) => x.id === id);
+  if (!record) throw new Error('Extension not found');
+  if (record.enabled === false) throw new Error('Enable this extension before opening its options.');
+  let view = toAxisExtensionView(record);
+  if (record.enabled !== false && !view.loaded) {
+    view = await loadAxisExtensionRecord(record);
+  }
+  if (!view.optionsUrl) throw new Error('This extension does not provide an options page');
+  openUrlInAxisBrowser(view.optionsUrl);
+  return true;
+}
+
+async function openAxisExtensionPopup(id) {
+  const record = getStoredAxisExtensions().find((x) => x.id === id);
+  if (!record) throw new Error('Extension not found');
+  if (record.enabled === false) throw new Error('Enable this extension before opening its popup.');
+  let view = toAxisExtensionView(record);
+  if (record.enabled !== false && !view.loaded) {
+    view = await loadAxisExtensionRecord(record);
+  }
+  if (!view.popupUrl) throw new Error('This extension does not provide a toolbar popup.');
+  const prev = axisExtensionPopupByRecordId.get(id);
+  if (prev && !prev.isDestroyed()) {
+    try {
+      if (prev.isMinimized()) prev.restore();
+      prev.show();
+      prev.focus();
+      return true;
+    } catch (_) {
+      axisExtensionPopupByRecordId.delete(id);
+    }
+  }
+
+  const extSession = getAxisExtensionSession();
+  const parentWin = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+
+  const popupWin = new BrowserWindow({
+    width: 400,
+    height: 560,
+    minWidth: 200,
+    minHeight: 120,
+    show: false,
+    title: view.name || 'Extension',
+    icon: fs.existsSync(APP_ICON_PATH) ? APP_ICON_PATH : undefined,
+    parent: parentWin || undefined,
+    autoHideMenuBar: true,
+    backgroundColor: '#f5f5f5',
+    webPreferences: {
+      session: extSession,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webSecurity: true,
+      webviewTag: true,
+      backgroundThrottling: false,
+      spellcheck: false
+    }
+  });
+
+  axisExtensionPopupByRecordId.set(id, popupWin);
+  popupWin.on('closed', () => {
+    if (axisExtensionPopupByRecordId.get(id) === popupWin) {
+      axisExtensionPopupByRecordId.delete(id);
+    }
+  });
+
+  attachAxisExtensionPopupShowHandlers(popupWin);
+
+  const bridgeUrl = buildAxisExtensionPopupBridgeDataUrl(view.popupUrl);
+  try {
+    await popupWin.loadURL(bridgeUrl);
+  } catch (err) {
+    axisExtensionPopupByRecordId.delete(id);
+    if (!popupWin.isDestroyed()) {
+      try {
+        popupWin.close();
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    throw err;
+  }
+
+  return true;
+}
 
 function normalizePermissionOrigin(url) {
   if (!url || typeof url !== 'string') return null;
@@ -379,18 +1062,120 @@ function configureSession() {
   } catch (_) {}
 }
 
-/** In-flight downloads from any Axis session — drives URL-bar + popup activity animations in renderer. */
-let axisActiveDownloadCount = 0;
+/** In-flight downloads from any Axis session — drives URL-bar ring + popup activity in renderer. */
+const axisActiveDownloadItems = new Set();
+let axisDownloadProgressBroadcastTimer = null;
+
+function getAxisAggregateDownloadProgress() {
+  let received = 0;
+  let total = 0;
+  for (const item of axisActiveDownloadItems) {
+    try {
+      received += item.getReceivedBytes();
+      const t = item.getTotalBytes();
+      if (t > 0) total += t;
+    } catch (_) {
+      /* item may be destroyed */
+    }
+  }
+  if (total <= 0) return null;
+  return Math.min(1, Math.max(0, received / total));
+}
 
 function broadcastAxisDownloadActivity() {
-  const active = axisActiveDownloadCount > 0;
+  const active = axisActiveDownloadItems.size > 0;
+  const progress = active ? getAxisAggregateDownloadProgress() : null;
   for (const w of BrowserWindow.getAllWindows()) {
     if (w.isDestroyed()) continue;
     try {
-      w.webContents.send('axis-download-activity', { active });
+      w.webContents.send('axis-download-activity', { active, progress });
     } catch (_) {
       /* window gone */
     }
+  }
+}
+
+function scheduleAxisDownloadProgressBroadcast() {
+  if (axisDownloadProgressBroadcastTimer != null) return;
+  axisDownloadProgressBroadcastTimer = setTimeout(() => {
+    axisDownloadProgressBroadcastTimer = null;
+    broadcastAxisDownloadActivity();
+  }, 80);
+}
+
+// ---------------------------------------------------------------------------
+// Ad blocker (@ghostery/adblocker-electron) — network + cosmetic filters per session
+// ---------------------------------------------------------------------------
+let axisAdblockBlocker = null;
+let axisAdblockLoadPromise = null;
+
+function getAxisAdblockSessions() {
+  const out = [];
+  try {
+    out.push(session.defaultSession);
+  } catch (_) {
+    return out;
+  }
+  try {
+    out.push(session.fromPartition('persist:main'));
+  } catch (_) {}
+  try {
+    out.push(session.fromPartition('incognito'));
+  } catch (_) {}
+  return out;
+}
+
+function syncAdBlockerFromStore() {
+  const enabled = store.get('adBlockerEnabled', true) !== false;
+  void applyAxisAdBlockerEnabled(enabled);
+}
+
+async function applyAxisAdBlockerEnabled(enabled) {
+  const sessions = getAxisAdblockSessions();
+  if (!enabled) {
+    if (!axisAdblockBlocker) return;
+    for (const s of sessions) {
+      try {
+        if (axisAdblockBlocker.isBlockingEnabled(s)) {
+          axisAdblockBlocker.disableBlockingInSession(s);
+        }
+      } catch (_) {}
+    }
+    return;
+  }
+  try {
+    if (typeof globalThis.fetch !== 'function') {
+      console.warn('Axis: ad blocker needs global fetch (Electron 39+)');
+      return;
+    }
+    const { ElectronBlocker } = require('@ghostery/adblocker-electron');
+    const fsp = fs.promises;
+    const cachePath = path.join(app.getPath('userData'), 'axis-adblock-engine.bin');
+    const fetchFn = globalThis.fetch.bind(globalThis);
+    if (!axisAdblockLoadPromise) {
+      axisAdblockLoadPromise = ElectronBlocker.fromPrebuiltAdsAndTracking(fetchFn, {
+        path: cachePath,
+        read: (p) => fsp.readFile(p),
+        write: (p, buf) => fsp.writeFile(p, buf),
+      }).catch((err) => {
+        axisAdblockLoadPromise = null;
+        console.error('Axis: failed to initialize ad blocker lists:', err);
+        throw err;
+      });
+    }
+    const blocker = await axisAdblockLoadPromise;
+    axisAdblockBlocker = blocker;
+    for (const s of sessions) {
+      try {
+        if (!blocker.isBlockingEnabled(s)) {
+          blocker.enableBlockingInSession(s);
+        }
+      } catch (e) {
+        console.warn('Axis: enable ad blocker on session failed:', e);
+      }
+    }
+  } catch (_) {
+    /* logged in load promise */
   }
 }
 
@@ -563,19 +1348,51 @@ function addWordToAllSpellCheckerDictionaries(word) {
   return added;
 }
 
+/**
+ * Chrome Web Store / Mozilla AMO “Add” buttons often start a guest download of `.crx` / `.xpi`.
+ * Cancel so files don’t land in Downloads — Axis installs via main-process fetch + Install in Axis.
+ */
+function axisShouldCancelChromeExtensionPackageDownload(item) {
+  try {
+    const u = String(item.getURL?.() || '');
+    if (!u) return false;
+    if (/https?:\/\/clients2\.google\.com\/service\/update2\/crx\b/i.test(u)) return true;
+    if (/https?:\/\/clients2\.google\.com\/crx\b/i.test(u)) return true;
+    if (/https?:\/\/addons\.mozilla\.org\/[^?]*\/downloads\/file\//i.test(u)) return true;
+    if (/https?:\/\/addons\.cdn\.mozilla\.net\//i.test(u)) return true;
+    if (/https?:\/\/product-files\.mozilla\.net\//i.test(u)) return true;
+  } catch (_) {
+    /* ignore */
+  }
+  return false;
+}
+
 function attachDownloadActivityTracking(sess) {
   if (!sess || typeof sess.on !== 'function') return;
-  sess.on('will-download', (_event, item) => {
-    axisActiveDownloadCount += 1;
-    broadcastAxisDownloadActivity();
-    item.on('done', () => {
-      axisActiveDownloadCount = Math.max(0, axisActiveDownloadCount - 1);
+  sess.on('will-download', (event, item) => {
+    if (axisShouldCancelChromeExtensionPackageDownload(item)) {
+      try {
+        event.preventDefault();
+      } catch (_) {
+        /* ignore */
+      }
+      return;
+    }
+    axisActiveDownloadItems.add(item);
+    const onUpdated = () => scheduleAxisDownloadProgressBroadcast();
+    item.on('updated', onUpdated);
+    item.once('done', () => {
+      try {
+        item.removeListener('updated', onUpdated);
+      } catch (_) {}
+      axisActiveDownloadItems.delete(item);
       broadcastAxisDownloadActivity();
     });
+    broadcastAxisDownloadActivity();
   });
 }
 
-/** macOS: vibrancy shows desktop through the window; turn it off when settings “Window glass brightness” is 0 (fully opaque chrome). */
+/** macOS: vibrancy shows desktop through the window; turn it off when Settings “Window transparency” is 0 (fully opaque chrome). */
 function applyVibrancyToWindow(browserWindow) {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   if (process.platform !== 'darwin') return;
@@ -800,7 +1617,7 @@ const unregisterShortcuts = () => {
   app.commandLine.appendSwitch('disable-hang-monitor');
   app.commandLine.appendSwitch('disable-background-networking');
   app.commandLine.appendSwitch('disable-default-apps');
-  app.commandLine.appendSwitch('disable-extensions');
+  /* Do not pass `disable-extensions`: it breaks `session.loadExtension` / user-installed extensions. */
   app.commandLine.appendSwitch('disable-sync');
   app.commandLine.appendSwitch('disable-translate');
   app.commandLine.appendSwitch('disable-breakpad');
@@ -959,14 +1776,13 @@ function getSettingsWindowBackgroundColor() {
   try {
     // Match the settings window to the in-app `uiTheme` setting (same source of
     // truth as the renderer's `data-ui-theme`) so there's no light/dark flash
-    // before `settings.html` reads the setting itself. Fall back to the OS scheme
-    // only if the setting is missing / invalid.
-    const uiTheme = store.get('uiTheme', null);
+    // before `settings.html` reads the setting itself. Do not use `nativeTheme`:
+    // OS appearance must not change this color.
+    const uiTheme = store.get('uiTheme', 'dark');
     if (uiTheme === 'light') return '#f5f5f7';
-    if (uiTheme === 'dark') return '#1e1e1e';
-    return nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#f5f5f7';
+    return '#1e1e1e';
   } catch (_) {
-    return '#f5f5f7';
+    return '#1e1e1e';
   }
 }
 
@@ -1027,17 +1843,12 @@ function openSettingsWindow(tab = null) {
     };
   }
   settingsWindow = new BrowserWindow(windowOptions);
-  const onThemeUpdated = () => {
-    refreshSettingsWindowChrome();
-  };
-  nativeTheme.on('updated', onThemeUpdated);
   const settingsPath = path.join(__dirname, 'settings.html');
   settingsWindow.loadFile(settingsPath, { hash: tab || '' });
   settingsWindow.once('ready-to-show', () => {
     settingsWindow.show();
   });
   settingsWindow.on('closed', () => {
-    nativeTheme.removeListener('updated', onThemeUpdated);
     settingsWindow = null;
   });
 }
@@ -1733,6 +2544,8 @@ app.whenReady().then(async () => {
   });
 
   configureSession();
+  syncAdBlockerFromStore();
+  await loadStoredAxisExtensions();
   ensureSpellEngineLoaded();
   warmUpMainProcessNativePaths();
   createWindow();
@@ -1843,6 +2656,16 @@ ipcMain.handle('get-settings', () => {
   return store.store;
 });
 
+/** Sync payload for `settings.html` first paint — `uiTheme` from the store only, never the OS. */
+ipcMain.on('axis-settings-window-bootstrap', (event) => {
+  try {
+    const ui = store.get('uiTheme', 'dark');
+    event.returnValue = { uiTheme: ui === 'light' ? 'light' : 'dark' };
+  } catch (_) {
+    event.returnValue = { uiTheme: 'dark' };
+  }
+});
+
 ipcMain.handle('get-site-permission-overrides', () => {
   return store.get('sitePermissionOverrides', {});
 });
@@ -1856,7 +2679,49 @@ ipcMain.handle('set-site-permission-overrides', (event, obj) => {
 
 ipcMain.handle('set-setting', (event, key, value) => {
   store.set(key, value);
+  if (key === 'adBlockerEnabled') {
+    syncAdBlockerFromStore();
+  }
   return true;
+});
+
+ipcMain.handle('get-extensions', async () => {
+  await migrateAxisExtensionPopupPagesIfNeeded();
+  return listAxisExtensions();
+});
+
+ipcMain.handle('install-extension', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return installAxisExtensionFromFolder(win && !win.isDestroyed() ? win : undefined);
+});
+
+ipcMain.handle('install-extension-from-web-store', async (_event, rawInput) => {
+  const out = await installExtensionFromStoreUrlOrId(rawInput);
+  return { canceled: false, ...out };
+});
+
+/** Absolute path for `<webview preload>` — Chrome Web Store click bridge. */
+ipcMain.handle('get-webview-cws-preload-path', () => path.join(__dirname, 'webview-preload-cws.js'));
+
+ipcMain.handle('install-extension-crx', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return installAxisExtensionFromCrxFile(win && !win.isDestroyed() ? win : undefined);
+});
+
+ipcMain.handle('set-extension-enabled', async (_event, id, enabled) => {
+  return setAxisExtensionEnabled(id, enabled);
+});
+
+ipcMain.handle('remove-extension', async (_event, id) => {
+  return removeAxisExtension(id);
+});
+
+ipcMain.handle('open-extension-options', async (_event, id) => {
+  return openAxisExtensionOptions(id);
+});
+
+ipcMain.handle('open-extension-popup', async (_event, id) => {
+  return openAxisExtensionPopup(id);
 });
 
 // Keyboard shortcuts management
