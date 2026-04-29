@@ -1,7 +1,7 @@
 {
   "name": "axis",
   "productName": "Axis",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "A minimalistic, customizable, and beautiful browser built on Electron",
   "main": "src/main.js",
   "scripts": {
@@ -36,6 +36,8 @@
     "tar": "^7.5.10"
   },
   "dependencies": {
+    "@ghostery/adblocker-electron": "^2.14.1",
+    "adm-zip": "^0.5.17",
     "dictionary-en": "^4.0.0",
     "electron-store": "^8.1.0",
     "jimp": "^1.6.1",
