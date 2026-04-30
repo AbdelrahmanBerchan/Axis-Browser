@@ -1428,6 +1428,12 @@ const MACOS_TRAFFIC_LIGHT_INSET = 16;
  */
 const MACOS_TRAFFIC_LIGHT_CLUSTER_WIDTH = 60;
 
+/** macOS frameless + hiddenInset: traffic-light position only (`roundedCorners` = Electron default). */
+const AXIS_MACOS_BROWSER_WINDOW_SHAPE =
+  process.platform === 'darwin'
+    ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
+    : {};
+
 function getBrowserWindowClientWidth(browserWindow) {
   try {
     const b = browserWindow.getContentBounds();
@@ -1699,9 +1705,7 @@ function createWindow() {
     backgroundColor: '#00000000',
     vibrancy: 'under-window',
     visualEffectState: 'active',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
-      : {})
+    ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
   });
 
   if (process.platform === 'darwin' && mainWindow) {
@@ -1909,9 +1913,7 @@ function openUrlInNewBrowserWindow(url) {
     backgroundColor: '#00000000',
     vibrancy: 'under-window',
     visualEffectState: 'active',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
-      : {})
+    ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
   });
 
   if (process.platform === 'darwin') {
@@ -2367,9 +2369,7 @@ function createIncognitoWindow(initialUrl = null) {
     backgroundColor: '#00000000',
     vibrancy: 'under-window',
     visualEffectState: 'active',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
-      : {})
+    ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
   });
 
   if (process.platform === 'darwin') {
