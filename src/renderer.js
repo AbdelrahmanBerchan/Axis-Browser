@@ -138,7 +138,7 @@ function getShortcutEditorActions() {
 
 /**
  * Shell chrome interpolation: Settings ▸ Window transparency (`windowChromeLight`) — 0 = opaque (handled in getShellChromeStyle),
- * 50 = default blend, 100 = most light. These structs are the dense vs airy *blend endpoints* for t∈(0,1], not slider 0.
+ * 50 = default blend, 100 = most light. **Transparent endpoint** is very low‑alpha; **above 0** the blend uses a curve (`1 − (1−t)^k`) so mid‑high slider values lean further toward “see through” without changing the control.
  */
 const AXIS_SHELL_CHROME_OPAQUE = {
     glassAlpha: 0.34,
@@ -165,28 +165,28 @@ const AXIS_SHELL_CHROME_OPAQUE = {
     newTabAskSat: 130,
 };
 const AXIS_SHELL_CHROME_TRANSPARENT = {
-    glassAlpha: 0.045,
+    glassAlpha: 0.0045,
     slideOutAlpha: 1,
-    popupAlpha: 0.18,
-    urlBarAlpha: 0.08,
-    blurMain: 26,
-    satMain: 148,
-    blurStrong: 28,
-    satStrong: 160,
-    urlBarBlur: 10,
-    urlBarSat: 118,
-    urlBarTintDefault: 0.1,
-    urlBarTintDark: 0.09,
-    urlBarTintLight: 0.07,
-    newTabSearchAlpha: 0.1,
-    newTabSearchBlur: 10,
-    newTabSearchSat: 118,
-    newTabToggleAlpha: 0.06,
-    newTabToggleBlur: 12,
-    newTabToggleSat: 125,
-    newTabAskAlpha: 0.18,
-    newTabAskBlur: 12,
-    newTabAskSat: 120,
+    popupAlpha: 0.038,
+    urlBarAlpha: 0.012,
+    blurMain: 8,
+    satMain: 118,
+    blurStrong: 10,
+    satStrong: 128,
+    urlBarBlur: 4,
+    urlBarSat: 102,
+    urlBarTintDefault: 0.028,
+    urlBarTintDark: 0.025,
+    urlBarTintLight: 0.018,
+    newTabSearchAlpha: 0.022,
+    newTabSearchBlur: 4,
+    newTabSearchSat: 108,
+    newTabToggleAlpha: 0.014,
+    newTabToggleBlur: 6,
+    newTabToggleSat: 112,
+    newTabAskAlpha: 0.04,
+    newTabAskBlur: 6,
+    newTabAskSat: 110,
 };
 
 /** Extension id from a Chrome Web Store listing URL (must match main-process `parseChromeWebStoreExtensionId`). */
@@ -3298,13 +3298,6 @@ class AxisBrowser {
         }
     }
 
-    hexToRgb(hex) {
-        const r = parseInt(hex.slice(1, 3), 16);
-        const g = parseInt(hex.slice(3, 5), 16);
-        const b = parseInt(hex.slice(5, 7), 16);
-        return { r, g, b };
-    }
-
     updateColorOrb(color) {
         const orb = document.getElementById('color-orb');
         if (orb) {
@@ -3318,21 +3311,25 @@ class AxisBrowser {
         const isDark = this.isDarkColor(baseColor);
         
         let primary = baseColor;
-        let secondary, accent, text;
+        let secondary, accent, text, textSecondary, textMuted;
 
         if (isDark) {
             // Dark mode - create lighter variations
             secondary = this.hslToHex(hsl.h, Math.max(0, hsl.s - 20), Math.min(100, hsl.l + 15));
             accent = this.hslToHex(hsl.h, Math.min(100, hsl.s + 10), Math.min(100, hsl.l + 25));
             text = '#ffffff';
+            textSecondary = 'rgba(255, 255, 255, 0.76)';
+            textMuted = 'rgba(255, 255, 255, 0.52)';
         } else {
             // Light mode - create darker variations
             secondary = this.hslToHex(hsl.h, Math.max(0, hsl.s - 30), Math.max(0, hsl.l - 20));
             accent = this.hslToHex(hsl.h, Math.min(100, hsl.s + 15), Math.max(0, hsl.l - 10));
-            text = '#000000';
+            text = '#111111';
+            textSecondary = 'rgba(0, 0, 0, 0.72)';
+            textMuted = 'rgba(0, 0, 0, 0.48)';
         }
 
-        return { primary, secondary, accent, text };
+        return { primary, secondary, accent, text, textSecondary, textMuted };
     }
 
     generateColorScheme(baseColor) {
@@ -3384,15 +3381,18 @@ class AxisBrowser {
         const gradientEnabled = !!(this.settings.gradientEnabled && gradientColor);
         const gradientDirection = this.settings.gradientDirection || 'to right';
         const chrome = this.getShellChromeStyle();
-        
+
+        const gaT = this.getThemeAwareGlassAlpha(themeColor, chrome.glassAlpha);
+        const gaG = gradientEnabled ? this.getThemeAwareGlassAlpha(gradientColor, chrome.glassAlpha) : gaT;
+
         // Create sidebar background
         let sidebarBg;
         if (gradientEnabled) {
-            const themeRgba = this.hexToRgba(themeColor, chrome.glassAlpha);
-            const gradientRgba = this.hexToRgba(gradientColor, chrome.glassAlpha);
+            const themeRgba = this.hexToRgba(themeColor, gaT);
+            const gradientRgba = this.hexToRgba(gradientColor, gaG);
             sidebarBg = this.smoothGradient(gradientDirection, themeRgba, gradientRgba);
         } else {
-            sidebarBg = this.hexToRgba(themeColor, chrome.glassAlpha);
+            sidebarBg = this.hexToRgba(themeColor, gaT);
         }
         
         // Apply to sidebar only
@@ -3474,6 +3474,11 @@ class AxisBrowser {
     }
 
     isDarkColor(hex) {
+        if (hex == null || hex === '') return true;
+        try {
+            const L = this.getLuminance(hex);
+            if (Number.isFinite(L)) return L < 0.44;
+        } catch (_) { /* fallback */ }
         const hsl = this.hexToHsl(hex);
         return hsl.l < 50;
     }
@@ -3486,7 +3491,60 @@ class AxisBrowser {
         });
         return 0.2126 * r + 0.7152 * g + 0.0722 * b;
     }
-    
+
+    /**
+     * Bright shells on vibrancy: too much luminance bump → grey slab; too little → **lost hue** (neutral
+     * “show-through” dominates). This curve keeps **transmission** from `baseAlpha` but adds **chroma
+     * insurance** (lift × saturation) so pale / vivid tints still read as the picked color.
+     */
+    getThemeAwareGlassAlpha(hexInput, baseAlpha) {
+        if (typeof baseAlpha !== 'number' || !Number.isFinite(baseAlpha)) return baseAlpha;
+        if (baseAlpha >= 0.997) return baseAlpha;
+        let hex = hexInput;
+        if (!hex || typeof hex !== 'string') return baseAlpha;
+        hex = hex.trim();
+        if (!hex.startsWith('#')) return baseAlpha;
+
+        let L;
+        try {
+            L = this.getLuminance(hex);
+        } catch (_) {
+            return baseAlpha;
+        }
+        const lift = Math.min(1, Math.max(0, (L - 0.14) / 0.82));
+        if (lift <= 0.003) return baseAlpha;
+
+        let hslSat = 0;
+        try {
+            hslSat = Math.max(0, Math.min(100, this.hexToHsl(hex).s)) / 100;
+        } catch (_) {
+            /* ignore */
+        }
+
+        const headroom = Math.max(0, 1 - baseAlpha);
+        const airy = baseAlpha < 0.13;
+        let maxBump;
+        if (airy) {
+            const paleRing = 1 - lift * 0.68;
+            const spreadCap = headroom * (0.095 + paleRing * 0.32);
+            const chromaPreserve = lift * (0.026 + hslSat * 0.072 + baseAlpha * 5.2);
+            const baseline = Math.max(
+                0.042,
+                0.066 + baseAlpha * 2.9 - lift * 0.016 + hslSat * 0.036
+            );
+            maxBump = Math.min(spreadCap, baseline + chromaPreserve);
+        } else {
+            maxBump = Math.min(headroom * 0.98, Math.max(baseAlpha + 0.28, 0.71 - baseAlpha * 0.12));
+            const opaqueish = 0.36;
+            const airyEdge = 0.13;
+            const transmissionWeight = Math.max(0, Math.min(1, (opaqueish - baseAlpha) / (opaqueish - airyEdge)));
+            const paleAtten = lift * Math.pow(transmissionWeight, 1.15) * 0.78;
+            maxBump *= Math.max(0.32, 1 - paleAtten);
+        }
+        const curved = lift * lift;
+        return Math.min(0.985, baseAlpha + maxBump * curved);
+    }
+
     // Calculate contrast ratio between two colors
     getContrastRatio(color1, color2) {
         const lum1 = this.getLuminance(color1);
@@ -3514,15 +3572,95 @@ class AxisBrowser {
             return whiteContrast > blackContrast ? white : black;
         }
     }
+
+    /** Blend two theme hex colors (for gradient shell text / contrast). `weightTowardB` in 0–1. */
+    mixHexColors(hexA, hexB, weightTowardB = 0.5) {
+        const t = Math.max(0, Math.min(1, weightTowardB));
+        const a = this.hexToRgb(hexA || '#808080');
+        const b = this.hexToRgb(hexB || hexA || '#808080');
+        const toByte = (n) => Math.max(0, Math.min(255, Math.round(n)));
+        const r = toByte(a.r * (1 - t) + b.r * t);
+        const g = toByte(a.g * (1 - t) + b.g * t);
+        const bl = toByte(a.b * (1 - t) + b.b * t);
+        const h = (c) => (c < 16 ? '0' : '') + c.toString(16);
+        return `#${h(r)}${h(g)}${h(bl)}`;
+    }
+
+    /**
+     * Rough RGB blend of tinted glass vs desktop showing through `(1 − alpha)`.
+     * Default “through” color is **hue-biased** toward the theme so contrast math matches a tinted
+     * slab, not a grey wash, when `tint` is small.
+     */
+    approximateGlassSurfaceHex(themeHex, tintAlpha01, ambientHex = null) {
+        const tint = Math.max(0, Math.min(1, tintAlpha01 || 0));
+        const tg = this.hexToRgb(themeHex || '#808080');
+        let amb = ambientHex;
+        if (amb == null || amb === '') {
+            let L;
+            try {
+                L = this.getLuminance(themeHex || '#808080');
+            } catch (_) {
+                L = 0.2;
+            }
+            const coolLight = '#e7ebf3';
+            if (L > 0.58) {
+                const towardNeutral = L > 0.78 ? 0.44 : 0.35;
+                amb = this.mixHexColors(themeHex || '#808080', coolLight, towardNeutral);
+            } else if (L > 0.38) {
+                amb = '#909090';
+            } else {
+                amb = '#1c1c1c';
+            }
+        }
+        const ag = this.hexToRgb(amb);
+        const toByte = (n) => Math.max(0, Math.min(255, Math.round(n)));
+        const r = toByte(tg.r * tint + ag.r * (1 - tint));
+        const g = toByte(tg.g * tint + ag.g * (1 - tint));
+        const b = toByte(tg.b * tint + ag.b * (1 - tint));
+        const h = (c) => (c < 16 ? '0' : '') + c.toString(16);
+        return `#${h(r)}${h(g)}${h(b)}`;
+    }
+
+    /**
+     * Shell/tab/sidebar text: strict #fff vs #000 chosen to maximize minimum contrast
+     * across primary + optional gradient glass surfaces (readable on both ends of a gradient).
+     */
+    deriveShellContrastTextPalette(surfPrimaryHex, surfGradientHexOptional = null) {
+        const surfaces = surfGradientHexOptional ? [surfPrimaryHex, surfGradientHexOptional] : [surfPrimaryHex];
+        const white = '#ffffff';
+        const black = '#000000';
+        const minContrast = (hex) => Math.min(...surfaces.map((s) => this.getContrastRatio(s, hex)));
+        const minW = minContrast(white);
+        const minB = minContrast(black);
+        const primary = minB >= minW ? black : white;
+        const shellIsDark = primary === white;
+        const rgb = shellIsDark ? '255, 255, 255' : '0, 0, 0';
+        return {
+            primary,
+            secondary: `rgba(${rgb}, 0.84)`,
+            muted: `rgba(${rgb}, 0.58)`,
+            shellIsDark,
+            inkRgb: rgb,
+        };
+    }
     
     // Convert hex to RGB
     hexToRgb(hex) {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result ? {
-            r: parseInt(result[1], 16),
-            g: parseInt(result[2], 16),
-            b: parseInt(result[3], 16)
-        } : { r: 0, g: 0, b: 0 };
+        if (hex == null || hex === '') return { r: 0, g: 0, b: 0 };
+        let value = String(hex).trim();
+        if (!value.startsWith('#')) value = `#${value}`;
+        value = value.slice(1);
+        if (/^[a-f\d]{3}$/i.test(value)) {
+            value = value.split('').map((c) => c + c).join('');
+        }
+        const result = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(value);
+        return result
+            ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            }
+            : { r: 0, g: 0, b: 0 };
     }
     
     // Extract domain from URL for theme caching
@@ -3627,17 +3765,7 @@ class AxisBrowser {
         const tabActiveBg = this.darkenColor(shellBase, 0.02);
         const buttonHoverBg = this.darkenColor(shellBase, 0.05);
         const secondaryColor = this.darkenColor(darkerPrimary, 0.02);
-        const isDark = this.isDarkColor(colors.primary);
-        const textSecondary = colors.textSecondary || colors.text;
-        const borderColor = colors.border || 'rgba(255, 255, 255, 0.08)';
-        const borderColorLight = colors.borderLight || 'rgba(255, 255, 255, 0.12)';
 
-        // Batch all CSS variable updates using setProperty for maximum performance
-        // Using setProperty is faster than individual style updates and doesn't overwrite other styles
-        const root = document.documentElement;
-        const style = root.style;
-        
-        // Gradient only when enabled in settings; second color may live on `colors` or only on `settings` (must match shell opacity in all branches).
         const gradientDirection = this.settings?.gradientDirection || '135deg';
         const gradientColorResolved =
             this.settings?.gradientEnabled &&
@@ -3647,9 +3775,58 @@ class AxisBrowser {
         const gradientEnabled = !!gradientColorResolved;
         const shellGradientSecondary = gradientColorResolved;
 
-        // Incognito: force solid black surfaces (chrome blur still uses transmission = 0 / opaque endpoint)
         const forceOpaqueBlack = this.isIncognitoWindow;
         const chrome = this.getShellChromeStyle();
+        let glassPrim = 1;
+        let glassGrad = 1;
+        if (!forceOpaqueBlack) {
+            glassPrim = this.getThemeAwareGlassAlpha(shellBase, chrome.glassAlpha);
+            glassGrad =
+                gradientEnabled && shellGradientSecondary
+                    ? this.getThemeAwareGlassAlpha(shellGradientSecondary, chrome.glassAlpha)
+                    : glassPrim;
+        }
+
+        let uiTextPrimary = colors.text;
+        let uiTextSecondary = colors.textSecondary || colors.text;
+        let uiTextMuted = colors.textMuted || colors.text;
+        let shellChromeIsDark = this.isDarkColor(colors.primary);
+        let shellContrastPal = null;
+        if (!forceOpaqueBlack) {
+            const surfP = this.approximateGlassSurfaceHex(shellBase, glassPrim);
+            const surfG =
+                gradientEnabled && shellGradientSecondary
+                    ? this.approximateGlassSurfaceHex(shellGradientSecondary, glassGrad)
+                    : null;
+            shellContrastPal = this.deriveShellContrastTextPalette(surfP, surfG);
+            uiTextPrimary = shellContrastPal.primary;
+            uiTextSecondary = shellContrastPal.secondary;
+            uiTextMuted = shellContrastPal.muted;
+            shellChromeIsDark = shellContrastPal.shellIsDark;
+        }
+
+        const isDark = shellChromeIsDark;
+        const textSecondary = uiTextSecondary;
+        const textMutedFinal = uiTextMuted;
+        let shellInkRgb = '255, 255, 255';
+        if (shellContrastPal && shellContrastPal.inkRgb) {
+            shellInkRgb = shellContrastPal.inkRgb;
+        } else {
+            try {
+                shellInkRgb = this.getLuminance(uiTextPrimary) > 0.5 ? '0, 0, 0' : '255, 255, 255';
+            } catch (_) {
+                shellInkRgb = '255, 255, 255';
+            }
+        }
+        const borderColor =
+            colors.border ||
+            (isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.1)');
+        const borderColorLight =
+            colors.borderLight || (isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.14)');
+
+        // Batch all CSS variable updates using setProperty for maximum performance
+        const root = document.documentElement;
+        const style = root.style;
         if (forceOpaqueBlack) {
             style.setProperty('--background-color', '#000000');
             style.setProperty('--sidebar-background', '#000000');
@@ -3659,16 +3836,17 @@ class AxisBrowser {
         if (!forceOpaqueBlack && gradientEnabled) {
             const bgGrad = this.smoothGradient(
                 gradientDirection,
-                this.hexToRgba(shellBase, chrome.glassAlpha),
-                this.hexToRgba(shellGradientSecondary, chrome.glassAlpha)
+                this.hexToRgba(shellBase, glassPrim),
+                this.hexToRgba(shellGradientSecondary, glassGrad)
             );
             style.setProperty('--background-color', bgGrad);
         } else if (!forceOpaqueBlack) {
-            style.setProperty('--background-color', this.hexToRgba(shellBase, chrome.glassAlpha));
+            style.setProperty('--background-color', this.hexToRgba(shellBase, glassPrim));
         }
-        style.setProperty('--text-color', colors.text);
+        style.setProperty('--text-color', uiTextPrimary);
         style.setProperty('--text-color-secondary', textSecondary);
-        style.setProperty('--text-color-muted', colors.textMuted || colors.text);
+        style.setProperty('--text-color-muted', textMutedFinal);
+        style.setProperty('--shell-ink-rgb', shellInkRgb);
         // Use a glassy, semi-transparent version of the shell base color for app surfaces (skip in incognito)
         let glassSidebarBg;
         let sidebarSlideOutBg;
@@ -3676,40 +3854,43 @@ class AxisBrowser {
             glassSidebarBg = '#000000';
             sidebarSlideOutBg = '#000000';
         } else if (gradientEnabled) {
-            const primaryRgba = this.hexToRgba(shellBase, chrome.glassAlpha);
-            const gradientRgba = this.hexToRgba(shellGradientSecondary, chrome.glassAlpha);
+            const primaryRgba = this.hexToRgba(shellBase, glassPrim);
+            const gradientRgba = this.hexToRgba(shellGradientSecondary, glassGrad);
             glassSidebarBg = this.smoothGradient(gradientDirection, primaryRgba, gradientRgba);
             const primarySlide = this.hexToRgba(shellBase, chrome.slideOutAlpha);
             const gradientSlide = this.hexToRgba(shellGradientSecondary, chrome.slideOutAlpha);
             sidebarSlideOutBg = this.smoothGradient(gradientDirection, primarySlide, gradientSlide);
         } else {
-            glassSidebarBg = this.hexToRgba(shellBase, chrome.glassAlpha) || `rgba(20, 20, 20, ${chrome.glassAlpha})`;
+            glassSidebarBg = this.hexToRgba(shellBase, glassPrim) || `rgba(20, 20, 20, ${glassPrim})`;
             sidebarSlideOutBg = this.hexToRgba(shellBase, chrome.slideOutAlpha) || `rgb(28, 28, 28)`;
         }
         // Popups use subtle dominant color (shell base, even if gradient)
-        const popupBgRgba = this.hexToRgba(shellBase, chrome.popupAlpha);
+        const popupBgAlpha = forceOpaqueBlack
+            ? chrome.popupAlpha
+            : this.getThemeAwareGlassAlpha(shellBase, chrome.popupAlpha);
+        const popupBgRgba = this.hexToRgba(shellBase, popupBgAlpha);
         style.setProperty('--popup-background-subtle', popupBgRgba);
         style.setProperty('--popup-header', headerBg);
         style.setProperty('--button-background', 'transparent');
         style.setProperty('--button-hover', buttonHoverBg);
-        style.setProperty('--button-text', colors.text);
-        style.setProperty('--button-text-hover', colors.text);
+        style.setProperty('--button-text', uiTextPrimary);
+        style.setProperty('--button-text-hover', uiTextPrimary);
         style.setProperty('--sidebar-background', glassSidebarBg);
         style.setProperty('--sidebar-slide-out-background', sidebarSlideOutBg);
         // URL bar now uses glassmorphism effect, no need to set background color
         // style.setProperty('--url-bar-background', urlBarBg);
         // style.setProperty('--url-bar-focus-background', urlBarFocusBg);
-        style.setProperty('--url-bar-text', colors.text);
-        style.setProperty('--url-bar-text-muted', textSecondary);
+        style.setProperty('--url-bar-text', uiTextPrimary);
+        style.setProperty('--url-bar-text-muted', textMutedFinal);
         style.setProperty('--tab-background', 'transparent');
         style.setProperty('--tab-background-hover', tabHoverBg);
         style.setProperty('--tab-background-active', tabActiveBg);
-        style.setProperty('--tab-text', colors.text);
-        style.setProperty('--tab-text-active', colors.text);
+        style.setProperty('--tab-text', uiTextPrimary);
+        style.setProperty('--tab-text-active', uiTextPrimary);
         style.setProperty('--tab-close-color', textSecondary);
-        style.setProperty('--tab-close-hover', colors.text);
+        style.setProperty('--tab-close-hover', uiTextPrimary);
         style.setProperty('--icon-color', textSecondary);
-        style.setProperty('--icon-hover', colors.text);
+        style.setProperty('--icon-hover', uiTextPrimary);
         style.setProperty('--border-color', borderColor);
         style.setProperty('--border-color-light', borderColorLight);
         style.setProperty('--accent-color', colors.accent);
@@ -3720,8 +3901,8 @@ class AxisBrowser {
         if (gradientEnabled) {
             const gradient = this.smoothGradient(
                 gradientDirection,
-                this.hexToRgba(darkerPrimary, chrome.glassAlpha),
-                this.hexToRgba(gradientColorResolved, chrome.glassAlpha)
+                this.hexToRgba(darkerPrimary, glassPrim),
+                this.hexToRgba(gradientColorResolved, glassGrad)
             );
             style.setProperty('--primary-gradient', gradient);
             style.setProperty('--theme-color', darkerPrimary);
@@ -3766,7 +3947,7 @@ class AxisBrowser {
         // Only update critical elements directly - CSS variables handle everything else
         // Body should be transparent to allow frosted glass effect
         document.body.style.background = 'transparent';
-        document.body.style.color = colors.text;
+        document.body.style.color = uiTextPrimary;
         
         // Check if there are any tabs open
         const hasTabs = this.tabs && this.tabs.size > 0;
@@ -3798,8 +3979,8 @@ class AxisBrowser {
         if (app) {
                 // Use semi-transparent background for frosted glass effect (shell base, not theme color)
                 const appBg = gradientEnabled ?
-                    this.smoothGradient(gradientDirection, this.hexToRgba(shellBase, chrome.glassAlpha), this.hexToRgba(shellGradientSecondary, chrome.glassAlpha)) :
-                    this.hexToRgba(shellBase, chrome.glassAlpha);
+                    this.smoothGradient(gradientDirection, this.hexToRgba(shellBase, glassPrim), this.hexToRgba(shellGradientSecondary, glassGrad)) :
+                    this.hexToRgba(shellBase, glassPrim);
                 app.style.setProperty('background', appBg, 'important');
             app.style.setProperty('backdrop-filter', chrome.backdropMain, 'important');
             app.style.setProperty('-webkit-backdrop-filter', chrome.backdropMain, 'important');
@@ -3816,8 +3997,8 @@ class AxisBrowser {
             // Also apply to app element (shell base so light mode stays light regardless of theme color)
             if (app) {
                 const appBg = gradientEnabled ?
-                    this.smoothGradient(gradientDirection, this.hexToRgba(shellBase, chrome.glassAlpha), this.hexToRgba(shellGradientSecondary, chrome.glassAlpha)) :
-                    this.hexToRgba(shellBase, chrome.glassAlpha);
+                    this.smoothGradient(gradientDirection, this.hexToRgba(shellBase, glassPrim), this.hexToRgba(shellGradientSecondary, glassGrad)) :
+                    this.hexToRgba(shellBase, glassPrim);
                 app.style.setProperty('background', appBg, 'important');
                 app.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
                 app.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
@@ -3871,7 +4052,7 @@ class AxisBrowser {
     }
 
     getShellChromeStyle() {
-        const t = this.getShellChromeTransmissionT();
+        const tSlider = this.getShellChromeTransmissionT();
         // Light mode re-tones the new-tab search/ask/toggle cards; webpages inside webviews
         // are untouched, this only affects the in-app `#new-tab-page` overlay.
         const lightUi = this.settings?.uiTheme === 'light' && !this.isIncognitoWindow;
@@ -3879,7 +4060,7 @@ class AxisBrowser {
         const ntAskRGB = lightUi ? '248, 249, 251' : '10, 11, 14';
         const ntToggleRGB = lightUi ? '0, 0, 0' : '255, 255, 255';
         /** Slider 0: solid theme colors, no blur — `AXIS_SHELL_CHROME_OPAQUE` is still partly translucent for the old "opaque" *blend endpoint* at t>0. */
-        if (t <= 0) {
+        if (tSlider <= 0) {
             const none = 'none';
             return {
                 t: 0,
@@ -3908,7 +4089,10 @@ class AxisBrowser {
                 newTabAskSat: 100,
             };
         }
-        const L = (a, b) => a + (b - a) * t;
+        /** Concave remap: slider mid–high spends more blend weight on the airy endpoint (`AXIS_SHELL_CHROME_TRANSPARENT`). */
+        const chromeBlendEaseExp = 1.85;
+        const tBlend = 1 - Math.pow(1 - tSlider, chromeBlendEaseExp);
+        const L = (a, b) => a + (b - a) * tBlend;
         const o = AXIS_SHELL_CHROME_OPAQUE;
         const tr = AXIS_SHELL_CHROME_TRANSPARENT;
         const glassAlpha = L(o.glassAlpha, tr.glassAlpha);
@@ -3939,7 +4123,7 @@ class AxisBrowser {
         const newTabAskBlur = Math.round(L(o.newTabAskBlur, tr.newTabAskBlur));
         const newTabAskSat = Math.round(L(o.newTabAskSat, tr.newTabAskSat));
         return {
-            t,
+            t: tSlider,
             glassAlpha,
             slideOutAlpha,
             popupAlpha,
@@ -4683,7 +4867,6 @@ class AxisBrowser {
                     webview.style.visibility = 'visible';
                     webview.style.pointerEvents = 'none';
                     webview.style.zIndex = '1';
-                    this.updateNewTabPageVisibility(true);
                 } else {
                     webview.style.opacity = '1';
                     webview.style.visibility = 'visible';
@@ -4696,6 +4879,13 @@ class AxisBrowser {
                 if (tab.url && tab.url !== 'about:blank' && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://')) {
                     this.applyCachedTheme(tab.url);
                 }
+            }
+
+            /* #new-tab-page is z-index 50 — must hide when leaving axis://newtab or it covers every webview below. */
+            if (tab.url === this.NEWTAB_URL) {
+                this.updateNewTabPageVisibility(true);
+            } else {
+                this.updateNewTabPageVisibility(false);
             }
         }
         
@@ -5845,20 +6035,23 @@ class AxisBrowser {
             return;
         }
         
+        const sanitizedUrl = this.sanitizeUrl(url);
+        if (!sanitizedUrl) return;
+        if (!options.skipHttpsConfirm && !this.confirmInsecureHttpNavigation(sanitizedUrl)) {
+            return;
+        }
+
         const webview = this.getActiveWebview();
         
         if (webview) {
-            const sanitizedUrl = this.sanitizeUrl(url);
-            if (!sanitizedUrl) return;
-            if (!options.skipHttpsConfirm && !this.confirmInsecureHttpNavigation(sanitizedUrl)) {
-                return;
-            }
             webview.src = sanitizedUrl;
-            
-            // Update tab data
             if (currentTab) {
                 currentTab.url = sanitizedUrl;
             }
+        }
+
+        if (sanitizedUrl !== this.NEWTAB_URL) {
+            this.updateNewTabPageVisibility(false);
         }
     }
 
@@ -17767,23 +17960,52 @@ class AxisBrowser {
         const gradientEnabled = this.settings?.gradientEnabled && gradientColor;
         const gradientDirection = this.settings?.gradientDirection || '135deg';
 
+        let scForBar = null;
+        let shellDarkChrome = this.isIncognitoWindow || this.isDarkColor(themeColor);
+        if (!this.isIncognitoWindow) {
+            if (this.settings?.transparentSites) {
+                scForBar = this.getShellChromeStyle();
+                const gaP = this.getThemeAwareGlassAlpha(themeColor, scForBar.glassAlpha);
+                const surfT = this.approximateGlassSurfaceHex(themeColor, gaP);
+                const surfG = gradientEnabled
+                    ? this.approximateGlassSurfaceHex(
+                          gradientColor,
+                          this.getThemeAwareGlassAlpha(gradientColor, scForBar.glassAlpha)
+                      )
+                    : null;
+                const blended = surfG ? this.mixHexColors(surfT, surfG, 0.5) : surfT;
+                shellDarkChrome = this.isDarkColor(blended);
+            } else if (gradientEnabled) {
+                shellDarkChrome = this.isDarkColor(this.mixHexColors(themeColor, gradientColor, 0.5));
+            }
+        }
+
         if (this.settings?.transparentSites) {
-            const sc = this.getShellChromeStyle();
+            const sc = scForBar || this.getShellChromeStyle();
             urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
             urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
-            urlBar.classList.add('dark-mode');
+            urlBar.classList.toggle('dark-mode', shellDarkChrome);
+            const gaP = this.getThemeAwareGlassAlpha(themeColor, sc.glassAlpha);
+            const gaG = gradientEnabled ? this.getThemeAwareGlassAlpha(gradientColor, sc.glassAlpha) : gaP;
             const bgColor = gradientEnabled
                 ? this.smoothGradient(
                     gradientDirection,
-                    this.hexToRgba(themeColor, sc.glassAlpha),
-                    this.hexToRgba(gradientColor, sc.glassAlpha)
+                    this.hexToRgba(themeColor, gaP),
+                    this.hexToRgba(gradientColor, gaG)
                 )
-                : this.hexToRgba(themeColor, sc.glassAlpha);
+                : this.hexToRgba(themeColor, gaP);
             urlBar.style.setProperty('--url-bar-bg', bgColor);
-            urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
-            urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
-            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.14)');
+            if (shellDarkChrome) {
+                urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
+                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
+                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.14)');
+            } else {
+                urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.12)');
+                urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
+                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.55)');
+                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.08)');
+            }
             this.applyChatPanelTheme(urlBar);
             return;
         }
@@ -17793,12 +18015,19 @@ class AxisBrowser {
         const bgColor = gradientEnabled
             ? this.smoothGradient(gradientDirection, themeColor, gradientColor)
             : themeColor;
-        urlBar.classList.add('dark-mode');
+        urlBar.classList.toggle('dark-mode', shellDarkChrome);
         urlBar.style.setProperty('--url-bar-bg', bgColor);
-        urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.14)');
-        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
-        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.16)');
+        if (shellDarkChrome) {
+            urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.14)');
+            urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
+            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.16)');
+        } else {
+            urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.14)');
+            urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
+            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.55)');
+            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.1)');
+        }
         this.applyChatPanelTheme(urlBar);
     }
 
@@ -17809,15 +18038,24 @@ class AxisBrowser {
 
         if (this.settings?.transparentSites) {
             const sc = this.getShellChromeStyle();
+            const lightUi = this.settings?.uiTheme === 'light';
             urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
             urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
-            urlBar.classList.add('dark-mode');
             const bg = sc.newTabSearchBg;
             urlBar.style.setProperty('--url-bar-bg', bg);
-            urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
-            urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
-            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+            if (lightUi) {
+                urlBar.classList.remove('dark-mode');
+                urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.1)');
+                urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
+                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.55)');
+                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.1)');
+            } else {
+                urlBar.classList.add('dark-mode');
+                urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
+                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
+                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+            }
             this.applyChatPanelTheme(urlBar);
             return;
         }
@@ -17927,9 +18165,12 @@ class AxisBrowser {
             if (seq !== this._urlBarThemeSeq) return;
             
             if (colorInfo) {
-                const { r, g, b, brightness, source } = colorInfo;
+                const { r, g, b, source } = colorInfo;
                 const isDefaultOrError = source === 'default' || source === 'error';
-                let isDark = brightness < 128;
+                const rr = Math.max(0, Math.min(255, Math.round(r)));
+                const gg = Math.max(0, Math.min(255, Math.round(g)));
+                const bb = Math.max(0, Math.min(255, Math.round(b)));
+                const pageHex = `#${[rr, gg, bb].map((c) => c.toString(16).padStart(2, '0')).join('')}`;
 
                 if (this.settings?.transparentSites) {
                     const sc = this.getShellChromeStyle();
@@ -17937,16 +18178,20 @@ class AxisBrowser {
                     urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
 
                     let bgColor;
-                    const ga = sc.glassAlpha.toFixed(3);
+                    let barDarkMode;
                     if (isDefaultOrError) {
-                        // Transparent page backgrounds yield "default" light — use neutral dark glass (not solid white)
-                        isDark = true;
-                        bgColor = `rgba(14, 15, 18, ${ga})`;
+                        barDarkMode = true;
+                        const nh = '#0e0f12';
+                        const tintA = this.getThemeAwareGlassAlpha(nh, sc.glassAlpha);
+                        bgColor = this.hexToRgba(nh, tintA);
                     } else {
-                        bgColor = `rgba(${r}, ${g}, ${b}, ${ga})`;
+                        const tintA = this.getThemeAwareGlassAlpha(pageHex, sc.glassAlpha);
+                        const surf = this.approximateGlassSurfaceHex(pageHex, tintA);
+                        barDarkMode = this.isDarkColor(surf);
+                        bgColor = `rgba(${rr}, ${gg}, ${bb}, ${Math.min(0.995, tintA)})`;
                     }
 
-                    if (isDark) {
+                    if (barDarkMode) {
                         urlBar.classList.add('dark-mode');
                         urlBar.style.setProperty('--url-bar-bg', bgColor);
                         urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
@@ -17965,10 +18210,10 @@ class AxisBrowser {
                 } else {
                     urlBar.style.removeProperty('backdrop-filter');
                     urlBar.style.removeProperty('-webkit-backdrop-filter');
-                    // Use the page color directly for the bar background so it matches as closely as possible
-                    const bgColor = `rgba(${r}, ${g}, ${b}, 1)`;
+                    const bgColor = `rgba(${rr}, ${gg}, ${bb}, 1)`;
+                    const pageBgDark = this.isDarkColor(pageHex);
 
-                    if (isDark) {
+                    if (pageBgDark) {
                         urlBar.classList.add('dark-mode');
                         urlBar.style.setProperty('--url-bar-bg', bgColor);
                         urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.14)');
@@ -17993,7 +18238,9 @@ class AxisBrowser {
                 const sc = this.getShellChromeStyle();
                 urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
                 urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
-                const bg = `rgba(14, 15, 18, ${sc.glassAlpha.toFixed(3)})`;
+                const nh = '#0e0f12';
+                const ta = this.getThemeAwareGlassAlpha(nh, sc.glassAlpha);
+                const bg = this.hexToRgba(nh, ta);
                 urlBar.style.setProperty('--url-bar-bg', bg);
                 urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
                 urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
