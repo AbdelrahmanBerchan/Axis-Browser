@@ -7,14 +7,13 @@ html, body {
     image-rendering: auto;
 }
 
-/* Subtle grain overlay to eliminate gradient banding */
+/* Subtle grain inside `#app` only (`absolute` — `fixed` would paint square corners vs the native window mask). */
 #app::after {
     content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
     pointer-events: none;
     z-index: 99999;
     opacity: 0.025;
@@ -56,6 +55,7 @@ html, body {
     --tab-pin-hover: #fff;
     --icon-color: #ccc;
     --icon-hover: #fff;
+    --shell-ink-rgb: 255, 255, 255;
     --border-color: rgba(255, 255, 255, 0.1);
     --border-color-light: rgba(255, 255, 255, 0.2);
     --primary-gradient: linear-gradient(135deg, #667eea 0%, #6a7cec 8%, #6d7aed 16%, #7078ef 24%, #7376f0 32%, #7574f1 40%, #7671f0 48%, #766dee 56%, #7568e4 64%, #7462d9 72%, #735cce 80%, #7256c3 84%, #7151b8 88%, #7050b4 90%, #764ba2 100%);
@@ -96,17 +96,17 @@ html, body {
     /* URL bar + webview stack + #content-area lift shadow: same right-edge radius so nothing looks squared when the guest is transparent. */
     --axis-content-panel-radius: 6px;
     /*
-     * Web panel elevation behind `#content-area::after`: all layers use (0, 0) blur — symmetric
-     * “ambient” depth, not a single offset that reads as light from one side. Stacked radii
-     * approximate a soft penumbra (tight ring → mid → falloff).
+     * Web panel elevation behind `#content-area::after`: symmetric `0 0` blurs only (no
+     * fake key light). Layers cap around ~44px so depth hugs the bezel — chunky contact ring,
+     * short penumbra, not a foggy halo out to triple-digit blur.
      */
     --axis-webview-elevation-shadow:
-        0 0 0 1px rgba(0, 0, 0, 0.05),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.045),
-        0 0 32px rgba(0, 0, 0, 0.11),
-        0 0 64px rgba(0, 0, 0, 0.075),
-        0 0 100px rgba(0, 0, 0, 0.05),
-        0 0 148px rgba(0, 0, 0, 0.035);
+        0 0 0 1px rgba(0, 0, 0, 0.078),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.055),
+        0 0 5px rgba(0, 0, 0, 0.22),
+        0 0 12px rgba(0, 0, 0, 0.13),
+        0 0 24px rgba(0, 0, 0, 0.072),
+        0 0 44px rgba(0, 0, 0, 0.034);
 }
 
 body.incognito-window {
@@ -732,16 +732,24 @@ button::-moz-focus-inner {
 
 html {
     background: transparent !important;
+    height: 100%;
+    overflow: hidden;
+    border: none;
+    outline: none;
 }
 
 body {
     font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-weight: 400;
+    box-sizing: border-box;
+    min-height: 100%;
     background: transparent;
     color: var(--text-color);
     overflow: hidden;
     user-select: none;
-    border-radius: 10px;
+    border: none;
+    outline: none;
+    box-shadow: none;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -755,6 +763,19 @@ body {
     /* No transitions for theme switching - instant */
 }
 
+/* macOS transparent window: full-body `transform`/layer promotion can offset the root layer ~1px vs the
+ * system rounded mask (reads as a black hairline). Let the platform clip the view — no custom corner CSS. */
+html.platform-darwin body {
+    transform: none;
+    perspective: none;
+    backface-visibility: visible;
+}
+
+/* Grain `mix-blend-mode` can darken the curved bezel; keep dither off the shell edge on Darwin. */
+html.platform-darwin #app::after {
+    display: none;
+}
+
 /* Disable transitions on theme-related properties during theme switching */
 body.theme-switching *,
 body.theme-switching *::before,
@@ -763,11 +784,15 @@ body.theme-switching *::after {
     animation: none !important;
 }
 
-/* Main app container - no rounded corners to avoid conflict with macOS */
+/* Main app shell — no CSS window rounding (fight with system mask → hairline). Vibrancy + blur only. */
 #app {
     height: 100vh;
     display: flex;
     flex-direction: column;
+    position: relative;
+    border: none;
+    outline: none;
+    box-shadow: none;
     background: var(--background-color);
     overflow: hidden;
     opacity: 0;
@@ -997,7 +1022,7 @@ body.theme-switching *::after {
 }
 
 .sidebar-controls .nav-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.08) !important;
+    background: rgba(var(--shell-ink-rgb), 0.1) !important;
     color: var(--text-color);
     transform: scale(1.03);
     border-radius: 7px;
@@ -1437,8 +1462,8 @@ body.resizing .ai-chat-resize-handle {
 }
 
 .nav-menu-item:hover {
-    background: rgba(255, 255, 255, 0.08) !important;
-    color: rgba(255, 255, 255, 0.95);
+    background: rgba(var(--shell-ink-rgb), 0.1) !important;
+    color: var(--text-color);
     transform: translateX(0) scale(1.02);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
@@ -1947,7 +1972,7 @@ body.resizing .ai-chat-resize-handle {
     right: 10px;
     height: 1px;
     border-radius: 0;
-    background: rgba(255, 255, 255, 0.92);
+    background: rgba(var(--shell-ink-rgb), 0.92);
     box-shadow: none;
     pointer-events: none;
     z-index: 999;
@@ -2051,7 +2076,7 @@ body.resizing .ai-chat-resize-handle {
     background: transparent;
     border: none;
     border-radius: 4px;
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(var(--shell-ink-rgb), 0.38);
     font-size: 10px;
     font-weight: 500;
     cursor: pointer;
@@ -2065,10 +2090,7 @@ body.resizing .ai-chat-resize-handle {
     outline: none;
 }
 
-body.light-theme .clear-unpinned-btn {
-    background: transparent;
-    color: rgba(0, 0, 0, 0.4);
-}
+
 
 .clear-unpinned-btn .clear-text {
     font-size: 10px;
@@ -2091,15 +2113,10 @@ body.light-theme .clear-unpinned-btn {
 
 .clear-unpinned-btn:hover {
     background: transparent;
-    color: rgba(255, 255, 255, 0.85);
+    color: rgba(var(--shell-ink-rgb), 0.88);
     transform: translateY(-50%);
     box-shadow: none;
     outline: none;
-}
-
-body.light-theme .clear-unpinned-btn:hover {
-    background: transparent;
-    color: rgba(0, 0, 0, 0.65);
 }
 
 .clear-unpinned-btn:hover .clear-arrow {
@@ -2108,15 +2125,10 @@ body.light-theme .clear-unpinned-btn:hover {
 
 .clear-unpinned-btn:active {
     background: transparent;
-    color: rgba(255, 255, 255, 0.95);
+    color: rgba(var(--shell-ink-rgb), 0.96);
     transform: translateY(-50%);
     box-shadow: none;
     outline: none;
-}
-
-body.light-theme .clear-unpinned-btn:active {
-    background: transparent;
-    color: rgba(0, 0, 0, 0.85);
 }
 
 .clear-unpinned-btn:active .clear-arrow {
@@ -2167,7 +2179,7 @@ body.light-theme .clear-unpinned-btn:active {
     border: none;
     border-radius: 10px;
     background: transparent;
-    color: #95979f;
+    color: var(--text-color-muted);
     font-size: 13px;
     font-weight: 500;
     font-family: inherit;
@@ -2209,10 +2221,10 @@ body.light-theme .clear-unpinned-btn:active {
     opacity: 1;
 }
 .sidebar-new-tab-btn:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(var(--shell-ink-rgb), 0.06);
 }
 .sidebar-new-tab-btn:active {
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(var(--shell-ink-rgb), 0.09);
 }
 .sidebar-new-tab-btn-label {
     white-space: nowrap;
@@ -2364,13 +2376,13 @@ body.light-theme .clear-unpinned-btn:active {
 }
 
 .tab-group:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(var(--shell-ink-rgb), 0.05);
 }
 
 .tab-group.active {
-    background: radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.06) 25%, transparent 55%),
-                rgba(255, 255, 255, 0.04);
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+    background: radial-gradient(circle at 0% 0%, rgba(var(--shell-ink-rgb), 0.12) 0%, rgba(var(--shell-ink-rgb), 0.08) 25%, transparent 55%),
+                rgba(var(--shell-ink-rgb), 0.05);
+    box-shadow: 0 0 0 1px rgba(var(--shell-ink-rgb), 0.08);
 }
 
 /* Tab groups being displaced — same as tabs: JS owns transform */
@@ -2481,9 +2493,9 @@ body.light-theme .clear-unpinned-btn:active {
     left: 8px;
     right: 8px;
     height: 2px;
-    background: rgba(255, 255, 255, 0.9);
-    box-shadow: 0 0 8px rgba(255, 255, 255, 0.5),
-                0 0 4px rgba(255, 255, 255, 0.3);
+    background: rgba(var(--shell-ink-rgb), 0.92);
+    box-shadow: 0 0 8px rgba(var(--shell-ink-rgb), 0.35),
+                0 0 4px rgba(var(--shell-ink-rgb), 0.25);
     z-index: 10000;
     pointer-events: none;
     display: none;
@@ -2522,14 +2534,6 @@ body.light-theme .clear-unpinned-btn:active {
     animation: none !important;
 }
 
-.tab.active {
-    background: rgba(255, 255, 255, 0.12);
-    outline: none;
-    box-shadow: none;
-    transform: none;
-}
-
-/* Ensure inactive tabs without hover are transparent */
 .tab:not(.active):not(:hover):not(.smooth-dragging) {
     background: transparent !important;
     border: none !important;
@@ -2749,14 +2753,14 @@ body.light-theme .clear-unpinned-btn:active {
 }
 
 .tab:not(.active):hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(var(--shell-ink-rgb), 0.05);
 }
 
 .tab.active {
-    background: radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.09) 15%, rgba(255, 255, 255, 0.06) 25%, rgba(255, 255, 255, 0.03) 35%, rgba(255, 255, 255, 0.01) 45%, transparent 55%),
-                rgba(255, 255, 255, 0.06);
+    background: radial-gradient(circle at 0% 0%, rgba(var(--shell-ink-rgb), 0.14) 0%, rgba(var(--shell-ink-rgb), 0.1) 15%, rgba(var(--shell-ink-rgb), 0.07) 25%, rgba(var(--shell-ink-rgb), 0.04) 35%, rgba(var(--shell-ink-rgb), 0.02) 45%, transparent 55%),
+                rgba(var(--shell-ink-rgb), 0.07);
     box-shadow:
-        0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 0 0 1px rgba(var(--shell-ink-rgb), 0.1),
         0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
@@ -6734,7 +6738,7 @@ body.light-theme .shortcut-desc {
 }
 
 .tab-group-name-input:focus {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(var(--shell-ink-rgb), 0.1);
     border-radius: 4px;
     padding: 0;
     margin: 0;
@@ -6769,14 +6773,14 @@ body.light-theme .shortcut-desc {
 }
 
 .tab-group.drag-over-tab-group {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(var(--shell-ink-rgb), 0.1);
     border-color: rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.6);
 }
 
 .tab-group.drag-over-tab-group::before {
     border-color: rgba(var(--tab-group-color-rgb, 255, 107, 107), 0.7);
     opacity: 1;
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 0 1px rgba(var(--shell-ink-rgb), 0.1);
 }
 
 .tab-group.drag-over-tab-group .tab-group-icon {
@@ -6790,7 +6794,7 @@ body.light-theme .shortcut-desc {
 }
 
 .tab-group.drag-over-tab-group .tab-group-name-input {
-    color: rgba(255, 255, 255, 0.95);
+    color: var(--text-color);
 }
 
 .tab-group.drag-over-tab-group .tab-group-content {
@@ -7058,7 +7062,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 }
 
 .sidebar-footer .nav-btn:hover {
-    background: rgba(255, 255, 255, 0.08) !important;
+    background: rgba(var(--shell-ink-rgb), 0.1) !important;
     color: var(--text-color);
     transform: scale(1.03);
     border-radius: 7px;
