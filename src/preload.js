@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Downloads management
   getDownloads: () => ipcRenderer.invoke('get-downloads'),
+  getActiveDownloads: () => ipcRenderer.invoke('get-active-downloads'),
   addDownload: (downloadInfo) => ipcRenderer.invoke('add-download', downloadInfo),
   updateDownloadProgress: (id, progress) => ipcRenderer.invoke('update-download-progress', id, progress),
   clearDownloads: () => ipcRenderer.invoke('clear-downloads'),
@@ -60,6 +61,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onCloseTab: (callback) => ipcRenderer.on('close-tab', callback),
   onRequestQuit: (callback) => ipcRenderer.on('request-quit', callback),
   onBrowserShortcut: (callback) => ipcRenderer.on('browser-shortcut', (event, action) => callback(action)),
+  onAxisHostNavGesture: (callback) => {
+    const handler = (_event, action) => {
+      if (action === 'back' || action === 'forward') callback(action);
+    };
+    ipcRenderer.on('axis-host-nav-gesture', handler);
+    return () => ipcRenderer.removeListener('axis-host-nav-gesture', handler);
+  },
   onOpenUrlInBrowser: (callback) => ipcRenderer.on('open-url-in-browser', (event, url) => callback(url)),
   onSettingsUpdated: (callback) => ipcRenderer.on('settings-updated', callback),
   onSwitchSettingsTab: (callback) => ipcRenderer.on('switch-settings-tab', (event, tab) => callback(tab)),
@@ -70,6 +78,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Incognito window (optional URL to open in a new tab)
   openIncognitoWindow: (url) => ipcRenderer.invoke('open-incognito-window', url),
+  openOrFocusIncognitoWindow: () => ipcRenderer.invoke('open-or-focus-incognito-window'),
+  openOrFocusPersonalWindow: () => ipcRenderer.invoke('open-or-focus-personal-window'),
   openUrlInNewWindow: (url) => ipcRenderer.invoke('open-url-in-new-window', url),
   
   // Notes management
