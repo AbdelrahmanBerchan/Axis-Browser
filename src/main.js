@@ -7,7 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const { exec } = require('child_process');
 const AdmZip = require('adm-zip');
-const { pathToFileURL } = require('url');
+const { pathToFileURL, fileURLToPath } = require('url');
 
 /** App branding image (project root). Used for windows, macOS Dock, About panel, and packaged .app icon. */
 const APP_ICON_PATH = path.join(__dirname, '..', 'Axis_logo.png');
@@ -536,6 +536,9 @@ async function commitAxisExtensionInstall(sourceDir) {
     throw new Error(loaded.error);
   }
   broadcastSettingsUpdated();
+  try {
+    createMenu();
+  } catch (_) {}
   return { extension: loaded, extensions: await listAxisExtensions() };
 }
 
@@ -727,6 +730,9 @@ async function setAxisExtensionEnabled(id, enabled) {
     unloadAxisExtensionRecord(all[idx]);
   }
   broadcastSettingsUpdated();
+  try {
+    createMenu();
+  } catch (_) {}
   return listAxisExtensions();
 }
 
@@ -745,6 +751,9 @@ async function removeAxisExtension(id) {
   } catch (_) {}
   axisExtensionRuntime.delete(id);
   broadcastSettingsUpdated();
+  try {
+    createMenu();
+  } catch (_) {}
   return listAxisExtensions();
 }
 
@@ -1064,6 +1073,7 @@ function configureSession() {
 
 /** In-flight downloads from any Axis session — drives URL-bar ring + popup activity in renderer. */
 const axisActiveDownloadItems = new Set();
+const axisDownloadItemMeta = new Map();
 let axisDownloadProgressBroadcastTimer = null;
 
 function getAxisAggregateDownloadProgress() {
@@ -1379,6 +1389,7 @@ function attachDownloadActivityTracking(sess) {
       return;
     }
     axisActiveDownloadItems.add(item);
+    axisDownloadItemMeta.set(item, { startedAt: Date.now() });
     const onUpdated = () => scheduleAxisDownloadProgressBroadcast();
     item.on('updated', onUpdated);
     item.once('done', () => {
@@ -1386,10 +1397,41 @@ function attachDownloadActivityTracking(sess) {
         item.removeListener('updated', onUpdated);
       } catch (_) {}
       axisActiveDownloadItems.delete(item);
+      axisDownloadItemMeta.delete(item);
       broadcastAxisDownloadActivity();
     });
     broadcastAxisDownloadActivity();
   });
+}
+
+function listAxisActiveDownloads() {
+  const out = [];
+  for (const item of axisActiveDownloadItems) {
+    try {
+      const savePath = item.getSavePath && item.getSavePath();
+      const filename = item.getFilename && item.getFilename();
+      const totalBytes = item.getTotalBytes ? Number(item.getTotalBytes()) : 0;
+      const receivedBytes = item.getReceivedBytes ? Number(item.getReceivedBytes()) : 0;
+      const bytesPerSecond = item.getCurrentBytesPerSecond ? Number(item.getCurrentBytesPerSecond()) : 0;
+      const meta = axisDownloadItemMeta.get(item) || { startedAt: Date.now() };
+      const remainingBytes = totalBytes > 0 ? Math.max(0, totalBytes - receivedBytes) : 0;
+      const etaSeconds = bytesPerSecond > 0 && remainingBytes > 0
+        ? Math.ceil(remainingBytes / bytesPerSecond)
+        : null;
+      out.push({
+        filename: filename || (savePath ? path.basename(savePath) : ''),
+        path: savePath || '',
+        totalBytes: Number.isFinite(totalBytes) ? totalBytes : 0,
+        receivedBytes: Number.isFinite(receivedBytes) ? receivedBytes : 0,
+        bytesPerSecond: Number.isFinite(bytesPerSecond) ? bytesPerSecond : 0,
+        etaSeconds: Number.isFinite(etaSeconds) ? etaSeconds : null,
+        startedAt: meta.startedAt || Date.now()
+      });
+    } catch (_) {
+      /* item may be destroyed between ticks */
+    }
+  }
+  return out;
 }
 
 /** macOS: vibrancy shows desktop through the window; turn it off when Settings “Window transparency” is 0 (fully opaque chrome). */
@@ -1674,6 +1716,23 @@ const unregisterShortcuts = () => {
   );
 })();
 
+/** macOS: `BrowserWindow` `swipe` (Trackpad › Swipe between pages). `right`→forward, `left`→back. Win/Linux: `app-command` browser-backward/forward unchanged. */
+function attachAxisHostNavigationGestures(browserWindow) {
+  if (!browserWindow || typeof browserWindow.on !== 'function') return;
+  browserWindow.on('swipe', (_event, direction) => {
+    if (browserWindow.isDestroyed()) return;
+    if (direction === 'right') browserWindow.webContents.send('axis-host-nav-gesture', 'forward');
+    else if (direction === 'left') browserWindow.webContents.send('axis-host-nav-gesture', 'back');
+  });
+
+  browserWindow.on('app-command', (_event, cmd) => {
+    if (browserWindow.isDestroyed()) return;
+    const c = String(cmd || '').toLowerCase();
+    if (c === 'browser-backward') browserWindow.webContents.send('axis-host-nav-gesture', 'back');
+    else if (c === 'browser-forward') browserWindow.webContents.send('axis-host-nav-gesture', 'forward');
+  });
+}
+
 function createWindow() {
   // Create the browser window with optimized settings
   mainWindow = new BrowserWindow({
@@ -1707,6 +1766,8 @@ function createWindow() {
     visualEffectState: 'active',
     ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
   });
+
+  attachAxisHostNavigationGestures(mainWindow);
 
   if (process.platform === 'darwin' && mainWindow) {
     mainWindow.__axisSidebarRight = false;
@@ -1871,6 +1932,29 @@ function openUrlInAxisBrowser(url) {
   mainWindow.webContents.send('open-url-in-browser', url);
 }
 
+/**
+ * Open a store/listing URL in a browser tab. If the focused window is the main shell (`index.html`),
+ * use it (normal or incognito); otherwise fall back to the primary browser window so Settings/other
+ * windows do not receive `open-url-in-browser`.
+ */
+function openStoreListingUrlFromMenu(url) {
+  if (!url || typeof url !== 'string') return;
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) {
+    try {
+      const pageUrl = focused.webContents.getURL() || '';
+      if (pageUrl.includes('index.html')) {
+        if (focused.isMinimized()) focused.restore();
+        focused.show();
+        focused.focus();
+        focused.webContents.send('open-url-in-browser', url);
+        return;
+      }
+    } catch (_) {}
+  }
+  openUrlInAxisBrowser(url);
+}
+
 function isSafeHttpUrl(url) {
   if (!url || typeof url !== 'string') return false;
   try {
@@ -1916,6 +2000,8 @@ function openUrlInNewBrowserWindow(url) {
     ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
   });
 
+  attachAxisHostNavigationGestures(win);
+
   if (process.platform === 'darwin') {
     win.__axisSidebarRight = false;
     attachMacTrafficLightResize(win);
@@ -1959,6 +2045,102 @@ function openUrlInNewBrowserWindow(url) {
     win.show();
     win.setWindowButtonVisibility(true);
   });
+}
+
+/** Optional small icon for application-menu extension rows (`iconUrl` is usually a `file:` URL). */
+function axisNativeImageForExtensionMenu(iconUrl) {
+  if (!iconUrl || typeof iconUrl !== 'string') return undefined;
+  try {
+    let fp = '';
+    if (iconUrl.startsWith('file:')) {
+      fp = fileURLToPath(iconUrl);
+    } else if (path.isAbsolute(iconUrl) && fs.existsSync(iconUrl)) {
+      fp = iconUrl;
+    }
+    if (!fp || !fs.existsSync(fp)) return undefined;
+    let img = nativeImage.createFromPath(fp);
+    if (!img || img.isEmpty()) return undefined;
+    const target = process.platform === 'darwin' ? 18 : 16;
+    const sz = img.getSize();
+    if (sz.width > target * 2 || sz.height > target * 2) {
+      img = img.resize({ width: target, height: target, quality: 'good' });
+    }
+    return img;
+  } catch (_) {
+    return undefined;
+  }
+}
+
+/** macOS menu bar (and other platforms): Extensions → installed items, store links, Settings. */
+function buildExtensionsSubmenu() {
+  const exts = listAxisExtensions();
+  /** @type {import('electron').MenuItemConstructorOptions[]} */
+  const items = [];
+  if (!exts.length) {
+    items.push({ label: 'No extensions installed', enabled: false });
+  } else {
+    for (const ext of exts) {
+      const userDisabled = ext.enabled === false;
+      const rawName = ext.name || 'Extension';
+      const label = rawName.length > 64 ? `${rawName.slice(0, 61)}…` : rawName;
+      const extId = ext.id;
+      const menuIcon = axisNativeImageForExtensionMenu(ext.iconUrl);
+      /** @type {import('electron').MenuItemConstructorOptions} */
+      const row = {
+        label,
+        enabled: !userDisabled,
+        ...(menuIcon ? { icon: menuIcon } : {}),
+        click: async () => {
+          try {
+            const v = listAxisExtensions().find((x) => x.id === extId);
+            if (!v) return;
+            if (v.enabled === false) return;
+            if (v.popupUrl) {
+              await openAxisExtensionPopup(extId);
+              return;
+            }
+            if (v.optionsUrl) {
+              await openAxisExtensionOptions(extId);
+              return;
+            }
+            const win = getActiveAxisWindow();
+            void dialog.showMessageBox(win && !win.isDestroyed() ? win : BrowserWindow.getFocusedWindow() || undefined, {
+              type: 'info',
+              title: v.name || 'Extension',
+              message: 'This extension has no toolbar popup or options page.',
+              buttons: ['OK']
+            });
+          } catch (e) {
+            const msg = e && e.message ? e.message : String(e);
+            const win = getActiveAxisWindow();
+            void dialog.showMessageBox(win && !win.isDestroyed() ? win : BrowserWindow.getFocusedWindow() || undefined, {
+              type: 'info',
+              title: 'Extension',
+              message: 'Could not open this extension.',
+              detail: msg,
+              buttons: ['OK']
+            });
+          }
+        }
+      };
+      items.push(row);
+    }
+  }
+
+  items.push({ type: 'separator' });
+  items.push({
+    label: 'Add extension (Chrome Web Store)',
+    click: () => openStoreListingUrlFromMenu('https://chromewebstore.google.com/')
+  });
+  items.push({
+    label: 'Add extension (Firefox Add-ons)',
+    click: () => openStoreListingUrlFromMenu('https://addons.mozilla.org/firefox/extensions/')
+  });
+  items.push({
+    label: 'Manage Extensions…',
+    click: () => openSettingsWindow('extensions')
+  });
+  return items;
 }
 
 function createMenu() {
@@ -2328,6 +2510,7 @@ function createMenu() {
   template.push({ label: 'Tabs', submenu: tabsSubmenu });
   template.push({ label: 'View', submenu: viewSubmenu });
   template.push({ label: 'History', submenu: historySubmenu });
+  template.push({ label: 'Extensions', submenu: buildExtensionsSubmenu() });
   template.push({ label: 'Window', submenu: windowSubmenu });
   template.push({ label: 'Help', submenu: helpSubmenu });
 
@@ -2371,6 +2554,9 @@ function createIncognitoWindow(initialUrl = null) {
     visualEffectState: 'active',
     ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
   });
+  incognitoWindow.__axisIsIncognito = true;
+
+  attachAxisHostNavigationGestures(incognitoWindow);
 
   if (process.platform === 'darwin') {
     incognitoWindow.__axisSidebarRight = false;
@@ -2409,6 +2595,30 @@ function createIncognitoWindow(initialUrl = null) {
   });
 
   return incognitoWindow;
+}
+
+function focusExistingIncognitoWindow() {
+  const all = BrowserWindow.getAllWindows().filter((w) => w && !w.isDestroyed());
+  const existing = all.find((w) => w.__axisIsIncognito === true);
+  if (!existing) return null;
+  try {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+  } catch (_) {}
+  return existing;
+}
+
+function focusExistingPersonalWindow() {
+  const all = BrowserWindow.getAllWindows().filter((w) => w && !w.isDestroyed());
+  const existing = all.find((w) => w.__axisIsIncognito !== true);
+  if (!existing) return null;
+  try {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+  } catch (_) {}
+  return existing;
 }
 
 function updateDockMenu() {
@@ -2701,7 +2911,9 @@ ipcMain.handle('install-extension-from-web-store', async (_event, rawInput) => {
 });
 
 /** Absolute path for `<webview preload>` — Chrome Web Store click bridge. */
-ipcMain.handle('get-webview-cws-preload-path', () => path.join(__dirname, 'webview-preload-cws.js'));
+ipcMain.handle('get-webview-cws-preload-path', () =>
+  path.join(__dirname, 'webview-preload-bundle.js')
+);
 
 ipcMain.handle('install-extension-crx', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
@@ -2812,6 +3024,10 @@ ipcMain.handle('delete-history-item', (event, id) => {
 // Downloads management (history of browser downloads)
 ipcMain.handle('get-downloads', () => {
   return downloadsStore.get('items', []);
+});
+
+ipcMain.handle('get-active-downloads', () => {
+  return listAxisActiveDownloads();
 });
 
 ipcMain.handle('add-download', (event, downloadInfo) => {
@@ -2971,6 +3187,18 @@ ipcMain.handle('show-item-in-folder', async (event, filePath) => {
 // Incognito window (optional initial URL to open in a new tab)
 ipcMain.handle('open-incognito-window', (event, url) => {
   createIncognitoWindow(typeof url === 'string' && url.length > 0 ? url : null);
+  return true;
+});
+
+ipcMain.handle('open-or-focus-incognito-window', () => {
+  const focused = focusExistingIncognitoWindow();
+  if (!focused) createIncognitoWindow();
+  return true;
+});
+
+ipcMain.handle('open-or-focus-personal-window', () => {
+  const focused = focusExistingPersonalWindow();
+  if (!focused) createWindow();
   return true;
 });
 
