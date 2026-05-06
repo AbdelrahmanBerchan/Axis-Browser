@@ -27,6 +27,32 @@
             <aside id="sidebar">
                 <div id="sidebar-resize-handle" class="resize-handle"></div>
             <div class="sidebar-section tabs-section">
+                    <div id="sidebar-profile-switcher" class="sidebar-profile-switcher">
+                        <button
+                            type="button"
+                            id="profile-switcher-trigger"
+                            class="profile-switcher-trigger"
+                            title="Switch profile"
+                            aria-label="Switch profile"
+                            aria-haspopup="menu"
+                            aria-expanded="false">
+                            <i id="profile-switcher-icon" class="fas fa-user" aria-hidden="true"></i>
+                        </button>
+                        <div id="profile-switcher-menu" class="profile-switcher-menu hidden" role="menu" aria-label="Profile options">
+                            <button type="button" id="profile-menu-personal" class="profile-switch-btn" role="menuitem" title="Open personal window">
+                                <i class="fas fa-user" aria-hidden="true"></i>
+                                <span>Personal</span>
+                            </button>
+                            <button type="button" id="profile-menu-incognito" class="profile-switch-btn" role="menuitem" title="Open incognito window">
+                                <i class="fas fa-user-secret" aria-hidden="true"></i>
+                                <span>Incognito</span>
+                            </button>
+                        </div>
+                    </div>
+                    <button type="button" id="clear-unpinned-floating" class="clear-unpinned-floating hidden" title="Clear all unpinned tabs">
+                        <span>Clear</span>
+                        <i class="fas fa-chevron-down" aria-hidden="true"></i>
+                    </button>
                     <div id="tabs-container" class="tabs-container vertical">
                         <!-- Pinned tabs will be added above the separator -->
                         <!-- Separator between pinned and unpinned tabs -->
@@ -35,10 +61,6 @@
                                 <span class="clear-text">Clear</span>
                                 <i class="fas fa-chevron-down clear-arrow"></i>
                             </button>
-                        </div>
-                        <div id="incognito-indicator" class="incognito-indicator hidden">
-                            <i class="fas fa-mask incognito-indicator-icon"></i>
-                            <span class="incognito-indicator-text">Incognito</span>
                         </div>
                         <button type="button" id="sidebar-new-tab-btn" class="sidebar-new-tab-btn" title="New Tab" draggable="false">
                             <span class="sidebar-new-tab-btn-inner">
@@ -135,6 +157,10 @@
                                 <span class="zoom-percentage">100%</span>
                             </div>
                         </div>
+                        <div id="axis-store-install-host-bar" class="axis-store-install-host-bar hidden" role="region" aria-label="Axis extension install">
+                            <span id="axis-store-install-host-text" class="axis-store-install-host-text"></span>
+                            <button type="button" id="axis-store-install-host-btn" class="axis-store-install-host-btn">Install in Axis</button>
+                        </div>
                         <!-- Legacy webview: placed first, z-index:0 in CSS - never blocks dynamic webviews -->
                         <webview id="webview" 
                                  src="data:text/html;charset=utf-8,%3C!DOCTYPE%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Cmeta%20name%3D%22color-scheme%22%20content%3D%22dark%20light%22%3E%3Cstyle%3Ehtml%2Cbody%7Bmargin%3A0%3Bmin-height%3A100%25%3Bbackground%3Atransparent!important%7D%3C%2Fstyle%3E%3C%2Fhead%3E%3Cbody%3E%3C!--axis-empty-guest--%3E%3C%2Fbody%3E%3C%2Fhtml%3E" 
@@ -144,6 +170,19 @@
                                  autosize="true"
                                  style="opacity:0;visibility:hidden;pointer-events:none;">
                         </webview>
+                        <!-- Non-interactive edge hint during trackpad/nav gestures (Safari-like pill + arrow) -->
+                        <div id="axis-nav-gesture-layer" class="axis-nav-gesture-layer" aria-hidden="true">
+                            <div class="axis-nav-gesture-pill axis-nav-gesture-pill--back">
+                                <svg class="axis-nav-gesture-arrow" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                                    <path fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M14 7l-5 5 5 5"/>
+                                </svg>
+                            </div>
+                            <div class="axis-nav-gesture-pill axis-nav-gesture-pill--forward">
+                                <svg class="axis-nav-gesture-arrow" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                                    <path fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M10 7l5 5-5 5"/>
+                                </svg>
+                            </div>
+                        </div>
                         <!-- Dynamic webviews for each tab - must be after legacy so they stack on top -->
                         <div id="webviews-container"></div>
                         <!-- New Tab Page (replaces spotlight - custom local page when opening new tab) -->
