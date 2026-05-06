@@ -315,13 +315,20 @@ class AxisBrowser {
         this.pipVideoIndex = 0; // Index of video element in webview
         this.pipWebview = null; // Reference to the webview with video
         this.pipLeaveCheckInterval = null; // Interval to detect native "back to tab" (PiP closed)
+        /** Prevents concurrent handlers when PiP ends (poll overlap). */
+        this._pipLeaveBusy = false;
         this._urlBarThemeSeq = 0;
+        /** Tab switch: disable URL bar tint fade until sync styling or first extract completes. */
+        this._urlBarInstantThemeTabSwitch = false;
         this._settingsUpdatedRaf = null;
         this._ambientAudioCtx = null;
         this._ambientAudioChain = null;
         this._ambientPreset = null;
         this._shortcutCache = {};
-        /** Absolute path to `webview-preload-cws.js` (set in `init`). */
+        this._downloadsPopupRefreshTimer = null;
+        this._downloadsPopupPollInterval = null;
+        this._downloadsPopupRenderInFlight = false;
+        /** Absolute path to `webview-preload-bundle.js` — nav gestures + CWS/AMO store UI (guest preload). */
         this._webviewCwsPreloadPath = null;
 
         this.isIncognitoWindow = (window.location.hash === '#incognito');
@@ -353,11 +360,17 @@ class AxisBrowser {
             tabsContainer: document.getElementById('tabs-container'),
             tabsSeparator: document.getElementById('tabs-separator'),
             sidebarNewTabBtn: document.getElementById('sidebar-new-tab-btn'),
+            clearUnpinnedFloatingBtn: document.getElementById('clear-unpinned-floating'),
             webview: document.getElementById('webview'),
             closeSettings: document.getElementById('close-settings'),
             downloadsBtnFooter: document.getElementById('downloads-btn-footer'),
             sidebarPlusBtn: document.getElementById('sidebar-plus-btn'),
             sidebarPlusMenu: document.getElementById('sidebar-plus-menu'),
+            profileSwitcherTrigger: document.getElementById('profile-switcher-trigger'),
+            profileSwitcherIcon: document.getElementById('profile-switcher-icon'),
+            profileSwitcherMenu: document.getElementById('profile-switcher-menu'),
+            profileMenuPersonal: document.getElementById('profile-menu-personal'),
+            profileMenuIncognito: document.getElementById('profile-menu-incognito'),
             closeDownloads: document.getElementById('close-downloads'),
             refreshDownloads: document.getElementById('refresh-downloads'),
             closeSecurity: document.getElementById('close-security'),
@@ -385,6 +398,9 @@ class AxisBrowser {
             urlBarAdblock: document.getElementById('url-bar-adblock'),
             urlBarCopy: document.getElementById('url-bar-copy'),
             urlBarCwsInstall: document.getElementById('url-bar-cws-install'),
+            axisStoreInstallHostBar: document.getElementById('axis-store-install-host-bar'),
+            axisStoreInstallHostText: document.getElementById('axis-store-install-host-text'),
+            axisStoreInstallHostBtn: document.getElementById('axis-store-install-host-btn'),
             urlBarExtensions: document.getElementById('url-bar-extensions'),
             urlBarChat: document.getElementById('url-bar-chat')
         };
@@ -393,10 +409,20 @@ class AxisBrowser {
     async init() {
         // Load settings + shortcut cache in parallel (faster first interaction)
         await Promise.all([this.loadSettings(), this.refreshShortcutCache()]);
+        const fallbackWebviewPreloadPath = (() => {
+            try {
+                return decodeURIComponent(new URL('webview-preload-bundle.js', window.location.href).pathname);
+            } catch (_) {
+                return null;
+            }
+        })();
         try {
-            this._webviewCwsPreloadPath = (await window.electronAPI.getWebviewCwsPreloadPath?.()) || null;
+            this._webviewCwsPreloadPath =
+                (await window.electronAPI.getWebviewCwsPreloadPath?.()) ||
+                fallbackWebviewPreloadPath ||
+                null;
         } catch (_) {
-            this._webviewCwsPreloadPath = null;
+            this._webviewCwsPreloadPath = fallbackWebviewPreloadPath || null;
         }
         if (this._webviewCwsPreloadPath && this.elements?.webview) {
             try {
@@ -420,8 +446,8 @@ class AxisBrowser {
         
         if (this.isIncognitoWindow) {
             document.body.classList.add('incognito-window');
-            document.getElementById('incognito-indicator')?.classList.remove('hidden');
         }
+        this.syncProfileSwitcherState();
         
         // ALWAYS apply theme on startup (incognito: always black, unchangable)
         const applyThemeNow = () => {
@@ -1164,6 +1190,22 @@ class AxisBrowser {
             this.hideSidebarPlusMenu();
             window.electronAPI.openIncognitoWindow();
         });
+        el.profileSwitcherTrigger?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleProfileSwitcherMenu();
+        });
+        el.profileMenuPersonal?.addEventListener('click', () => {
+            this.hideProfileSwitcherMenu();
+            if (this.isIncognitoWindow) {
+                this.openPersonalProfileWindow();
+            }
+        });
+        el.profileMenuIncognito?.addEventListener('click', () => {
+            this.hideProfileSwitcherMenu();
+            if (!this.isIncognitoWindow) {
+                this.openIncognitoProfileWindow();
+            }
+        });
         
         el.closeDownloads?.addEventListener('click', () => this.toggleDownloads());
         
@@ -1196,6 +1238,7 @@ class AxisBrowser {
                     dlBtn.setAttribute('title', 'Downloading…');
                 }
             }
+            this.scheduleDownloadsPopupRefresh();
         });
         
         // Clear history button
@@ -1205,6 +1248,10 @@ class AxisBrowser {
         // Clear unpinned tabs button
         const clearUnpinnedBtn = document.querySelector('.clear-unpinned-btn');
         clearUnpinnedBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.clearUnpinnedTabs();
+        });
+        this.elements.clearUnpinnedFloatingBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.clearUnpinnedTabs();
         });
@@ -1816,10 +1863,14 @@ class AxisBrowser {
             if (e.target.closest('#sidebar-plus-btn') || e.target.closest('#sidebar-plus-menu')) {
                 return;
             }
+            if (e.target.closest('#sidebar-profile-switcher')) {
+                return;
+            }
             
             // Close all context menus smoothly
             this.hideWebpageContextMenu();
             this.hideSidebarPlusMenu();
+            this.hideProfileSwitcherMenu();
             
             if (!e.target.closest('.tab') && !e.target.closest('.tab-group')) {
                 this.hideTabContextMenu();
@@ -2001,6 +2052,14 @@ class AxisBrowser {
         window.electronAPI.onBrowserShortcut((action) => {
             this.executeBrowserShortcut(action);
         });
+
+        window.electronAPI.onAxisHostNavGesture?.((action) => {
+            try {
+                this.tryNavigateWithAxisGesture(action);
+            } catch (_) {
+                /* ignore */
+            }
+        });
         
         // URL bar native context menu actions
         window.electronAPI.onUrlBarContextMenuAction?.((action, data) => {
@@ -2059,6 +2118,52 @@ class AxisBrowser {
                 this._ambientAudioCtx.resume().catch(() => {});
             }
         });
+    }
+
+    syncProfileSwitcherState() {
+        const trigger = this.elements?.profileSwitcherTrigger;
+        const icon = this.elements?.profileSwitcherIcon;
+        const personalBtn = this.elements?.profileMenuPersonal;
+        const incognitoBtn = this.elements?.profileMenuIncognito;
+        if (!trigger || !icon || !personalBtn || !incognitoBtn) return;
+        const isIncog = !!this.isIncognitoWindow;
+        icon.className = isIncog ? 'fas fa-user-secret' : 'fas fa-user';
+        trigger.setAttribute('aria-label', isIncog ? 'Current profile: Incognito' : 'Current profile: Personal');
+        personalBtn.classList.toggle('active', !isIncog);
+        incognitoBtn.classList.toggle('active', isIncog);
+        this.hideProfileSwitcherMenu();
+    }
+
+    toggleProfileSwitcherMenu() {
+        const menu = this.elements?.profileSwitcherMenu;
+        const trigger = this.elements?.profileSwitcherTrigger;
+        if (!menu || !trigger) return;
+        const opening = menu.classList.contains('hidden');
+        menu.classList.toggle('hidden', !opening);
+        trigger.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    }
+
+    hideProfileSwitcherMenu() {
+        const menu = this.elements?.profileSwitcherMenu;
+        const trigger = this.elements?.profileSwitcherTrigger;
+        if (!menu || !trigger) return;
+        menu.classList.add('hidden');
+        trigger.setAttribute('aria-expanded', 'false');
+    }
+
+    getActiveHttpUrlForProfileSwitch() {
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        const url = typeof tab?.url === 'string' ? tab.url.trim() : '';
+        if (!url) return null;
+        return /^https?:\/\//i.test(url) ? url : null;
+    }
+
+    openIncognitoProfileWindow() {
+        window.electronAPI.openOrFocusIncognitoWindow();
+    }
+
+    openPersonalProfileWindow() {
+        window.electronAPI.openOrFocusPersonalWindow();
     }
 
     async applySettingsUpdateFromMain() {
@@ -2821,6 +2926,11 @@ class AxisBrowser {
         
         const ipcMessageHandler = (event) => {
             const { channel, args } = event;
+            if (channel === 'axis-nav-gesture') {
+                const dir = args && args[0];
+                this.tryNavigateWithAxisGesture(dir, webview, tabId);
+                return;
+            }
             if (channel === 'axis-cws-add-to-chrome') {
                 if (!isActiveTab()) return;
                 const id = args && args[0];
@@ -4712,6 +4822,7 @@ class AxisBrowser {
         }
 
         const prevCur = this._normalizeTabMapKey(this.currentTab);
+        const switchedDifferentTab = prevCur != null && prevCur !== tabId;
 
         // Save new-tab-page state for the tab we're leaving (so each new tab keeps its own content)
         if (prevCur != null && prevCur !== tabId && this.tabs.has(prevCur)) {
@@ -4794,17 +4905,6 @@ class AxisBrowser {
                 }
                 if (currentSrc === undefined || currentSrc === null) currentSrc = '';
 
-                const urlsMatch = (a, b) => {
-                    if (!a || !b) return a === b;
-                    try {
-                        const u1 = new URL(a);
-                        const u2 = new URL(b);
-                        return u1.origin === u2.origin && u1.pathname === u2.pathname && (u1.search || '') === (u2.search || '');
-                    } catch (_) {
-                        return a === b;
-                    }
-                };
-
                 // If tab says new-tab but webview has navigated to a real page (e.g. user searched from new tab), sync tab.url so we show the page, not the overlay
                 const isWebviewRealPage = currentSrc && currentSrc !== 'about:blank' && currentSrc.trim() !== '' && currentSrc !== this.NEWTAB_URL && !currentSrc.startsWith('axis:');
                 if (tab.url === this.NEWTAB_URL && isWebviewRealPage) {
@@ -4835,12 +4935,18 @@ class AxisBrowser {
                 } else if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
                     const sanitizedTabUrl = this.sanitizeUrl(tab.url);
                     const webviewHasContent = currentSrc && currentSrc !== 'about:blank' && currentSrc.trim() !== '';
-                    const samePage = urlsMatch(currentSrc, sanitizedTabUrl) || urlsMatch(currentSrc, tab.url);
-                    if (!webviewHasContent || !samePage) {
+                    if (!webviewHasContent) {
                         webview.src = sanitizedTabUrl || 'https://www.google.com';
-                    } else if (currentSrc && currentSrc !== tab.url) {
-                        tab.url = currentSrc;
-                        this.tabs.set(tabId, tab);
+                    } else {
+                        // Guest already has a document — never reassign `src` here or SPAs (e.g. YouTube)
+                        // full-reload when `tab.url` lags behind in-page URL changes (query/hash).
+                        try {
+                            const cur = new URL(currentSrc);
+                            if ((cur.protocol === 'https:' || cur.protocol === 'http:') && currentSrc !== tab.url) {
+                                tab.url = currentSrc;
+                                this.tabs.set(tabId, tab);
+                            }
+                        } catch (_) {}
                     }
                 } else if (tab.url !== this.NEWTAB_URL && tab.url !== 'axis://settings' && (!currentSrc || currentSrc === 'about:blank')) {
                     webview.src = 'https://www.google.com';
@@ -4891,6 +4997,10 @@ class AxisBrowser {
         
         // DEFER non-critical updates to not block tab switching
         requestAnimationFrame(() => {
+            if (switchedDifferentTab) {
+                this._urlBarInstantThemeTabSwitch = true;
+                this.elements?.webviewUrlBar?.classList.add('url-bar--instant-theme');
+            }
             this._nudgeWebviewGuestLayout();
             this._syncGuestWindowResizeEvent();
             if (activeTab) {
@@ -5324,6 +5434,8 @@ class AxisBrowser {
 
         if (newTabPage) {
             if (show) {
+                // New-tab overlay is never an extension-store listing surface.
+                this.updateExtensionStoreHostBar('');
                 if (this._resetNewTabPageOnShow) {
                     this.resetNewTabPageState();
                     this._resetNewTabPageOnShow = false;
@@ -5480,6 +5592,10 @@ class AxisBrowser {
             }
         }
         
+        // Keep pinned/separator/floating-clear visibility in sync for all windows, including
+        // incognito where pinned persistence paths are skipped.
+        this.updatePinnedSeparatorVisibility();
+
         // Update chat button visibility
         this.updateChatButtonVisibility();
     }
@@ -5607,6 +5723,16 @@ class AxisBrowser {
         if (typeof tabId === 'number' && Number.isFinite(tabId)) return tabId;
         const n = parseInt(String(tabId), 10);
         return Number.isFinite(n) ? n : null;
+    }
+
+    /** Create a unique numeric tab id (optionally honoring a preferred id). */
+    _createUniqueTabId(preferredId = null) {
+        let id = this._normalizeTabMapKey(preferredId);
+        if (id == null) id = Date.now();
+        while (this.tabs.has(id)) {
+            id += 1;
+        }
+        return id;
     }
 
     /** Normalize tab id for Map keys (dataset uses strings; internal ids are numbers). */
@@ -5974,6 +6100,158 @@ class AxisBrowser {
             this.updateNewTabPageVisibility(false);
         }
         this.updateNavigationButtons();
+    }
+
+    /**
+     * After gesture animation: prefer native webview navigation when Chromium has entries
+     * (more reliable than tab-only synthetic stack on SPA / redirect flows).
+     */
+    axisNavigateAfterGesture(direction) {
+        const webview = this.getActiveWebview();
+        if (!webview || !this.currentTab || !this.tabs.has(this.currentTab)) return;
+
+        if (direction === 'back') {
+            try {
+                if (webview.canGoBack()) {
+                    webview.goBack();
+                    this.updateNavigationButtons();
+                    return;
+                }
+            } catch (_) {
+                /* fall through */
+            }
+            this.goBack();
+            return;
+        }
+
+        try {
+            if (webview.canGoForward()) {
+                webview.goForward();
+                this.updateNavigationButtons();
+                return;
+            }
+        } catch (_) {
+            /* fall through */
+        }
+        this.goForward();
+    }
+
+    /**
+     * Unified back/forward from guest `axis-nav-gesture` (optional `webview` / `tabId` must match the active tab)
+     * or from main-process `axis-host-nav-gesture` (omit guest args).
+     */
+    tryNavigateWithAxisGesture(direction, webview, tabId) {
+        if (direction !== 'back' && direction !== 'forward') return;
+        if (!this.currentTab) return;
+        if (tabId != null && String(tabId) !== String(this.currentTab)) return;
+
+        const w = this.getActiveWebview();
+        if (!w) return;
+        if (webview != null && webview !== w) return;
+
+        const t = this.tabs.get(this.currentTab);
+        const synthBack =
+            t && t.history && t.history.length > 1 && t.historyIndex != null && t.historyIndex > 0;
+        const synthFwd =
+            t &&
+            t.history &&
+            t.history.length > 1 &&
+            t.historyIndex != null &&
+            t.historyIndex < t.history.length - 1;
+
+        let canChromiumBack = false;
+        let canChromiumFwd = false;
+        try {
+            canChromiumBack = w.canGoBack();
+            canChromiumFwd = w.canGoForward();
+        } catch (_) {
+            /* guest may transiently throw — treat as no native stack */
+        }
+
+        if (direction === 'back' && !synthBack && !canChromiumBack) return;
+        if (direction === 'forward' && !synthFwd && !canChromiumFwd) return;
+
+        if (direction === 'back') {
+            this.runAxisNavigationGesture('back', () => this.axisNavigateAfterGesture('back'));
+        } else {
+            this.runAxisNavigationGesture('forward', () => this.axisNavigateAfterGesture('forward'));
+        }
+    }
+
+    /** Trackpad swipe (guest preload): slide webviews + edge arrow, then `navigate()` (`goBack` / `goForward`). */
+    runAxisNavigationGesture(direction, navigate) {
+        if (this._axisNavGestureBusy) {
+            this._axisNavGestureQueuedDirection = direction;
+            return;
+        }
+        if (typeof navigate !== 'function') return;
+
+        const stack = document.getElementById('webviews-container');
+        const wrap = stack?.closest?.('.webview-container');
+        const phaseRoot = wrap || stack;
+        const finishGesture = () => {
+            phaseRoot.classList.remove(
+                'axis-nav--back-out',
+                'axis-nav--forward-out',
+                'axis-nav--back-in',
+                'axis-nav--forward-in'
+            );
+            this._axisNavGestureBusy = false;
+            const qDir = this._axisNavGestureQueuedDirection;
+            this._axisNavGestureQueuedDirection = null;
+            if (qDir === 'back' || qDir === 'forward')
+                queueMicrotask(() =>
+                    qDir === 'back'
+                        ? this.tryNavigateWithAxisGesture('back')
+                        : this.tryNavigateWithAxisGesture('forward')
+                );
+        };
+
+        if (!stack) {
+            try {
+                navigate();
+            } catch (_) {
+                /* ignore */
+            }
+            finishGesture();
+            return;
+        }
+
+        this._axisNavGestureBusy = true;
+        phaseRoot.classList.remove(
+            'axis-nav--back-out',
+            'axis-nav--forward-out',
+            'axis-nav--back-in',
+            'axis-nav--forward-in'
+        );
+        /* reflow restart */
+        phaseRoot.offsetHeight;
+
+        const outCls = direction === 'back' ? 'axis-nav--back-out' : 'axis-nav--forward-out';
+        const inCls = direction === 'back' ? 'axis-nav--back-in' : 'axis-nav--forward-in';
+
+        phaseRoot.classList.add(outCls);
+
+        const outMs = 240;
+        const inMs = 300;
+
+        window.setTimeout(() => {
+            try {
+                navigate();
+            } catch (_) {
+                /* ignore */
+            }
+            phaseRoot.classList.remove(outCls);
+            window.requestAnimationFrame(() => {
+                phaseRoot.classList.add(inCls);
+                window.setTimeout(() => finishGesture(), inMs + 36);
+            });
+        }, outMs);
+
+        window.setTimeout(() => {
+            if (!this._axisNavGestureBusy) return;
+            finishGesture();
+        }, 880);
     }
 
     goBack() {
@@ -9787,50 +10065,61 @@ class AxisBrowser {
     updatePinnedSeparatorVisibility() {
         const tabsContainer = this.elements.tabsContainer;
         const separator = this.elements.tabsSeparator;
+        const floatingClear = this.elements.clearUnpinnedFloatingBtn;
         if (!tabsContainer || !separator) return;
         
         const children = Array.from(tabsContainer.children);
         const sepIndex = children.indexOf(separator);
         if (sepIndex <= 0) {
             separator.style.display = 'none';
+            const hasUnpinnedDom = children
+                .slice(Math.max(0, sepIndex + 1))
+                .some(el => el.classList.contains('tab') || el.classList.contains('tab-group'));
+            if (floatingClear) {
+                floatingClear.classList.toggle('hidden', !hasUnpinnedDom);
+            }
             return;
         }
         
         const hasPinnedDom = children
             .slice(0, sepIndex)
             .some(el => el.classList.contains('tab') || el.classList.contains('tab-group'));
+        const hasUnpinnedDom = children
+            .slice(sepIndex + 1)
+            .some(el => el.classList.contains('tab') || el.classList.contains('tab-group'));
         
         separator.style.display = hasPinnedDom ? 'block' : 'none';
+        if (floatingClear) {
+            floatingClear.classList.toggle('hidden', hasPinnedDom || !hasUnpinnedDom);
+        }
     }
     
     savePinnedTabs() {
         const tabsContainer = this.elements.tabsContainer;
-        const separator = this.elements.tabsSeparator;
-        if (!tabsContainer || !separator) return;
-        
-        // Get all pinned tabs in order
+        if (!tabsContainer) return;
+
+        // Get all pinned loose tabs in current visual order.
+        // Do not depend on "above separator" placement; if drag/layout is mid-transition
+        // we still persist tabs marked `pinned: true`.
         const pinnedTabs = [];
+        let pinnedOrder = 0;
         const allChildren = Array.from(tabsContainer.children);
-        const separatorIndex = allChildren.indexOf(separator);
-        
-        // Get tabs above separator (pinned)
-        for (let i = 0; i < separatorIndex; i++) {
-            const child = allChildren[i];
-            if (child.classList.contains('tab')) {
-                const tabId = parseInt(child.dataset.tabId, 10);
-                const tab = this.tabs.get(tabId);
-                if (tab && tab.pinned) {
-                    pinnedTabs.push({
-                        id: tabId,
-                        url: tab.url,
-                        title: tab.title,
-                        favicon: tab.favicon || null, // Save favicon
-                        customIcon: tab.customIcon || null, // Save custom icon
-                        customIconType: tab.customIconType || null, // Save icon type (emoji or fontawesome)
-                        customTitle: tab.customTitle || null, // Save custom title
-                        order: i
-                    });
-                }
+        for (const child of allChildren) {
+            if (!child.classList.contains('tab')) continue;
+            const tabId = this._normalizeTabMapKey(child.dataset.tabId);
+            if (tabId == null) continue;
+            const tab = this.tabs.get(tabId);
+            if (tab && tab.pinned && !tab.tabGroupId) {
+                pinnedTabs.push({
+                    id: tabId,
+                    url: tab.url,
+                    title: tab.title,
+                    favicon: tab.favicon || null, // Save favicon
+                    customIcon: tab.customIcon || null, // Save custom icon
+                    customIconType: tab.customIconType || null, // Save icon type (emoji or fontawesome)
+                    customTitle: tab.customTitle || null, // Save custom title
+                    order: pinnedOrder++
+                });
             }
         }
         
@@ -9851,7 +10140,7 @@ class AxisBrowser {
             
             // Create pinned tabs in order
             for (const pinnedData of pinnedTabsData) {
-                const tabId = pinnedData.id || Date.now() + Math.random();
+                const tabId = this._createUniqueTabId(pinnedData.id);
                 const tabElement = document.createElement('div');
                 tabElement.className = 'tab pinned';
                 tabElement.dataset.tabId = tabId;
@@ -13309,27 +13598,140 @@ class AxisBrowser {
         });
     }
 
-    // In-app downloads popup showing most recent files from Downloads folder
-    async showDownloadsPopup() {
+    isDownloadsPopupVisible() {
+        const popup = document.getElementById('downloads-popup');
+        return !!popup && !popup.classList.contains('hidden');
+    }
+
+    scheduleDownloadsPopupRefresh() {
+        if (!this.isDownloadsPopupVisible()) return;
+        if (this._downloadsPopupRefreshTimer != null) return;
+        this._downloadsPopupRefreshTimer = setTimeout(async () => {
+            this._downloadsPopupRefreshTimer = null;
+            if (this._downloadsPopupRenderInFlight || !this.isDownloadsPopupVisible()) return;
+            await this.refreshDownloadsPopupListIfOpen();
+        }, 120);
+    }
+
+    startDownloadsPopupLiveRefresh() {
+        this.stopDownloadsPopupLiveRefresh();
+        this._downloadsPopupPollInterval = setInterval(() => {
+            this.scheduleDownloadsPopupRefresh();
+        }, 900);
+    }
+
+    stopDownloadsPopupLiveRefresh() {
+        if (this._downloadsPopupPollInterval != null) {
+            clearInterval(this._downloadsPopupPollInterval);
+            this._downloadsPopupPollInterval = null;
+        }
+        if (this._downloadsPopupRefreshTimer != null) {
+            clearTimeout(this._downloadsPopupRefreshTimer);
+            this._downloadsPopupRefreshTimer = null;
+        }
+    }
+
+    async refreshDownloadsPopupListIfOpen() {
         const popup = document.getElementById('downloads-popup');
         const list = document.getElementById('downloads-popup-list');
-        const button = document.getElementById('downloads-btn-footer');
-        if (!popup || !list || !button) return;
+        if (!popup || popup.classList.contains('hidden') || !list) return;
+        if (this._downloadsPopupRenderInFlight) return;
+        this._downloadsPopupRenderInFlight = true;
+        try {
+            const activeDownloads = await window.electronAPI.getActiveDownloads?.() || [];
+            const activeByName = new Map();
+            activeDownloads.forEach((d) => {
+                const n = this.normalizeDownloadDisplayName(d?.filename || d?.path || '');
+                if (n) activeByName.set(n, d);
+            });
+            const rows = Array.from(list.querySelectorAll('.downloads-popup-item'));
+            rows.forEach((row) => {
+                const n = row.dataset.downloadNameNorm || '';
+                const tracked = activeByName.get(n) || null;
+                this.applyDownloadsPopupRowDownloadState(row, tracked);
+            });
+        } finally {
+            this._downloadsPopupRenderInFlight = false;
+        }
+    }
 
-        // Toggle: if already visible, hide
-        if (!popup.classList.contains('hidden')) {
-            this.hideDownloadsPopup();
-            return;
+    normalizeDownloadDisplayName(name = '') {
+        const raw = String(name || '').trim().toLowerCase();
+        if (!raw) return '';
+        return raw
+            .replace(/\.crdownload$/i, '')
+            .replace(/\.part$/i, '')
+            .replace(/\.download$/i, '');
+    }
+
+    applyDownloadsPopupRowDownloadState(row, tracked) {
+        if (!row) return;
+        const isDownloading = !!tracked;
+        const totalBytes = Number((tracked && tracked.totalBytes) || 0);
+        const receivedBytes = Number((tracked && tracked.receivedBytes) || 0);
+        const hasProgress = isDownloading && totalBytes > 0;
+        const progressPct = hasProgress
+            ? Math.max(0, Math.min(100, Math.round((receivedBytes / totalBytes) * 100)))
+            : null;
+        const etaSeconds = isDownloading && Number.isFinite(Number(tracked?.etaSeconds))
+            ? Number(tracked.etaSeconds)
+            : null;
+        const etaText = etaSeconds != null
+            ? (etaSeconds >= 60 ? `${Math.ceil(etaSeconds / 60)} min left` : `${Math.max(1, etaSeconds)} sec left`)
+            : '';
+
+        row.classList.toggle('is-downloading', isDownloading);
+        const timeEl = row.querySelector('.downloads-popup-time');
+        if (timeEl) {
+            timeEl.textContent = isDownloading
+                ? (hasProgress ? `Downloading • ${progressPct}%${etaText ? ` • ${etaText}` : ''}` : `Downloading…${etaText ? ` • ${etaText}` : ''}`)
+                : (row.dataset.downloadBaseMeta || '');
         }
 
-        this.closeExtensionsMenu();
+        let progressEl = row.querySelector('.downloads-popup-progress');
+        if (isDownloading) {
+            if (!progressEl) {
+                progressEl = document.createElement('div');
+                progressEl.className = 'downloads-popup-progress';
+                progressEl.innerHTML = '<div class="downloads-popup-progress-fill"></div>';
+                const info = row.querySelector('.downloads-popup-info');
+                if (info) info.appendChild(progressEl);
+            }
+            progressEl.classList.toggle('indeterminate', !hasProgress);
+            const fill = progressEl.querySelector('.downloads-popup-progress-fill');
+            if (fill) fill.style.width = `${hasProgress ? progressPct : 28}%`;
+        } else if (progressEl) {
+            progressEl.remove();
+        }
 
+        const showFolderBtn = row.querySelector('.downloads-popup-show-folder');
+        if (showFolderBtn) {
+            if (isDownloading) {
+                showFolderBtn.setAttribute('disabled', 'disabled');
+                showFolderBtn.setAttribute('title', 'Available when download completes');
+            } else {
+                showFolderBtn.removeAttribute('disabled');
+                showFolderBtn.setAttribute('title', 'Show in Finder');
+            }
+        }
+    }
+
+    async populateDownloadsPopupList(list) {
+        if (!list) return;
+
+        // Toggle: if already visible, hide
         // Load recent files from system Downloads folder
         let downloads = [];
+        let activeDownloads = [];
         try {
             downloads = await window.electronAPI.getDownloadsFromFolder() || [];
         } catch (error) {
             console.error('Failed to load downloads:', error);
+        }
+        try {
+            activeDownloads = await window.electronAPI.getActiveDownloads?.() || [];
+        } catch (_) {
+            activeDownloads = [];
         }
 
         // Clear current items
@@ -13349,12 +13751,49 @@ class AxisBrowser {
             if (pathsForIcons.length && window.electronAPI?.cacheDragIcons) {
                 window.electronAPI.cacheDragIcons(pathsForIcons).catch(() => {});
             }
+            const activeByPath = new Map();
+            const activeByName = new Map();
+            activeDownloads
+                .filter((d) => d)
+                .forEach((d) => {
+                    const p = typeof d.path === 'string' ? d.path.trim().toLowerCase() : '';
+                    const n = this.normalizeDownloadDisplayName(d.filename || d.path || '');
+                    if (p) activeByPath.set(p, d);
+                    if (n) activeByName.set(n, d);
+                });
+            const seenNormNames = new Set();
             downloads.forEach((item) => {
                 const fileName = item.name || item.path || 'File';
                 const fileType = this.getFileTypeForPreview(fileName);
+                const pathKey = typeof item.path === 'string' ? item.path.trim().toLowerCase() : '';
+                const nameKey = this.normalizeDownloadDisplayName(fileName);
+                if (nameKey && seenNormNames.has(nameKey)) return;
+                if (nameKey) seenNormNames.add(nameKey);
+                const tracked = activeByPath.get(pathKey) || activeByName.get(nameKey) || null;
+                const isDownloading = !!tracked;
+                const totalBytes = Number((tracked && tracked.size) || item.size || 0);
+                const receivedBytes = Number((tracked && tracked.receivedBytes) || 0);
+                const hasProgress = isDownloading && totalBytes > 0;
+                const progressPct = hasProgress
+                    ? Math.max(0, Math.min(100, Math.round((receivedBytes / totalBytes) * 100)))
+                    : null;
+                const etaSeconds = isDownloading && Number.isFinite(Number(tracked?.etaSeconds))
+                    ? Number(tracked.etaSeconds)
+                    : null;
+                const etaText = etaSeconds != null
+                    ? (etaSeconds >= 60 ? `${Math.ceil(etaSeconds / 60)} min left` : `${Math.max(1, etaSeconds)} sec left`)
+                    : '';
+                const metaText = isDownloading
+                    ? (hasProgress ? `Downloading • ${progressPct}%${etaText ? ` • ${etaText}` : ''}` : `Downloading…${etaText ? ` • ${etaText}` : ''}`)
+                    : `${this.formatFileSize(item.size || 0)} • ${this.formatTimeAgo(item.mtime)}`;
+                const progressMarkup = isDownloading
+                    ? `<div class="downloads-popup-progress ${hasProgress ? '' : 'indeterminate'}"><div class="downloads-popup-progress-fill" style="width:${hasProgress ? progressPct : 28}%;"></div></div>`
+                    : '';
 
                 const row = document.createElement('div');
-                row.className = 'downloads-popup-item';
+                row.className = `downloads-popup-item${isDownloading ? ' is-downloading' : ''}`;
+                row.dataset.downloadNameNorm = nameKey || '';
+                row.dataset.downloadBaseMeta = `${this.formatFileSize(item.size || 0)} • ${this.formatTimeAgo(item.mtime)}`;
                 row.innerHTML = `
                     <div class="downloads-popup-thumbnail ${this.escapeHtml(fileType)}">
                         ${this.getDownloadPopupThumbnailLoadingMarkup()}
@@ -13364,8 +13803,9 @@ class AxisBrowser {
                             ${this.escapeHtml(fileName)}
                         </div>
                         <div class="downloads-popup-time">
-                            ${this.formatFileSize(item.size || 0)} • ${this.formatTimeAgo(item.mtime)}
+                            ${this.escapeHtml(metaText)}
                         </div>
+                        ${progressMarkup}
                     </div>
                     <button class="downloads-popup-show-folder" title="Show in Finder">
                         <i class="fas fa-folder-open"></i>
@@ -13374,6 +13814,10 @@ class AxisBrowser {
 
                 row.draggable = true;
                 row.addEventListener('dragstart', (e) => {
+                    if (isDownloading) {
+                        e.preventDefault();
+                        return;
+                    }
                     e.preventDefault();
                     if (item.path && window.electronAPI?.startFileDrag) {
                         window.electronAPI.startFileDrag(item.path);
@@ -13382,6 +13826,7 @@ class AxisBrowser {
 
                 // Open file on row click (suppressed after a drag by the browser)
                 row.addEventListener('click', () => {
+                    if (isDownloading) return;
                     if (item.path) {
                         window.electronAPI.openLibraryItem(item.path);
                     }
@@ -13389,8 +13834,13 @@ class AxisBrowser {
 
                 // Reveal in Finder
                 const showFolderBtn = row.querySelector('.downloads-popup-show-folder');
+                if (isDownloading) {
+                    showFolderBtn?.setAttribute('disabled', 'disabled');
+                    showFolderBtn?.setAttribute('title', 'Available when download completes');
+                }
                 showFolderBtn?.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    if (isDownloading) return;
                     if (item.path) {
                         window.electronAPI.showItemInFolder(item.path);
                     }
@@ -13400,6 +13850,23 @@ class AxisBrowser {
                 this.loadDownloadPopupThumbnail(item.path, fileType, fileName, row);
             });
         }
+    }
+
+    // In-app downloads popup showing most recent files from Downloads folder
+    async showDownloadsPopup() {
+        const popup = document.getElementById('downloads-popup');
+        const list = document.getElementById('downloads-popup-list');
+        const button = document.getElementById('downloads-btn-footer');
+        if (!popup || !list || !button) return;
+
+        // Toggle: if already visible, hide
+        if (!popup.classList.contains('hidden')) {
+            this.hideDownloadsPopup();
+            return;
+        }
+
+        this.closeExtensionsMenu();
+        await this.populateDownloadsPopupList(list);
 
         // Position popup under the downloads button
         const rect = button.getBoundingClientRect();
@@ -13426,6 +13893,7 @@ class AxisBrowser {
             backdrop.setAttribute('aria-hidden', 'false');
         }
         document.body.classList.add('downloads-popup-open');
+        this.startDownloadsPopupLiveRefresh();
 
         const openFolderBtn = document.getElementById('downloads-popup-open-folder');
         openFolderBtn?.addEventListener('click', async (e) => {
@@ -13441,6 +13909,7 @@ class AxisBrowser {
     hideDownloadsPopup() {
         const popup = document.getElementById('downloads-popup');
         const backdrop = document.getElementById('downloads-popup-backdrop');
+        this.stopDownloadsPopupLiveRefresh();
         if (backdrop) {
             backdrop.classList.add('hidden');
             backdrop.setAttribute('aria-hidden', 'true');
@@ -14638,7 +15107,7 @@ class AxisBrowser {
             }
         };
 
-        /** Pinned/unpinned band: separator + optional incognito row + “+ New Tab” — same drag shift as a unit */
+        /** Pinned/unpinned band: separator + “+ New Tab” — same drag shift as a unit */
         const clearPinnedUnpinnedBandTransforms = () => {
             const sep = this.elements.tabsSeparator;
             if (sep && sep.parentNode) {
@@ -14649,11 +15118,6 @@ class AxisBrowser {
             if (nt && nt.parentNode) {
                 nt.style.removeProperty('transform');
                 nt.style.transition = '';
-            }
-            const inc = document.getElementById('incognito-indicator');
-            if (inc && inc.parentNode) {
-                inc.style.removeProperty('transform');
-                inc.style.transition = '';
             }
         };
 
@@ -14669,11 +15133,6 @@ class AxisBrowser {
             if (nt && nt.parentNode) {
                 nt.style.transition = '';
                 nt.style.setProperty('transform', tf, 'important');
-            }
-            const inc = document.getElementById('incognito-indicator');
-            if (inc && inc.parentNode) {
-                inc.style.transition = '';
-                inc.style.setProperty('transform', tf, 'important');
             }
         };
 
@@ -17639,26 +18098,21 @@ class AxisBrowser {
                 } catch (_) {
                     listingUrl = '';
                 }
-                if (!axisParseChromeWebStoreExtensionId(listingUrl) && !axisParseFirefoxAmoAddonKey(listingUrl)) {
-                    this.showNotification('Open an extension page on the Chrome Web Store or Mozilla Add-ons first.', 'info');
-                    return;
-                }
-                const btn = el.urlBarCwsInstall;
-                if (btn) btn.disabled = true;
+                await this.installExtensionFromStoreListingUrl(listingUrl, el.urlBarCwsInstall);
+            });
+        }
+        if (el.axisStoreInstallHostBtn) {
+            el.axisStoreInstallHostBtn.addEventListener('click', async (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const wv = this.getActiveWebview();
+                let listingUrl = '';
                 try {
-                    await window.electronAPI.installExtensionFromWebStore(listingUrl);
-                    const moz = axisParseFirefoxAmoAddonKey(listingUrl);
-                    const dismissToken = moz ? `amo:${moz.toLowerCase()}` : (axisParseChromeWebStoreExtensionId(listingUrl) || '');
-                    if (dismissToken) axisNotifyExtensionStoreBarDismissed(wv, dismissToken);
-                    this.showNotification('Extension installed', 'success');
-                } catch (e) {
-                    this.showNotification(
-                        e && e.message ? e.message : 'Could not install this extension.',
-                        'error'
-                    );
-                } finally {
-                    if (btn) btn.disabled = false;
+                    listingUrl = wv && typeof wv.getURL === 'function' ? wv.getURL() || '' : '';
+                } catch (_) {
+                    listingUrl = '';
                 }
+                await this.installExtensionFromStoreListingUrl(listingUrl, el.axisStoreInstallHostBtn);
             });
         }
 
@@ -17757,7 +18211,59 @@ class AxisBrowser {
             });
         }
     }
-    
+
+    /** After a tab switch, URL bar tint updates without CSS fade; call again after sync styling or extract. */
+    _releaseUrlBarInstantThemeAfterTabSwitchIfNeeded() {
+        if (!this._urlBarInstantThemeTabSwitch) return;
+        this._urlBarInstantThemeTabSwitch = false;
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar) return;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                urlBar.classList.remove('url-bar--instant-theme');
+            });
+        });
+    }
+
+    async installExtensionFromStoreListingUrl(listingUrl, triggerBtn = null) {
+        const cwsId = axisParseChromeWebStoreExtensionId(listingUrl);
+        const amoKey = axisParseFirefoxAmoAddonKey(listingUrl);
+        if (!cwsId && !amoKey) {
+            this.showNotification('Open an extension page on the Chrome Web Store or Mozilla Add-ons first.', 'info');
+            return;
+        }
+        const wv = this.getActiveWebview();
+        if (triggerBtn) triggerBtn.disabled = true;
+        try {
+            await window.electronAPI.installExtensionFromWebStore(listingUrl);
+            const dismissToken = amoKey ? `amo:${amoKey.toLowerCase()}` : cwsId;
+            if (dismissToken) axisNotifyExtensionStoreBarDismissed(wv, dismissToken);
+            this.showNotification('Extension installed', 'success');
+        } catch (e) {
+            this.showNotification(
+                e && e.message ? e.message : 'Could not install this extension.',
+                'error'
+            );
+        } finally {
+            if (triggerBtn) triggerBtn.disabled = false;
+        }
+    }
+
+    updateExtensionStoreHostBar(currentUrl) {
+        const el = this.elements;
+        if (!el?.axisStoreInstallHostBar || !el.axisStoreInstallHostText) return;
+        const cwsId = axisParseChromeWebStoreExtensionId(currentUrl);
+        const amoKey = axisParseFirefoxAmoAddonKey(currentUrl);
+        if (cwsId || amoKey) {
+            el.axisStoreInstallHostText.textContent = amoKey
+                ? 'Add to Firefox does not install in Axis. Use Install in Axis.'
+                : 'Add to Chrome does not install in Axis. Use Install in Axis.';
+            el.axisStoreInstallHostBar.classList.remove('hidden');
+        } else {
+            el.axisStoreInstallHostBar.classList.add('hidden');
+        }
+    }
+
     // Update the URL bar display and theme
     // opts.skipExtractTheme: when true, do not run extractUrlBarTheme (caller will await it — avoids races on rapid settings toggles)
     updateUrlBar(webview, opts = {}) {
@@ -17782,6 +18288,7 @@ class AxisBrowser {
                 el.urlBarCwsInstall.classList.add('hidden');
                 el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
             }
+            this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
             return;
         }
         
@@ -17801,6 +18308,7 @@ class AxisBrowser {
                 el.urlBarCwsInstall.classList.add('hidden');
                 el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
             }
+            this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
             return;
         }
         
@@ -17832,6 +18340,8 @@ class AxisBrowser {
                 el.urlBarCwsInstall.classList.add('hidden');
                 el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
             }
+            this.updateExtensionStoreHostBar('');
+            this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
             return;
         }
         
@@ -17874,6 +18384,7 @@ class AxisBrowser {
                 el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
             }
         }
+        this.updateExtensionStoreHostBar(currentUrl);
         
         // Update input field with current URL
         if (el.urlBarInput) {
@@ -17943,11 +18454,14 @@ class AxisBrowser {
         const tab = this.tabs.get(this.currentTab);
         if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
             this.applyAppThemeToUrlBar();
+            this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
             return;
         }
         // Extract theme color from website
         if (!opts.skipExtractTheme) {
             this.extractUrlBarTheme(webview);
+        } else {
+            this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         }
     }
     
@@ -18231,6 +18745,7 @@ class AxisBrowser {
                     this.applyChatPanelTheme(urlBar);
                 }
             }
+            this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         } catch (e) {
             if (seq !== this._urlBarThemeSeq) return;
             if (this.settings?.transparentSites) {
@@ -18254,6 +18769,7 @@ class AxisBrowser {
                 urlBar.style.setProperty('--url-bar-bg', 'rgba(250, 250, 250, 0.95)');
                 this.applyChatPanelTheme(urlBar);
             }
+            this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         }
     }
 
@@ -18276,25 +18792,76 @@ class AxisBrowser {
         this.pipVideoIndex = 0;
         this.pipWebview = null;
         this.pipLeaveCheckInterval = null;
+        this._pipLeaveBusy = false;
     }
     
     startPIPLeaveCheck() {
         this.stopPIPLeaveCheck();
-        this.pipLeaveCheckInterval = setInterval(async () => {
-            if (!this.pipTabId || !this.pipWebview) return;
-            try {
-                const stillInPIP = await this.pipWebview.executeJavaScript('!!document.pictureInPictureElement');
-                if (!stillInPIP) {
-                    const tabIdToSwitch = this.pipTabId;
-                    if (tabIdToSwitch && this.tabs.has(tabIdToSwitch)) {
-                        this.switchToTab(tabIdToSwitch);
-                    }
-                    this.hidePIP();
-                }
-            } catch (e) {
-                // Webview may be gone or navigating
+        this._pipLeaveBusy = false;
+        this.pipLeaveCheckInterval = setInterval(() => {
+            void this._pipPollPiPStateOnce();
+        }, 150);
+    }
+
+    /**
+     * When native PiP ends, Chromium usually keeps the video playing for "Back to tab" and pauses
+     * for the PiP close (X). Guest `visibilityState` stays `hidden` for a background tab until we
+     * switch, so we cannot use visibility — playback state after exit is the practical signal.
+     */
+    async _pipPollPiPStateOnce() {
+        if (!this.pipTabId || !this.pipWebview || this._pipLeaveBusy) return;
+        let stillInPIP = true;
+        try {
+            stillInPIP = await this.pipWebview.executeJavaScript('!!document.pictureInPictureElement');
+        } catch (e) {
+            return;
+        }
+        if (stillInPIP) return;
+        if (this._pipLeaveBusy) return;
+        this._pipLeaveBusy = true;
+        this.stopPIPLeaveCheck();
+
+        const webview = this.pipWebview;
+        const rawId = this.pipTabId;
+        const id = this._normalizeTabMapKey(rawId);
+        const idx = Number(this.pipVideoIndex) || 0;
+
+        try {
+            await new Promise((r) => setTimeout(r, 90));
+            let pausedAfter = true;
+            if (webview && !webview.isDestroyed?.()) {
+                try {
+                    pausedAfter = await webview.executeJavaScript(`
+                        (function() {
+                            var videos = document.querySelectorAll('video');
+                            var v = videos[${idx}];
+                            return v ? !!v.paused : true;
+                        })();
+                    `);
+                } catch (_) {}
             }
-        }, 700);
+            const cur = this.currentTab != null ? this._normalizeTabMapKey(this.currentTab) : null;
+            const otherTabFocused = id != null && cur != null && cur !== id;
+            if (otherTabFocused && pausedAfter === false && webview && !webview.isDestroyed?.()) {
+                await new Promise((r) => setTimeout(r, 120));
+                try {
+                    const paused2 = await webview.executeJavaScript(`
+                        (function() {
+                            var videos = document.querySelectorAll('video');
+                            var v = videos[${idx}];
+                            return v ? !!v.paused : true;
+                        })();
+                    `);
+                    if (paused2) pausedAfter = true;
+                } catch (_) {}
+            }
+            if (otherTabFocused && pausedAfter === false) {
+                this.switchToTab(id);
+            }
+        } finally {
+            this._pipLeaveBusy = false;
+            this.hidePIP();
+        }
     }
     
     stopPIPLeaveCheck() {
@@ -18302,6 +18869,38 @@ class AxisBrowser {
             clearInterval(this.pipLeaveCheckInterval);
             this.pipLeaveCheckInterval = null;
         }
+    }
+
+    /**
+     * Injected into guests for tab-switch auto-PiP only. Filters tiny/decorative `<video>` loops
+     * (hero animations, sprites) so only layout-large, reasonably sized media can trigger PiP.
+     */
+    static _guestVideoEligibleForAutoPipSrc() {
+        return `
+                    function axisGuestVideoEligibleForAutoPip(v) {
+                        try {
+                            var r = v.getBoundingClientRect();
+                            var layW = r.width;
+                            var layH = r.height;
+                            var area = layW * layH;
+                            var MIN_EDGE = 112;
+                            var MIN_AREA = 12000;
+                            if (!(layW >= MIN_EDGE && layH >= MIN_EDGE && area >= MIN_AREA)) return false;
+                            var aw = v.videoWidth || 0;
+                            var ah = v.videoHeight || 0;
+                            if (aw > 0 && ah > 0 && Math.min(aw, ah) < 96) return false;
+                            if (typeof v.checkVisibility === 'function') {
+                                try {
+                                    if (!v.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
+                                } catch (e) {}
+                            }
+                            var cs = getComputedStyle(v);
+                            if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.03) return false;
+                            return true;
+                        } catch (e) {
+                            return false;
+                        }
+                    }`;
     }
     
     async checkAndShowPIP(tabId, webview) {
@@ -18311,18 +18910,16 @@ class AxisBrowser {
             // Check if there's a playing video and request native PIP
             const result = await webview.executeJavaScript(`
                 (async function() {
+                    ${AxisBrowser._guestVideoEligibleForAutoPipSrc()}
                     const videos = document.querySelectorAll('video');
                     for (let i = 0; i < videos.length; i++) {
                         const v = videos[i];
-                        if (!v.paused && v.readyState >= 2) {
+                        if (!v.paused && v.readyState >= 2 && axisGuestVideoEligibleForAutoPip(v)) {
                             try {
-                                // Check if PIP is supported
                                 if (document.pictureInPictureEnabled && !v.disablePictureInPicture) {
-                                    // Exit any existing PIP first
                                     if (document.pictureInPictureElement) {
                                         await document.exitPictureInPicture();
                                     }
-                                    // Request native PIP
                                     await v.requestPictureInPicture();
                                     return { success: true, videoIndex: i };
                                 }
@@ -18358,13 +18955,13 @@ class AxisBrowser {
             // Request native browser PIP
             await webview.executeJavaScript(`
                 (async function() {
+                    ${AxisBrowser._guestVideoEligibleForAutoPipSrc()}
                     const videos = document.querySelectorAll('video');
                     const videoIndex = ${videoIndex};
                     if (videos.length > videoIndex) {
                         const v = videos[videoIndex];
-                        if (v && document.pictureInPictureEnabled && !v.disablePictureInPicture) {
+                        if (v && axisGuestVideoEligibleForAutoPip(v) && document.pictureInPictureEnabled && !v.disablePictureInPicture) {
                             try {
-                                // Exit any existing PIP first
                                 if (document.pictureInPictureElement) {
                                     await document.exitPictureInPicture();
                                 }
@@ -18387,20 +18984,15 @@ class AxisBrowser {
         if (!this.pipTabId) return;
         
         this.stopPIPLeaveCheck();
-        const tabIdToSwitch = this.pipTabId;
+        const tabIdToSwitch = this._normalizeTabMapKey(this.pipTabId);
         
-        // Exit native PIP
         await this.exitNativePIP();
         
-        // Switch to the tab with the video
-        if (tabIdToSwitch && this.tabs.has(tabIdToSwitch)) {
+        if (tabIdToSwitch != null && this.tabs.has(tabIdToSwitch)) {
             this.switchToTab(tabIdToSwitch);
+        } else {
+            this.hidePIP();
         }
-        
-        // Clear PIP state
-        this.pipTabId = null;
-        this.pipVideoIndex = 0;
-        this.pipWebview = null;
     }
     
     async exitNativePIP() {
