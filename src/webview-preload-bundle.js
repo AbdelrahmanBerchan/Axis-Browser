@@ -7,9 +7,11 @@
     const { ipcRenderer } = require('electron');
 
     const COALESCE_MS = 110;
-        const COOLDOWN_MS = 400;
-        const THRESH_AXIAL = 50;
+    const COOLDOWN_MS = 400;
+    const THRESH_AXIAL = 175;
     const MAX_DOMINANT_VERTICAL = 28;
+    const HORIZONTAL_DOMINANCE = 1.22;
+    const MIN_ABS_DX = 8;
 
     let acc = 0;
     let lastEventMs = 0;
@@ -32,10 +34,10 @@
             dy *= 96;
           }
 
-          if (Math.abs(dx) <= 2) return;
+          if (Math.abs(dx) <= MIN_ABS_DX) return;
 
           if (Math.abs(dy) > MAX_DOMINANT_VERTICAL && Math.abs(dy) > Math.abs(dx) * 0.95) return;
-          if (Math.abs(dx) < Math.abs(dy) * 0.92) return;
+          if (Math.abs(dx) < Math.abs(dy) * HORIZONTAL_DOMINANCE) return;
 
           const now = Date.now();
           if (now < cooldownUntil) return;
