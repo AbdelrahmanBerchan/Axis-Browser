@@ -255,6 +255,8 @@ class AxisBrowser {
         this.webviewListenersSetup = new WeakMap(); // Start with no tabs
         this.tabs = new Map(); // Start with empty tabs
         this.tabGroups = new Map(); // Store tab groups: { id, name, tabIds: [], open: true, color: '#FF6B6B' }
+        this.favorites = []; // Sidebar favorites shown above pinned tabs
+        this._favoriteDrag = null;
         /** During `syncSidebarFromTabGroups`, empty group that will run close animation (last tab dragged out). */
         this._pendingEmptyGroupCollapseId = null;
         this.pendingTabGroupColor = null; // Color selected for new tab group
@@ -302,6 +304,9 @@ class AxisBrowser {
         this.spotlightSelectedIndex = -1; // Track selected suggestion index
         this.NEWTAB_URL = 'axis://newtab'; // Custom new tab page (replaces spotlight)
         this.contextMenuTabGroupId = null; // Track which tab group context menu is open
+        this.contextMenuFavoriteId = null; // Sidebar favorite tile native context menu
+        /** Tab whose guest fired the last webpage context menu (may differ from `currentTab`). */
+        this._contextMenuSourceTabId = null;
         this.themeCache = new Map(); // Cache theme colors per domain for instant theme switching
         this.currentLibraryItems = []; // Store library items for preview navigation
         this.currentPreviewFile = null; // Current file being previewed
@@ -317,7 +322,14 @@ class AxisBrowser {
         this.pipLeaveCheckInterval = null; // Interval to detect native "back to tab" (PiP closed)
         /** Prevents concurrent handlers when PiP ends (poll overlap). */
         this._pipLeaveBusy = false;
+        /** Background media mini-player after native PiP closes (`{ tabId, videoIndex }`, tabId normalized). */
+        this._sidebarMediaDock = null;
+        this._sidebarMediaDockPoll = null;
+        /** ResizeObserver for sidebar mini-player title slide distance when the dock width changes. */
+        this._sidebarMediaTitleResizeObserver = null;
         this._urlBarThemeSeq = 0;
+        /** Deferred second pass after SPAs paint sticky chrome / theme-color settles. */
+        this._urlBarThemeRefineTimer = null;
         /** Tab switch: disable URL bar tint fade until sync styling or first extract completes. */
         this._urlBarInstantThemeTabSwitch = false;
         this._settingsUpdatedRaf = null;
@@ -359,6 +371,8 @@ class AxisBrowser {
             sidebar: document.getElementById('sidebar'),
             tabsContainer: document.getElementById('tabs-container'),
             tabsSeparator: document.getElementById('tabs-separator'),
+            favoritesSection: document.getElementById('favorites-section'),
+            favoritesGrid: document.getElementById('favorites-grid'),
             sidebarNewTabBtn: document.getElementById('sidebar-new-tab-btn'),
             clearUnpinnedFloatingBtn: document.getElementById('clear-unpinned-floating'),
             webview: document.getElementById('webview'),
@@ -402,7 +416,19 @@ class AxisBrowser {
             axisStoreInstallHostText: document.getElementById('axis-store-install-host-text'),
             axisStoreInstallHostBtn: document.getElementById('axis-store-install-host-btn'),
             urlBarExtensions: document.getElementById('url-bar-extensions'),
-            urlBarChat: document.getElementById('url-bar-chat')
+            urlBarChat: document.getElementById('url-bar-chat'),
+            sidebarMediaDock: document.getElementById('sidebar-media-dock'),
+            sidebarMediaDockCard: document.querySelector('#sidebar-media-dock .sidebar-media-dock-card'),
+            sidebarMediaTitle: document.getElementById('sidebar-media-title'),
+            sidebarMediaTitleMask: document.getElementById('sidebar-media-title-mask'),
+            sidebarMediaTitleBtn: document.getElementById('sidebar-media-title-btn'),
+            sidebarMediaSourceBadge: document.getElementById('sidebar-media-source-badge'),
+            sidebarMediaPipBtn: document.getElementById('sidebar-media-pip-btn'),
+            sidebarMediaDismissBtn: document.getElementById('sidebar-media-dismiss-btn'),
+            sidebarMediaPrevBtn: document.getElementById('sidebar-media-prev-btn'),
+            sidebarMediaPlayBtn: document.getElementById('sidebar-media-play-btn'),
+            sidebarMediaNextBtn: document.getElementById('sidebar-media-next-btn'),
+            sidebarMediaVolBtn: document.getElementById('sidebar-media-vol-btn')
         };
     }
 
@@ -495,6 +521,7 @@ class AxisBrowser {
         
         this.applySidebarPosition(); // Apply saved sidebar position
         this.setupEventListeners();
+        this.setupSidebarMediaDockListeners();
         this.setupNewTabPage();
         this.setupTabSearch();
         this.setupLoadingScreen();
@@ -503,6 +530,7 @@ class AxisBrowser {
 
         // Load pinned tabs and tab groups (skip in incognito – start fresh)
         if (!this.isIncognitoWindow) {
+            this.loadFavorites();
             await this.loadPinnedTabs();
             await this.loadTabGroups();
         }
@@ -1311,6 +1339,13 @@ class AxisBrowser {
             this.hideTabContextMenu();
         });
 
+        document.getElementById('add-tab-favorite-option')?.addEventListener('click', () => {
+            if (this.contextMenuTabId) {
+                this.addTabToFavorites(this.contextMenuTabId);
+            }
+            this.hideTabContextMenu();
+        });
+
         document.getElementById('close-tab-option').addEventListener('click', () => {
             this.closeCurrentTab();
             this.hideTabContextMenu();
@@ -1420,27 +1455,77 @@ class AxisBrowser {
                         });
                     }
                     break;
-                case 'open-image-new-tab':
-                    if (data && data.srcURL) {
-                        this.createNewTab(data.srcURL);
+                case 'open-image-new-tab': {
+                    const raw = data && data.srcURL;
+                    if (!raw) break;
+                    const pageURL = (data && data.pageURL) || '';
+                    const prepared = this.prepareContextMenuImageUrl(raw, pageURL);
+                    if (prepared) {
+                        this.createNewTab(prepared, { trustedContextImage: true });
                     }
                     break;
-                case 'copy-image':
-                    if (data) {
-                        const webview = this.getActiveWebview();
-                        if (webview) {
-                            webview.copyImageAt(data.x || 0, data.y || 0);
-                            this.showNotification('Image copied to clipboard', 'success');
+                }
+                case 'save-image':
+                    if (data && data.srcURL && window.electronAPI?.saveImageFromUrl) {
+                        void window.electronAPI
+                            .saveImageFromUrl(data.srcURL, Number(data.guestWebContentsId) || 0)
+                            .then((result) => {
+                                if (!result?.ok && result?.error) {
+                                    console.warn('Save image:', result.error);
+                                }
+                            });
+                    }
+                    break;
+                case 'copy-image': {
+                    const gx = Math.round(Number(data?.x) || 0);
+                    const gy = Math.round(Number(data?.y) || 0);
+                    const gid = Number(data?.guestWebContentsId) || 0;
+                    let ok = false;
+                    if (gid > 0 && window.electronAPI?.copyImageAtGuest) {
+                        try {
+                            const r = await window.electronAPI.copyImageAtGuest(gid, gx, gy);
+                            ok = !!(r && r.ok);
+                        } catch (_) {
+                            ok = false;
                         }
                     }
-                    break;
-                case 'copy-image-url':
-                    if (data && data.srcURL) {
-                        navigator.clipboard.writeText(data.srcURL).then(() => {
-                            this.showNotification('Image URL copied to clipboard', 'success');
-                        });
+                    if (!ok) {
+                        let wv = null;
+                        if (this._contextMenuSourceTabId != null) {
+                            wv = this.tabs.get(this._contextMenuSourceTabId)?.webview;
+                        }
+                        if (!wv) wv = this.getActiveWebview();
+                        try {
+                            if (wv && typeof wv.copyImageAt === 'function') {
+                                wv.copyImageAt(gx, gy);
+                                ok = true;
+                            }
+                        } catch (_) {
+                            ok = false;
+                        }
+                    }
+                    if (ok) {
+                        this.showNotification('Image copied to clipboard', 'success');
                     }
                     break;
+                }
+                case 'copy-image-url': {
+                    const raw = data && data.srcURL;
+                    if (!raw) break;
+                    const pageURL = (data && data.pageURL) || '';
+                    const prepared = this.prepareContextMenuImageUrl(raw, pageURL);
+                    if (prepared) {
+                        const ok = await this.writeTextToClipboard(prepared);
+                        if (ok) {
+                            this.showNotification('Image URL copied to clipboard', 'success');
+                        } else {
+                            this.showNotification('Could not copy to clipboard', 'error');
+                        }
+                    } else {
+                        this.showNotification('Could not resolve image address', 'error');
+                    }
+                    break;
+                }
                 case 'copy-url':
                     this.copyCurrentUrl();
                     break;
@@ -1450,12 +1535,33 @@ class AxisBrowser {
                 case 'print':
                     this.printPage();
                     break;
-                case 'inspect':
-                    const webview = this.getActiveWebview();
-                    if (webview) {
-                        webview.openDevTools();
+                case 'inspect': {
+                    const inspectWv = this.getActiveWebview();
+                    if (!inspectWv) break;
+                    const ic = this.webviewContextInfo || {};
+                    const fromData =
+                        data &&
+                        Number.isFinite(Number(data.x)) &&
+                        Number.isFinite(Number(data.y));
+                    const fromCtx =
+                        Number.isFinite(Number(ic.x)) && Number.isFinite(Number(ic.y));
+                    const ix = fromData ? Number(data.x) : fromCtx ? Number(ic.x) : NaN;
+                    const iy = fromData ? Number(data.y) : fromCtx ? Number(ic.y) : NaN;
+                    try {
+                        if (Number.isFinite(ix) && Number.isFinite(iy)) {
+                            inspectWv.inspectElement(Math.round(ix), Math.round(iy));
+                        } else {
+                            inspectWv.openDevTools();
+                        }
+                    } catch (_) {
+                        try {
+                            inspectWv.openDevTools();
+                        } catch (__) {
+                            /* ignore */
+                        }
                     }
                     break;
+                }
                 case 'replace-misspelling': {
                     const replacement = data && typeof data.replacement === 'string' ? data.replacement : '';
                     const manualWord = data && typeof data.manualReplaceWord === 'string' ? data.manualReplaceWord : '';
@@ -1546,6 +1652,107 @@ class AxisBrowser {
             }
         });
         
+        // Favorites tile — native context menu (main process)
+        window.electronAPI.onFavoriteContextMenuAction?.((action) => {
+            if (this.isIncognitoWindow) {
+                this.contextMenuFavoriteId = null;
+                return;
+            }
+            const favId = this.contextMenuFavoriteId;
+            const findFav = () => (favId ? this.favorites.find((f) => f.id === favId) : null);
+            switch (action) {
+                case 'open': {
+                    const fav = findFav();
+                    if (fav) this.navigateFavorite(fav);
+                    this.contextMenuFavoriteId = null;
+                    break;
+                }
+                case 'open-new-tab': {
+                    const fav = findFav();
+                    const url = fav ? this.normalizeFavoriteUrl(fav.url) : '';
+                    if (url) {
+                        this.createNewTab(url);
+                        this.showNotification('Opened in new tab', 'success');
+                    }
+                    this.contextMenuFavoriteId = null;
+                    break;
+                }
+                case 'copy-link': {
+                    const fav = findFav();
+                    const url = fav ? this.normalizeFavoriteUrl(fav.url) : '';
+                    if (url) {
+                        navigator.clipboard.writeText(url).then(
+                            () => this.showNotification('Link copied to clipboard', 'success'),
+                            () => this.showNotification('Could not copy link', 'error')
+                        );
+                    }
+                    this.contextMenuFavoriteId = null;
+                    break;
+                }
+                case 'rename': {
+                    const fav = findFav();
+                    if (fav) {
+                        const cur = fav.title || '';
+                        const next = window.prompt('Favorite name:', cur);
+                        if (next != null) {
+                            const t = String(next).trim();
+                            if (t) {
+                                fav.title = t;
+                                const rt = this._normalizeTabMapKey(fav.runtimeTabId);
+                                if (rt != null && this.tabs.has(rt)) {
+                                    const tab = this.tabs.get(rt);
+                                    tab.title = t;
+                                    this.tabs.set(rt, tab);
+                                    const tabElement = document.querySelector(`[data-tab-id="${rt}"]`);
+                                    if (tabElement) {
+                                        const titleElement = tabElement.querySelector('.tab-title');
+                                        if (titleElement) titleElement.textContent = t;
+                                        this.updateTabTooltip(rt);
+                                    }
+                                }
+                                this.saveFavorites();
+                                this.renderFavorites();
+                            }
+                        }
+                    }
+                    this.contextMenuFavoriteId = null;
+                    break;
+                }
+                case 'change-icon': {
+                    void this.showIconPicker('favorite');
+                    break;
+                }
+                case 'reset-icon': {
+                    const fav = findFav();
+                    if (fav) {
+                        fav.customIcon = null;
+                        fav.customIconType = null;
+                        const rt = this._normalizeTabMapKey(fav.runtimeTabId);
+                        if (rt != null && this.tabs.has(rt)) {
+                            const tab = this.tabs.get(rt);
+                            tab.customIcon = null;
+                            tab.customIconType = null;
+                            this.tabs.set(rt, tab);
+                            const tabElement = document.querySelector(`[data-tab-id="${rt}"]`);
+                            if (tabElement) this.updateTabIcon(tabElement, rt);
+                        }
+                        this.saveFavorites();
+                        this.renderFavorites();
+                        this.showNotification('Icon reset', 'success');
+                    }
+                    this.contextMenuFavoriteId = null;
+                    break;
+                }
+                case 'remove': {
+                    if (favId) this.removeFavorite(favId);
+                    this.contextMenuFavoriteId = null;
+                    break;
+                }
+                default:
+                    this.contextMenuFavoriteId = null;
+            }
+        });
+
         // Listen for tab context menu actions from main process
         window.electronAPI.onTabContextMenuAction((action, data) => {
             switch (action) {
@@ -1568,6 +1775,34 @@ class AxisBrowser {
                     break;
                 case 'change-icon':
                     this.showIconPicker('tab');
+                    break;
+                case 'reset-icon':
+                    if (this.contextMenuTabId) {
+                        const tabId = this.contextMenuTabId;
+                        const tab = this.tabs.get(tabId);
+                        if (tab) {
+                            tab.customIcon = null;
+                            tab.customIconType = null;
+                            this.tabs.set(tabId, tab);
+                            const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+                            if (tabElement) this.updateTabIcon(tabElement, tabId);
+                            if (tab.pinned) this.savePinnedTabs();
+                            if (tab.isFavoriteTab && tab.favoriteId) {
+                                const fav = this.favorites.find((f) => f.id === tab.favoriteId);
+                                if (fav) {
+                                    fav.customIcon = null;
+                                    fav.customIconType = null;
+                                    this.saveFavorites();
+                                    this.renderFavorites();
+                                }
+                            }
+                        }
+                    }
+                    break;
+                case 'add-to-favorites':
+                    if (this.contextMenuTabId) {
+                        this.addTabToFavorites(this.contextMenuTabId);
+                    }
                     break;
                 case 'add-to-tab-group':
                 case 'move-to-tab-group':
@@ -1616,6 +1851,21 @@ class AxisBrowser {
                     break;
                 case 'change-icon':
                     this.showIconPicker('tab-group');
+                    break;
+                case 'reset-icon':
+                    if (this.contextMenuTabGroupId != null) {
+                        const gid = this.findTabGroupKey(this.contextMenuTabGroupId);
+                        if (gid != null) {
+                            const tabGroup = this.tabGroups.get(gid);
+                            if (tabGroup) {
+                                tabGroup.icon = null;
+                                tabGroup.iconType = null;
+                                this.tabGroups.set(gid, tabGroup);
+                                this.saveTabGroups();
+                                this.renderTabGroups();
+                            }
+                        }
+                    }
                     break;
             }
         });
@@ -1967,16 +2217,66 @@ class AxisBrowser {
         // Image options
         document.getElementById('webpage-open-image-new-tab')?.addEventListener('click', () => {
             const ctx = this.webviewContextInfo || {};
-            if (ctx.srcURL) {
-                this.createNewTab(ctx.srcURL);
+            const raw = ctx.srcURL;
+            if (raw) {
+                const prepared = this.prepareContextMenuImageUrl(raw, ctx.pageURL || '');
+                if (prepared) {
+                    this.createNewTab(prepared, { trustedContextImage: true });
+                }
+            }
+            this.hideWebpageContextMenu();
+        });
+
+        document.getElementById('webpage-save-image')?.addEventListener('click', async () => {
+            const ctx = this.webviewContextInfo || {};
+            const webview = this.getActiveWebview();
+            let guestWebContentsId = 0;
+            try {
+                if (webview && typeof webview.getWebContentsId === 'function') {
+                    guestWebContentsId = webview.getWebContentsId() || 0;
+                }
+            } catch (_) {}
+            if (ctx.srcURL && window.electronAPI?.saveImageFromUrl) {
+                await window.electronAPI.saveImageFromUrl(ctx.srcURL, guestWebContentsId);
             }
             this.hideWebpageContextMenu();
         });
         
-        document.getElementById('webpage-copy-image')?.addEventListener('click', () => {
-            const webview = this.getActiveWebview();
-            if (webview) {
-                webview.copyImageAt(this.webviewContextInfo?.x || 0, this.webviewContextInfo?.y || 0);
+        document.getElementById('webpage-copy-image')?.addEventListener('click', async () => {
+            const ctx = this.webviewContextInfo || {};
+            const gx = Math.round(Number(ctx.x) || 0);
+            const gy = Math.round(Number(ctx.y) || 0);
+            const menuTabId = this._contextMenuSourceTabId;
+            const webview =
+                menuTabId != null && this.tabs.has(menuTabId)
+                    ? this.tabs.get(menuTabId).webview
+                    : this.getActiveWebview();
+            let gid = 0;
+            try {
+                if (webview && typeof webview.getWebContentsId === 'function') {
+                    gid = webview.getWebContentsId() || 0;
+                }
+            } catch (_) {
+                gid = 0;
+            }
+            let ok = false;
+            if (gid > 0 && window.electronAPI?.copyImageAtGuest) {
+                try {
+                    const r = await window.electronAPI.copyImageAtGuest(gid, gx, gy);
+                    ok = !!(r && r.ok);
+                } catch (_) {
+                    ok = false;
+                }
+            }
+            if (!ok && webview && typeof webview.copyImageAt === 'function') {
+                try {
+                    webview.copyImageAt(gx, gy);
+                    ok = true;
+                } catch (_) {
+                    ok = false;
+                }
+            }
+            if (ok) {
                 this.showNotification('Image copied to clipboard', 'success');
             }
             this.hideWebpageContextMenu();
@@ -1984,9 +2284,19 @@ class AxisBrowser {
         
         document.getElementById('webpage-copy-image-url')?.addEventListener('click', async () => {
             const ctx = this.webviewContextInfo || {};
-            if (ctx.srcURL) {
-                await navigator.clipboard.writeText(ctx.srcURL);
-                this.showNotification('Image URL copied to clipboard', 'success');
+            const raw = ctx.srcURL;
+            if (raw) {
+                const prepared = this.prepareContextMenuImageUrl(raw, ctx.pageURL || '');
+                if (prepared) {
+                    const ok = await this.writeTextToClipboard(prepared);
+                    if (ok) {
+                        this.showNotification('Image URL copied to clipboard', 'success');
+                    } else {
+                        this.showNotification('Could not copy to clipboard', 'error');
+                    }
+                } else {
+                    this.showNotification('Could not resolve image address', 'error');
+                }
             }
             this.hideWebpageContextMenu();
         });
@@ -2009,8 +2319,23 @@ class AxisBrowser {
         
         document.getElementById('webpage-inspect')?.addEventListener('click', () => {
             const webview = this.getActiveWebview();
+            const ctx = this.webviewContextInfo || {};
             if (webview) {
-                webview.openDevTools();
+                const ix = Number(ctx.x);
+                const iy = Number(ctx.y);
+                try {
+                    if (Number.isFinite(ix) && Number.isFinite(iy)) {
+                        webview.inspectElement(Math.round(ix), Math.round(iy));
+                    } else {
+                        webview.openDevTools();
+                    }
+                } catch (_) {
+                    try {
+                        webview.openDevTools();
+                    } catch (__) {
+                        /* ignore */
+                    }
+                }
             }
             this.hideWebpageContextMenu();
         });
@@ -2891,7 +3216,7 @@ class AxisBrowser {
         this.startAudioDetection(tabId, webview);
 
         const contextMenuHandler = (e) => {
-            if (!isActiveTab()) return;
+            this._contextMenuSourceTabId = tabId;
 
             this.webviewContextInfo = {
                 hasSelection: e.params?.selectionText?.length > 0,
@@ -2899,6 +3224,13 @@ class AxisBrowser {
                 linkURL: e.params?.linkURL || '',
                 srcURL: e.params?.srcURL || '',
                 mediaType: e.params?.mediaType || 'none',
+                pageURL: (() => {
+                    try {
+                        return webview.getURL() || '';
+                    } catch (_) {
+                        return '';
+                    }
+                })(),
                 isEditable: e.params?.isEditable || false,
                 canCut: e.params?.editFlags?.canCut || false,
                 canCopy: e.params?.editFlags?.canCopy || false,
@@ -4464,6 +4796,35 @@ class AxisBrowser {
         }
     }
 
+    /**
+     * After bulk tab closes or switching to a favorite (no sidebar `.tab` row), `<webview>`
+     * guests can keep a **stale viewport width**; responsive pages then use a phone-width column,
+     * which looks like the page lives in the narrow sidebar beside an empty panel.
+     */
+    _forceGuestLayoutSync() {
+        try {
+            const c = document.getElementById('webviews-container');
+            if (c) {
+                void c.getBoundingClientRect();
+                void c.offsetWidth;
+                void c.offsetHeight;
+            }
+        } catch (_) {}
+        this._nudgeWebviewGuestLayout();
+        try {
+            window.dispatchEvent(new Event('resize'));
+        } catch (_) {}
+        this._syncGuestWindowResizeEvent();
+        requestAnimationFrame(() => {
+            this._nudgeWebviewGuestLayout();
+            this._syncGuestWindowResizeEvent();
+        });
+        setTimeout(() => {
+            this._nudgeWebviewGuestLayout();
+            this._syncGuestWindowResizeEvent();
+        }, 64);
+    }
+
     /** Dispatch window `resize` inside the active guest for pages that listen on `window`. */
     _syncGuestWindowResizeEvent() {
         const wv = this.getActiveWebview();
@@ -4521,9 +4882,17 @@ class AxisBrowser {
         return tab?.webview || null;
     }
 
-    createNewTab(url = null) {
+    createNewTab(url = null, options = {}) {
         let effectiveUrl = url;
-        if (
+        if (options && options.trustedContextImage && typeof url === 'string') {
+            const t = url.trim();
+            effectiveUrl = t || null;
+            if (effectiveUrl && !String(effectiveUrl).toLowerCase().startsWith('axis:')) {
+                if (!this.confirmInsecureHttpNavigation(effectiveUrl)) {
+                    effectiveUrl = null;
+                }
+            }
+        } else if (
             url &&
             url !== this.NEWTAB_URL &&
             url !== 'axis://settings' &&
@@ -4625,7 +4994,10 @@ class AxisBrowser {
         this.updateEmptyState();
 
         if (effectiveUrl) {
-            this.navigate(effectiveUrl, { skipHttpsConfirm: true });
+            this.navigate(effectiveUrl, {
+                skipHttpsConfirm: true,
+                trustedContextImage: !!(options && options.trustedContextImage)
+            });
         }
         this.updateTabFavicon(tabId, tabElement);
         this.updateTabTooltip(tabId);
@@ -4821,6 +5193,10 @@ class AxisBrowser {
             return;
         }
 
+        if (this._sidebarMediaDock && this._normalizeTabMapKey(this._sidebarMediaDock.tabId) === tabId) {
+            this.hideSidebarMediaDock();
+        }
+
         const prevCur = this._normalizeTabMapKey(this.currentTab);
         const switchedDifferentTab = prevCur != null && prevCur !== tabId;
 
@@ -5001,8 +5377,12 @@ class AxisBrowser {
                 this._urlBarInstantThemeTabSwitch = true;
                 this.elements?.webviewUrlBar?.classList.add('url-bar--instant-theme');
             }
-            this._nudgeWebviewGuestLayout();
-            this._syncGuestWindowResizeEvent();
+            if (tab && tab.isFavoriteTab && !activeTab) {
+                this._forceGuestLayoutSync();
+            } else {
+                this._nudgeWebviewGuestLayout();
+                this._syncGuestWindowResizeEvent();
+            }
             if (activeTab) {
                 this.updateTabFavicon(tabId, activeTab);
             }
@@ -5765,6 +6145,18 @@ class AxisBrowser {
         const tid = this._normalizeTabMapKey(rawCloseId);
         if (tid == null) return;
 
+        const closingFavorite = this.tabs.get(tid);
+        if (closingFavorite?.isFavoriteTab && closingFavorite.favoriteId) {
+            const fav = this.favorites.find((item) => item.id === closingFavorite.favoriteId);
+            if (fav && this._normalizeTabMapKey(fav.runtimeTabId) === tid) {
+                fav.runtimeTabId = null;
+            }
+        }
+
+        if (this._sidebarMediaDock && this._normalizeTabMapKey(this._sidebarMediaDock.tabId) === tid) {
+            this.hideSidebarMediaDock();
+        }
+
         // Save pinned tabs before closing (in case it was pinned)
         this.savePinnedTabs();
         const tidChat = this._normalizeTabIdForChatState(tid);
@@ -5916,7 +6308,7 @@ class AxisBrowser {
         const allElements = Array.from(tabsContainer.children);
         const separatorIndex = allElements.indexOf(separator);
         
-        // Collect unpinned tab IDs
+        // Collect unpinned tab IDs (never favorite runtime tabs — they are not "disposable" unpinned)
         const unpinnedTabIds = [];
         for (let i = separatorIndex + 1; i < allElements.length; i++) {
             const el = allElements[i];
@@ -5924,7 +6316,7 @@ class AxisBrowser {
                 const tabId = parseInt(el.dataset.tabId, 10);
                 if (!isNaN(tabId)) {
                     const tab = this.tabs.get(tabId);
-                    if (tab && !tab.pinned) {
+                    if (tab && !tab.pinned && !tab.isFavoriteTab) {
                         unpinnedTabIds.push(tabId);
                     }
                 }
@@ -5934,7 +6326,10 @@ class AxisBrowser {
                 tabsInGroup.forEach(t => {
                     const tabId = parseInt(t.dataset.tabId, 10);
                     if (!isNaN(tabId)) {
-                        unpinnedTabIds.push(tabId);
+                        const tab = this.tabs.get(tabId);
+                        if (tab && !tab.isFavoriteTab) {
+                            unpinnedTabIds.push(tabId);
+                        }
                     }
                 });
             }
@@ -5952,6 +6347,7 @@ class AxisBrowser {
         // Save state
         this.savePinnedTabs();
         this.saveTabGroups();
+        this._forceGuestLayoutSync();
     }
 
     performTabUndo() {
@@ -6034,8 +6430,17 @@ class AxisBrowser {
             return;
         }
 
-        // Sanitize and validate URL input
-        const sanitizedUrl = this.sanitizeUrl(url);
+        // Sanitize and validate URL input (context-menu images may be data: or pre-resolved https)
+        let sanitizedUrl = null;
+        if (options.trustedContextImage && typeof url === 'string') {
+            const t = url.trim();
+            const low = t.toLowerCase();
+            if (t && !low.startsWith('javascript:') && !low.startsWith('vbscript:')) {
+                sanitizedUrl = t;
+            }
+        } else {
+            sanitizedUrl = this.sanitizeUrl(url);
+        }
         if (!sanitizedUrl) {
             console.error('Invalid URL provided:', url);
             return;
@@ -10093,6 +10498,306 @@ class AxisBrowser {
             floatingClear.classList.toggle('hidden', hasPinnedDom || !hasUnpinnedDom);
         }
     }
+
+    normalizeFavoriteUrl(rawUrl) {
+        const url = String(rawUrl || '').trim();
+        if (!url || url === this.NEWTAB_URL || url === 'about:blank') return '';
+        try {
+            const parsed = new URL(url);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+            parsed.hash = '';
+            return parsed.toString();
+        } catch (_) {
+            return '';
+        }
+    }
+
+    isFavoriteUrl(url) {
+        const normalized = this.normalizeFavoriteUrl(url);
+        return !!normalized && this.favorites.some((fav) => this.normalizeFavoriteUrl(fav.url) === normalized);
+    }
+
+    getFavoriteIconHtml(favorite) {
+        if (favorite.customIcon) {
+            if (favorite.customIconType === 'emoji') {
+                return `<span class="favorite-favicon favorite-favicon-emoji">${this.escapeHtml(favorite.customIcon)}</span>`;
+            }
+            return `<i class="fas ${this.escapeHtml(favorite.customIcon)} favorite-favicon favorite-favicon-fa" aria-hidden="true"></i>`;
+        }
+        if (favorite.favicon) {
+            return `<img class="favorite-favicon" src="${this.escapeHtml(favorite.favicon)}" alt="" draggable="false" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';"><span class="favorite-favicon favorite-favicon-fallback" aria-hidden="true" style="display:none;">${this.escapeHtml(this.getFavoriteInitial(favorite))}</span>`;
+        }
+        return `<span class="favorite-favicon favorite-favicon-fallback" aria-hidden="true">${this.escapeHtml(this.getFavoriteInitial(favorite))}</span>`;
+    }
+
+    getFavoriteInitial(favorite) {
+        try {
+            const host = new URL(favorite.url).hostname.replace(/^www\./, '');
+            return (host.charAt(0) || '•').toUpperCase();
+        } catch (_) {
+            return (String(favorite.title || '•').charAt(0) || '•').toUpperCase();
+        }
+    }
+
+    saveFavorites() {
+        if (this.isIncognitoWindow) return;
+        const prevById = new Map(this.favorites.map((f) => [f.id, f]));
+        const compact = this.favorites
+            .map((fav, order) => ({
+                id: fav.id || `fav-${Date.now()}-${order}`,
+                url: this.normalizeFavoriteUrl(fav.url),
+                title: String(fav.title || 'Favorite').trim() || 'Favorite',
+                favicon: fav.favicon || null,
+                customIcon: fav.customIcon || null,
+                customIconType: fav.customIconType || null,
+                order
+            }))
+            .filter((fav) => !!fav.url);
+        this.saveSetting(
+            'favorites',
+            compact.map(({ id, url, title, favicon, customIcon, customIconType, order }) => ({
+                id,
+                url,
+                title,
+                favicon,
+                customIcon,
+                customIconType,
+                order
+            }))
+        );
+        this.favorites = compact.map((row) => {
+            const prev = prevById.get(row.id);
+            return prev ? { ...row, runtimeTabId: prev.runtimeTabId } : { ...row };
+        });
+    }
+
+    loadFavorites() {
+        if (this.isIncognitoWindow) {
+            this.favorites = [];
+            this.renderFavorites();
+            return;
+        }
+        const raw = Array.isArray(this.settings?.favorites) ? this.settings.favorites : [];
+        const seen = new Set();
+        this.favorites = raw
+            .slice()
+            .sort((a, b) => (a.order || 0) - (b.order || 0))
+            .map((fav, idx) => ({
+                id: fav.id || `fav-${Date.now()}-${idx}`,
+                url: this.normalizeFavoriteUrl(fav.url),
+                title: String(fav.title || 'Favorite').trim() || 'Favorite',
+                favicon: fav.favicon || null,
+                customIcon: fav.customIcon || null,
+                customIconType: fav.customIconType || null,
+                order: idx
+            }))
+            .filter((fav) => {
+                if (!fav.url || seen.has(fav.url)) return false;
+                seen.add(fav.url);
+                return true;
+            });
+        this.renderFavorites();
+    }
+
+    addTabToFavorites(tabId) {
+        if (this.isIncognitoWindow) return;
+        const tab = this.tabs.get(this._normalizeTabMapKey(tabId));
+        if (!tab) return;
+        let url = tab.url;
+        try {
+            if (tab.webview && typeof tab.webview.getURL === 'function') {
+                const current = tab.webview.getURL();
+                if (current && current !== 'about:blank') url = current;
+            }
+        } catch (_) {}
+        const normalized = this.normalizeFavoriteUrl(url);
+        if (!normalized) {
+            this.showNotification('Only website tabs can be added to Favorites', 'info');
+            return;
+        }
+        if (this.isFavoriteUrl(normalized)) {
+            this.showNotification('Already in Favorites', 'info');
+            return;
+        }
+        let title = tab.customTitle || tab.title || '';
+        try {
+            if (tab.webview && typeof tab.webview.getTitle === 'function') {
+                title = tab.webview.getTitle() || title;
+            }
+        } catch (_) {}
+        let favicon = tab.favicon || null;
+        if (!favicon) {
+            try {
+                favicon = `https://www.google.com/s2/favicons?domain=${new URL(normalized).hostname}&sz=64`;
+            } catch (_) {
+                favicon = null;
+            }
+        }
+        this.favorites.push({
+            id: `fav-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            url: normalized,
+            title: title || new URL(normalized).hostname.replace(/^www\./, ''),
+            favicon,
+            customIcon: tab.customIcon || null,
+            customIconType: tab.customIconType || null,
+            order: this.favorites.length
+        });
+        this.saveFavorites();
+        this.renderFavorites();
+    }
+
+    createFavoriteRuntimeTab(favorite) {
+        const url = this.normalizeFavoriteUrl(favorite?.url);
+        if (!url) return null;
+        const tabId = this._createUniqueTabId(Date.now());
+        this.tabs.set(tabId, {
+            id: tabId,
+            url,
+            title: favorite.title || 'Favorite',
+            favicon: favorite.favicon || null,
+            customIcon: favorite.customIcon || null,
+            customIconType: favorite.customIconType || null,
+            canGoBack: false,
+            canGoForward: false,
+            history: [url],
+            historyIndex: 0,
+            pinned: false,
+            webview: null,
+            isMuted: false,
+            isPlayingAudio: false,
+            isFavoriteTab: true,
+            favoriteId: favorite.id,
+            hiddenInSidebar: true
+        });
+        favorite.runtimeTabId = tabId;
+        return tabId;
+    }
+
+    navigateFavorite(favorite) {
+        if (!favorite) return;
+        let tabId = this._normalizeTabMapKey(favorite.runtimeTabId);
+        if (tabId != null && !this.tabs.has(tabId)) {
+            favorite.runtimeTabId = null;
+            tabId = null;
+        }
+        if (tabId == null) {
+            tabId = this.createFavoriteRuntimeTab(favorite);
+        }
+        if (tabId == null) return;
+        this.switchToTab(tabId);
+        this.renderFavorites();
+    }
+
+    removeFavorite(favoriteId) {
+        const before = this.favorites.length;
+        const favorite = this.favorites.find((fav) => fav.id === favoriteId);
+        const runtimeTabId = this._normalizeTabMapKey(favorite?.runtimeTabId);
+        this.favorites = this.favorites.filter((fav) => fav.id !== favoriteId);
+        if (this.favorites.length === before) return;
+        if (runtimeTabId != null && this.tabs.has(runtimeTabId)) {
+            this.closeTab(runtimeTabId);
+        }
+        this.saveFavorites();
+        this.renderFavorites();
+    }
+
+    renderFavorites() {
+        const section = this.elements?.favoritesSection;
+        const grid = this.elements?.favoritesGrid;
+        if (!section || !grid) return;
+        const activeTabId = this._normalizeTabMapKey(this.currentTab);
+
+        section.classList.toggle('hidden', this.favorites.length === 0);
+        grid.innerHTML = '';
+        this.favorites.forEach((favorite) => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'favorite-item';
+            item.draggable = true;
+            item.dataset.favoriteId = favorite.id;
+            item.title = `${favorite.title || 'Favorite'}\n${favorite.url}`;
+            item.setAttribute('role', 'listitem');
+            if (activeTabId != null && this._normalizeTabMapKey(favorite.runtimeTabId) === activeTabId) {
+                item.classList.add('active');
+            }
+            item.innerHTML = `
+                <span class="favorite-icon-wrap">${this.getFavoriteIconHtml(favorite)}</span>
+            `;
+            item.addEventListener('click', () => this.navigateFavorite(favorite));
+            item.addEventListener('contextmenu', (e) => {
+                void this.showFavoriteContextMenu(e, favorite);
+            });
+            item.addEventListener('dragstart', (e) => this.onFavoriteDragStart(e, favorite.id));
+            item.addEventListener('dragend', (e) => this.onFavoriteDragEnd(e, favorite.id));
+            grid.appendChild(item);
+        });
+
+        if (!grid.__favoritesDragBound) {
+            grid.__favoritesDragBound = true;
+            grid.addEventListener('dragover', (e) => this.onFavoritesGridDragOver(e));
+            grid.addEventListener('drop', (e) => this.onFavoritesGridDrop(e));
+        }
+    }
+
+    onFavoriteDragStart(e, favoriteId) {
+        const item = e.currentTarget;
+        this._favoriteDrag = { id: favoriteId, droppedInside: false };
+        item.classList.add('favorite-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try {
+            e.dataTransfer.setData('text/plain', favoriteId);
+        } catch (_) {}
+    }
+
+    onFavoritesGridDragOver(e) {
+        if (!this._favoriteDrag) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const grid = this.elements?.favoritesGrid;
+        const dragging = grid?.querySelector('.favorite-dragging');
+        if (!grid || !dragging) return;
+        const siblings = Array.from(grid.querySelectorAll('.favorite-item:not(.favorite-dragging)'));
+        const after = siblings.find((item) => {
+            const rect = item.getBoundingClientRect();
+            const midpoint = rect.left + rect.width / 2;
+            return e.clientY < rect.bottom && e.clientX < midpoint;
+        });
+        if (after) grid.insertBefore(dragging, after);
+        else grid.appendChild(dragging);
+    }
+
+    onFavoritesGridDrop(e) {
+        if (!this._favoriteDrag) return;
+        e.preventDefault();
+        this._favoriteDrag.droppedInside = true;
+        this.persistFavoriteDomOrder();
+    }
+
+    onFavoriteDragEnd(e, favoriteId) {
+        const item = e.currentTarget;
+        item.classList.remove('favorite-dragging');
+        const pointTarget = document.elementFromPoint(e.clientX, e.clientY);
+        const droppedInFavorites = !!pointTarget?.closest?.('#favorites-section');
+        const droppedInside = this._favoriteDrag?.droppedInside || droppedInFavorites;
+        this._favoriteDrag = null;
+        if (!droppedInside) {
+            this.removeFavorite(favoriteId);
+            return;
+        }
+        this.persistFavoriteDomOrder();
+    }
+
+    persistFavoriteDomOrder() {
+        const grid = this.elements?.favoritesGrid;
+        if (!grid) return;
+        const order = Array.from(grid.querySelectorAll('.favorite-item'))
+            .map((el) => el.dataset.favoriteId)
+            .filter(Boolean);
+        const byId = new Map(this.favorites.map((fav) => [fav.id, fav]));
+        this.favorites = order.map((id, idx) => ({ ...byId.get(id), order: idx })).filter((fav) => fav && fav.id);
+        this.saveFavorites();
+        this.renderFavorites();
+    }
     
     savePinnedTabs() {
         const tabsContainer = this.elements.tabsContainer;
@@ -11515,8 +12220,19 @@ class AxisBrowser {
         let targetElement = null;
         if (this._iconPickerType === 'tab' && this.contextMenuTabId) {
             targetElement = document.querySelector(`[data-tab-id="${this.contextMenuTabId}"]`);
-        } else if (this._iconPickerType === 'tab-group' && this.contextMenuTabGroupId) {
-            targetElement = document.querySelector(`[data-tab-group-id="${this.contextMenuTabGroupId}"]`);
+        } else if (this._iconPickerType === 'favorite' && this.contextMenuFavoriteId) {
+            const fid = String(this.contextMenuFavoriteId);
+            const q = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(fid) : fid.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            targetElement = document.querySelector(`#favorites-grid .favorite-item[data-favorite-id="${q}"]`);
+        } else if (this._iconPickerType === 'tab-group' && this.contextMenuTabGroupId != null) {
+            const gid = this.findTabGroupKey(this.contextMenuTabGroupId);
+            const q =
+                gid != null && typeof CSS !== 'undefined' && CSS.escape
+                    ? CSS.escape(String(gid))
+                    : gid != null
+                      ? String(gid).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+                      : '';
+            if (q) targetElement = document.querySelector(`[data-tab-group-id="${q}"]`);
         }
         
         if (!targetElement) {
@@ -11530,6 +12246,7 @@ class AxisBrowser {
             if (!targetElement) {
                 console.error('Target element not found for native emoji picker');
                 this._iconPickerType = null;
+                if (this.contextMenuFavoriteId) this.contextMenuFavoriteId = null;
                 return;
             }
         }
@@ -11620,6 +12337,9 @@ class AxisBrowser {
                     if (emojiInput.parentNode) {
                         emojiInput.remove();
                     }
+                    if (this._iconPickerType === 'favorite') {
+                        this.contextMenuFavoriteId = null;
+                    }
                     this._iconPickerType = null;
                 }, 60000); // 60 second timeout
             });
@@ -11630,6 +12350,7 @@ class AxisBrowser {
         // selected is an emoji or symbol from native macOS picker
         const iconValue = selected.trim();
         if (!iconValue) {
+            if (this._iconPickerType === 'favorite') this.contextMenuFavoriteId = null;
             this._iconPickerType = null;
             return;
         }
@@ -11647,15 +12368,38 @@ class AxisBrowser {
                     this.updateTabIcon(tabElement, this.contextMenuTabId);
                 }
             }
-        } else if (this._iconPickerType === 'tab-group' && this.contextMenuTabGroupId) {
-            const tabGroup = this.tabGroups.get(this.contextMenuTabGroupId);
+        } else if (this._iconPickerType === 'tab-group' && this.contextMenuTabGroupId != null) {
+            const gid = this.findTabGroupKey(this.contextMenuTabGroupId);
+            if (gid == null) {
+                this._iconPickerType = null;
+                return;
+            }
+            const tabGroup = this.tabGroups.get(gid);
             if (tabGroup) {
                 tabGroup.icon = iconValue;
                 tabGroup.iconType = 'emoji';
-                this.tabGroups.set(this.contextMenuTabGroupId, tabGroup);
+                this.tabGroups.set(gid, tabGroup);
                 this.saveTabGroups();
                 this.renderTabGroups();
             }
+        } else if (this._iconPickerType === 'favorite' && this.contextMenuFavoriteId) {
+            const fav = this.favorites.find((f) => f.id === this.contextMenuFavoriteId);
+            if (fav) {
+                fav.customIcon = iconValue;
+                fav.customIconType = 'emoji';
+                const rt = this._normalizeTabMapKey(fav.runtimeTabId);
+                if (rt != null && this.tabs.has(rt)) {
+                    const tab = this.tabs.get(rt);
+                    tab.customIcon = iconValue;
+                    tab.customIconType = 'emoji';
+                    this.tabs.set(rt, tab);
+                    const tabElement = document.querySelector(`[data-tab-id="${rt}"]`);
+                    if (tabElement) this.updateTabIcon(tabElement, rt);
+                }
+                this.saveFavorites();
+                this.renderFavorites();
+            }
+            this.contextMenuFavoriteId = null;
         }
         
         this._iconPickerType = null;
@@ -11798,6 +12542,47 @@ class AxisBrowser {
 
         this.setupTabGroupEventListeners(tabGroupElement, tabGroup);
         return tabGroupElement;
+    }
+
+    /**
+     * When reusing an existing `.tab-group` node, keep header chrome (color, icon, name) in sync with `tabGroup`.
+     * Icons were not updating after Change Icon because `getOrCreateGroupElement` only refreshed inner tabs.
+     */
+    syncTabGroupElementHeader(el, tabGroup) {
+        if (!el || !tabGroup) return;
+        const color = tabGroup.color || '#FF6B6B';
+        const rgb = this.hexToRgb(color);
+        if (rgb) el.style.setProperty('--tab-group-color-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+        el.style.setProperty('--tab-group-color', color);
+        el.dataset.color = color;
+        el.classList.toggle('pinned', tabGroup.pinned !== false);
+
+        const tabLeft = el.querySelector('.tab-left');
+        const nameInput = el.querySelector('.tab-group-name-input');
+        if (!tabLeft || !nameInput) return;
+
+        const nextIconHtml =
+            tabGroup.iconType === 'emoji'
+                ? `<span class="tab-favicon tab-group-icon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;">${this.escapeHtml(tabGroup.icon || '📁')}</span>`
+                : `<i class="fas ${this.escapeHtml(tabGroup.icon || 'fa-layer-group')} tab-favicon tab-group-icon" aria-hidden="true"></i>`;
+
+        const oldIcon = tabLeft.querySelector('.tab-group-icon');
+        if (oldIcon) {
+            oldIcon.outerHTML = nextIconHtml;
+        } else {
+            nameInput.insertAdjacentHTML('beforebegin', nextIconHtml);
+        }
+        const newIcon = tabLeft.querySelector('.tab-group-icon');
+        if (newIcon) {
+            newIcon.draggable = false;
+        }
+
+        if (nameInput.readOnly) {
+            const nextName = tabGroup.name || '';
+            if (nameInput.value !== nextName) {
+                nameInput.value = nextName;
+            }
+        }
     }
 
     setupTabGroupEventListeners(tabGroupElement, tabGroup) {
@@ -12497,6 +13282,7 @@ class AxisBrowser {
         };
 
         if (el && content) {
+            this.syncTabGroupElementHeader(el, group);
             ensureContentOrder(content);
             return el;
         }
@@ -12507,15 +13293,16 @@ class AxisBrowser {
     }
 
     async showTabGroupContextMenu(e, tabGroupId) {
-            // Hide other context menus
-            this.hideTabContextMenu();
-            this.hideWebpageContextMenu();
-            this.hideSidebarContextMenu();
-            
-            this.contextMenuTabGroupId = tabGroupId;
-        
-        // Show native OS context menu
-        await window.electronAPI.showTabGroupContextMenu(e.clientX, e.clientY);
+        // Hide other context menus
+        this.hideTabContextMenu();
+        this.hideWebpageContextMenu();
+        this.hideSidebarContextMenu();
+
+        this.contextMenuTabGroupId = this.findTabGroupKey(tabGroupId);
+        const g = this.contextMenuTabGroupId != null ? this.tabGroups.get(this.contextMenuTabGroupId) : null;
+        const hasCustomIcon = !!(g?.icon && String(g.icon).trim());
+
+        await window.electronAPI.showTabGroupContextMenu(e.clientX, e.clientY, { hasCustomIcon });
     }
 
     hideTabGroupContextMenu() {
@@ -12755,15 +13542,40 @@ class AxisBrowser {
         const tabGroupsList = Array.from(this.tabGroups.values())
             .sort((a, b) => (a.order || 0) - (b.order || 0))
             .map(g => ({ id: g.id, name: g.name || `Tab Group ${g.id}` }));
+        let tabUrlForFavorite = tab?.url || '';
+        try {
+            if (tab?.webview && typeof tab.webview.getURL === 'function') {
+                const currentUrl = tab.webview.getURL();
+                if (currentUrl && currentUrl !== 'about:blank') tabUrlForFavorite = currentUrl;
+            }
+        } catch (_) {}
         const tabInfo = {
             isPinned: tab?.pinned || false,
             isMuted: tab?.isMuted || false,
             tabGroups: tabGroupsList,
             tabGroupId: tab?.tabGroupId != null ? tab.tabGroupId : undefined,
-            isIncognito: this.isIncognitoWindow
+            isIncognito: this.isIncognitoWindow,
+            isFavorite: this.isFavoriteUrl(tabUrlForFavorite),
+            hasCustomIcon: !!(tab?.customIcon && String(tab.customIcon).trim())
         };
         this.contextMenuTabId = tabId;
         await window.electronAPI.showTabContextMenu(e.clientX, e.clientY, tabInfo);
+    }
+
+    async showFavoriteContextMenu(e, favorite) {
+        if (this.isIncognitoWindow || !favorite) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this.hideWebpageContextMenu();
+        this.hideSidebarContextMenu();
+        this.hideTabGroupContextMenu();
+        this.contextMenuFavoriteId = favorite.id;
+        const hasCustomIcon = !!(favorite.customIcon && String(favorite.customIcon).trim());
+        if (!window.electronAPI?.showFavoriteContextMenu) {
+            this.contextMenuFavoriteId = null;
+            return;
+        }
+        await window.electronAPI.showFavoriteContextMenu(e.clientX, e.clientY, { hasCustomIcon });
     }
 
     hideTabContextMenu() {
@@ -12999,7 +13811,11 @@ class AxisBrowser {
         this.hideTabGroupContextMenu();
         
         const ctx = this.webviewContextInfo || {};
-        const webview = this.getActiveWebview();
+        const menuTabId = this._contextMenuSourceTabId;
+        const webview =
+            menuTabId != null && this.tabs.has(menuTabId)
+                ? this.tabs.get(menuTabId).webview
+                : this.getActiveWebview();
         
         // Back/forward are sync. Speech state: only query guest JS when the menu will show Speech
         // (selection + speech on); otherwise skip — first executeJavaScript can stall seconds on cold webview.
@@ -13202,6 +14018,45 @@ class AxisBrowser {
                 }
             })
             .catch(() => {});
+    }
+
+    /**
+     * Plain-text clipboard write with fallbacks (native context-menu clicks often lack a transient
+     * user gesture for `navigator.clipboard` in Electron).
+     */
+    async writeTextToClipboard(text) {
+        const s = text == null ? '' : String(text);
+        if (!s) return false;
+        try {
+            await navigator.clipboard.writeText(s);
+            return true;
+        } catch (_) {
+            /* continue */
+        }
+        try {
+            const textArea = document.createElement('textarea');
+            textArea.value = s;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-9999px';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            const ok = document.execCommand('copy');
+            document.body.removeChild(textArea);
+            if (ok) return true;
+        } catch (_) {
+            /* continue */
+        }
+        try {
+            if (window.electronAPI?.writeClipboardText) {
+                const r = await window.electronAPI.writeClipboardText(s);
+                return !!(r && r.ok);
+            }
+        } catch (_) {
+            /* ignore */
+        }
+        return false;
     }
 
     async copyCurrentUrl() {
@@ -13664,6 +14519,17 @@ class AxisBrowser {
             .replace(/\.download$/i, '');
     }
 
+    onDownloadsPopupCancelRequested(axisId, row) {
+        const id = Number(axisId);
+        if (!(id > 0) || !window.electronAPI?.cancelActiveDownload) return;
+        void window.electronAPI.cancelActiveDownload(id).then((res) => {
+            if (res && res.ok && row) {
+                row.dataset.axisDownloadCancelled = '1';
+            }
+            this.scheduleDownloadsPopupRefresh();
+        });
+    }
+
     applyDownloadsPopupRowDownloadState(row, tracked) {
         if (!row) return;
         const isDownloading = !!tracked;
@@ -13681,11 +14547,20 @@ class AxisBrowser {
             : '';
 
         row.classList.toggle('is-downloading', isDownloading);
+        if (isDownloading) {
+            delete row.dataset.axisDownloadCancelled;
+        }
         const timeEl = row.querySelector('.downloads-popup-time');
         if (timeEl) {
-            timeEl.textContent = isDownloading
-                ? (hasProgress ? `Downloading • ${progressPct}%${etaText ? ` • ${etaText}` : ''}` : `Downloading…${etaText ? ` • ${etaText}` : ''}`)
-                : (row.dataset.downloadBaseMeta || '');
+            if (!isDownloading && row.dataset.axisDownloadCancelled === '1') {
+                timeEl.textContent = 'Download cancelled';
+            } else if (isDownloading) {
+                timeEl.textContent = hasProgress
+                    ? `Downloading • ${progressPct}%${etaText ? ` • ${etaText}` : ''}`
+                    : `Downloading…${etaText ? ` • ${etaText}` : ''}`;
+            } else {
+                timeEl.textContent = row.dataset.downloadBaseMeta || '';
+            }
         }
 
         let progressEl = row.querySelector('.downloads-popup-progress');
@@ -13704,14 +14579,47 @@ class AxisBrowser {
             progressEl.remove();
         }
 
-        const showFolderBtn = row.querySelector('.downloads-popup-show-folder');
-        if (showFolderBtn) {
-            if (isDownloading) {
-                showFolderBtn.setAttribute('disabled', 'disabled');
-                showFolderBtn.setAttribute('title', 'Available when download completes');
-            } else {
-                showFolderBtn.removeAttribute('disabled');
-                showFolderBtn.setAttribute('title', 'Show in Finder');
+        const downloadPath = row.dataset.downloadPath || '';
+        const existingSide = row.querySelector('.downloads-popup-row-action');
+        if (isDownloading && tracked && Number(tracked.axisId) > 0) {
+            const aid = Number(tracked.axisId);
+            const needNew =
+                !existingSide ||
+                !existingSide.classList.contains('downloads-popup-cancel-download') ||
+                Number(existingSide.dataset.axisDownloadId) !== aid;
+            if (needNew) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'downloads-popup-row-action downloads-popup-cancel-download';
+                btn.title = 'Cancel download';
+                btn.dataset.axisDownloadId = String(aid);
+                btn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = Number(btn.dataset.axisDownloadId);
+                    const itemRow = btn.closest('.downloads-popup-item');
+                    this.onDownloadsPopupCancelRequested(id, itemRow);
+                });
+                if (existingSide) existingSide.replaceWith(btn);
+                else row.appendChild(btn);
+            }
+        } else {
+            const needFolder =
+                !existingSide || !existingSide.classList.contains('downloads-popup-show-folder');
+            if (needFolder) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'downloads-popup-row-action downloads-popup-show-folder';
+                btn.title = 'Show in Finder';
+                btn.innerHTML =  '<i class="fas fa-folder-open" aria-hidden="true"></i>';
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (downloadPath) {
+                        window.electronAPI.showItemInFolder(downloadPath);
+                    }
+                });
+                if (existingSide) existingSide.replaceWith(btn);
+                else row.appendChild(btn);
             }
         }
     }
@@ -13793,7 +14701,12 @@ class AxisBrowser {
                 const row = document.createElement('div');
                 row.className = `downloads-popup-item${isDownloading ? ' is-downloading' : ''}`;
                 row.dataset.downloadNameNorm = nameKey || '';
+                row.dataset.downloadPath = item.path || '';
                 row.dataset.downloadBaseMeta = `${this.formatFileSize(item.size || 0)} • ${this.formatTimeAgo(item.mtime)}`;
+                const sideBtnHtml =
+                    isDownloading && tracked && Number(tracked.axisId) > 0
+                        ? `<button type="button" class="downloads-popup-row-action downloads-popup-cancel-download" title="Cancel download" data-axis-download-id="${tracked.axisId}"><i class="fas fa-times" aria-hidden="true"></i></button>`
+                        : `<button type="button" class="downloads-popup-row-action downloads-popup-show-folder" title="Show in Finder"><i class="fas fa-folder-open" aria-hidden="true"></i></button>`;
                 row.innerHTML = `
                     <div class="downloads-popup-thumbnail ${this.escapeHtml(fileType)}">
                         ${this.getDownloadPopupThumbnailLoadingMarkup()}
@@ -13807,9 +14720,7 @@ class AxisBrowser {
                         </div>
                         ${progressMarkup}
                     </div>
-                    <button class="downloads-popup-show-folder" title="Show in Finder">
-                        <i class="fas fa-folder-open"></i>
-                    </button>
+                    ${sideBtnHtml}
                 `;
 
                 row.draggable = true;
@@ -13832,15 +14743,15 @@ class AxisBrowser {
                     }
                 });
 
-                // Reveal in Finder
-                const showFolderBtn = row.querySelector('.downloads-popup-show-folder');
-                if (isDownloading) {
-                    showFolderBtn?.setAttribute('disabled', 'disabled');
-                    showFolderBtn?.setAttribute('title', 'Available when download completes');
-                }
-                showFolderBtn?.addEventListener('click', (e) => {
+                const sideBtn = row.querySelector('.downloads-popup-row-action');
+                sideBtn?.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    if (isDownloading) return;
+                    if (sideBtn.classList.contains('downloads-popup-cancel-download')) {
+                        const aid = Number(sideBtn.dataset.axisDownloadId);
+                        const itemRow = sideBtn.closest('.downloads-popup-item');
+                        this.onDownloadsPopupCancelRequested(aid, itemRow);
+                        return;
+                    }
                     if (item.path) {
                         window.electronAPI.showItemInFolder(item.path);
                     }
@@ -17749,6 +18660,59 @@ class AxisBrowser {
         return h.includes('.');
     }
 
+    /** Safe `data:image/...` patterns for context-menu open/copy (not navigated as raw HTML). */
+    _isSafeContextMenuDataImageUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        return (
+            /^data:image\/(png|jpe?g|gif|webp|avif|bmp|x-icon)(;[^,]*)?;base64,/i.test(url) ||
+            /^data:image\/(png|jpe?g|gif|webp|avif|bmp|x-icon)(;[^,]*)?,/i.test(url) ||
+            /^data:image\/svg\+xml(;[^,]*)?;base64,/i.test(url) ||
+            /^data:image\/svg\+xml(;[^,]*)?,/i.test(url)
+        );
+    }
+
+    /**
+     * Resolve image `src` against the guest page URL and validate for Open/Copy image (allows safe `data:image/*`, http(s)).
+     * `sanitizeUrl` alone rejects `data:` and mis-handles relative image URLs.
+     */
+    prepareContextMenuImageUrl(raw, pageUrl) {
+        if (!raw || typeof raw !== 'string') return null;
+        let url = raw.trim().replace(/[<>'"\x00-\x1f\x7f-\x9f]/g, '');
+        if (!url) return null;
+        const lower = url.toLowerCase();
+        if (lower.startsWith('javascript:') || lower.startsWith('vbscript:')) return null;
+
+        if (!/^https?:\/\//i.test(url) && !lower.startsWith('data:') && !lower.startsWith('blob:')) {
+            if (url.startsWith('//')) {
+                url = 'https:' + url;
+            } else {
+                try {
+                    let base = 'https://invalid/';
+                    const tp = pageUrl && String(pageUrl).trim();
+                    if (tp) {
+                        try {
+                            base = new URL(tp).href;
+                        } catch (_) {
+                            /* keep default */
+                        }
+                    }
+                    url = new URL(url, base).href;
+                } catch (_) {
+                    return null;
+                }
+            }
+        }
+
+        const lower2 = url.toLowerCase();
+        if (lower2.startsWith('data:')) {
+            if (!this._isSafeContextMenuDataImageUrl(url)) return null;
+            return url;
+        }
+        if (lower2.startsWith('blob:')) return null;
+
+        return this.sanitizeUrl(url);
+    }
+
     sanitizeUrl(input) {
         if (!input || typeof input !== 'string') {
             return null;
@@ -17768,6 +18732,24 @@ class AxisBrowser {
             lowerUrl.startsWith('file:') ||
             lowerUrl.startsWith('ftp:')) {
             return null;
+        }
+
+        // Internal Axis shell URLs — must not fall through to `getSearchUrl` (would Google "axis://…").
+        if (lowerUrl.startsWith('axis://')) {
+            if (lowerUrl === 'axis://newtab') {
+                return this.NEWTAB_URL;
+            }
+            if (lowerUrl === 'axis://settings') {
+                return 'axis://settings';
+            }
+            return null;
+        }
+        if (lowerUrl.startsWith('axis:note://')) {
+            const idPart = String(url.slice('axis:note://'.length)).replace(/[<>'"\x00-\x1f\x7f-\x9f]/g, '');
+            if (!idPart || !/^[a-zA-Z0-9_.-]+$/.test(idPart)) {
+                return null;
+            }
+            return `axis:note://${idPart}`;
         }
 
         // Spaces (and similar) mean a natural-language query, not a navigable URL — unless a full
@@ -18269,11 +19251,17 @@ class AxisBrowser {
     updateUrlBar(webview, opts = {}) {
         if (this.splitView) {
             this.updateSplitPanesUrlBars();
+            this.renderFavorites();
             return;
         }
         const el = this.elements;
-        if (!el || !el.webviewUrlBar) return;
-        
+        if (!el || !el.webviewUrlBar) {
+            this.renderFavorites();
+            return;
+        }
+        // Favorites “active” dot tracks `currentTab` only — must run before NTP / special-page early returns that skip URL chrome work.
+        this.renderFavorites();
+
         // New tab page: show URL bar but hide action buttons (copy, security, chat)
         const currentTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
         if (currentTab && currentTab.url === this.NEWTAB_URL) {
@@ -18586,89 +19574,265 @@ class AxisBrowser {
         this.applyChatPanelTheme(urlBar);
     }
     
+    _clearUrlBarThemeRefineTimer() {
+        if (this._urlBarThemeRefineTimer) {
+            clearTimeout(this._urlBarThemeRefineTimer);
+            this._urlBarThemeRefineTimer = null;
+        }
+    }
+
+    /** One delayed re-extract so late-painted headers / meta updates can correct the URL bar tint. */
+    _scheduleUrlBarThemeRefine(webview) {
+        this._clearUrlBarThemeRefineTimer();
+        if (!webview) return;
+        const wv = webview;
+        this._urlBarThemeRefineTimer = setTimeout(() => {
+            this._urlBarThemeRefineTimer = null;
+            if (this.getActiveWebview() !== wv) return;
+            const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+            if (!tab || tab.url === this.NEWTAB_URL || tab.url === 'axis://settings' || tab.isSettings) return;
+            void this.extractUrlBarTheme(wv, { refine: true });
+        }, 480);
+    }
+
     // Extract website theme color and apply to URL bar
-    async extractUrlBarTheme(webview) {
+    async extractUrlBarTheme(webview, opts = {}) {
         if (!webview) return;
         
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
 
+        this._clearUrlBarThemeRefineTimer();
         const seq = ++this._urlBarThemeSeq;
         
         try {
             const colorInfo = await webview.executeJavaScript(`
                 (function() {
                     try {
-                        // Helper to parse color
                         function parseColor(str) {
                             if (!str || str === 'transparent' || str === 'rgba(0, 0, 0, 0)') return null;
-                            
-                            // Hex color
                             if (str.startsWith('#')) {
-                                let hex = str;
+                                var hex = str;
                                 if (hex.length === 4) {
                                     hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
                                 }
                                 if (hex.length === 7) {
-                                    const r = parseInt(hex.slice(1, 3), 16);
-                                    const g = parseInt(hex.slice(3, 5), 16);
-                                    const b = parseInt(hex.slice(5, 7), 16);
-                                    return { r, g, b };
+                                    return {
+                                        r: parseInt(hex.slice(1, 3), 16),
+                                        g: parseInt(hex.slice(3, 5), 16),
+                                        b: parseInt(hex.slice(5, 7), 16)
+                                    };
                                 }
                             }
-                            
-                            // RGB/RGBA
-                            const match = str.match(/[\\d.]+/g);
+                            var match = str.match(/[\\d.]+/g);
                             if (match && match.length >= 3) {
-                                const r = Math.round(parseFloat(match[0]));
-                                const g = Math.round(parseFloat(match[1]));
-                                const b = Math.round(parseFloat(match[2]));
-                                const a = match.length >= 4 ? parseFloat(match[3]) : 1;
+                                var r = Math.round(parseFloat(match[0]));
+                                var g = Math.round(parseFloat(match[1]));
+                                var b = Math.round(parseFloat(match[2]));
+                                var a = match.length >= 4 ? parseFloat(match[3]) : 1;
                                 if (a < 0.1) return null;
                                 return { r, g, b };
                             }
                             return null;
                         }
-                        
                         function getBrightness(rgb) {
-                            if (!rgb) return 128;
                             return (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
                         }
-                        
-                        // Try theme-color meta tag
-                        const themeMeta = document.querySelector('meta[name="theme-color"]');
-                        if (themeMeta && themeMeta.content) {
-                            const color = parseColor(themeMeta.content);
-                            if (color) {
-                                return { ...color, brightness: getBrightness(color), source: 'meta' };
-                            }
+                        function rgbKey(rgb) {
+                            return Math.round(rgb.r / 8) + ',' + Math.round(rgb.g / 8) + ',' + Math.round(rgb.b / 8);
                         }
-                        
-                        // Try header/nav background
-                        const headerSelectors = ['header', 'nav', '[role="banner"]', '.header', '.navbar', '#header'];
-                        for (const sel of headerSelectors) {
-                            const el = document.querySelector(sel);
-                            if (el) {
-                                const style = window.getComputedStyle(el);
-                                const color = parseColor(style.backgroundColor);
-                                if (color && (color.r + color.g + color.b) > 30) {
-                                    return { ...color, brightness: getBrightness(color), source: 'header' };
+                        function colorDist(a, b) {
+                            return Math.sqrt(
+                                (a.r - b.r) * (a.r - b.r) +
+                                (a.g - b.g) * (a.g - b.g) +
+                                (a.b - b.b) * (a.b - b.b)
+                            );
+                        }
+                        function isSimilar(a, b, maxDist) {
+                            return colorDist(a, b) <= (maxDist || 42);
+                        }
+                        function isConsentChrome(el) {
+                            if (!el || el.nodeType !== 1) return false;
+                            var t = (
+                                String(el.id || '') + ' ' +
+                                String(el.className || '') + ' ' +
+                                String(el.getAttribute('aria-label') || '')
+                            ).toLowerCase();
+                            return /\\bcookie\\b|\\bconsent\\b|\\bgdpr\\b|\\bccpa\\b|\\bonetrust\\b|\\bosano\\b|usercentrics|cookiebot|cookielaw|announcement-bar|cmp-/.test(t);
+                        }
+                        function isInteractiveLeaf(el) {
+                            if (!el || el.nodeType !== 1) return false;
+                            var tag = el.tagName;
+                            if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || tag === 'SELECT') return true;
+                            var role = String(el.getAttribute('role') || '').toLowerCase();
+                            return role === 'button' || role === 'link' || role === 'menuitem';
+                        }
+                        function isAccentChip(rgb, rect) {
+                            var max = Math.max(rgb.r, rgb.g, rgb.b);
+                            var min = Math.min(rgb.r, rgb.g, rgb.b);
+                            if (max < 40) return false;
+                            var sat = (max - min) / max;
+                            var area = rect ? Math.max(0, rect.width * rect.height) : 0;
+                            return sat > 0.52 && area > 0 && area < 12000;
+                        }
+                        function getEffectiveBg(el) {
+                            var cur = el;
+                            while (cur && cur.nodeType === 1) {
+                                if (cur.tagName === 'IFRAME') return null;
+                                var bg = parseColor(window.getComputedStyle(cur).backgroundColor);
+                                if (bg && (bg.r + bg.g + bg.b) > 28) return bg;
+                                cur = cur.parentElement;
+                            }
+                            return null;
+                        }
+                        function collectTopVoteCandidate() {
+                            var vw = window.innerWidth || document.documentElement.clientWidth || 0;
+                            var vh = window.innerHeight || document.documentElement.clientHeight || 300;
+                            if (vw < 2 || vh < 8) return null;
+                            var votes = Object.create(null);
+                            var xs = [Math.floor(vw * 0.5), Math.floor(vw * 0.22), Math.floor(vw * 0.78)];
+                            var ys = [4, 12, 22, 34, 48];
+                            for (var yi = 0; yi < ys.length; yi++) {
+                                var yy = ys[yi];
+                                if (yy >= vh - 2) continue;
+                                for (var xi = 0; xi < xs.length; xi++) {
+                                    var xx = Math.max(0, Math.min(vw - 1, xs[xi]));
+                                    var els;
+                                    try { els = document.elementsFromPoint(xx, yy); } catch (e) { continue; }
+                                    if (!els || !els.length) continue;
+                                    for (var i = 0; i < Math.min(els.length, 24); i++) {
+                                        var el = els[i];
+                                        if (!el || el.nodeType !== 1) continue;
+                                        if (isConsentChrome(el)) continue;
+                                        var rect = el.getBoundingClientRect();
+                                        var area = Math.max(0, rect.width * rect.height);
+                                        var bg = getEffectiveBg(el);
+                                        if (!bg) continue;
+                                        if (isInteractiveLeaf(el) && area < 18000) continue;
+                                        if (isAccentChip(bg, rect)) continue;
+                                        var spanW = rect.width >= Math.min(200, vw * 0.28);
+                                        var spanH = rect.height >= 20 || (rect.top <= 4 && rect.height >= 12);
+                                        var bodyPaint = el === document.body || el === document.documentElement;
+                                        var weight = 1;
+                                        if (spanW && spanH) weight += 2;
+                                        if (bodyPaint) weight += 1;
+                                        if (yy <= 14) weight += 1;
+                                        var key = rgbKey(bg);
+                                        if (!votes[key]) votes[key] = { rgb: bg, score: 0, hits: 0 };
+                                        votes[key].score += weight;
+                                        votes[key].hits += 1;
+                                    }
                                 }
                             }
+                            var bestKey = null;
+                            var bestScore = 0;
+                            for (var k in votes) {
+                                if (votes[k].score > bestScore) {
+                                    bestScore = votes[k].score;
+                                    bestKey = k;
+                                }
+                            }
+                            if (!bestKey || bestScore < 3) return null;
+                            return { rgb: votes[bestKey].rgb, score: 55 + bestScore * 8, source: 'topvote' };
                         }
-                        
-                        // Try body/html background
-                        const bodyBg = parseColor(window.getComputedStyle(document.body).backgroundColor);
-                        if (bodyBg) {
-                            return { ...bodyBg, brightness: getBrightness(bodyBg), source: 'body' };
+                        function collectHeaderCandidate() {
+                            var selectors = ['header', 'nav', '[role="banner"]', '[role="navigation"]', '.header', '.navbar', '.app-bar', '#header', '#navbar'];
+                            var best = null;
+                            var bestScore = 0;
+                            var vh = window.innerHeight || 400;
+                            var vw = window.innerWidth || 800;
+                            for (var s = 0; s < selectors.length; s++) {
+                                var nodes = document.querySelectorAll(selectors[s]);
+                                for (var j = 0; j < nodes.length; j++) {
+                                    var el = nodes[j];
+                                    if (!el || isConsentChrome(el)) continue;
+                                    var r = el.getBoundingClientRect();
+                                    if (r.bottom < 0 || r.top > vh * 0.45) continue;
+                                    if (r.width < Math.min(100, vw * 0.15)) continue;
+                                    var bg = getEffectiveBg(el);
+                                    if (!bg || isAccentChip(bg, r)) continue;
+                                    var st = window.getComputedStyle(el);
+                                    var pos = st.position;
+                                    var score = 40;
+                                    if (pos === 'fixed' || pos === 'sticky') score += 50;
+                                    if (r.top <= 8) score += 40;
+                                    if (el.tagName === 'HEADER' || el.tagName === 'NAV') score += 35;
+                                    score += Math.min(r.height, 96) * 0.2;
+                                    score += Math.min(r.width, vw) / vw * 30;
+                                    if (score > bestScore) {
+                                        bestScore = score;
+                                        best = { rgb: bg, score: 60 + score, source: 'header' };
+                                    }
+                                }
+                            }
+                            return best;
                         }
-                        
-                        const htmlBg = parseColor(window.getComputedStyle(document.documentElement).backgroundColor);
-                        if (htmlBg) {
-                            return { ...htmlBg, brightness: getBrightness(htmlBg), source: 'html' };
+                        function collectMetaCandidate() {
+                            var themeMeta = document.querySelector('meta[name="theme-color"]');
+                            if (!themeMeta || !themeMeta.content) return null;
+                            var metaColor = parseColor(themeMeta.content);
+                            if (!metaColor) return null;
+                            return { rgb: metaColor, score: 72, source: 'meta' };
                         }
-                        
-                        // Default to light
+                        function collectSurfaceCandidate() {
+                            var bodyBg = parseColor(window.getComputedStyle(document.body).backgroundColor);
+                            var htmlBg = parseColor(window.getComputedStyle(document.documentElement).backgroundColor);
+                            var pick = bodyBg || htmlBg;
+                            if (!pick) return null;
+                            return { rgb: pick, score: 48, source: 'surface' };
+                        }
+                        function pickBestCandidate(cands) {
+                            if (!cands.length) return null;
+                            var boosted = cands.slice();
+                            for (var i = 0; i < boosted.length; i++) {
+                                for (var j = i + 1; j < boosted.length; j++) {
+                                    if (isSimilar(boosted[i].rgb, boosted[j].rgb, 48)) {
+                                        boosted[i].score += 28;
+                                        boosted[j].score += 28;
+                                    }
+                                }
+                            }
+                            boosted.sort(function(a, b) { return b.score - a.score; });
+                            return boosted[0];
+                        }
+
+                        var candidates = [];
+                        var top = collectTopVoteCandidate();
+                        var hdr = collectHeaderCandidate();
+                        var meta = collectMetaCandidate();
+                        var surface = collectSurfaceCandidate();
+                        if (top) candidates.push(top);
+                        if (hdr) candidates.push(hdr);
+                        if (meta) candidates.push(meta);
+                        if (surface) candidates.push(surface);
+
+                        var cMeta = meta;
+                        var cTop = top;
+                        var cHdr = hdr;
+                        if (cMeta && cHdr && isSimilar(cMeta.rgb, cHdr.rgb, 50)) {
+                            cMeta.score += 35;
+                            cHdr.score += 35;
+                        }
+                        if (cMeta && cTop && isSimilar(cMeta.rgb, cTop.rgb, 50)) {
+                            cMeta.score += 30;
+                            cTop.score += 30;
+                        }
+                        if (cTop && cHdr && isSimilar(cTop.rgb, cHdr.rgb, 45)) {
+                            cTop.score += 40;
+                            cHdr.score += 40;
+                        }
+                        if (cMeta && cTop && cHdr &&
+                            !isSimilar(cMeta.rgb, cTop.rgb, 55) &&
+                            !isSimilar(cMeta.rgb, cHdr.rgb, 55)) {
+                            cMeta.score -= 45;
+                        }
+
+                        var winner = pickBestCandidate(candidates);
+                        if (winner) {
+                            var w = winner.rgb;
+                            return { r: w.r, g: w.g, b: w.b, brightness: getBrightness(w), source: winner.source };
+                        }
+
                         return { r: 250, g: 250, b: 250, brightness: 250, source: 'default' };
                     } catch (e) {
                         return { r: 250, g: 250, b: 250, brightness: 250, source: 'error' };
@@ -18677,6 +19841,7 @@ class AxisBrowser {
             `);
 
             if (seq !== this._urlBarThemeSeq) return;
+            if (this.getActiveWebview() !== webview) return;
             
             if (colorInfo) {
                 const { r, g, b, source } = colorInfo;
@@ -18744,10 +19909,14 @@ class AxisBrowser {
                     }
                     this.applyChatPanelTheme(urlBar);
                 }
+                if (!opts.refine) {
+                    this._scheduleUrlBarThemeRefine(webview);
+                }
             }
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         } catch (e) {
             if (seq !== this._urlBarThemeSeq) return;
+            if (this.getActiveWebview() !== webview) return;
             if (this.settings?.transparentSites) {
                 urlBar.classList.add('dark-mode');
                 const sc = this.getShellChromeStyle();
@@ -18804,9 +19973,9 @@ class AxisBrowser {
     }
 
     /**
-     * When native PiP ends, Chromium usually keeps the video playing for "Back to tab" and pauses
-     * for the PiP close (X). Guest `visibilityState` stays `hidden` for a background tab until we
-     * switch, so we cannot use visibility — playback state after exit is the practical signal.
+     * When native PiP ends, show the **sidebar mini player** whenever the guest still has the
+     * target `<video>` (playback may be running or paused depending on how PiP was closed).
+     * The dock stays until the media **ends**, the element disappears, or the user dismisses.
      */
     async _pipPollPiPStateOnce() {
         if (!this.pipTabId || !this.pipWebview || this._pipLeaveBusy) return;
@@ -18827,36 +19996,26 @@ class AxisBrowser {
         const idx = Number(this.pipVideoIndex) || 0;
 
         try {
+            /* Brief settle after native PiP teardown (guest DOM / `paused` can flicker one frame). */
             await new Promise((r) => setTimeout(r, 90));
-            let pausedAfter = true;
-            if (webview && !webview.isDestroyed?.()) {
+            let videoPresent = false;
+            if (webview && !webview.isDestroyed?.() && id != null) {
                 try {
-                    pausedAfter = await webview.executeJavaScript(`
+                    videoPresent = await webview.executeJavaScript(`
                         (function() {
                             var videos = document.querySelectorAll('video');
-                            var v = videos[${idx}];
-                            return v ? !!v.paused : true;
+                            return !!(videos[${idx}]);
                         })();
                     `);
                 } catch (_) {}
             }
-            const cur = this.currentTab != null ? this._normalizeTabMapKey(this.currentTab) : null;
-            const otherTabFocused = id != null && cur != null && cur !== id;
-            if (otherTabFocused && pausedAfter === false && webview && !webview.isDestroyed?.()) {
-                await new Promise((r) => setTimeout(r, 120));
-                try {
-                    const paused2 = await webview.executeJavaScript(`
-                        (function() {
-                            var videos = document.querySelectorAll('video');
-                            var v = videos[${idx}];
-                            return v ? !!v.paused : true;
-                        })();
-                    `);
-                    if (paused2) pausedAfter = true;
-                } catch (_) {}
-            }
-            if (otherTabFocused && pausedAfter === false) {
-                this.switchToTab(id);
+            /* Always offer the sidebar mini player when PiP ends and the `<video>` is still in
+             * the page — whether the site left playback running or paused it (e.g. PiP close).
+             * Showing only when `!paused` missed common cases and the dock poll hid instantly. */
+            if (videoPresent && id != null) {
+                /* Native PiP teardown does not tell us the user’s intent — never auto-switch the
+                 * active tab here; use **Go to tab** on the sidebar dock or the tab strip. */
+                this.showSidebarMediaDock(id, idx);
             }
         } finally {
             this._pipLeaveBusy = false;
@@ -18980,21 +20139,6 @@ class AxisBrowser {
         }
     }
     
-    async backToPIPTab() {
-        if (!this.pipTabId) return;
-        
-        this.stopPIPLeaveCheck();
-        const tabIdToSwitch = this._normalizeTabMapKey(this.pipTabId);
-        
-        await this.exitNativePIP();
-        
-        if (tabIdToSwitch != null && this.tabs.has(tabIdToSwitch)) {
-            this.switchToTab(tabIdToSwitch);
-        } else {
-            this.hidePIP();
-        }
-    }
-    
     async exitNativePIP() {
         if (this.pipWebview) {
             try {
@@ -19037,6 +20181,311 @@ class AxisBrowser {
         }
         
         this.hidePIP();
+    }
+
+    setupSidebarMediaDockListeners() {
+        const el = this.elements;
+        el.sidebarMediaTitleBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!this._sidebarMediaDock) return;
+            const tid = this._normalizeTabMapKey(this._sidebarMediaDock.tabId);
+            if (tid != null) this.switchToTab(tid);
+        });
+        el.sidebarMediaPipBtn?.addEventListener('click', () => void this.sidebarMediaDockRequestPip());
+        el.sidebarMediaDismissBtn?.addEventListener('click', () => void this.sidebarMediaDockDismiss());
+        el.sidebarMediaPrevBtn?.addEventListener('click', () => void this.sidebarMediaDockSeek(-10));
+        el.sidebarMediaPlayBtn?.addEventListener('click', () => void this.sidebarMediaDockTogglePlay());
+        el.sidebarMediaNextBtn?.addEventListener('click', () => void this.sidebarMediaDockSeek(10));
+        el.sidebarMediaVolBtn?.addEventListener('click', () => void this.sidebarMediaDockToggleMute());
+    }
+
+    _getSidebarMediaWebview() {
+        if (!this._sidebarMediaDock) return null;
+        const tid = this._normalizeTabMapKey(this._sidebarMediaDock.tabId);
+        const tab = tid != null ? this.tabs.get(tid) : null;
+        return tab?.webview || null;
+    }
+
+    hideSidebarMediaDock() {
+        this._stopSidebarMediaDockPoll();
+        this._sidebarMediaTitleDisconnectResizeObserver();
+        this._sidebarMediaDock = null;
+        this.elements?.sidebarMediaDock?.classList.add('hidden');
+    }
+
+    _stopSidebarMediaDockPoll() {
+        if (this._sidebarMediaDockPoll) {
+            clearInterval(this._sidebarMediaDockPoll);
+            this._sidebarMediaDockPoll = null;
+        }
+    }
+
+    showSidebarMediaDock(tabId, videoIndex) {
+        const tid = this._normalizeTabMapKey(tabId);
+        if (tid == null || !this.tabs.has(tid)) return;
+        this._stopSidebarMediaDockPoll();
+        this._sidebarMediaDock = { tabId: tid, videoIndex: Number(videoIndex) || 0 };
+        const dock = this.elements?.sidebarMediaDock;
+        if (dock) {
+            dock.classList.remove('hidden');
+            const card = dock.querySelector('.sidebar-media-dock-card');
+            if (card) this.elements.sidebarMediaDockCard = card;
+        }
+        this._refreshSidebarMediaDockChrome();
+        this._sidebarMediaTitleEnsureResizeObserver();
+        this._startSidebarMediaDockPoll();
+    }
+
+    _sidebarMediaTitleEnsureResizeObserver() {
+        const mask = this.elements?.sidebarMediaTitleMask;
+        if (!mask || typeof ResizeObserver === 'undefined') return;
+        if (this._sidebarMediaTitleResizeObserver) {
+            try {
+                this._sidebarMediaTitleResizeObserver.observe(mask);
+            } catch (_) {
+                /* already observing */
+            }
+            return;
+        }
+        this._sidebarMediaTitleResizeObserver = new ResizeObserver(() => {
+            this._layoutSidebarMediaTitleSlide();
+        });
+        this._sidebarMediaTitleResizeObserver.observe(mask);
+    }
+
+    _sidebarMediaTitleDisconnectResizeObserver() {
+        if (!this._sidebarMediaTitleResizeObserver) return;
+        try {
+            this._sidebarMediaTitleResizeObserver.disconnect();
+        } catch (_) {
+            /* ignore */
+        }
+        this._sidebarMediaTitleResizeObserver = null;
+    }
+
+    _layoutSidebarMediaTitleSlide() {
+        const mask = this.elements?.sidebarMediaTitleMask;
+        const text = this.elements?.sidebarMediaTitle;
+        if (!mask || !text) return;
+        const apply = () => {
+            const avail = Math.max(0, mask.clientWidth);
+            const need = text.scrollWidth;
+            const over = Math.max(0, need - avail);
+            text.style.setProperty('--sidebar-media-title-slide', over > 5 ? `-${over}px` : '0px');
+        };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(apply);
+        else apply();
+    }
+
+    _refreshSidebarMediaDockChrome() {
+        const el = this.elements;
+        const state = this._sidebarMediaDock;
+        if (!state) return;
+        const tab = this.tabs.get(this._normalizeTabMapKey(state.tabId));
+        const rawUrl = tab?.url || '';
+        const urlLower = rawUrl.toLowerCase();
+        const title = tab?.customTitle || tab?.title || 'Playing media';
+        if (el.sidebarMediaTitle) el.sidebarMediaTitle.textContent = title;
+        if (el.sidebarMediaTitleBtn) {
+            el.sidebarMediaTitleBtn.title = title ? `${title} — Go to tab` : 'Go to tab';
+        }
+
+        const card =
+            el.sidebarMediaDockCard ||
+            el.sidebarMediaDock?.querySelector?.('.sidebar-media-dock-card');
+        if (card) {
+            el.sidebarMediaDockCard = card;
+            card.classList.toggle(
+                'sidebar-media-dock-card--yt',
+                urlLower.includes('youtube.com') || urlLower.includes('youtu.be')
+            );
+        }
+
+        const playI = el.sidebarMediaPlayBtn?.querySelector('i');
+        if (playI) playI.className = 'fas fa-pause';
+        const volI = el.sidebarMediaVolBtn?.querySelector('i');
+        if (volI) volI.className = 'fas fa-volume-high';
+        const badge = el.sidebarMediaSourceBadge;
+        if (badge) {
+            if (urlLower.includes('youtube.com') || urlLower.includes('youtu.be')) {
+                badge.innerHTML = '<span class="sidebar-media-yt" title="YouTube"></span>';
+            } else {
+                badge.innerHTML = '<i class="fas fa-film sidebar-media-source-generic" aria-hidden="true"></i>';
+            }
+        }
+        this._layoutSidebarMediaTitleSlide();
+    }
+
+    _startSidebarMediaDockPoll() {
+        this._stopSidebarMediaDockPoll();
+        this._sidebarMediaDockPoll = setInterval(() => void this._sidebarMediaDockPollTick(), 1400);
+        void this._sidebarMediaDockPollTick();
+    }
+
+    async _sidebarMediaDockPollTick() {
+        if (!this._sidebarMediaDock) return;
+        const wv = this._getSidebarMediaWebview();
+        if (!wv || wv.isDestroyed?.()) {
+            this.hideSidebarMediaDock();
+            return;
+        }
+        const idx = this._sidebarMediaDock.videoIndex;
+        let ended = false;
+        let paused = true;
+        let muted = false;
+        try {
+            const res = await wv.executeJavaScript(`
+                (function() {
+                    var videos = document.querySelectorAll('video');
+                    var v = videos[${idx}];
+                    if (!v) return { ok: false };
+                    return { ok: true, paused: !!v.paused, ended: !!v.ended, muted: !!v.muted };
+                })();
+            `);
+            if (!res || !res.ok) {
+                this.hideSidebarMediaDock();
+                return;
+            }
+            ended = !!res.ended;
+            paused = !!res.paused;
+            muted = !!res.muted;
+        } catch (_) {
+            return;
+        }
+        if (ended) {
+            this.hideSidebarMediaDock();
+            return;
+        }
+        this._updateSidebarMediaPlayMuteIcons(paused, muted);
+    }
+
+    _updateSidebarMediaPlayMuteIcons(paused, muted) {
+        const playI = this.elements?.sidebarMediaPlayBtn?.querySelector('i');
+        if (playI) {
+            playI.className = paused ? 'fas fa-play' : 'fas fa-pause';
+        }
+        const volI = this.elements?.sidebarMediaVolBtn?.querySelector('i');
+        if (volI) {
+            volI.className = muted ? 'fas fa-volume-xmark' : 'fas fa-volume-high';
+        }
+    }
+
+    async sidebarMediaDockTogglePlay() {
+        const wv = this._getSidebarMediaWebview();
+        const dock = this._sidebarMediaDock;
+        if (!wv || !dock) return;
+        const idx = dock.videoIndex;
+        try {
+            await wv.executeJavaScript(`
+                (function() {
+                    var videos = document.querySelectorAll('video');
+                    var v = videos[${idx}];
+                    if (!v) return;
+                    if (v.paused) { v.play(); } else { v.pause(); }
+                })();
+            `);
+        } catch (_) {}
+        void this._sidebarMediaDockPollTick();
+    }
+
+    async sidebarMediaDockSeek(deltaSec) {
+        const wv = this._getSidebarMediaWebview();
+        const dock = this._sidebarMediaDock;
+        if (!wv || !dock) return;
+        const idx = dock.videoIndex;
+        const d = Number(deltaSec) || 0;
+        try {
+            await wv.executeJavaScript(`
+                (function() {
+                    var videos = document.querySelectorAll('video');
+                    var v = videos[${idx}];
+                    if (!v || !isFinite(v.duration)) return;
+                    var t = v.currentTime + ${d};
+                    v.currentTime = Math.max(0, Math.min(v.duration, t));
+                })();
+            `);
+        } catch (_) {}
+    }
+
+    async sidebarMediaDockToggleMute() {
+        const wv = this._getSidebarMediaWebview();
+        const dock = this._sidebarMediaDock;
+        if (!wv || !dock) return;
+        const idx = dock.videoIndex;
+        try {
+            await wv.executeJavaScript(`
+                (function() {
+                    var videos = document.querySelectorAll('video');
+                    var v = videos[${idx}];
+                    if (v) v.muted = !v.muted;
+                })();
+            `);
+        } catch (_) {}
+        void this._sidebarMediaDockPollTick();
+    }
+
+    async sidebarMediaDockDismiss() {
+        const wv = this._getSidebarMediaWebview();
+        const dock = this._sidebarMediaDock;
+        if (wv && dock) {
+            const idx = dock.videoIndex;
+            try {
+                await wv.executeJavaScript(`
+                    (function() {
+                        var videos = document.querySelectorAll('video');
+                        var v = videos[${idx}];
+                        if (v && !v.paused) v.pause();
+                    })();
+                `);
+            } catch (_) {}
+        }
+        this.hideSidebarMediaDock();
+    }
+
+    async sidebarMediaDockRequestPip() {
+        const wv = this._getSidebarMediaWebview();
+        const dock = this._sidebarMediaDock;
+        if (!wv || !dock || wv.isDestroyed?.()) return;
+        const tabId = dock.tabId;
+        const idx = dock.videoIndex;
+        try {
+            /* Explicit PiP from the dock must not use auto-PiP layout rules: the guest `<video>` is
+             * often hidden or zero-sized while the tab is in the background, so
+             * `axisGuestVideoEligibleForAutoPip` would block a valid re-entry. */
+            const result = await wv.executeJavaScript(
+                `
+                (async function() {
+                    var videos = document.querySelectorAll('video');
+                    var v = videos[${idx}];
+                    if (!v || v.tagName !== 'VIDEO') return { success: false };
+                    if (!document.pictureInPictureEnabled || v.disablePictureInPicture) {
+                        return { success: false };
+                    }
+                    try {
+                        if (document.pictureInPictureElement === v) {
+                            return { success: true };
+                        }
+                        if (document.pictureInPictureElement) {
+                            await document.exitPictureInPicture();
+                        }
+                        await v.requestPictureInPicture();
+                        return { success: true };
+                    } catch (e) {
+                        return { success: false };
+                    }
+                })();
+            `,
+                true
+            );
+            if (result && result.success) {
+                this.hideSidebarMediaDock();
+                this.pipTabId = tabId;
+                this.pipVideoIndex = idx;
+                this.pipWebview = wv;
+                this.startPIPLeaveCheck();
+            }
+        } catch (_) {}
     }
     
     hidePIP() {
