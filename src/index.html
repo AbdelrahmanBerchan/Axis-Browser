@@ -27,6 +27,78 @@
             <aside id="sidebar">
                 <div id="sidebar-resize-handle" class="resize-handle"></div>
             <div class="sidebar-section tabs-section">
+                    <div class="sidebar-tabs-topbar" aria-label="Sidebar actions">
+                        <button type="button" id="clear-unpinned-floating" class="clear-unpinned-floating hidden" title="Clear all unpinned tabs">
+                            <span>Clear</span>
+                            <i class="fas fa-arrow-down clear-arrow" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                    <section id="favorites-section" class="favorites-section hidden" aria-label="Favorites">
+                        <div id="favorites-grid" class="favorites-grid" role="list"></div>
+                    </section>
+                    <div id="tabs-container" class="tabs-container vertical">
+                        <!-- Pinned tabs will be added above the separator -->
+                        <!-- Separator between pinned and unpinned tabs -->
+                        <div id="tabs-separator" class="tabs-separator">
+                            <button class="clear-unpinned-btn" title="Clear all unpinned tabs">
+                                <span class="clear-text">Clear</span>
+                                <i class="fas fa-arrow-down clear-arrow" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                        <button type="button" id="sidebar-new-tab-btn" class="sidebar-new-tab-btn" title="New Tab" draggable="false">
+                            <span class="sidebar-new-tab-btn-inner">
+                                <i class="fas fa-plus sidebar-new-tab-btn-icon" aria-hidden="true"></i>
+                                <span class="sidebar-new-tab-btn-label">New Tab</span>
+                            </span>
+                        </button>
+                        <!-- Unpinned tabs will be added below -->
+                    </div>
+                </div>
+
+            <div class="sidebar-section sidebar-footer">
+                <div id="sidebar-media-dock" class="sidebar-media-dock hidden" aria-label="Mini player — background media">
+                    <div class="sidebar-media-dock-card">
+                        <div class="sidebar-media-dock-row">
+                            <span class="sidebar-media-source-wrap" title="Source" aria-hidden="true">
+                                <span class="sidebar-media-source" id="sidebar-media-source-badge"></span>
+                            </span>
+                            <button type="button" class="sidebar-media-meta-btn" id="sidebar-media-title-btn" title="Go to tab">
+                                <span class="sidebar-media-title-mask" id="sidebar-media-title-mask">
+                                    <span id="sidebar-media-title" class="sidebar-media-title-text">Media</span>
+                                </span>
+                            </button>
+                            <div class="sidebar-media-dock-transport" role="group" aria-label="Playback">
+                                <button type="button" class="sidebar-media-ctrl-btn" id="sidebar-media-prev-btn" title="Back 10 seconds" aria-label="Back 10 seconds">
+                                    <i class="fas fa-backward-step" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" class="sidebar-media-ctrl-btn" id="sidebar-media-play-btn" title="Play or pause" aria-label="Play or pause">
+                                    <i class="fas fa-play" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" class="sidebar-media-ctrl-btn" id="sidebar-media-next-btn" title="Forward 10 seconds" aria-label="Forward 10 seconds">
+                                    <i class="fas fa-forward-step" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="sidebar-media-dock-expand" id="sidebar-media-dock-expand">
+                            <div class="sidebar-media-dock-expand-inner">
+                                <div class="sidebar-media-expand-actions sidebar-media-expand-actions--leading" role="group" aria-label="Volume and picture in picture">
+                                    <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-vol-btn" title="Mute or unmute" aria-label="Mute or unmute">
+                                        <i class="fas fa-volume-high" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-pip-btn" title="Picture in picture" aria-label="Picture in picture">
+                                        <i class="fas fa-clone" aria-hidden="true"></i>
+                                    </button>
+                                </div>
+                                <div class="sidebar-media-expand-actions sidebar-media-expand-actions--trailing" role="group" aria-label="Close mini player">
+                                    <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-dismiss-btn" title="Pause and hide" aria-label="Pause and hide">
+                                        <i class="fas fa-times" aria-hidden="true"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="sidebar-footer-profile-row" aria-label="Profile">
                     <div id="sidebar-profile-switcher" class="sidebar-profile-switcher">
                         <button
                             type="button"
@@ -49,30 +121,7 @@
                             </button>
                         </div>
                     </div>
-                    <button type="button" id="clear-unpinned-floating" class="clear-unpinned-floating hidden" title="Clear all unpinned tabs">
-                        <span>Clear</span>
-                        <i class="fas fa-chevron-down" aria-hidden="true"></i>
-                    </button>
-                    <div id="tabs-container" class="tabs-container vertical">
-                        <!-- Pinned tabs will be added above the separator -->
-                        <!-- Separator between pinned and unpinned tabs -->
-                        <div id="tabs-separator" class="tabs-separator">
-                            <button class="clear-unpinned-btn" title="Clear all unpinned tabs">
-                                <span class="clear-text">Clear</span>
-                                <i class="fas fa-chevron-down clear-arrow"></i>
-                            </button>
-                        </div>
-                        <button type="button" id="sidebar-new-tab-btn" class="sidebar-new-tab-btn" title="New Tab" draggable="false">
-                            <span class="sidebar-new-tab-btn-inner">
-                                <i class="fas fa-plus sidebar-new-tab-btn-icon" aria-hidden="true"></i>
-                                <span class="sidebar-new-tab-btn-label">New Tab</span>
-                            </span>
-                        </button>
-                        <!-- Unpinned tabs will be added below -->
-                    </div>
                 </div>
-
-            <div class="sidebar-section sidebar-footer">
             </div>
             
             <!-- Sidebar plus dropdown (New tab / New tab group / Incognito) -->
@@ -284,6 +333,10 @@
             <i class="fas fa-icons"></i>
             <span>Change Icon</span>
         </div>
+        <div class="context-menu-item" id="add-tab-favorite-option">
+            <i class="fas fa-star"></i>
+            <span>Add to Favorites</span>
+        </div>
         <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="close-tab-option">
             <i class="fas fa-times"></i>
@@ -400,6 +453,10 @@
         <div class="context-menu-item image-option" id="webpage-open-image-new-tab">
             <i class="fas fa-image"></i>
             <span>Open Image in New Tab</span>
+        </div>
+        <div class="context-menu-item image-option" id="webpage-save-image">
+            <i class="fas fa-download"></i>
+            <span>Save Image</span>
         </div>
         <div class="context-menu-item image-option" id="webpage-copy-image">
             <i class="fas fa-copy"></i>
