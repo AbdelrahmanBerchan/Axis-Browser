@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Downloads management
   getDownloads: () => ipcRenderer.invoke('get-downloads'),
   getActiveDownloads: () => ipcRenderer.invoke('get-active-downloads'),
+  cancelActiveDownload: (axisId) => ipcRenderer.invoke('cancel-active-download', axisId),
   addDownload: (downloadInfo) => ipcRenderer.invoke('add-download', downloadInfo),
   updateDownloadProgress: (id, progress) => ipcRenderer.invoke('update-download-progress', id, progress),
   clearDownloads: () => ipcRenderer.invoke('clear-downloads'),
@@ -82,6 +83,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openOrFocusPersonalWindow: () => ipcRenderer.invoke('open-or-focus-personal-window'),
   openUrlInNewWindow: (url) => ipcRenderer.invoke('open-url-in-new-window', url),
   
+  // Sidebar favorites
+  getFavorites: () => ipcRenderer.invoke('get-favorites'),
+  setFavorites: (items) => ipcRenderer.invoke('set-favorites', items),
+  fetchFaviconBytes: (url) => ipcRenderer.invoke('axis-fetch-favicon-bytes', url),
+  showFavoriteContextMenu: (x, y, info) => ipcRenderer.invoke('show-favorite-context-menu', x, y, info),
+  onFavoriteContextMenuAction: (callback) =>
+    ipcRenderer.on('favorite-context-menu-action', (event, action, data) => callback(action, data)),
+
   // Notes management
   getNotes: () => ipcRenderer.invoke('get-notes'),
   saveNote: (note) => ipcRenderer.invoke('save-note', note),
@@ -112,6 +121,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Webpage context menu
   showWebpageContextMenu: (x, y, contextInfo) => ipcRenderer.invoke('show-webpage-context-menu', x, y, contextInfo),
+  copyImageAtGuest: (guestWebContentsId, x, y) =>
+    ipcRenderer.invoke('copy-image-at-guest', { guestWebContentsId, x, y }),
+  writeClipboardText: (text) => ipcRenderer.invoke('write-clipboard-text', text),
+  saveImageFromUrl: (url, guestWebContentsId) =>
+    ipcRenderer.invoke('save-image-from-url', { url, guestWebContentsId }),
   onWebpageContextMenuAction: (callback) => ipcRenderer.on('webpage-context-menu-action', (event, action, data) => callback(action, data)),
   addToSpellCheckerDictionary: (word) => ipcRenderer.invoke('add-to-spellcheck-dictionary', word),
   
@@ -124,7 +138,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onTabContextMenuAction: (callback) => ipcRenderer.on('tab-context-menu-action', (event, action, data) => callback(action, data)),
   
   // Tab group context menu
-  showTabGroupContextMenu: (x, y) => ipcRenderer.invoke('show-tab-group-context-menu', x, y),
+  showTabGroupContextMenu: (x, y, info) => ipcRenderer.invoke('show-tab-group-context-menu', x, y, info),
   onTabGroupContextMenuAction: (callback) => ipcRenderer.on('tab-group-context-menu-action', (event, action, data) => callback(action, data)),
   
   // Icon picker
