@@ -1074,6 +1074,7 @@ function configureSession() {
 /** In-flight downloads from any Axis session — drives URL-bar ring + popup activity in renderer. */
 const axisActiveDownloadItems = new Set();
 const axisDownloadItemMeta = new Map();
+let nextAxisDownloadSessionId = 1;
 let axisDownloadProgressBroadcastTimer = null;
 
 function getAxisAggregateDownloadProgress() {
@@ -1389,7 +1390,10 @@ function attachDownloadActivityTracking(sess) {
       return;
     }
     axisActiveDownloadItems.add(item);
-    axisDownloadItemMeta.set(item, { startedAt: Date.now() });
+    axisDownloadItemMeta.set(item, {
+      startedAt: Date.now(),
+      axisId: nextAxisDownloadSessionId++
+    });
     const onUpdated = () => scheduleAxisDownloadProgressBroadcast();
     item.on('updated', onUpdated);
     item.once('done', () => {
@@ -1413,12 +1417,13 @@ function listAxisActiveDownloads() {
       const totalBytes = item.getTotalBytes ? Number(item.getTotalBytes()) : 0;
       const receivedBytes = item.getReceivedBytes ? Number(item.getReceivedBytes()) : 0;
       const bytesPerSecond = item.getCurrentBytesPerSecond ? Number(item.getCurrentBytesPerSecond()) : 0;
-      const meta = axisDownloadItemMeta.get(item) || { startedAt: Date.now() };
+      const meta = axisDownloadItemMeta.get(item) || { startedAt: Date.now(), axisId: 0 };
       const remainingBytes = totalBytes > 0 ? Math.max(0, totalBytes - receivedBytes) : 0;
       const etaSeconds = bytesPerSecond > 0 && remainingBytes > 0
         ? Math.ceil(remainingBytes / bytesPerSecond)
         : null;
       out.push({
+        axisId: meta.axisId || 0,
         filename: filename || (savePath ? path.basename(savePath) : ''),
         path: savePath || '',
         totalBytes: Number.isFinite(totalBytes) ? totalBytes : 0,
@@ -2425,7 +2430,18 @@ function createMenu() {
       click: () => sendBrowserShortcut('toggle-chat')
     },
     { type: 'separator' },
-    { role: 'togglefullscreen', label: 'Enter Full Screen' }
+    {
+      id: 'axis-enter-fullscreen',
+      label: 'Enter Full Screen',
+      accelerator: process.platform === 'darwin' ? 'Ctrl+Command+F' : 'F11',
+      // macOS: do not use `role: 'togglefullscreen'` — it duplicates the OS-injected View item.
+      click: () => {
+        const win = BrowserWindow.getFocusedWindow();
+        if (win && !win.isDestroyed()) {
+          win.setFullScreen(!win.isFullScreen());
+        }
+      }
+    }
   ];
 
   const historySubmenu = [
@@ -3030,6 +3046,23 @@ ipcMain.handle('get-active-downloads', () => {
   return listAxisActiveDownloads();
 });
 
+ipcMain.handle('cancel-active-download', (_event, axisId) => {
+  const id = Number(axisId);
+  if (!Number.isFinite(id) || id <= 0) return { ok: false, error: 'bad-id' };
+  for (const item of axisActiveDownloadItems) {
+    const meta = axisDownloadItemMeta.get(item);
+    if (meta && meta.axisId === id) {
+      try {
+        item.cancel();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: String(err?.message || err) };
+      }
+    }
+  }
+  return { ok: false, error: 'not-found' };
+});
+
 ipcMain.handle('add-download', (event, downloadInfo) => {
   const downloads = downloadsStore.get('items', []);
   const newDownload = {
@@ -3448,19 +3481,38 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
     template.push({
       label: 'Open Image in New Tab',
       click: () => {
-        event.sender.send('webpage-context-menu-action', 'open-image-new-tab', { srcURL: ctx.srcURL });
+        event.sender.send('webpage-context-menu-action', 'open-image-new-tab', {
+          srcURL: ctx.srcURL,
+          pageURL: typeof ctx.pageURL === 'string' ? ctx.pageURL : ''
+        });
+      }
+    });
+    template.push({
+      label: 'Save Image',
+      click: () => {
+        event.sender.send('webpage-context-menu-action', 'save-image', {
+          srcURL: ctx.srcURL,
+          guestWebContentsId: Number(ctx.guestWebContentsId) || 0
+        });
       }
     });
     template.push({
       label: 'Copy Image',
       click: () => {
-        event.sender.send('webpage-context-menu-action', 'copy-image', { x: ctx.x || 0, y: ctx.y || 0 });
+        event.sender.send('webpage-context-menu-action', 'copy-image', {
+          x: ctx.x || 0,
+          y: ctx.y || 0,
+          guestWebContentsId: Number(ctx.guestWebContentsId) || 0
+        });
       }
     });
     template.push({
       label: 'Copy Image Address',
       click: () => {
-        event.sender.send('webpage-context-menu-action', 'copy-image-url', { srcURL: ctx.srcURL });
+        event.sender.send('webpage-context-menu-action', 'copy-image-url', {
+          srcURL: ctx.srcURL,
+          pageURL: typeof ctx.pageURL === 'string' ? ctx.pageURL : ''
+        });
       }
     });
     template.push({ type: 'separator' });
@@ -3589,7 +3641,12 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
   template.push({
     label: 'Inspect Element',
     click: () => {
-      event.sender.send('webpage-context-menu-action', 'inspect');
+      const hasXY =
+        typeof ctx.x === 'number' &&
+        !Number.isNaN(ctx.x) &&
+        typeof ctx.y === 'number' &&
+        !Number.isNaN(ctx.y);
+      event.sender.send('webpage-context-menu-action', 'inspect', hasXY ? { x: ctx.x, y: ctx.y } : {});
     }
   });
   
@@ -3599,6 +3656,59 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
   menu.popup({ window });
 
   return true;
+});
+
+/** Save image from guest context menu — uses webview session (cookies) via `downloadURL`. */
+ipcMain.handle('save-image-from-url', async (event, payload) => {
+  const { webContents } = require('electron');
+  const url = typeof payload?.url === 'string' ? payload.url.trim() : '';
+  const guestId = Number(payload?.guestWebContentsId) || 0;
+  if (!url) return { ok: false, error: 'no-url' };
+  try {
+    const guest = guestId > 0 ? webContents.fromId(guestId) : null;
+    if (guest && !guest.isDestroyed()) {
+      guest.downloadURL(url);
+      return { ok: true };
+    }
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const wc = win && !win.isDestroyed() ? win.webContents : null;
+    if (wc && !wc.isDestroyed()) {
+      wc.downloadURL(url);
+      return { ok: true };
+    }
+    return { ok: false, error: 'no-webcontents' };
+  } catch (err) {
+    console.error('save-image-from-url:', err);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+/** Copy image at (x,y) in a guest webview — more reliable than `<webview>.copyImageAt` in some cases. */
+ipcMain.handle('copy-image-at-guest', async (_event, payload) => {
+  const { webContents } = require('electron');
+  const guestId = Number(payload?.guestWebContentsId) || 0;
+  const x = Math.round(Number(payload?.x) || 0);
+  const y = Math.round(Number(payload?.y) || 0);
+  if (guestId <= 0) return { ok: false, error: 'no-guest' };
+  try {
+    const guest = webContents.fromId(guestId);
+    if (!guest || guest.isDestroyed()) return { ok: false, error: 'destroyed' };
+    guest.copyImageAt(x, y);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+/** When `navigator.clipboard` / `execCommand` fail (common right after a native context menu). */
+ipcMain.handle('write-clipboard-text', (_event, text) => {
+  try {
+    if (typeof text !== 'string') return { ok: false, error: 'not-string' };
+    clipboard.writeText(text);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
 });
 
 // URL bar — standard edit cluster, then navigation (paste and go)
@@ -3694,8 +3804,24 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
       click: () => {
         event.sender.send('tab-context-menu-action', 'change-icon');
       }
+    },
+    {
+      label: 'Reset Icon',
+      enabled: !!info.hasCustomIcon,
+      click: () => {
+        event.sender.send('tab-context-menu-action', 'reset-icon');
+      }
     }
   );
+  if (!info.isIncognito) {
+    template.push({
+      label: info.isFavorite ? 'Already in Favorites' : 'Add to Favorites',
+      enabled: !info.isFavorite,
+      click: () => {
+        event.sender.send('tab-context-menu-action', 'add-to-favorites');
+      }
+    });
+  }
 
   const tabGroups = info.tabGroups || [];
   const inGroupId = info.tabGroupId;
@@ -3748,8 +3874,65 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
   return true;
 });
 
+// Sidebar favorites — navigation, copy, rename/icon, remove (no instant delete on right-click)
+ipcMain.handle('show-favorite-context-menu', async (event, _x, _y, info) => {
+  const meta = info || {};
+  const template = [
+    {
+      label: 'Open',
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'open');
+      }
+    },
+    {
+      label: 'Open in New Tab',
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'open-new-tab');
+      }
+    },
+    {
+      label: 'Copy Link',
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'copy-link');
+      }
+    },
+    {
+      label: 'Rename…',
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'rename');
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Change Icon',
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'change-icon');
+      }
+    },
+    {
+      label: 'Reset Icon',
+      enabled: !!meta.hasCustomIcon,
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'reset-icon');
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Remove from Favorites',
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'remove');
+      }
+    }
+  ];
+  const menu = Menu.buildFromTemplate(template);
+  const window = BrowserWindow.fromWebContents(event.sender);
+  menu.popup({ window });
+  return true;
+});
+
 // Tab group — edit & appearance, then destructive delete
-ipcMain.handle('show-tab-group-context-menu', async (event, x, y) => {
+ipcMain.handle('show-tab-group-context-menu', async (event, _x, _y, info) => {
+  const meta = info || {};
   const template = [
     {
       label: 'Rename Tab Group',
@@ -3773,6 +3956,13 @@ ipcMain.handle('show-tab-group-context-menu', async (event, x, y) => {
       label: 'Change Icon',
       click: () => {
         event.sender.send('tab-group-context-menu-action', 'change-icon');
+      }
+    },
+    {
+      label: 'Reset Icon',
+      enabled: !!meta.hasCustomIcon,
+      click: () => {
+        event.sender.send('tab-group-context-menu-action', 'reset-icon');
       }
     },
     { type: 'separator' },
