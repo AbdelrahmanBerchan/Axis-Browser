@@ -6433,11 +6433,7 @@ class AxisBrowser {
         // Sanitize and validate URL input (context-menu images may be data: or pre-resolved https)
         let sanitizedUrl = null;
         if (options.trustedContextImage && typeof url === 'string') {
-            const t = url.trim();
-            const low = t.toLowerCase();
-            if (t && !low.startsWith('javascript:') && !low.startsWith('vbscript:')) {
-                sanitizedUrl = t;
-            }
+            sanitizedUrl = this._getTrustedContextImageNavigateUrl(url);
         } else {
             sanitizedUrl = this.sanitizeUrl(url);
         }
@@ -6879,6 +6875,35 @@ class AxisBrowser {
 
         if (hostname === domain) return true;
         return hostname.endsWith(`.${domain}`);
+    }
+
+    /** Hostname check for YouTube / youtu.be (not substring on full URL). */
+    isYouTubeHost(rawUrl) {
+        if (!rawUrl || typeof rawUrl !== 'string') return false;
+        return this.isUrlOnDomain(rawUrl, 'youtube.com') || this.isUrlOnDomain(rawUrl, 'youtu.be');
+    }
+
+    /**
+     * Allow navigation for context-menu images only when scheme is safe (blocks `data:text/html`, etc.).
+     */
+    _getTrustedContextImageNavigateUrl(url) {
+        if (!url || typeof url !== 'string') return null;
+        const t = url.trim();
+        if (!t) return null;
+        const low = t.toLowerCase();
+        if (
+            low.startsWith('javascript:') ||
+            low.startsWith('vbscript:') ||
+            low.startsWith('file:') ||
+            low.startsWith('ftp:') ||
+            low.startsWith('blob:')
+        ) {
+            return null;
+        }
+        if (low.startsWith('data:')) {
+            return this._isSafeContextMenuDataImageUrl(t) ? t : null;
+        }
+        return t;
     }
 
     updateTabTitle() {
@@ -20284,7 +20309,7 @@ class AxisBrowser {
         if (!state) return;
         const tab = this.tabs.get(this._normalizeTabMapKey(state.tabId));
         const rawUrl = tab?.url || '';
-        const urlLower = rawUrl.toLowerCase();
+        const isYouTube = this.isYouTubeHost(rawUrl);
         const title = tab?.customTitle || tab?.title || 'Playing media';
         if (el.sidebarMediaTitle) el.sidebarMediaTitle.textContent = title;
         if (el.sidebarMediaTitleBtn) {
@@ -20296,10 +20321,7 @@ class AxisBrowser {
             el.sidebarMediaDock?.querySelector?.('.sidebar-media-dock-card');
         if (card) {
             el.sidebarMediaDockCard = card;
-            card.classList.toggle(
-                'sidebar-media-dock-card--yt',
-                urlLower.includes('youtube.com') || urlLower.includes('youtu.be')
-            );
+            card.classList.toggle('sidebar-media-dock-card--yt', isYouTube);
         }
 
         const playI = el.sidebarMediaPlayBtn?.querySelector('i');
@@ -20308,7 +20330,7 @@ class AxisBrowser {
         if (volI) volI.className = 'fas fa-volume-high';
         const badge = el.sidebarMediaSourceBadge;
         if (badge) {
-            if (urlLower.includes('youtube.com') || urlLower.includes('youtu.be')) {
+            if (isYouTube) {
                 badge.innerHTML = '<span class="sidebar-media-yt" title="YouTube"></span>';
             } else {
                 badge.innerHTML = '<i class="fas fa-film sidebar-media-source-generic" aria-hidden="true"></i>';
