@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSitePermissionOverrides: (obj) => ipcRenderer.invoke('set-site-permission-overrides', obj),
   sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
   openSettingsWindow: (tab) => ipcRenderer.invoke('open-settings-window', tab),
+  getSettingsTabLoadUrl: (section) => ipcRenderer.invoke('get-settings-tab-load-url', section),
+  getSettingsWebviewPreloadPath: () => ipcRenderer.invoke('get-settings-webview-preload-path'),
   openUrlInBrowser: (url) => ipcRenderer.invoke('open-url-in-browser', url),
   printPage: (webContentsId) => ipcRenderer.invoke('print-page', webContentsId),
   getExtensions: () => ipcRenderer.invoke('get-extensions'),
@@ -70,6 +72,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('axis-host-nav-gesture', handler);
   },
   onOpenUrlInBrowser: (callback) => ipcRenderer.on('open-url-in-browser', (event, url) => callback(url)),
+  onOpenSettingsTab: (callback) => ipcRenderer.on('open-settings-tab', (event, section) => callback(section)),
   onSettingsUpdated: (callback) => ipcRenderer.on('settings-updated', callback),
   onSwitchSettingsTab: (callback) => ipcRenderer.on('switch-settings-tab', (event, tab) => callback(tab)),
   onOpenPopupUrl: (callback) => ipcRenderer.on('open-popup-url', (event, url) => callback(url)),
