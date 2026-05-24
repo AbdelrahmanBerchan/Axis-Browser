@@ -342,6 +342,7 @@ class AxisBrowser {
         this._downloadsPopupRenderInFlight = false;
         /** Absolute path to `webview-preload-bundle.js` — nav gestures + CWS/AMO store UI (guest preload). */
         this._webviewCwsPreloadPath = null;
+        this._settingsWebviewPreloadPath = null;
 
         this.isIncognitoWindow = (window.location.hash === '#incognito');
         
@@ -449,6 +450,12 @@ class AxisBrowser {
                 null;
         } catch (_) {
             this._webviewCwsPreloadPath = fallbackWebviewPreloadPath || null;
+        }
+        try {
+            this._settingsWebviewPreloadPath =
+                (await window.electronAPI.getSettingsWebviewPreloadPath?.()) || null;
+        } catch (_) {
+            this._settingsWebviewPreloadPath = null;
         }
         if (this._webviewCwsPreloadPath && this.elements?.webview) {
             try {
@@ -821,6 +828,12 @@ class AxisBrowser {
         const ct = this._normalizeTabMapKey(this.currentTab);
         if (ct != null && !this.tabs.has(ct)) {
             this._applyFocusAfterTabClose(null);
+        }
+        const cur = this._normalizeTabMapKey(this.currentTab);
+        const active = cur != null ? this.tabs.get(cur) : null;
+        if (active?.isFavoriteTab) {
+            this.renderFavorites();
+            this._forceGuestLayoutSync();
         }
     }
 
@@ -2423,12 +2436,16 @@ class AxisBrowser {
             }
         });
         
-        // Listen for URL open from settings window (navigate in main window)
+        // Listen for URL open from settings tab (navigate in main window)
         window.electronAPI.onOpenUrlInBrowser?.((url) => {
             if (url) this.createNewTab(url);
         });
+
+        window.electronAPI.onOpenSettingsTab?.((section) => {
+            this.openSettingsTab(section || null);
+        });
         
-        // Listen for settings updates from settings window (refresh theme)
+        // Listen for settings updates from the settings tab / store (refresh theme)
         window.electronAPI.onSettingsUpdated?.(() => {
             if (this._settingsUpdatedRaf != null) cancelAnimationFrame(this._settingsUpdatedRaf);
             this._settingsUpdatedRaf = requestAnimationFrame(() => {
@@ -2702,7 +2719,7 @@ class AxisBrowser {
                 this.performTabUndo();
                 break;
             case 'history':
-                window.electronAPI?.openSettingsWindow?.('history');
+                this.openSettingsTab('history');
                 break;
             case 'downloads':
                 this.showDownloadsPopup();
@@ -3309,62 +3326,9 @@ class AxisBrowser {
         webview.__eventHandlers.ipcMessage = ipcMessageHandler;
         webview.addEventListener('ipc-message', ipcMessageHandler);
         
-        const settingsDomReadyHandler = () => {
-            if (!isActiveTab()) return;
-            const url = webview.getURL();
-            if (url && url.includes('axis://settings')) {
-                const browser = this;
-                let lastSidebarPos = null;
-                let lastSearchEngine = null;
-                
-                webview.__settingsPollInterval = setInterval(async () => {
-                    if (!isActiveTab() || webview.isDestroyed?.()) {
-                        if (webview.__settingsPollInterval) {
-                            clearInterval(webview.__settingsPollInterval);
-                            webview.__settingsPollInterval = null;
-                        }
-                        return;
-                    }
-                    
-                    try {
-                        const currentValues = await webview.executeJavaScript(`
-                            (function() {
-                                const sidebarPos = document.getElementById('sidebar-position');
-                                const searchEngine = document.getElementById('search-engine');
-                                return {
-                                    sidebarPosition: sidebarPos ? sidebarPos.value : null,
-                                    searchEngine: searchEngine ? searchEngine.value : null
-                                };
-                            })();
-                        `);
-                        
-                        if (currentValues.sidebarPosition !== null && currentValues.sidebarPosition !== lastSidebarPos) {
-                            lastSidebarPos = currentValues.sidebarPosition;
-                            await browser.saveSetting('sidebarPosition', currentValues.sidebarPosition);
-                            browser.applySidebarPosition();
-                        }
-                        
-                        if (currentValues.searchEngine !== null && currentValues.searchEngine !== lastSearchEngine) {
-                            lastSearchEngine = currentValues.searchEngine;
-                            await browser.saveSetting('searchEngine', currentValues.searchEngine);
-                        }
-                    } catch (e) {
-                        // Ignore errors
-                    }
-                }, 900);
-                
-                const settingsNavCleanup = () => {
-                    if (webview.__settingsPollInterval) {
-                        clearInterval(webview.__settingsPollInterval);
-                        webview.__settingsPollInterval = null;
-                    }
-                };
-                webview.__eventHandlers._settingsNavCleanup = settingsNavCleanup;
-                webview.addEventListener('did-navigate', settingsNavCleanup, { once: true });
-            }
-        };
-        webview.__eventHandlers.settingsDomReady = settingsDomReadyHandler;
-        webview.addEventListener('dom-ready', settingsDomReadyHandler);
+        // Settings tabs persist through their own preload IPC. Do not poll and
+        // rewrite Settings controls from the host; that races normal click/change
+        // handlers in the guest and makes controls feel broken.
     }
         
     /** Remove every event listener that setupWebviewEventListeners attached. */
@@ -3387,7 +3351,6 @@ class AxisBrowser {
             pageFaviconUpdated:'page-favicon-updated',
             contextMenu:       'context-menu',
             ipcMessage:        'ipc-message',
-            settingsDomReady:  'dom-ready',
         };
 
         const handlers = webview.__eventHandlers;
@@ -3397,9 +3360,6 @@ class AxisBrowser {
                     webview.removeEventListener(eventName, handlers[key]);
                 }
             }
-            if (handlers._settingsNavCleanup) {
-                webview.removeEventListener('did-navigate', handlers._settingsNavCleanup);
-            }
         }
 
         if (webview.__wcLoadProgressHandler && webview.__wcLoadProgressWc) {
@@ -3408,10 +3368,6 @@ class AxisBrowser {
             } catch (_) {}
         }
 
-        if (webview.__settingsPollInterval) {
-            clearInterval(webview.__settingsPollInterval);
-            webview.__settingsPollInterval = null;
-        }
         if (webview.__loadingTimeout) {
             clearTimeout(webview.__loadingTimeout);
             webview.__loadingTimeout = null;
@@ -4698,8 +4654,21 @@ class AxisBrowser {
 
     getTabWebpreferencesString() {
         const base =
-            'contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes';
+            'contextIsolation=false,nodeIntegration=false,sandbox=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes';
         return this.settings?.javascriptEnabled === false ? `${base},javascript=no` : base;
+    }
+
+    getSettingsTabWebpreferencesString() {
+        // Internal Settings UI must always run JS (even when browsing tabs disable it).
+        return 'contextIsolation=true,nodeIntegration=false,sandbox=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes';
+    }
+
+    _isSettingsTab(tab) {
+        return !!(tab && (tab.url === 'axis://settings' || tab.isSettings));
+    }
+
+    _settingsWebviewOptionsForTab(tab) {
+        return this._isSettingsTab(tab) ? { useSettingsPreload: true } : {};
     }
 
     /** Destroy all tab webviews so they are recreated with current webpreferences (e.g. JavaScript on/off). */
@@ -4728,17 +4697,25 @@ class AxisBrowser {
         }
     }
 
-    createTabWebview(tabId) {
+    createTabWebview(tabId, options = {}) {
         const container = document.getElementById('webviews-container');
         if (!container) return null;
 
         const webview = document.createElement('webview');
         webview.dataset.tabId = String(tabId);
         webview.setAttribute('allowpopups', '');
-        webview.setAttribute('webpreferences', this.getTabWebpreferencesString());
-        if (this._webviewCwsPreloadPath) {
+        webview.setAttribute(
+            'webpreferences',
+            options.useSettingsPreload
+                ? this.getSettingsTabWebpreferencesString()
+                : this.getTabWebpreferencesString()
+        );
+        const preloadPath = options.useSettingsPreload
+            ? this._settingsWebviewPreloadPath
+            : this._webviewCwsPreloadPath;
+        if (preloadPath) {
             try {
-                webview.setAttribute('preload', this._webviewCwsPreloadPath);
+                webview.setAttribute('preload', preloadPath);
             } catch (_) {
                 /* ignore */
             }
@@ -4907,6 +4884,11 @@ class AxisBrowser {
             } else {
                 effectiveUrl = sanitized;
             }
+        }
+
+        if (effectiveUrl === 'axis://settings') {
+            void this.openSettingsTab(options?.settingsSection || null);
+            return this._findSettingsTabId();
         }
 
         const tabId = Date.now();
@@ -5251,7 +5233,7 @@ class AxisBrowser {
         if (tab) {
             // Ensure webview exists - create if missing
             if (!tab.webview) {
-                const webview = this.createTabWebview(tabId);
+                const webview = this.createTabWebview(tabId, this._settingsWebviewOptionsForTab(tab));
                 if (webview) {
                     tab.webview = webview;
                     this.tabs.set(tabId, tab);
@@ -5297,11 +5279,10 @@ class AxisBrowser {
                         tab.url = 'axis://settings';
                         this.tabs.set(tabId, tab);
                     }
-                    if (webview) {
-                        webview.style.setProperty('background', 'rgba(40, 40, 40, 0.95)', 'important');
-                    }
-                    if (currentSrc === 'about:blank' || !currentSrc) {
-                        this.loadSettingsInWebview();
+                    if (currentSrc === 'about:blank' || !currentSrc || !currentSrc.includes('settings.html')) {
+                        void this.loadSettingsInWebview(tab.settingsSection || null, tabId);
+                    } else if (tab.settingsSection) {
+                        this.focusSettingsSection(tabId, tab.settingsSection);
                     }
                 } else if (tab.url && tab.url.startsWith('axis:note://')) {
                     const noteId = tab.url.replace('axis:note://', '');
@@ -5377,9 +5358,7 @@ class AxisBrowser {
                 this._urlBarInstantThemeTabSwitch = true;
                 this.elements?.webviewUrlBar?.classList.add('url-bar--instant-theme');
             }
-            if (tab && tab.isFavoriteTab && !activeTab) {
-                this._forceGuestLayoutSync();
-            } else {
+            if (!(tab && tab.isFavoriteTab && !activeTab)) {
                 this._nudgeWebviewGuestLayout();
                 this._syncGuestWindowResizeEvent();
             }
@@ -5426,6 +5405,10 @@ class AxisBrowser {
                     this.hideLoadingIndicator();
                     this.loadingBarTabId = null;
                 }
+            }
+            if (tab && tab.isFavoriteTab && !activeTab) {
+                this.renderFavorites();
+                this._forceGuestLayoutSync();
             }
         });
     }
@@ -6446,6 +6429,11 @@ class AxisBrowser {
             return;
         }
 
+        if (sanitizedUrl === 'axis://settings') {
+            this.openSettingsTab();
+            return;
+        }
+
         const isNewTabUrl = sanitizedUrl === this.NEWTAB_URL;
 
         // Load URL in active webview
@@ -6994,1910 +6982,296 @@ class AxisBrowser {
     }
 
     toggleSettings() {
-        // Open native settings window
-        if (window.electronAPI?.openSettingsWindow) {
-            window.electronAPI.openSettingsWindow();
-        }
+        this.openSettingsTab();
     }
 
     async openSettingsAsTab() {
-        // Open native settings window instead of tab
-        if (window.electronAPI?.openSettingsWindow) {
-            window.electronAPI.openSettingsWindow();
-        }
+        this.openSettingsTab();
     }
 
-    async loadSettingsInWebview() {
-        const webview = this.getActiveWebview();
+    _findSettingsTabId() {
+        for (const [id, tab] of this.tabs) {
+            if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+                return this._normalizeTabMapKey(id);
+            }
+        }
+        return null;
+    }
+
+    focusSettingsSection(rawTabId, section) {
+        const tabId = this._normalizeTabMapKey(rawTabId);
+        const sectionId = section != null ? String(section).replace(/^#/, '').trim() : '';
+        if (tabId == null || !sectionId) return;
+        const tab = this.tabs.get(tabId);
+        if (tab) {
+            tab.settingsSection = sectionId;
+            this.tabs.set(tabId, tab);
+        }
+        const wv = tab?.webview;
+        if (!wv || typeof wv.executeJavaScript !== 'function') return;
+        const payload = JSON.stringify(sectionId);
+        wv.executeJavaScript(
+            `(function(s){try{if(typeof window.__axisSwitchSettingsSection==="function")window.__axisSwitchSettingsSection(s);else location.hash=s;}catch(e){}})(${payload});`,
+            true
+        ).catch(() => {});
+    }
+
+    async createSettingsTab(section = null) {
+        if (!this._settingsWebviewPreloadPath) {
+            try {
+                this._settingsWebviewPreloadPath =
+                    (await window.electronAPI.getSettingsWebviewPreloadPath?.()) || null;
+            } catch (_) {
+                this._settingsWebviewPreloadPath = null;
+            }
+        }
+        const tabId = this._createUniqueTabId(Date.now());
+        const tabElement = document.createElement('div');
+        tabElement.className = 'tab';
+        tabElement.dataset.tabId = String(tabId);
+
+        tabElement.innerHTML = `
+            <div class="tab-content">
+                <div class="tab-left">
+                    <i class="fas fa-cog tab-favicon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: rgba(255, 255, 255, 0.7);"></i>
+                    <span class="tab-audio-indicator" style="display: none;"><i class="fas fa-volume-up"></i></span>
+                    <span class="tab-title">Settings</span>
+                </div>
+                <div class="tab-right">
+                    <button class="tab-close"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+        `;
+
+        const tabData = {
+            id: tabId,
+            url: 'axis://settings',
+            title: 'Settings',
+            favicon: null,
+            customIcon: 'fa-cog',
+            customIconType: 'fa',
+            canGoBack: false,
+            canGoForward: false,
+            history: ['axis://settings'],
+            historyIndex: 0,
+            pinned: false,
+            webview: null,
+            isMuted: false,
+            isPlayingAudio: false,
+            isSettings: true,
+            settingsSection: section || null
+        };
+
+        const webview = this.createTabWebview(tabId, { useSettingsPreload: true });
+        if (webview) tabData.webview = webview;
+        this.tabs.set(tabId, tabData);
+
+        const tabsContainer = this.elements.tabsContainer;
+        const separator = this.elements.tabsSeparator;
+        if (separator && separator.parentNode === tabsContainer) {
+            const unpinnedRef = this.elements.sidebarNewTabBtn
+                ? this.elements.sidebarNewTabBtn.nextSibling
+                : separator.nextSibling;
+            tabsContainer.insertBefore(tabElement, unpinnedRef);
+        } else if (tabsContainer) {
+            tabsContainer.appendChild(tabElement);
+        }
+
+        this.setupTabEventListeners(tabElement, tabId);
+        this.switchToTab(tabId);
+        this.updateEmptyState();
+        this.updateTabTooltip(tabId);
+        await this.loadSettingsInWebview(section, tabId);
+        return tabId;
+    }
+
+    async openSettingsTab(section = null) {
+        const existingId = this._findSettingsTabId();
+        if (existingId != null) {
+            this.switchToTab(existingId);
+            await this.loadSettingsInWebview(section || null, existingId);
+            if (section) this.focusSettingsSection(existingId, section);
+            return existingId;
+        }
+        return this.createSettingsTab(section);
+    }
+
+    async rebuildSettingsTabWebview(tabId, section = null) {
+        const tid = this._normalizeTabMapKey(tabId);
+        if (tid == null) return;
+        const tab = this.tabs.get(tid);
+        if (!tab?.isSettings && tab?.url !== 'axis://settings') return;
+
+        if (!this._settingsWebviewPreloadPath) {
+            try {
+                this._settingsWebviewPreloadPath =
+                    (await window.electronAPI.getSettingsWebviewPreloadPath?.()) || null;
+            } catch (_) {
+                this._settingsWebviewPreloadPath = null;
+            }
+        }
+
+        if (tab.webview) {
+            try {
+                this.cleanupWebviewListeners(tab.webview);
+                try {
+                    tab.webview.src = 'about:blank';
+                } catch (_) {}
+                if (tab.webview.parentNode) {
+                    tab.webview.parentNode.removeChild(tab.webview);
+                }
+            } catch (_) {}
+            tab.webview = null;
+        }
+
+        const webview = this.createTabWebview(tid, { useSettingsPreload: true });
+        if (webview) {
+            tab.webview = webview;
+            this.tabs.set(tid, tab);
+            if (this._normalizeTabMapKey(this.currentTab) === tid) {
+                this.elements.webview = webview;
+            }
+        }
+
+        await this.loadSettingsInWebview(section || tab.settingsSection || null, tid);
+    }
+
+    async loadSettingsInWebview(section = null, rawTabId = null) {
+        const tabId = this._normalizeTabMapKey(rawTabId ?? this.currentTab);
+        const tab = tabId != null ? this.tabs.get(tabId) : null;
+        const webview = tab?.webview || (tabId == null ? this.getActiveWebview() : null);
         if (!webview) return;
 
-        // Set webview background immediately to prevent flash
-        webview.style.setProperty('background', 'rgba(40, 40, 40, 0.95)', 'important');
+        if (!this._settingsWebviewPreloadPath) {
+            try {
+                this._settingsWebviewPreloadPath =
+                    (await window.electronAPI.getSettingsWebviewPreloadPath?.()) || null;
+            } catch (_) {
+                this._settingsWebviewPreloadPath = null;
+            }
+        }
 
-        // Reload settings from storage to ensure we have latest values
-        await this.loadSettings();
+        if (tab) {
+            tab.isSettings = true;
+            tab.url = 'axis://settings';
+            tab.title = 'Settings';
+            if (section) tab.settingsSection = section;
+            this.tabs.set(tabId, tab);
+        }
 
-        // Get current settings (with defaults)
-        const sidebarPosition = this.settings.sidebarPosition || 'left';
-        const searchEngine = this.settings.searchEngine || 'google';
+        const tabElement = tabId != null ? document.querySelector(`[data-tab-id="${tabId}"]`) : null;
+        if (tabElement) {
+            const titleEl = tabElement.querySelector('.tab-title');
+            if (titleEl) titleEl.textContent = 'Settings';
+            this.updateTabTooltip(tabId);
+        }
 
-        // Keyboard shortcuts (defaults + overrides; null override = disabled)
-        let shortcutDefaults = {};
-        let shortcutOverrides = {};
-        const shortcutActionsJson = JSON.stringify(getShortcutEditorActions());
         try {
-            shortcutDefaults = await window.electronAPI.getDefaultShortcuts();
-            shortcutOverrides = await window.electronAPI.getShortcutOverrides();
+            webview.style.removeProperty('background');
+        } catch (_) {}
+
+        const targetSection = section || tab?.settingsSection || null;
+
+        const settingsPreload = this._settingsWebviewPreloadPath || '';
+        let webviewPreload = '';
+        try {
+            webviewPreload = webview.getAttribute('preload') || '';
+        } catch (_) {
+            webviewPreload = '';
+        }
+        if (
+            tabId != null &&
+            settingsPreload &&
+            webviewPreload !== settingsPreload &&
+            !webviewPreload.includes('webview-preload-settings')
+        ) {
+            await this.rebuildSettingsTabWebview(tabId, targetSection);
+            return;
+        }
+
+        let loadUrl = null;
+        try {
+            loadUrl = await window.electronAPI.getSettingsTabLoadUrl(targetSection);
         } catch (err) {
-            console.error('Failed to load shortcuts:', err);
+            console.error('Failed to resolve settings tab URL:', err);
+            return;
         }
 
-        // Get history for history tab
-        const history = await this.getHistory();
-        const historyHtml = history.length === 0 
-            ? '<div class="empty-state"><i class="fas fa-history"></i><p>No history found</p></div>'
-            : history.map(item => `
-                <div class="history-item" data-url="${this.escapeHtml(item.url)}">
-                    <img class="history-favicon" src="${this.escapeHtml(item.favicon)}" alt="" onerror="this.style.display='none'">
-                    <div class="history-info">
-                        <div class="history-title">${this.escapeHtml(item.title)}</div>
-                        <div class="history-url">${this.escapeHtml(item.url)}</div>
-                    </div>
-                    <div class="history-time">${this.escapeHtml(item.time)}</div>
-                    <div class="history-actions">
-                        <button class="history-delete" data-id="${item.id}" title="Delete">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </div>
-            `).join('');
-        
-        // Create settings HTML
-        const settingsHtml = `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Settings - Axis Browser</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body {
-            height: 100%;
-            overflow: hidden;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            /* Let the main app theme show through instead of forcing grey */
-            background: transparent;
-            color: #fff;
-            padding: 0;
-            line-height: 1.6;
-        }
-        .settings-wrapper {
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            min-height: 0;
-            /* Transparent so it sits on top of the existing theme */
-            background: transparent;
-        }
-        .settings-header {
-            display: flex;
-            align-items: center;
-            padding: 20px 24px;
-            background: rgba(40, 40, 40, 0.95);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        }
-        .header-title {
-            font-size: 22px;
-            font-weight: 600;
-            color: #fff;
-            margin: 0;
-        }
-        .settings-content-wrapper {
-            display: flex;
-            flex: 1;
-            min-height: 0;
-            overflow: hidden;
-            padding: 24px;
-            gap: 20px;
-            align-items: stretch;
-        }
-        .settings-sidebar {
-            width: 200px;
-            background: transparent;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            flex-shrink: 0;
-            align-self: stretch;
-            overflow-y: auto;
-            overflow-x: hidden;
-        }
-        .nav-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px 12px;
-            border-radius: 8px;
-            color: rgba(255, 255, 255, 0.7);
-            cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            font-size: 14px;
-            font-weight: 500;
-        }
-        .nav-item i {
-            width: 18px;
-            text-align: center;
-            font-size: 14px;
-        }
-        .nav-item:hover {
-            background: rgba(255, 255, 255, 0.05);
-            color: #fff;
-        }
-        .nav-item.active {
-            background: rgba(255, 255, 255, 0.08);
-            color: #fff;
-            font-weight: 600;
-        }
-        .settings-main {
-            flex: 1;
-            min-width: 0;
-            min-height: 0;
-            background: transparent;
-            padding: 0;
-            overflow-y: auto;
-            overflow-x: hidden;
-            -webkit-overflow-scrolling: touch;
-        }
-        .settings-main::-webkit-scrollbar {
-            width: 8px;
-        }
-        .settings-main::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        .settings-main::-webkit-scrollbar-thumb {
-            background: #444;
-            border-radius: 4px;
-        }
-        .settings-main::-webkit-scrollbar-thumb:hover {
-            background: #555;
-        }
-        .section {
-            margin-bottom: 24px;
-        }
-        .section:last-child {
-            margin-bottom: 0;
-        }
-        .section-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: #fff;
-            margin: 0 0 16px 0;
-        }
-        .section-title-with-icon {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 16px;
-        }
-        .section-title-with-icon .section-title {
-            margin: 0;
-        }
-        .shortcuts-title-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 16px;
-        }
-        .shortcuts-title-row .section-title {
-            margin: 0;
-        }
-        .option-button {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 16px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            margin-bottom: 8px;
-            width: 100%;
-        }
-        .option-button:last-child {
-            margin-bottom: 0;
-        }
-        .option-button:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.12);
-        }
-        .option-button i {
-            font-size: 16px;
-            color: rgba(255, 255, 255, 0.7);
-            width: 18px;
-            text-align: center;
-        }
-        .option-content {
-            flex: 1;
-        }
-        .option-title {
-            font-size: 14px;
-            font-weight: 500;
-            color: #fff;
-            margin-bottom: 2px;
-        }
-        .option-subtitle {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.5);
-        }
-        .settings-tab-content {
-            display: none;
-            overflow-x: hidden;
-            overflow-y: auto;
-            width: 100%;
-            box-sizing: border-box;
-        }
-        .settings-tab-content.active {
-            display: block;
-        }
-        .history-controls {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 24px;
-        }
-        .history-search {
-            flex: 1;
-            padding: 12px 16px;
-            background: #0a0a0a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            color: #fff;
-            font-size: 14px;
-            outline: none;
-            transition: all 0.2s ease;
-        }
-        .history-search:focus {
-            border-color: rgba(255, 255, 255, 0.2);
-            background: #111111;
-        }
-        .history-search::placeholder {
-            color: rgba(255, 255, 255, 0.4);
-        }
-        .clear-btn {
-            padding: 12px 20px;
-            background: #0a0a0a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            color: rgba(255, 255, 255, 0.8);
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .clear-btn:hover {
-            background: rgba(255, 59, 48, 0.15);
-            border-color: rgba(255, 59, 48, 0.3);
-            color: #ff3b30;
-        }
-        .history-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .history-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 16px;
-            background: #0a0a0a;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        .history-item:hover {
-            background: #111111;
-            border-color: rgba(255, 255, 255, 0.12);
-        }
-        .history-favicon {
-            width: 16px;
-            height: 16px;
-            border-radius: 3px;
-            flex-shrink: 0;
-        }
-        .history-info {
-            flex: 1;
-            min-width: 0;
-        }
-        .history-title {
-            font-size: 14px;
-            font-weight: 500;
-            color: #fff;
-            margin-bottom: 4px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .history-url {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.5);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .history-time {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.4);
-            white-space: nowrap;
-        }
-        .history-actions {
-            display: flex;
-            gap: 8px;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-        .history-item:hover .history-actions {
-            opacity: 1;
-        }
-        .history-delete {
-            padding: 6px 10px;
-            background: #0a0a0a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 6px;
-            color: rgba(255, 255, 255, 0.5);
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .history-delete:hover {
-            background: rgba(255, 59, 48, 0.15);
-            border-color: rgba(255, 59, 48, 0.3);
-            color: #ff3b30;
-        }
-        .shortcut-group {
-            margin-bottom: 24px;
-            width: 100%;
-            box-sizing: border-box;
-            overflow-x: hidden;
-        }
-        .shortcut-group:last-child {
-            margin-bottom: 0;
-        }
-        .shortcut-group h4 {
-            font-size: 12px;
-            font-weight: 600;
-            color: rgba(255, 255, 255, 0.6);
-            margin-bottom: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .shortcut-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            gap: 16px;
-            min-width: 0;
-            width: 100%;
-            box-sizing: border-box;
-        }
-        .shortcut-item:last-child {
-            border-bottom: none;
-        }
-        .shortcut-key {
-            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
-            font-size: 12px;
-            padding: 6px 10px;
-            background: #0a0a0a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 6px;
-            color: #fff;
-            font-weight: 500;
-            min-width: 80px;
-            text-align: center;
-        }
-        .shortcut-desc {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.8);
-            flex: 1;
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .shortcuts-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            gap: 16px;
-            flex-wrap: wrap;
-            width: 100%;
-            box-sizing: border-box;
-        }
-        .shortcuts-info {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.5);
-            margin: 0;
-        }
-        .reset-shortcuts-btn {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            flex-shrink: 0;
-            white-space: nowrap;
-        }
-        .reset-shortcuts-btn:hover {
-            background: rgba(255, 255, 255, 0.12);
-            border-color: rgba(255, 255, 255, 0.2);
-            color: #fff;
-        }
-        .reset-shortcuts-btn:active {
-            transform: scale(0.98);
-        }
-        .reset-shortcuts-btn i {
-            font-size: 12px;
-        }
-        .shortcut-input {
-            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
-            font-size: 12px;
-            padding: 8px 12px;
-            background: #0a0a0a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            color: #fff;
-            font-weight: 500;
-            min-width: 80px;
-            max-width: 150px;
-            width: auto;
-            flex-shrink: 0;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            outline: none;
-            box-sizing: border-box;
-        }
-        .shortcut-input:hover {
-            border-color: rgba(255, 255, 255, 0.25);
-            background: #111;
-        }
-        .shortcut-input:focus {
-            border-color: #4a9eff;
-            background: #111;
-            box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.2);
-        }
-        .shortcut-input.recording {
-            border-color: #ff9800;
-            background: rgba(255, 152, 0, 0.1);
-            animation: pulse-recording 1.5s infinite;
-        }
-        @keyframes pulse-recording {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.4); }
-            50% { box-shadow: 0 0 0 4px rgba(255, 152, 0, 0.2); }
-        }
-        .shortcut-item.editable {
-            cursor: default;
-        }
-        .shortcut-item.editable:hover {
-            background: rgba(255, 255, 255, 0.02);
-            border-radius: 8px;
-        }
-        .shortcuts-editor-root { width: 100%; }
-        .shortcut-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-        .shortcut-row:last-child { border-bottom: none; }
-        .shortcut-row .shortcut-row-main { flex: 1; min-width: 0; }
-        .shortcut-row .shortcut-row-main span { font-size: 14px; color: rgba(255,255,255,0.85); }
-        .shortcut-row-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .shortcut-action-btn {
-            font-size: 11px;
-            padding: 6px 12px;
-            border-radius: 6px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            background: rgba(255, 255, 255, 0.06);
-            color: rgba(255, 255, 255, 0.85);
-            cursor: pointer;
-            white-space: nowrap;
-        }
-        .shortcut-action-btn:hover { background: rgba(255, 255, 255, 0.1); }
-        .shortcut-row.shortcut-row-disabled .shortcut-input { opacity: 0.5; pointer-events: none; }
-        .shortcuts-subheading {
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: rgba(255, 255, 255, 0.45);
-            margin: 16px 0 10px;
-        }
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: rgba(255, 255, 255, 0.4);
-        }
-        .empty-state i {
-            font-size: 48px;
-            color: rgba(255, 255, 255, 0.15);
-            margin-bottom: 16px;
-        }
-        .toggle-switch {
-            position: relative;
-            width: 42px;
-            height: 24px;
-            flex-shrink: 0;
-        }
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        .toggle-slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(255, 255, 255, 0.1);
-            transition: .2s;
-            border-radius: 24px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-        }
-        .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 18px;
-            width: 18px;
-            left: 2px;
-            bottom: 2px;
-            background-color: rgba(255, 255, 255, 0.5);
-            transition: .2s;
-            border-radius: 50%;
-        }
-        .toggle-switch input:checked + .toggle-slider {
-            background-color: #3B82F6;
-            border-color: #3B82F6;
-        }
-        .toggle-switch input:checked + .toggle-slider:before {
-            transform: translateX(18px);
-            background-color: #fff;
-        }
-        .toggle-switch input:focus + .toggle-slider {
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
-        }
-        .setting-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 14px 16px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 8px;
-            margin-bottom: 12px;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .setting-row:last-child {
-            margin-bottom: 0;
-        }
-        .setting-row:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.12);
-        }
-        .setting-row-content {
-            flex: 1;
-            margin-right: 24px;
-        }
-        .setting-row-title {
-            font-size: 14px;
-            font-weight: 500;
-            color: #fff;
-            margin-bottom: 2px;
-        }
-        .setting-row-desc {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.5);
-        }
-        .setting-select {
-            padding: 8px 12px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 6px;
-            color: #fff;
-            font-size: 14px;
-            cursor: pointer;
-            outline: none;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            min-width: 140px;
-        }
-        .setting-select:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.15);
-        }
-        .setting-select:focus {
-            border-color: rgba(255, 255, 255, 0.2);
-            background: rgba(255, 255, 255, 0.08);
-        }
-        .setting-select option {
-            background: #1a1a1a;
-            color: #fff;
-        }
-        .toggle-switch {
-            position: relative;
-            display: inline-block;
-            width: 48px;
-            height: 24px;
-        }
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        .toggle-slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(255, 255, 255, 0.1);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            border-radius: 24px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 18px;
-            width: 18px;
-            left: 3px;
-            bottom: 2px;
-            background-color: #fff;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            border-radius: 50%;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-        }
-        .toggle-switch input:checked + .toggle-slider {
-            background-color: rgba(255, 255, 255, 0.2);
-            border-color: rgba(255, 255, 255, 0.3);
-        }
-        .toggle-switch input:checked + .toggle-slider:before {
-            transform: translateX(24px);
-        }
-        .toggle-switch:hover .toggle-slider {
-            background-color: rgba(255, 255, 255, 0.15);
-            border-color: rgba(255, 255, 255, 0.2);
-        }
-        .gradient-settings {
-            transition: opacity 0.3s ease, max-height 0.3s ease;
-        }
-        .custom-color-picker-wrapper {
-            position: relative;
-        }
-        .custom-color-picker-trigger {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            padding: 8px 14px;
-            min-width: 140px;
-            height: 36px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.05);
-            cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            outline: none;
-            position: relative;
-            overflow: hidden;
-        }
-        .custom-color-picker-trigger::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: inherit;
-            border-radius: 8px;
-            z-index: 0;
-        }
-        .custom-color-picker-trigger:hover {
-            border-color: rgba(255, 255, 255, 0.2);
-            background: rgba(255, 255, 255, 0.08);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-        .custom-color-picker-trigger:active {
-            transform: translateY(0);
-        }
-        .color-picker-hex {
-            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
-            font-size: 13px;
-            color: #fff;
-            font-weight: 500;
-            z-index: 1;
-            position: relative;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-        }
-        .color-picker-arrow {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.7);
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            z-index: 1;
-            position: relative;
-        }
-        .custom-color-picker-trigger.active .color-picker-arrow {
-            transform: rotate(180deg);
-        }
-        .custom-color-picker-popup {
-            position: fixed;
-            width: 280px;
-            background: rgba(20, 20, 20, 0.98);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
-            opacity: 0;
-            visibility: hidden;
-            transform: translateY(-10px) scale(0.95);
-            transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-            z-index: 10000;
-            overflow: visible;
-        }
-        .custom-color-picker-popup.show {
-            opacity: 1;
-            visibility: visible;
-            transform: translateY(0) scale(1);
-        }
-        .color-picker-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.02);
-        }
-        .color-picker-header span {
-            font-size: 13px;
-            font-weight: 600;
-            color: #fff;
-        }
-        .color-picker-close {
-            width: 24px;
-            height: 24px;
-            border: none;
-            background: transparent;
-            color: rgba(255, 255, 255, 0.6);
-            cursor: pointer;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s ease;
-            padding: 0;
-        }
-        .color-picker-close:hover {
-            background: rgba(255, 255, 255, 0.1);
-            color: #fff;
-        }
-        .color-picker-body {
-            padding: 16px;
-        }
-        .color-picker-saturation {
-            width: 100%;
-            height: 180px;
-            position: relative;
-            border-radius: 8px;
-            overflow: hidden;
-            cursor: crosshair;
-            margin-bottom: 12px;
-            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-            background: #ff0000;
-        }
-        .color-picker-white {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(to right, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0));
-            pointer-events: none;
-        }
-        .color-picker-black {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(to top, rgba(0, 0, 0, 1), rgba(0, 0, 0, 0));
-            pointer-events: none;
-        }
-        .color-picker-cursor {
-            position: absolute;
-            width: 18px;
-            height: 18px;
-            border: 2px solid #fff;
-            border-radius: 50%;
-            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.4);
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-            transition: transform 0.05s cubic-bezier(0.4, 0, 0.2, 1);
-            z-index: 10;
-        }
-        .color-picker-hue {
-            width: 100%;
-            height: 12px;
-            position: relative;
-            border-radius: 6px;
-            margin-bottom: 16px;
-            cursor: pointer;
-            background: linear-gradient(to right, 
-                #ff0000 0%, 
-                #ffff00 16.66%, 
-                #00ff00 33.33%, 
-                #00ffff 50%, 
-                #0000ff 66.66%, 
-                #ff00ff 83.33%, 
-                #ff0000 100%);
-            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-        }
-        .color-picker-hue-cursor {
-            position: absolute;
-            top: 50%;
-            width: 18px;
-            height: 18px;
-            border: 2px solid #fff;
-            border-radius: 50%;
-            background: #fff;
-            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 2px 6px rgba(0, 0, 0, 0.4);
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-            transition: left 0.05s cubic-bezier(0.4, 0, 0.2, 1);
-            z-index: 10;
-        }
-        .color-picker-inputs {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr 1fr;
-            gap: 8px;
-        }
-        .color-input-group {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .color-input-group label {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.5);
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .color-input {
-            width: 100%;
-            padding: 6px 8px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 6px;
-            color: #fff;
-            font-size: 12px;
-            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
-            outline: none;
-            transition: all 0.2s ease;
-        }
-        .color-input:focus {
-            border-color: rgba(255, 255, 255, 0.3);
-            background: rgba(255, 255, 255, 0.08);
-        }
-        .color-input.hex-input {
-            grid-column: 1 / -1;
-        }
-        .theme-preview {
-            width: 200px;
-            height: 60px;
-            border-radius: 8px;
-            overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        .theme-preview-gradient {
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, var(--theme-color, #1a1a1a) 0%, var(--gradient-color, #2a2a2a) 100%);
-        }
-        .fade-in {
-            animation: fadeIn 0.3s ease;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-    </style>
-</head>
-<body>
-    <div class="settings-wrapper">
-        <div class="settings-header">
-            <h1 class="header-title">Settings</h1>
-        </div>
-        
-        <div class="settings-content-wrapper">
-            <div class="settings-sidebar">
-                <div class="nav-item active" data-section="customization">
-                    <i class="fas fa-palette"></i>
-                    <span>Looks &amp; Feel</span>
-                </div>
-                <div class="nav-item" data-section="history">
-                    <i class="fas fa-history"></i>
-                    <span>History</span>
-                </div>
-                <div class="nav-item" data-section="shortcuts">
-                    <i class="fas fa-keyboard"></i>
-                    <span>Shortcuts</span>
-                </div>
-            </div>
-            
-            <div class="settings-main">
-                <div class="settings-tab-content active" id="customization-tab">
-                    <div class="section fade-in">
-                        <div class="section-title-with-icon">
-                            <div class="section-icon"><i class="fas fa-sliders-h"></i></div>
-                            <h2 class="section-title">Appearance</h2>
-                        </div>
-                        <div class="setting-row">
-                            <div class="setting-row-content">
-                                <div class="setting-row-title">Sidebar Position</div>
-                                <div class="setting-row-desc">Choose where the sidebar appears</div>
-                            </div>
-                            <select id="sidebar-position" class="setting-select">
-                                <option value="left" ${sidebarPosition === 'left' ? 'selected' : ''}>Left</option>
-                                <option value="right" ${sidebarPosition === 'right' ? 'selected' : ''}>Right</option>
-                            </select>
-                        </div>
-                        <div class="setting-row">
-                            <div class="setting-row-content">
-                                <div class="setting-row-title">Search Engine</div>
-                                <div class="setting-row-desc">Choose your default search engine</div>
-                            </div>
-                            <select id="search-engine" class="setting-select">
-                                <option value="google" ${searchEngine === 'google' ? 'selected' : ''}>Google</option>
-                                <option value="bing" ${searchEngine === 'bing' ? 'selected' : ''}>Bing</option>
-                                <option value="duckduckgo" ${searchEngine === 'duckduckgo' ? 'selected' : ''}>DuckDuckGo</option>
-                                <option value="yahoo" ${searchEngine === 'yahoo' ? 'selected' : ''}>Yahoo</option>
-                                <option value="yandex" ${searchEngine === 'yandex' ? 'selected' : ''}>Yandex</option>
-                            </select>
-                        </div>
-                        <div class="setting-row">
-                            <div class="setting-row-content">
-                                <div class="setting-row-title">HTTPS-only mode</div>
-                                <div class="setting-row-desc">Ask before loading sites that use HTTP (not HTTPS). Localhost is always allowed.</div>
-                            </div>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="https-only-mode" ${this.settings.httpsOnlyMode ? 'checked' : ''}>
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="setting-row">
-                            <div class="setting-row-content">
-                                <div class="setting-row-title">JavaScript</div>
-                                <div class="setting-row-desc">Allow sites to run JavaScript. Turn off for minimal static pages (many sites will break).</div>
-                            </div>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="javascript-enabled" ${this.settings.javascriptEnabled !== false ? 'checked' : ''}>
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <div class="section fade-in">
-                        <div class="section-title-with-icon">
-                            <div class="section-icon"><i class="fas fa-palette"></i></div>
-                            <h2 class="section-title">Theme Colors</h2>
-                        </div>
-                        <div class="setting-row">
-                            <div class="setting-row-content">
-                                <div class="setting-row-title">Appearance</div>
-                                <div class="setting-row-desc">Light or dark mode for the Axis UI. Does not affect the window frame or your theme color.</div>
-                            </div>
-                            <select class="setting-select" id="ui-theme">
-                                <option value="dark" ${this.settings.uiTheme !== 'light' ? 'selected' : ''}>Dark</option>
-                                <option value="light" ${this.settings.uiTheme === 'light' ? 'selected' : ''}>Light</option>
-                            </select>
-                        </div>
-                        <div class="setting-row">
-                            <div class="setting-row-content">
-                                <div class="setting-row-title">Theme Color</div>
-                                <div class="setting-row-desc">Choose your primary theme color</div>
-                            </div>
-                            <div class="custom-color-picker-wrapper">
-                                <button class="custom-color-picker-trigger" id="theme-color-trigger" style="background: ${this.settings.themeColor || '#1a1a1a'};">
-                                    <span class="color-picker-hex" id="theme-color-display">${this.settings.themeColor || '#1a1a1a'}</span>
-                                    <i class="fas fa-chevron-down color-picker-arrow"></i>
-                                </button>
-                                <div class="custom-color-picker-popup" id="theme-color-picker-popup">
-                                    <div class="color-picker-header">
-                                        <span>Theme Color</span>
-                                        <button class="color-picker-close"><i class="fas fa-times"></i></button>
-                                    </div>
-                                    <div class="color-picker-body">
-                                        <div class="color-picker-saturation" id="theme-saturation">
-                                            <div class="color-picker-white"></div>
-                                            <div class="color-picker-black"></div>
-                                            <div class="color-picker-cursor" id="theme-cursor"></div>
-                                        </div>
-                                        <div class="color-picker-hue" id="theme-hue">
-                                            <div class="color-picker-hue-cursor" id="theme-hue-cursor"></div>
-                                        </div>
-                                        <div class="color-picker-inputs">
-                                            <div class="color-input-group">
-                                                <label>Hex</label>
-                                                <input type="text" class="color-input hex-input" id="theme-hex-input" value="${this.settings.themeColor || '#1a1a1a'}">
-                                            </div>
-                                            <div class="color-input-group">
-                                                <label>R</label>
-                                                <input type="number" class="color-input rgb-input" id="theme-r-input" min="0" max="255" value="26">
-                                            </div>
-                                            <div class="color-input-group">
-                                                <label>G</label>
-                                                <input type="number" class="color-input rgb-input" id="theme-g-input" min="0" max="255" value="26">
-                                            </div>
-                                            <div class="color-input-group">
-                                                <label>B</label>
-                                                <input type="number" class="color-input rgb-input" id="theme-b-input" min="0" max="255" value="26">
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="setting-row">
-                            <div class="setting-row-content">
-                                <div class="setting-row-title">Enable Gradient</div>
-                                <div class="setting-row-desc">Use a gradient instead of a solid color</div>
-                            </div>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="gradient-enabled" ${this.settings.gradientEnabled ? 'checked' : ''}>
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="setting-row gradient-settings" id="gradient-settings-row" style="display: ${this.settings.gradientEnabled ? 'flex' : 'none'};">
-                            <div class="setting-row-content">
-                                <div class="setting-row-title">Gradient Color</div>
-                                <div class="setting-row-desc">Choose a second color for gradient effects</div>
-                            </div>
-                            <div class="custom-color-picker-wrapper">
-                                <button class="custom-color-picker-trigger" id="gradient-color-trigger" style="background: ${this.settings.gradientColor || '#2a2a2a'};">
-                                    <span class="color-picker-hex" id="gradient-color-display">${this.settings.gradientColor || '#2a2a2a'}</span>
-                                    <i class="fas fa-chevron-down color-picker-arrow"></i>
-                                </button>
-                                <div class="custom-color-picker-popup" id="gradient-color-picker-popup">
-                                    <div class="color-picker-header">
-                                        <span>Gradient Color</span>
-                                        <button class="color-picker-close"><i class="fas fa-times"></i></button>
-                                    </div>
-                                    <div class="color-picker-body">
-                                        <div class="color-picker-saturation" id="gradient-saturation">
-                                            <div class="color-picker-white"></div>
-                                            <div class="color-picker-black"></div>
-                                            <div class="color-picker-cursor" id="gradient-cursor"></div>
-                                        </div>
-                                        <div class="color-picker-hue" id="gradient-hue">
-                                            <div class="color-picker-hue-cursor" id="gradient-hue-cursor"></div>
-                                        </div>
-                                        <div class="color-picker-inputs">
-                                            <div class="color-input-group">
-                                                <label>Hex</label>
-                                                <input type="text" class="color-input hex-input" id="gradient-hex-input" value="${this.settings.gradientColor || '#2a2a2a'}">
-                                            </div>
-                                            <div class="color-input-group">
-                                                <label>R</label>
-                                                <input type="number" class="color-input rgb-input" id="gradient-r-input" min="0" max="255" value="42">
-                                            </div>
-                                            <div class="color-input-group">
-                                                <label>G</label>
-                                                <input type="number" class="color-input rgb-input" id="gradient-g-input" min="0" max="255" value="42">
-                                            </div>
-                                            <div class="color-input-group">
-                                                <label>B</label>
-                                                <input type="number" class="color-input rgb-input" id="gradient-b-input" min="0" max="255" value="42">
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="setting-row gradient-settings" id="gradient-direction-row" style="display: ${this.settings.gradientEnabled ? 'flex' : 'none'};">
-                            <div class="setting-row-content">
-                                <div class="setting-row-title">Gradient Direction</div>
-                                <div class="setting-row-desc">Choose the direction of the gradient</div>
-                            </div>
-                            <select id="gradient-direction" class="setting-select">
-                                <option value="to right" ${this.settings.gradientDirection === 'to right' ? 'selected' : ''}>→ Right</option>
-                                <option value="to left" ${this.settings.gradientDirection === 'to left' ? 'selected' : ''}>← Left</option>
-                                <option value="to bottom" ${this.settings.gradientDirection === 'to bottom' ? 'selected' : ''}>↓ Bottom</option>
-                                <option value="to top" ${this.settings.gradientDirection === 'to top' ? 'selected' : ''}>↑ Top</option>
-                                <option value="135deg" ${this.settings.gradientDirection === '135deg' ? 'selected' : ''}>↗ Diagonal Right</option>
-                                <option value="45deg" ${this.settings.gradientDirection === '45deg' ? 'selected' : ''}>↘ Diagonal Left</option>
-                                <option value="225deg" ${this.settings.gradientDirection === '225deg' ? 'selected' : ''}>↙ Diagonal Bottom Right</option>
-                                <option value="315deg" ${this.settings.gradientDirection === '315deg' ? 'selected' : ''}>↖ Diagonal Top Right</option>
-                            </select>
-                        </div>
-                        <div class="setting-row">
-                            <div class="setting-row-content">
-                                <div class="setting-row-title">Preview</div>
-                                <div class="setting-row-desc">See how your theme looks</div>
-                            </div>
-                            <div class="theme-preview" id="theme-preview">
-                                <div class="theme-preview-gradient"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="settings-tab-content" id="history-tab">
-                    <div class="section fade-in">
-                        <div class="section-title-with-icon">
-                            <div class="section-icon"><i class="fas fa-history"></i></div>
-                            <h2 class="section-title">Browsing History</h2>
-                        </div>
-                        <div class="history-controls">
-                            <input type="text" id="history-search" placeholder="Search history..." class="history-search">
-                            <button id="clear-history" class="clear-btn">
-                                <i class="fas fa-trash"></i> Clear All
-                            </button>
-                        </div>
-                        <div class="history-list" id="history-list">
-                            ${historyHtml}
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="settings-tab-content" id="shortcuts-tab">
-                    <div class="section fade-in">
-                        <div class="section-title-with-icon shortcuts-title-row">
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                            <div class="section-icon"><i class="fas fa-keyboard"></i></div>
-                            <h2 class="section-title">Keyboard Shortcuts</h2>
-                            </div>
-                            <button id="reset-shortcuts-btn" class="reset-shortcuts-btn">
-                                <i class="fas fa-undo"></i> Reset to Defaults
-                            </button>
-                        </div>
-                        <div id="shortcuts-editor-root" class="shortcuts-editor-root"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        window._axisShortcutDefaults = ${JSON.stringify(shortcutDefaults)};
-        window._axisShortcutOverrides = ${JSON.stringify(shortcutOverrides)};
-        window.SHORTCUT_ACTIONS = ${shortcutActionsJson};
-        
-        // Navigation switching
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const section = item.dataset.section;
-                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-                document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
-                item.classList.add('active');
-                const contentId = section + '-tab';
-                const contentEl = document.getElementById(contentId);
-                if (contentEl) {
-                    contentEl.classList.add('active', 'fade-in');
-                }
-            });
-        });
-        
-        // Toggle switches - save immediately on change
-        const sidebarPositionToggle = document.getElementById('sidebar-position');
-        if (sidebarPositionToggle) {
-            sidebarPositionToggle.addEventListener('change', (e) => {
-                const key = 'sidebarPosition';
-                const value = e.target.value;
-                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: key, value: value }));
-            });
-        }
-        
-        const searchEngineSelect = document.getElementById('search-engine');
-        if (searchEngineSelect) {
-            searchEngineSelect.addEventListener('change', (e) => {
-                const key = 'searchEngine';
-                const value = e.target.value;
-                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: key, value: value }));
-            });
-        }
-        
-        const httpsOnlyModeEl = document.getElementById('https-only-mode');
-        if (httpsOnlyModeEl) {
-            httpsOnlyModeEl.addEventListener('change', (e) => {
-                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'httpsOnlyMode', value: e.target.checked }));
-            });
-        }
-        
-        const javascriptEnabledEl = document.getElementById('javascript-enabled');
-        if (javascriptEnabledEl) {
-            javascriptEnabledEl.addEventListener('change', (e) => {
-                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'javascriptEnabled', value: e.target.checked }));
-            });
+        let currentSrc = '';
+        try {
+            currentSrc = webview.getURL() || '';
+        } catch (_) {
+            currentSrc = '';
         }
 
-        const uiThemeEl = document.getElementById('ui-theme');
-        if (uiThemeEl) {
-            uiThemeEl.addEventListener('change', (e) => {
-                const v = e.target.value === 'light' ? 'light' : 'dark';
-                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'uiTheme', value: v }));
-            });
-        }
-        
-        // Custom color picker implementation
-        function initColorPicker(pickerId, triggerId, popupId, saturationId, hueId, cursorId, hueCursorId, hexInputId, rInputId, gInputId, bInputId, displayId, settingKey) {
-            const trigger = document.getElementById(triggerId);
-            const popup = document.getElementById(popupId);
-            const saturation = document.getElementById(saturationId);
-            const hue = document.getElementById(hueId);
-            const cursor = document.getElementById(cursorId);
-            const hueCursor = document.getElementById(hueCursorId);
-            const hexInput = document.getElementById(hexInputId);
-            const rInput = document.getElementById(rInputId);
-            const gInput = document.getElementById(gInputId);
-            const bInput = document.getElementById(bInputId);
-            const display = document.getElementById(displayId);
-            
-            if (!trigger || !popup) return;
-            
-            let currentHue = 0;
-            let currentSaturation = 1;
-            let currentBrightness = 0.1;
-            let isDragging = false;
-            let isHueDragging = false;
-            
-            // Initialize color from current value
-            function initColor(hex) {
-                const rgb = hexToRgb(hex);
-                if (!rgb) return;
-                const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
-                currentHue = hsv.h;
-                currentSaturation = hsv.s;
-                currentBrightness = hsv.v;
-                updateColor();
-            }
-            
-            // Initialize on load
-            const initialHex = display ? display.textContent : (settingKey === 'themeColor' ? '#1a1a1a' : '#2a2a2a');
-            initColor(initialHex);
-            
-            function hexToRgb(hex) {
-                const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
-                return result ? {
-                    r: parseInt(result[1], 16),
-                    g: parseInt(result[2], 16),
-                    b: parseInt(result[3], 16)
-                } : null;
-            }
-            
-            function rgbToHsv(r, g, b) {
-                r /= 255; g /= 255; b /= 255;
-                const max = Math.max(r, g, b);
-                const min = Math.min(r, g, b);
-                let h, s, v = max;
-                const d = max - min;
-                s = max === 0 ? 0 : d / max;
-                if (max === min) {
-                    h = 0;
-                } else {
-                    switch (max) {
-                        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
-                        case g: h = ((b - r) / d + 2) / 6; break;
-                        case b: h = ((r - g) / d + 4) / 6; break;
-                    }
-                }
-                return { h: h * 360, s, v };
-            }
-            
-            function hsvToRgb(h, s, v) {
-                h = h / 360;
-                const i = Math.floor(h * 6);
-                const f = h * 6 - i;
-                const p = v * (1 - s);
-                const q = v * (1 - f * s);
-                const t = v * (1 - (1 - f) * s);
-                let r, g, b;
-                switch (i % 6) {
-                    case 0: r = v; g = t; b = p; break;
-                    case 1: r = q; g = v; b = p; break;
-                    case 2: r = p; g = v; b = t; break;
-                    case 3: r = p; g = q; b = v; break;
-                    case 4: r = t; g = p; b = v; break;
-                    case 5: r = v; g = p; b = q; break;
-                }
-                return {
-                    r: Math.round(r * 255),
-                    g: Math.round(g * 255),
-                    b: Math.round(b * 255)
-                };
-            }
-            
-            function rgbToHex(r, g, b) {
-                return '#' + [r, g, b].map(x => {
-                    const hex = x.toString(16);
-                    return hex.length === 1 ? '0' + hex : hex;
-                }).join('');
-            }
-            
-            function updateColor() {
-                const rgb = hsvToRgb(currentHue, currentSaturation, currentBrightness);
-                const hex = rgbToHex(rgb.r, rgb.g, rgb.b);
-                
-                // Update UI
-                if (trigger) {
-                    trigger.style.background = hex;
-                }
-                if (display) {
-                    display.textContent = hex.toUpperCase();
-                }
-                if (hexInput) {
-                    hexInput.value = hex.toUpperCase();
-                }
-                if (rInput) rInput.value = rgb.r;
-                if (gInput) gInput.value = rgb.g;
-                if (bInput) bInput.value = rgb.b;
-                
-                // Update saturation background with hue
-                if (saturation) {
-                    const hueColor = hsvToRgb(currentHue, 1, 1);
-                    const hueHex = rgbToHex(hueColor.r, hueColor.g, hueColor.b);
-                    // The saturation area background shows the pure hue
-                    saturation.style.background = hueHex;
-                }
-                
-                // Update cursor positions
-                if (cursor && saturation) {
-                    const rect = saturation.getBoundingClientRect();
-                    const x = currentSaturation * rect.width;
-                    const y = (1 - currentBrightness) * rect.height;
-                    cursor.style.left = x + 'px';
-                    cursor.style.top = y + 'px';
-                }
-                
-                if (hueCursor && hue) {
-                    const rect = hue.getBoundingClientRect();
-                    const x = (currentHue / 360) * rect.width;
-                    hueCursor.style.left = x + 'px';
-                }
-                
-                // Update preview
-                updateThemePreview();
-                
-                // Save setting
-                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: settingKey, value: hex }));
-            }
-            
-            // Toggle popup
-            trigger.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const isOpen = popup.classList.contains('show');
-                if (isOpen) {
-                    closePopup();
-                } else {
-                    openPopup();
-                }
-            });
-            
-            function positionPopup() {
-                // Calculate position relative to trigger button
-                const triggerRect = trigger.getBoundingClientRect();
-                const popupWidth = 280;
-                const popupHeight = 320; // Approximate height
-                const spacing = 8;
-                
-                // Position popup below trigger, aligned to right
-                let top = triggerRect.bottom + spacing;
-                let right = window.innerWidth - triggerRect.right;
-                
-                // Check if popup would go off bottom of screen
-                if (top + popupHeight > window.innerHeight) {
-                    // Position above trigger instead
-                    top = triggerRect.top - popupHeight - spacing;
-                    // Make sure it doesn't go off top
-                    if (top < 0) {
-                        top = spacing;
-                    }
-                }
-                
-                // Check if popup would go off right edge
-                if (right + popupWidth > window.innerWidth) {
-                    right = window.innerWidth - triggerRect.left;
-                }
-                
-                // Check if popup would go off left edge
-                if (right > window.innerWidth - 20) {
-                    right = 20;
-                }
-                
-                // Apply positioning
-                popup.style.top = top + 'px';
-                popup.style.right = right + 'px';
-                popup.style.left = 'auto';
-                popup.style.bottom = 'auto';
-            }
-            
-            function openPopup() {
-                positionPopup();
-                popup.classList.add('show');
-                trigger.classList.add('active');
-                // Initialize color from current value
-                const currentHex = display ? display.textContent : (settingKey === 'themeColor' ? '#1a1a1a' : '#2a2a2a');
-                initColor(currentHex);
-                
-                // Reposition on window resize
-                const resizeHandler = () => {
-                    if (popup.classList.contains('show')) {
-                        positionPopup();
-                    }
-                };
-                window.addEventListener('resize', resizeHandler);
-                // Store handler for cleanup if needed
-                popup._resizeHandler = resizeHandler;
-            }
-            
-            function closePopup() {
-                popup.classList.remove('show');
-                trigger.classList.remove('active');
-                // Remove resize handler if it exists
-                if (popup._resizeHandler) {
-                    window.removeEventListener('resize', popup._resizeHandler);
-                    delete popup._resizeHandler;
-                }
-            }
-            
-            // Close on outside click (use capture phase for better detection)
-            const handleOutsideClick = (e) => {
-                if (popup.classList.contains('show') && 
-                    !popup.contains(e.target) && 
-                    !trigger.contains(e.target)) {
-                    closePopup();
-                }
-            };
-            document.addEventListener('click', handleOutsideClick, true);
-            
-            // Close button
-            const closeBtn = popup.querySelector('.color-picker-close');
-            if (closeBtn) {
-                closeBtn.addEventListener('click', closePopup);
-            }
-            
-            // Saturation picker
-            if (saturation) {
-                const startDrag = (e) => {
-                    e.preventDefault();
-                    isDragging = true;
-                    updateSaturationFromEvent(e);
-                };
-                
-                const drag = (e) => {
-                    if (isDragging) {
-                        e.preventDefault();
-                        updateSaturationFromEvent(e);
-                    }
-                };
-                
-                const endDrag = () => {
-                    isDragging = false;
-                };
-                
-                saturation.addEventListener('mousedown', startDrag);
-                saturation.addEventListener('touchstart', startDrag, { passive: false });
-                
-                document.addEventListener('mousemove', drag);
-                document.addEventListener('touchmove', drag, { passive: false });
-                
-                document.addEventListener('mouseup', endDrag);
-                document.addEventListener('touchend', endDrag);
-            }
-            
-            function updateSaturationFromEvent(e) {
-                if (!saturation) return;
-                const rect = saturation.getBoundingClientRect();
-                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-                const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
-                const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
-                currentSaturation = x / rect.width;
-                currentBrightness = 1 - (y / rect.height);
-                updateColor();
-            }
-            
-            // Hue picker
-            if (hue) {
-                const startHueDrag = (e) => {
-                    e.preventDefault();
-                    isHueDragging = true;
-                    updateHueFromEvent(e);
-                };
-                
-                const dragHue = (e) => {
-                    if (isHueDragging) {
-                        e.preventDefault();
-                        updateHueFromEvent(e);
-                    }
-                };
-                
-                const endHueDrag = () => {
-                    isHueDragging = false;
-                };
-                
-                hue.addEventListener('mousedown', startHueDrag);
-                hue.addEventListener('touchstart', startHueDrag, { passive: false });
-                
-                document.addEventListener('mousemove', dragHue);
-                document.addEventListener('touchmove', dragHue, { passive: false });
-                
-                document.addEventListener('mouseup', endHueDrag);
-                document.addEventListener('touchend', endHueDrag);
-            }
-            
-            function updateHueFromEvent(e) {
-                if (!hue) return;
-                const rect = hue.getBoundingClientRect();
-                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-                const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
-                currentHue = (x / rect.width) * 360;
-                updateColor();
-            }
-            
-            // Input handlers
-            if (hexInput) {
-                hexInput.addEventListener('input', (e) => {
-                    const hex = e.target.value;
-                    if (/^#[0-9A-Fa-f]{6}$/.test(hex)) {
-                        initColor(hex);
-                    }
-                });
-            }
-            
-            [rInput, gInput, bInput].forEach((input, index) => {
-                if (input) {
-                    input.addEventListener('input', (e) => {
-                        const r = parseInt(rInput?.value || 0);
-                        const g = parseInt(gInput?.value || 0);
-                        const b = parseInt(bInput?.value || 0);
-                        if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
-                            const hsv = rgbToHsv(r, g, b);
-                            currentHue = hsv.h;
-                            currentSaturation = hsv.s;
-                            currentBrightness = hsv.v;
-                            updateColor();
+        const focusLoadedSection = (attempt = 0) => {
+            try {
+                webview
+                    .executeJavaScript(
+                        `(function(){
+                            if (typeof window.electronAPI === "undefined") return "no-api";
+                            if (typeof window.__axisSwitchSettingsSection !== "function") return "no-switch";
+                            const active = document.querySelector(".sidebar-item.active")?.dataset?.section
+                                || ${JSON.stringify(targetSection || tab?.settingsSection || 'customization')};
+                            window.__axisSwitchSettingsSection(active);
+                            return "ok";
+                        })();`,
+                        true
+                    )
+                    .then((result) => {
+                        if (result === 'ok' || attempt >= 50) return;
+                        setTimeout(() => focusLoadedSection(attempt + 1), 100);
+                    })
+                    .catch(() => {
+                        if (attempt < 50) {
+                            setTimeout(() => focusLoadedSection(attempt + 1), 100);
                         }
                     });
-                }
-            });
-        }
-        
-        // Initialize both color pickers
-        initColorPicker('theme', 'theme-color-trigger', 'theme-color-picker-popup', 
-            'theme-saturation', 'theme-hue', 'theme-cursor', 'theme-hue-cursor',
-            'theme-hex-input', 'theme-r-input', 'theme-g-input', 'theme-b-input',
-            'theme-color-display', 'themeColor');
-        
-        initColorPicker('gradient', 'gradient-color-trigger', 'gradient-color-picker-popup',
-            'gradient-saturation', 'gradient-hue', 'gradient-cursor', 'gradient-hue-cursor',
-            'gradient-hex-input', 'gradient-r-input', 'gradient-g-input', 'gradient-b-input',
-            'gradient-color-display', 'gradientColor');
-        
-        // Gradient toggle handler
-        const gradientEnabled = document.getElementById('gradient-enabled');
-        const gradientSettingsRow = document.getElementById('gradient-settings-row');
-        const gradientDirectionRow = document.getElementById('gradient-direction-row');
-        
-        if (gradientEnabled) {
-            gradientEnabled.addEventListener('change', (e) => {
-                const enabled = e.target.checked;
-                if (gradientSettingsRow) {
-                    gradientSettingsRow.style.display = enabled ? 'flex' : 'none';
-                }
-                if (gradientDirectionRow) {
-                    gradientDirectionRow.style.display = enabled ? 'flex' : 'none';
-                }
-                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'gradientEnabled', value: enabled }));
-                updateThemePreview();
-            });
-        }
-        
-        // Gradient direction handler
-        const gradientDirection = document.getElementById('gradient-direction');
-        if (gradientDirection) {
-            gradientDirection.addEventListener('change', (e) => {
-                console.log('SETTINGS_UPDATE:' + JSON.stringify({ type: 'updateSetting', key: 'gradientDirection', value: e.target.value }));
-                updateThemePreview();
-            });
-        }
-        
-        // Theme preview update
-        function updateThemePreview() {
-            const themePreview = document.getElementById('theme-preview');
-            const themeDisplay = document.getElementById('theme-color-display');
-            const gradientDisplay = document.getElementById('gradient-color-display');
-            const gradientEnabledCheckbox = document.getElementById('gradient-enabled');
-            const gradientDirectionSelect = document.getElementById('gradient-direction');
-            
-            if (themePreview && themeDisplay) {
-                const themeColor = themeDisplay.textContent;
-                const gradientEl = themePreview.querySelector('.theme-preview-gradient');
-                if (gradientEl) {
-                    const isGradientEnabled = gradientEnabledCheckbox ? gradientEnabledCheckbox.checked : false;
-                    const direction = gradientDirectionSelect ? gradientDirectionSelect.value : '135deg';
-                    
-                    if (isGradientEnabled && gradientDisplay) {
-                        const gradientColor = gradientDisplay.textContent;
-                        gradientEl.style.background = \`linear-gradient(\${direction}, \${themeColor} 0%, \${gradientColor} 100%)\`;
-                    } else {
-                        gradientEl.style.background = themeColor;
-                    }
+            } catch (_) {
+                if (attempt < 50) {
+                    setTimeout(() => focusLoadedSection(attempt + 1), 100);
                 }
             }
-        }
-        
-        // History search
-        const historySearch = document.getElementById('history-search');
-        if (historySearch) {
-            historySearch.addEventListener('input', (e) => {
-                const searchTerm = e.target.value.toLowerCase();
-                document.querySelectorAll('.history-item').forEach(item => {
-                    const title = item.querySelector('.history-title')?.textContent.toLowerCase() || '';
-                    const url = item.querySelector('.history-url')?.textContent.toLowerCase() || '';
-                    if (title.includes(searchTerm) || url.includes(searchTerm)) {
-                        item.style.display = 'flex';
-                    } else {
-                        item.style.display = 'none';
-                    }
-                });
-            });
-        }
-        
-        // Clear history
-        const clearHistoryBtn = document.getElementById('clear-history');
-        if (clearHistoryBtn) {
-            clearHistoryBtn.addEventListener('click', () => {
-                if (confirm('Are you sure you want to clear all history?')) {
-                    window.postMessage({ type: 'clearHistory' }, '*');
-                }
-            });
-        }
-        
-        // Delete history item
-        document.querySelectorAll('.history-delete').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const id = btn.dataset.id;
-                window.postMessage({ type: 'deleteHistoryItem', id: id }, '*');
-            });
-        });
-        
-        // Navigate to history item
-        document.querySelectorAll('.history-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                if (!e.target.closest('.history-delete')) {
-                    const url = item.dataset.url;
-                    window.postMessage({ type: 'navigate', url: url }, '*');
-                }
-            });
-        });
-        
-        // ========== Keyboard Shortcuts Editor (Active / Disabled + rebind) ==========
-        let shortcutDefaults = window._axisShortcutDefaults || {};
-        let shortcutOverrides = Object.assign({}, window._axisShortcutOverrides || {});
-        const SHORTCUT_UI = window.SHORTCUT_ACTIONS || [];
+        };
 
-        function escAttr(s) {
-            return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-        }
-        function formatShortcutDisplay(shortcut) {
-            if (!shortcut) return '';
-            return String(shortcut)
-                .replace(/Cmd/g, '⌘')
-                .replace(/Ctrl/g, '⌃')
-                .replace(/Alt/g, '⌥')
-                .replace(/Shift/g, '⇧')
-                .replace(/\\+/g, ' + ');
-        }
-        function mergedActiveShortcuts() {
-            const merged = {};
-            for (let i = 0; i < SHORTCUT_UI.length; i++) {
-                const action = SHORTCUT_UI[i].action;
-                const def = shortcutDefaults[action];
-                if (!def) continue;
-                if (Object.prototype.hasOwnProperty.call(shortcutOverrides, action)) {
-                    const v = shortcutOverrides[action];
-                    if (v !== null && v !== '' && v !== '__disabled__') merged[action] = v;
-                } else {
-                    merged[action] = def;
-                }
+        const alreadyLoaded = currentSrc.includes('settings.html');
+        if (alreadyLoaded) {
+            let apiOk = false;
+            try {
+                apiOk = await webview.executeJavaScript(
+                    'typeof window.electronAPI !== "undefined"',
+                    true
+                );
+            } catch (_) {
+                apiOk = false;
             }
-            return merged;
-        }
-        function persistShortcutOverrides() {
-            console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'setShortcuts', shortcuts: shortcutOverrides }));
-        }
-        function pauseGlobalShortcuts() {
-            console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'pauseShortcuts' }));
-        }
-        function resumeGlobalShortcuts() {
-            console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'resumeShortcuts' }));
-        }
-        function renderShortcutsEditor(refreshFromWindow) {
-            if (refreshFromWindow) {
-                shortcutDefaults = window._axisShortcutDefaults || {};
-                shortcutOverrides = Object.assign({}, window._axisShortcutOverrides || {});
+            if (!apiOk && tabId != null) {
+                await this.rebuildSettingsTabWebview(tabId, targetSection);
+                return;
             }
-            const root = document.getElementById('shortcuts-editor-root');
-            if (!root) return;
-            const merged = mergedActiveShortcuts();
-            const enabled = SHORTCUT_UI.filter(function (row) { return merged[row.action]; });
-            const disabled = SHORTCUT_UI.filter(function (row) {
-                return !merged[row.action] && shortcutDefaults[row.action];
-            });
-            let html = '';
-            html += '<div class="shortcuts-subheading">Active</div>';
-            for (let i = 0; i < enabled.length; i++) {
-                const row = enabled[i];
-                const action = row.action;
-                const label = row.label;
-                const val = formatShortcutDisplay(merged[action]);
-                html += '<div class="shortcut-row" data-shortcut-action="' + escAttr(action) + '">';
-                html += '<div class="shortcut-row-main"><span>' + escAttr(label) + '</span></div>';
-                html += '<div class="shortcut-row-actions">';
-                html += '<input type="text" class="shortcut-input" readonly data-action="' + escAttr(action) + '" value="' + escAttr(val) + '">';
-                html += '<button type="button" class="shortcut-action-btn" data-disable-action="' + escAttr(action) + '">Disable</button>';
-                html += '</div></div>';
-            }
-            html += '<div class="shortcuts-subheading">Disabled</div>';
-            if (disabled.length === 0) {
-                html += '<div class="shortcut-row"><span style="font-size:12px;color:rgba(255,255,255,0.45);">No shortcuts disabled</span></div>';
-            } else {
-                for (let j = 0; j < disabled.length; j++) {
-                    const row = disabled[j];
-                    const action = row.action;
-                    const label = row.label;
-                    html += '<div class="shortcut-row shortcut-row-disabled" data-shortcut-action="' + escAttr(action) + '">';
-                    html += '<div class="shortcut-row-main"><span>' + escAttr(label) + '</span></div>';
-                    html += '<div class="shortcut-row-actions">';
-                    html += '<input type="text" class="shortcut-input" readonly disabled value="Disabled">';
-                    html += '<button type="button" class="shortcut-action-btn" data-enable-action="' + escAttr(action) + '">Enable</button>';
-                    html += '</div></div>';
-                }
-            }
-            root.innerHTML = html;
-            root.querySelectorAll('.shortcut-input:not([disabled])').forEach(function (input) {
-                input.addEventListener('focus', function () {
-                    pauseGlobalShortcuts();
-                    input.value = 'Press keys...';
-                    input.dataset.recording = '1';
-                    input.classList.add('recording');
-                });
-                input.addEventListener('blur', function () {
-                    input.classList.remove('recording');
-                    input.removeAttribute('data-recording');
-                    const a = input.dataset.action;
-                    const m = mergedActiveShortcuts();
-                    if (input.value === 'Press keys...' && m[a]) {
-                        input.value = formatShortcutDisplay(m[a]);
-                    }
-                    resumeGlobalShortcuts();
-                });
-                input.addEventListener('keydown', function (e) {
-                    if (!input.dataset.recording) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (e.key === 'Escape') {
-                        input.blur();
-                        return;
-                    }
-                    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-                    const parts = [];
-                    if (isMac && e.metaKey) parts.push('Cmd');
-                    else if (e.ctrlKey) parts.push('Ctrl');
-                    if (e.altKey) parts.push('Alt');
-                    if (e.shiftKey) parts.push('Shift');
-                    let key = e.key;
-                    if (key === ' ') key = 'Space';
-                    else if (key.length === 1) key = key.toUpperCase();
-                    if (['Control', 'Meta', 'Alt', 'Shift'].includes(key)) return;
-                    parts.push(key);
-                    const shortcut = parts.join('+');
-                    const action = input.dataset.action;
-                    let conflict = null;
-                    const m0 = mergedActiveShortcuts();
-                    for (const k in m0) {
-                        if (Object.prototype.hasOwnProperty.call(m0, k) && k !== action && m0[k] === shortcut) {
-                            conflict = k;
-                            break;
-                        }
-                    }
-                    if (conflict) {
-                        const conflictLabel = (SHORTCUT_UI.find(function (r) { return r.action === conflict; }) || {}).label || conflict;
-                        if (!confirm('This shortcut is already used by "' + conflictLabel + '". Disable that shortcut and use it here?')) {
-                            input.blur();
-                            return;
-                        }
-                        shortcutOverrides[conflict] = null;
-                    }
-                    if (shortcut === shortcutDefaults[action]) {
-                        delete shortcutOverrides[action];
-                    } else {
-                        shortcutOverrides[action] = shortcut;
-                    }
-                    persistShortcutOverrides();
-                    input.classList.remove('recording');
-                    resumeGlobalShortcuts();
-                    input.blur();
-                });
-            });
-            root.querySelectorAll('[data-disable-action]').forEach(function (btn) {
-                btn.addEventListener('click', function () {
-                    const action = btn.getAttribute('data-disable-action');
-                    shortcutOverrides[action] = null;
-                    persistShortcutOverrides();
-                });
-            });
-            root.querySelectorAll('[data-enable-action]').forEach(function (btn) {
-                btn.addEventListener('click', function () {
-                    const action = btn.getAttribute('data-enable-action');
-                    delete shortcutOverrides[action];
-                    persistShortcutOverrides();
-                });
-            });
+            focusLoadedSection();
+            if (targetSection) this.focusSettingsSection(tabId, targetSection);
+            return;
         }
-        window.renderShortcutsEditor = renderShortcutsEditor;
 
-        const resetBtn = document.getElementById('reset-shortcuts-btn');
-        if (resetBtn) {
-            resetBtn.addEventListener('click', function () {
-                if (confirm('Reset all keyboard shortcuts to their defaults?')) {
-                    console.log('SHORTCUTS_MESSAGE:' + JSON.stringify({ type: 'resetShortcuts' }));
-                }
-            });
+        const onSettingsGuestReady = () => {
+            focusLoadedSection();
+        };
+        try {
+            webview.removeEventListener('dom-ready', webview.__axisSettingsDomReady);
+            webview.removeEventListener('did-finish-load', webview.__axisSettingsDidFinishLoad);
+        } catch (_) {}
+        webview.__axisSettingsDomReady = onSettingsGuestReady;
+        webview.__axisSettingsDidFinishLoad = onSettingsGuestReady;
+        webview.addEventListener('dom-ready', onSettingsGuestReady, { once: true });
+        webview.addEventListener('did-finish-load', onSettingsGuestReady, { once: true });
+
+        try {
+            webview.src = loadUrl;
+        } catch (err) {
+            console.error('Failed to load settings tab:', err);
+            return;
         }
-        renderShortcutsEditor(true);
-
-    </script>
-</body>
-</html>`;
-
-        const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(settingsHtml);
-        webview.src = dataUrl;
-        
-        // Reset to black theme for settings
-        this.resetToBlackTheme();
     }
 
     switchSettingsTab(tabName) {
@@ -9091,10 +7465,8 @@ class AxisBrowser {
         }
         
         if (event.data.type === 'openSiteSettings') {
-            if (window.electronAPI?.openSettingsWindow) {
-                window.electronAPI.openSettingsWindow('permissions');
-                this.showNotification('Opening Site permissions in Settings', 'info');
-            }
+            this.openSettingsTab('permissions');
+            this.showNotification('Opening Site permissions in Settings', 'info');
             return;
         }
         
@@ -19086,7 +17458,7 @@ class AxisBrowser {
         document.getElementById('extensions-menu-manage')?.addEventListener('click', async () => {
             this.closeExtensionsMenu();
             try {
-                await window.electronAPI?.openSettingsWindow?.('extensions');
+                await this.openSettingsTab('extensions');
             } catch (_) {}
         });
         window.addEventListener('resize', () => {
