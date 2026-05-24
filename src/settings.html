@@ -73,6 +73,13 @@
         html:not(.macos) .settings-window-chrome {
             display: none;
         }
+        /* In-tab Settings: no separate window title strip — the shell URL bar is the chrome. */
+        html.settings-embedded .settings-window-chrome {
+            display: none !important;
+        }
+        html.settings-embedded.macos .settings-wrap {
+            flex-direction: row;
+        }
         .settings-content-row {
             display: flex;
             flex: 1;
@@ -108,10 +115,10 @@
         .sidebar-item:hover { background: rgba(0,0,0,0.05); }
                 html.axis-dark .sidebar-item:hover { background: rgba(255,255,255,0.08); }
         .sidebar-item.active {
-            background: rgba(0,122,255,0.15);
-            color: #007aff;
+            background: #111111;
+            color: #ffffff;
         }
-                html.axis-dark .sidebar-item.active { background: rgba(10,132,255,0.25); color: #0a84ff; }
+                html.axis-dark .sidebar-item.active { background: #ffffff; color: #000000; }
         .sidebar-item svg { width: 16px; height: 16px; opacity: 0.8; }
         .sidebar-item.active svg { opacity: 1; }
         
@@ -225,16 +232,16 @@
         input[type="checkbox"] {
             width: 18px;
             height: 18px;
-            accent-color: #007aff;
+            accent-color: #111111;
         }
-                html.axis-dark input[type="checkbox"] { accent-color: #0a84ff; }
+                html.axis-dark input[type="checkbox"] { accent-color: #ffffff; }
         input[type="range"] {
             width: 140px;
             max-width: 40vw;
             min-height: 24px;
-            accent-color: #007aff;
+            accent-color: #111111;
         }
-                html.axis-dark input[type="range"] { accent-color: #0a84ff; }
+                html.axis-dark input[type="range"] { accent-color: #ffffff; }
         .ambient-volume-wrap {
             display: flex;
             align-items: center;
@@ -403,7 +410,7 @@
             justify-content: center;
             font-size: 15px;
             font-weight: 700;
-            color: #007aff;
+            color: #111111;
         }
         .extension-main { flex: 1; min-width: 0; }
         .extension-title-row {
@@ -493,15 +500,15 @@
             outline: none;
         }
         .settings-search:focus {
-            border-color: rgba(0,122,255,0.6);
-            box-shadow: 0 0 0 2px rgba(0,122,255,0.15);
+            border-color: rgba(0,0,0,0.72);
+            box-shadow: 0 0 0 2px rgba(0,0,0,0.14);
         }
                 html.axis-dark .settings-search { background: #3a3a3c;
                 border-color: rgba(255,255,255,0.16);
             }
             .settings-search:focus {
-                border-color: rgba(10,132,255,0.7);
-                box-shadow: 0 0 0 2px rgba(10,132,255,0.2); }
+                border-color: rgba(255,255,255,0.74);
+                box-shadow: 0 0 0 2px rgba(255,255,255,0.18); }
         .settings-search-empty {
             display: none;
             text-align: center;
@@ -638,13 +645,361 @@
             border-color: rgba(0, 0, 0, 0.12);
         }
         html:not(.axis-dark) input[type="checkbox"] {
-            accent-color: #007aff;
+            accent-color: #111111;
+        }
+
+        /* Monochrome Settings shell: pure light/dark surfaces, no accent color or glass. */
+        :root {
+            --settings-bg: #f7f7f7;
+            --settings-sidebar-bg: #ffffff;
+            --settings-card-bg: #ffffff;
+            --settings-control-bg: #ffffff;
+            --settings-hover-bg: #eeeeee;
+            --settings-active-bg: #111111;
+            --settings-active-text: #ffffff;
+            --settings-card-border: #dcdcdc;
+            --settings-row-border: #ececec;
+            --settings-text: #111111;
+            --settings-muted: #6d6d6d;
+            --settings-muted-2: #9a9a9a;
+            --settings-focus: rgba(0, 0, 0, 0.18);
+            --settings-shadow: 0 14px 38px rgba(0, 0, 0, 0.08);
+        }
+        html.axis-dark {
+            --settings-bg: #000000;
+            --settings-sidebar-bg: #050505;
+            --settings-card-bg: #0d0d0d;
+            --settings-control-bg: #151515;
+            --settings-hover-bg: #1f1f1f;
+            --settings-active-bg: #ffffff;
+            --settings-active-text: #000000;
+            --settings-card-border: #242424;
+            --settings-row-border: #1e1e1e;
+            --settings-text: #ffffff;
+            --settings-muted: #a5a5a5;
+            --settings-muted-2: #6f6f6f;
+            --settings-focus: rgba(255, 255, 255, 0.20);
+            --settings-shadow: none;
+        }
+        body,
+        html.axis-dark body,
+        html:not(.axis-dark) body {
+            color: var(--settings-text);
+            background: var(--settings-bg);
+        }
+        html.macos .settings-window-chrome,
+        html.macos.axis-dark .settings-window-chrome {
+            height: 42px;
+            background: var(--settings-sidebar-bg);
+            border-bottom-color: var(--settings-card-border);
+            color: var(--settings-muted);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+        }
+        .sidebar,
+        html.axis-dark .sidebar {
+            width: 232px;
+            padding: 14px 10px;
+            background: var(--settings-sidebar-bg);
+            border-right-color: var(--settings-card-border);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+        }
+        .sidebar-item {
+            min-height: 34px;
+            margin: 2px 0;
+            padding: 7px 11px;
+            border-radius: 9px;
+            font-weight: 600;
+            color: var(--settings-muted);
+            transition: background 0.12s ease, color 0.12s ease;
+        }
+        .sidebar-item svg {
+            width: 17px;
+            height: 17px;
+            opacity: 0.8;
+        }
+        .sidebar-item:hover,
+        html.axis-dark .sidebar-item:hover {
+            background: var(--settings-hover-bg);
+            color: var(--settings-text);
+        }
+        .sidebar-item.active,
+        html.axis-dark .sidebar-item.active {
+            background: var(--settings-active-bg);
+            color: var(--settings-active-text);
+            box-shadow: none;
+        }
+        .main {
+            padding: 30px 36px 42px;
+            background: var(--settings-bg);
+        }
+        .main-inner {
+            max-width: 760px;
+        }
+        .settings-search-wrap {
+            position: sticky;
+            top: -30px;
+            z-index: 5;
+            margin: -6px 0 22px;
+            padding: 6px 0 12px;
+            background: var(--settings-bg);
+        }
+        .settings-search,
+        html.axis-dark .settings-search,
+        html:not(.axis-dark) .settings-search {
+            min-height: 38px;
+            padding: 9px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--settings-card-border);
+            background: var(--settings-control-bg);
+            color: var(--settings-text);
+            box-shadow: none;
+        }
+        .settings-search:focus {
+            border-color: var(--settings-text);
+            box-shadow: 0 0 0 3px var(--settings-focus);
+        }
+        .group {
+            margin-bottom: 28px;
+        }
+        .group-title,
+        .extensions-section-label,
+        .shortcuts-subheading {
+            color: var(--settings-muted);
+            letter-spacing: 0.075em;
+            font-size: 10.5px;
+            padding-left: 8px;
+            margin-bottom: 10px;
+        }
+        .group-content,
+        html.axis-dark .group-content {
+            background: var(--settings-card-bg);
+            border: 1px solid var(--settings-card-border);
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: var(--settings-shadow);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+        }
+        .row,
+        .shortcut-row,
+        .extension-card,
+        html.axis-dark .row,
+        html.axis-dark .shortcut-row,
+        html.axis-dark .extension-card {
+            border-bottom-color: var(--settings-row-border);
+        }
+        .row {
+            min-height: 54px;
+            padding: 14px 20px;
+            gap: 18px;
+        }
+        .row-title,
+        .extension-title,
+        .shortcut-row .shortcut-row-main span {
+            font-size: 13.5px;
+            font-weight: 650;
+            letter-spacing: -0.01em;
+        }
+        .row-desc,
+        .history-url,
+        .history-time,
+        .extensions-pane-lead,
+        .extensions-hint,
+        .extension-desc,
+        .extension-path,
+        .extension-version,
+        .extension-status,
+        .perm-intro,
+        .perm-empty,
+        .extensions-empty,
+        html.axis-dark .row-desc,
+        html.axis-dark .history-url,
+        html.axis-dark .extensions-pane-lead,
+        html.axis-dark .extensions-hint,
+        html.axis-dark .extension-desc,
+        html.axis-dark .extension-path,
+        html.axis-dark .extension-version,
+        html.axis-dark .extension-status,
+        html.axis-dark .perm-intro,
+        html.axis-dark .perm-empty,
+        html.axis-dark .extensions-empty {
+            color: var(--settings-muted);
+        }
+        .row-desc,
+        .extensions-hint,
+        .extensions-pane-lead,
+        .perm-intro {
+            line-height: 1.55;
+        }
+        button {
+            min-height: 32px;
+            border-radius: 9px;
+            border-color: var(--settings-card-border);
+            background: var(--settings-control-bg);
+            color: var(--settings-text);
+            box-shadow: none;
+            transition: background 0.12s ease, border-color 0.12s ease;
+        }
+        button:hover,
+        html.axis-dark button:hover {
+            background: var(--settings-hover-bg);
+            border-color: var(--settings-text);
+        }
+        button:active {
+            transform: none;
+        }
+        select,
+        input[type="text"],
+        input[type="search"],
+        html.axis-dark select,
+        html.axis-dark input[type="text"],
+        html.axis-dark input[type="search"],
+        html:not(.axis-dark) select,
+        html:not(.axis-dark) .perm-table select {
+            min-height: 34px;
+            border-radius: 9px;
+            border-color: var(--settings-card-border);
+            background-color: var(--settings-control-bg);
+            color: var(--settings-text);
+        }
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            accent-color: var(--settings-text);
+        }
+        html:not(.axis-dark) input[type="checkbox"] {
+            accent-color: #111111;
+        }
+        html.axis-dark input[type="checkbox"] {
+            accent-color: #ffffff;
+        }
+        input[type="range"] {
+            height: 28px;
+            accent-color: var(--settings-text);
+        }
+        html:not(.axis-dark) input[type="range"] {
+            accent-color: #111111;
+        }
+        html.axis-dark input[type="range"] {
+            accent-color: #ffffff;
+        }
+        .theme-preview {
+            height: 34px;
+            border-radius: 9px;
+            border-color: var(--settings-card-border);
+            box-shadow: none;
+        }
+        .history-toolbar,
+        .shortcuts-header {
+            margin-bottom: 18px;
+        }
+        .history-item {
+            min-height: 44px;
+            padding: 11px 14px;
+            border-radius: 10px;
+            transition: background 0.12s ease;
+        }
+        .history-item:hover,
+        html.axis-dark .history-item:hover {
+            background: var(--settings-hover-bg);
+        }
+        .extensions-section {
+            margin-bottom: 24px;
+        }
+        .extensions-store-buttons button,
+        .extensions-file-actions button,
+        .extensions-webstore-row button {
+            min-height: 36px;
+        }
+        .extensions-webstore-input {
+            min-height: 36px;
+        }
+        .extension-card {
+            padding: 16px 18px;
+            gap: 14px;
+        }
+        .extension-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            filter: grayscale(1);
+        }
+        .extension-icon-fallback,
+        html.axis-dark .extension-icon-fallback {
+            color: var(--settings-text);
+        }
+        .extension-actions {
+            gap: 10px;
+        }
+        .shortcut-row {
+            min-height: 48px;
+            padding: 10px 18px;
+        }
+        .shortcut-input,
+        .shortcut-action-btn {
+            border-radius: 8px;
+        }
+        .perm-add-row {
+            padding: 14px 18px 16px;
+        }
+        .perm-table th {
+            background: var(--settings-hover-bg);
+        }
+        .perm-table td,
+        html.axis-dark .perm-table td {
+            border-bottom-color: var(--settings-row-border);
+        }
+        @media (max-width: 760px) {
+            html.macos .settings-window-chrome {
+                padding-left: 70px;
+            }
+            .settings-content-row {
+                flex-direction: column;
+            }
+            .sidebar,
+            html.axis-dark .sidebar {
+                width: 100%;
+                max-height: 128px;
+                display: flex;
+                gap: 6px;
+                overflow-x: auto;
+                overflow-y: hidden;
+                border-right: none;
+                border-bottom: 1px solid var(--settings-card-border);
+            }
+            .sidebar-item {
+                flex: 0 0 auto;
+                white-space: nowrap;
+            }
+            .main {
+                padding: 22px 18px 32px;
+            }
+            .settings-search-wrap {
+                top: -22px;
+            }
+            .row {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 10px;
+            }
+            .row-controls {
+                width: 100%;
+                justify-content: flex-start;
+                flex-wrap: wrap;
+            }
         }
     </style>
     <script>
         // Apply the in-app `uiTheme` from the store only (never OS appearance).
         // Sync bootstrap runs before first paint; async getSettings confirms afterward.
         (function applyInitialAxisTheme() {
+            try {
+                if (new URLSearchParams(location.search).get('embedded') === '1') {
+                    document.documentElement.classList.add('settings-embedded');
+                }
+            } catch (_) {}
             const normalizeUiTheme = (v) => (v === 'light' ? 'light' : 'dark');
 
             const setFromValue = (v) => {
@@ -1056,6 +1411,24 @@
     
     <script>
         (async function() {
+            async function waitForElectronAPI(timeoutMs = 5000) {
+                const start = Date.now();
+                while (typeof window.electronAPI === 'undefined') {
+                    if (Date.now() - start > timeoutMs) return false;
+                    await new Promise((resolve) => setTimeout(resolve, 16));
+                }
+                return typeof window.electronAPI !== 'undefined';
+            }
+
+            if (!(await waitForElectronAPI())) {
+                const mainInner = document.querySelector('.main-inner');
+                if (mainInner) {
+                    mainInner.innerHTML =
+                        '<div class="empty-state" style="padding:24px;text-align:center;">Settings could not connect to Axis. Close this tab and open Settings again.</div>';
+                }
+                return;
+            }
+
             const THEME_KEYS = ['themeColor', 'gradientColor', 'gradientEnabled', 'gradientDirection', 'transparentSites', 'windowChromeLight', 'uiTheme'];
             const SHORTCUT_ACTIONS = [
                 { action: 'spotlight-search', label: 'New Tab' },
@@ -1258,21 +1631,29 @@
             
             // Sidebar nav
             let activeSection = 'customization';
-            function switchSection(section) {
+            let suppressSectionRefresh = false;
+            let switchSection = function(section) {
                 document.querySelectorAll('.sidebar-item').forEach(n => n.classList.remove('active'));
-                document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+                document.querySelectorAll('.pane').forEach(p => {
+                    p.classList.remove('active');
+                    p.style.display = '';
+                });
                 const item = document.querySelector(`.sidebar-item[data-section="${section}"]`);
                 const pane = document.getElementById(section + '-pane');
                 if (item) item.classList.add('active');
-                if (pane) pane.classList.add('active');
+                if (pane) {
+                    pane.classList.add('active');
+                    pane.style.display = 'block';
+                }
                 activeSection = section;
             }
+            window.__axisSwitchSettingsSection = switchSection;
             document.querySelectorAll('.sidebar-item').forEach(item => {
                 item.addEventListener('click', () => switchSection(item.dataset.section));
             });
             const hash = (location.hash || '').replace(/^#/, '');
             if (hash) switchSection(hash);
-            window.electronAPI?.onSwitchSettingsTab?.(switchSection);
+            window.electronAPI?.onSwitchSettingsTab?.((tab) => switchSection(tab));
 
             const SITE_PERM_KEYS = ['camera', 'microphone', 'notifications', 'geolocation'];
             function normalizeSiteOriginInput(raw) {
@@ -1570,7 +1951,12 @@
                         pane.querySelectorAll('.row, .shortcut-row').forEach(row => { row.style.display = ''; });
                     });
                     if (settingsSearchEmpty) settingsSearchEmpty.style.display = 'none';
-                    switchSection(activeSection || 'customization');
+                    suppressSectionRefresh = true;
+                    try {
+                        switchSection(activeSection || 'customization');
+                    } finally {
+                        suppressSectionRefresh = false;
+                    }
                     return;
                 }
 
@@ -1868,6 +2254,28 @@
                     renderShortcuts();
                 }
             });
+
+            const baseSwitchSection = switchSection;
+            const refreshSettingsSection = (section) => {
+                if (section === 'history') void populateHistory();
+                else if (section === 'extensions') void loadExtensions();
+                else if (section === 'permissions') void loadSitePermissionOverrides();
+                else if (section === 'shortcuts') {
+                    void reloadShortcutState().then(() => renderShortcuts());
+                }
+            };
+            window.__axisRefreshAllSettingsData = () => {
+                void populateHistory();
+                void loadExtensions();
+                void loadSitePermissionOverrides();
+                void reloadShortcutState().then(() => renderShortcuts());
+            };
+            switchSection = (section) => {
+                baseSwitchSection(section);
+                if (!suppressSectionRefresh) refreshSettingsSection(section);
+            };
+            window.__axisSwitchSettingsSection = switchSection;
+            refreshSettingsSection(activeSection || 'customization');
         })();
     </script>
 </body>
