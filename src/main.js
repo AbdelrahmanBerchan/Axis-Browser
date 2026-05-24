@@ -209,15 +209,26 @@ function buildAxisExtensionPopupBridgeDataUrl(popupUrl) {
   if (parsed.protocol !== 'chrome-extension:') {
     throw new Error('Invalid extension popup URL');
   }
-  const srcEsc = String(popupUrl).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const srcEsc = String(popupUrl)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
   const wp = getAxisExtensionPopupGuestWebpreferencesAttr().replace(/"/g, '&quot;');
   const html =
     '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
-    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\';">' +
-    '<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#f5f5f5}' +
-    'webview{display:inline-flex;width:100%;height:100%;border:0}</style></head><body>' +
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; ' +
+    'script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; ' +
+    'child-src chrome-extension:; frame-src chrome-extension:;">' +
+    '<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#f5f5f5;color:#1f1f1f;font:13px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}' +
+    'webview{display:flex;width:100%;height:100%;border:0;background:transparent}' +
+    '#axis-ext-status{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:18px;box-sizing:border-box;color:#555;background:#f5f5f5}' +
+    '#axis-ext-status.hidden{display:none}</style></head><body>' +
+    '<div id="axis-ext-status">Loading extension…</div>' +
     `<webview src="${srcEsc}" partition="${AXIS_EXTENSION_SESSION_PARTITION}" allowpopups ` +
-    `webpreferences="${wp}"></webview></body></html>`;
+    `webpreferences="${wp}"></webview>` +
+    '<script>(function(){var status=document.getElementById("axis-ext-status");var wv=document.querySelector("webview");function hide(){if(status)status.className="hidden";}function fail(e){if(!status)return;var msg=e&&e.errorDescription?e.errorDescription:"Could not load this extension popup.";status.className="";status.textContent=msg;}if(wv){wv.addEventListener("dom-ready",hide);wv.addEventListener("did-finish-load",hide);wv.addEventListener("did-fail-load",fail);setTimeout(function(){try{if(wv.getURL&&wv.getURL())hide();}catch(e){}},1200);}})();</script>' +
+    '</body></html>';
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
@@ -245,6 +256,10 @@ function attachAxisExtensionPopupShowHandlers(popupWin) {
 
 function getAxisExtensionsDir() {
   return path.join(app.getPath('userData'), 'extensions');
+}
+
+function getAxisExtensionRuntimeDir() {
+  return path.join(app.getPath('userData'), 'extension-runtime');
 }
 
 function makeExtensionRecordId(name) {
@@ -321,6 +336,187 @@ function getAxisExtensionIconUrl(extensionPath, manifest) {
     } catch (_) {}
   }
   return '';
+}
+
+function convertMv3WebAccessibleResources(resources) {
+  if (!Array.isArray(resources)) return resources;
+  const out = [];
+  for (const entry of resources) {
+    if (typeof entry === 'string') {
+      out.push(entry);
+    } else if (entry && typeof entry === 'object' && Array.isArray(entry.resources)) {
+      out.push(...entry.resources.filter((x) => typeof x === 'string'));
+    }
+  }
+  return Array.from(new Set(out));
+}
+
+function getAxisExtensionApiShimSource() {
+  return `
+(function () {
+  var root = typeof globalThis !== 'undefined' ? globalThis : self;
+  var chromeObj = root.chrome = root.chrome || {};
+  function eventStub() {
+    return {
+      addListener: function () {},
+      removeListener: function () {},
+      hasListener: function () { return false; }
+    };
+  }
+  function noop() {
+    var cb = arguments.length ? arguments[arguments.length - 1] : null;
+    if (typeof cb === 'function') setTimeout(function () { cb(); }, 0);
+  }
+  chromeObj.action = chromeObj.action || {};
+  ['setIcon', 'setBadgeText', 'setBadgeBackgroundColor', 'setTitle', 'setPopup', 'enable', 'disable'].forEach(function (key) {
+    if (typeof chromeObj.action[key] !== 'function') chromeObj.action[key] = noop;
+  });
+  chromeObj.browserAction = chromeObj.browserAction || chromeObj.action;
+  chromeObj.contextMenus = chromeObj.contextMenus || {};
+  ['create', 'update', 'remove', 'removeAll'].forEach(function (key) {
+    if (typeof chromeObj.contextMenus[key] !== 'function') chromeObj.contextMenus[key] = noop;
+  });
+  chromeObj.contextMenus.onClicked = chromeObj.contextMenus.onClicked || eventStub();
+  chromeObj.scripting = chromeObj.scripting || {};
+  if (typeof chromeObj.scripting.executeScript !== 'function') {
+    chromeObj.scripting.executeScript = function (_details, callback) {
+      if (typeof callback === 'function') setTimeout(function () { callback([]); }, 0);
+      return Promise.resolve([]);
+    };
+  }
+  if (typeof chromeObj.scripting.insertCSS !== 'function') chromeObj.scripting.insertCSS = noop;
+  if (typeof chromeObj.scripting.removeCSS !== 'function') chromeObj.scripting.removeCSS = noop;
+  chromeObj.fontSettings = chromeObj.fontSettings || {};
+  if (typeof chromeObj.fontSettings.getFontList !== 'function') {
+    chromeObj.fontSettings.getFontList = function (callback) {
+      if (typeof callback === 'function') setTimeout(function () { callback([]); }, 0);
+    };
+  }
+  chromeObj.windows = chromeObj.windows || {};
+  if (typeof chromeObj.windows.getAll !== 'function') {
+    chromeObj.windows.getAll = function (_query, callback) {
+      if (typeof _query === 'function') callback = _query;
+      if (typeof callback === 'function') setTimeout(function () { callback([]); }, 0);
+    };
+  }
+  if (typeof chromeObj.windows.update !== 'function') chromeObj.windows.update = noop;
+  if (typeof chromeObj.windows.create !== 'function') chromeObj.windows.create = noop;
+  if (chromeObj.runtime && typeof chromeObj.runtime.setUninstallURL !== 'function') {
+    chromeObj.runtime.setUninstallURL = noop;
+  }
+})();`;
+}
+
+async function prepareAxisExtensionLoadPath(record, manifest) {
+  if (!record?.path || !manifest || manifest.manifest_version !== 3) {
+    return record?.path || '';
+  }
+  const serviceWorker = manifest.background?.service_worker;
+  const hasAction = manifest.action && typeof manifest.action === 'object';
+  const needsCompat = !!serviceWorker || hasAction || Array.isArray(manifest.host_permissions);
+  if (!needsCompat) return record.path;
+
+  const runtimeRoot = getAxisExtensionRuntimeDir();
+  const safeId = String(record.id || 'extension').replace(/[^a-zA-Z0-9._-]/g, '-');
+  const compatPath = path.join(runtimeRoot, safeId);
+  await fs.promises.rm(compatPath, { recursive: true, force: true }).catch(() => {});
+  await fs.promises.mkdir(runtimeRoot, { recursive: true });
+  await fs.promises.cp(record.path, compatPath, {
+    recursive: true,
+    force: true,
+    errorOnExist: false
+  });
+
+  const compatManifest = { ...manifest, manifest_version: 2 };
+  const shimFile = 'axis_extension_api_shim.js';
+  await fs.promises.writeFile(path.join(compatPath, shimFile), getAxisExtensionApiShimSource(), 'utf8');
+
+  if (manifest.action && typeof manifest.action === 'object') {
+    compatManifest.browser_action = {
+      ...(manifest.browser_action && typeof manifest.browser_action === 'object' ? manifest.browser_action : {}),
+      ...manifest.action
+    };
+  }
+  delete compatManifest.action;
+
+  const unsupportedMv2Permissions = new Set(['scripting', 'fontSettings', 'contextMenus']);
+  const permissions = new Set(
+    (Array.isArray(manifest.permissions) ? manifest.permissions : []).filter(
+      (p) => typeof p === 'string' && !unsupportedMv2Permissions.has(p)
+    )
+  );
+  if (Array.isArray(manifest.host_permissions)) {
+    for (const p of manifest.host_permissions) {
+      if (typeof p === 'string') permissions.add(p);
+    }
+  }
+  compatManifest.permissions = Array.from(permissions);
+  delete compatManifest.host_permissions;
+
+  const optionalPermissions = new Set(
+    (Array.isArray(manifest.optional_permissions) ? manifest.optional_permissions : []).filter(
+      (p) => typeof p === 'string' && !unsupportedMv2Permissions.has(p)
+    )
+  );
+  if (Array.isArray(manifest.optional_host_permissions)) {
+    for (const p of manifest.optional_host_permissions) {
+      if (typeof p === 'string') optionalPermissions.add(p);
+    }
+  }
+  delete compatManifest.optional_permissions;
+  if (optionalPermissions.size > 0) {
+    compatManifest.optional_permissions = Array.from(optionalPermissions);
+  }
+  delete compatManifest.optional_host_permissions;
+
+  if (Array.isArray(manifest.web_accessible_resources)) {
+    compatManifest.web_accessible_resources = convertMv3WebAccessibleResources(
+      manifest.web_accessible_resources
+    );
+  }
+  if (Array.isArray(manifest.content_scripts)) {
+    compatManifest.content_scripts = manifest.content_scripts.map((script) => {
+      if (!script || typeof script !== 'object') return script;
+      const copy = { ...script };
+      delete copy.world;
+      return copy;
+    });
+  }
+
+  if (serviceWorker) {
+    if (manifest.background?.type === 'module') {
+      const bgPage = '__axis_mv3_background__.html';
+      await fs.promises.writeFile(
+        path.join(compatPath, bgPage),
+        `<!doctype html><meta charset="utf-8"><script src="${shimFile}"></script><script type="module" src="${String(serviceWorker).replace(/"/g, '&quot;')}"></script>`,
+        'utf8'
+      );
+      compatManifest.background = { page: bgPage, persistent: false };
+    } else {
+      compatManifest.background = { scripts: [shimFile, serviceWorker], persistent: false };
+    }
+  } else if (manifest.background?.scripts && Array.isArray(manifest.background.scripts)) {
+    compatManifest.background = {
+      ...manifest.background,
+      scripts: [shimFile, ...manifest.background.scripts]
+    };
+  }
+
+  if (
+    compatManifest.content_security_policy &&
+    typeof compatManifest.content_security_policy === 'object'
+  ) {
+    compatManifest.content_security_policy =
+      compatManifest.content_security_policy.extension_pages ||
+      "script-src 'self'; object-src 'self'";
+  }
+
+  await fs.promises.writeFile(
+    path.join(compatPath, 'manifest.json'),
+    JSON.stringify(compatManifest, null, 2),
+    'utf8'
+  );
+  return compatPath;
 }
 
 function parseChromeWebStoreExtensionId(raw) {
@@ -598,7 +794,13 @@ async function loadAxisExtensionRecord(record) {
 
   try {
     const manifest = await readAxisExtensionManifest(record.path);
-    const ext = await session.fromPartition('persist:main').loadExtension(record.path, {
+    const loadPath = await prepareAxisExtensionLoadPath(record, manifest);
+    const extSession = session.fromPartition('persist:main');
+    const loadExtension =
+      extSession.extensions && typeof extSession.extensions.loadExtension === 'function'
+        ? extSession.extensions.loadExtension.bind(extSession.extensions)
+        : extSession.loadExtension.bind(extSession);
+    const ext = await loadExtension(loadPath, {
       allowFileAccess: true
     });
     const next = {
@@ -807,11 +1009,12 @@ async function openAxisExtensionPopup(id) {
     backgroundColor: '#f5f5f5',
     webPreferences: {
       session: extSession,
-      contextIsolation: true,
+      contextIsolation: false,
       nodeIntegration: false,
       sandbox: false,
+      preload: path.join(__dirname, 'extension-popup-preload.js'),
       webSecurity: true,
-      webviewTag: true,
+      webviewTag: false,
       backgroundThrottling: false,
       spellcheck: false
     }
@@ -826,9 +1029,12 @@ async function openAxisExtensionPopup(id) {
 
   attachAxisExtensionPopupShowHandlers(popupWin);
 
-  const bridgeUrl = buildAxisExtensionPopupBridgeDataUrl(view.popupUrl);
   try {
-    await popupWin.loadURL(bridgeUrl);
+    // Load extension popups as real top-level extension pages. The previous data-URL
+    // bridge nested the popup in a <webview>, which opened a window but left many
+    // extension UIs blank/non-interactive because popup scripts were not running in
+    // the expected top-level extension page context.
+    await popupWin.loadURL(view.popupUrl);
   } catch (err) {
     axisExtensionPopupByRecordId.delete(id);
     if (!popupWin.isDestroyed()) {
@@ -877,9 +1083,6 @@ function cleanSitePermissionOverrides(raw) {
 function broadcastSettingsUpdated() {
   try {
     applyMainWindowVibrancyFromStore();
-  } catch (_) {}
-  try {
-    refreshSettingsWindowChrome();
   } catch (_) {}
   for (const w of BrowserWindow.getAllWindows()) {
     if (w.isDestroyed()) continue;
@@ -1119,6 +1322,15 @@ function scheduleAxisDownloadProgressBroadcast() {
 // ---------------------------------------------------------------------------
 let axisAdblockBlocker = null;
 let axisAdblockLoadPromise = null;
+const axisAdblockEnabledSessionKeys = new Set();
+
+function getAxisSessionKey(sess) {
+  try {
+    return sess && typeof sess.partition === 'string' ? sess.partition : '';
+  } catch (_) {
+    return '';
+  }
+}
 
 function getAxisAdblockSessions() {
   const out = [];
@@ -1150,6 +1362,7 @@ async function applyAxisAdBlockerEnabled(enabled) {
         if (axisAdblockBlocker.isBlockingEnabled(s)) {
           axisAdblockBlocker.disableBlockingInSession(s);
         }
+        axisAdblockEnabledSessionKeys.delete(getAxisSessionKey(s));
       } catch (_) {}
     }
     return;
@@ -1178,10 +1391,19 @@ async function applyAxisAdBlockerEnabled(enabled) {
     axisAdblockBlocker = blocker;
     for (const s of sessions) {
       try {
+        const key = getAxisSessionKey(s);
+        if (key && axisAdblockEnabledSessionKeys.has(key)) continue;
         if (!blocker.isBlockingEnabled(s)) {
           blocker.enableBlockingInSession(s);
         }
+        if (key) axisAdblockEnabledSessionKeys.add(key);
       } catch (e) {
+        const msg = e && e.message ? String(e.message) : String(e);
+        if (msg.includes("Attempted to register a second handler for '@ghostery/adblocker/inject-cosmetic-filters'")) {
+          const key = getAxisSessionKey(s);
+          if (key) axisAdblockEnabledSessionKeys.add(key);
+          continue;
+        }
         console.warn('Axis: enable ad blocker on session failed:', e);
       }
     }
@@ -1461,7 +1683,6 @@ function applyMainWindowVibrancyFromStore() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   applyVibrancyToWindow(mainWindow);
 }
-let settingsWindow = null;
 let isQuitConfirmed = false;
 let isUserQuitting = false;
 
@@ -1842,85 +2063,24 @@ function createWindow() {
   createMenu();
 }
 
-function getSettingsWindowBackgroundColor() {
-  try {
-    // Match the settings window to the in-app `uiTheme` setting (same source of
-    // truth as the renderer's `data-ui-theme`) so there's no light/dark flash
-    // before `settings.html` reads the setting itself. Do not use `nativeTheme`:
-    // OS appearance must not change this color.
-    const uiTheme = store.get('uiTheme', 'dark');
-    if (uiTheme === 'light') return '#f5f5f7';
-    return '#1e1e1e';
-  } catch (_) {
-    return '#1e1e1e';
+/** Open Settings as an in-browser tab (`axis://settings`) in the main shell. */
+function openSettingsInBrowserTab(section = null) {
+  let win = mainWindow;
+  if (!win || win.isDestroyed()) {
+    createWindow();
+    win = mainWindow;
   }
-}
-
-/** Windows `titleBarOverlay` + background color when the Settings `BrowserWindow` is open. */
-function refreshSettingsWindowChrome() {
-  if (!settingsWindow || settingsWindow.isDestroyed()) return;
-  const bg = getSettingsWindowBackgroundColor();
+  if (!win || win.isDestroyed()) {
+    const fallback = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+    if (!fallback) return;
+    win = fallback;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
   try {
-    settingsWindow.setBackgroundColor(bg);
+    win.webContents.send('open-settings-tab', section || null);
   } catch (_) {}
-  if (process.platform !== 'win32') return;
-  if (typeof settingsWindow.setTitleBarOverlay !== 'function') return;
-  try {
-    const light = String(bg).toLowerCase() === '#f5f5f7';
-    settingsWindow.setTitleBarOverlay({
-      color: light ? '#f5f5f7' : '#1e1e1e',
-      symbolColor: light ? '#1a1a1a' : '#e8e8ed',
-      height: 32
-    });
-  } catch (_) {}
-}
-
-function openSettingsWindow(tab = null) {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.focus();
-    if (tab) {
-      settingsWindow.webContents.send('switch-settings-tab', tab);
-    }
-    return;
-  }
-  const windowOptions = {
-    width: 760,
-    height: 560,
-    minWidth: 560,
-    minHeight: 400,
-    title: 'Settings',
-    show: false,
-    backgroundColor: getSettingsWindowBackgroundColor(),
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
-    }
-  };
-  // macOS: replace the system title bar (often dark when OS is dark) with `hiddenInset`
-  // + an in-page strip in `settings.html`. Windows: recolor the caption with
-  // `titleBarOverlay` so `uiTheme: light` matches a light top bar.
-  if (process.platform === 'darwin') {
-    windowOptions.titleBarStyle = 'hiddenInset';
-  } else if (process.platform === 'win32') {
-    windowOptions.titleBarStyle = 'hidden';
-    const bg0 = getSettingsWindowBackgroundColor();
-    const light = String(bg0).toLowerCase() === '#f5f5f7';
-    windowOptions.titleBarOverlay = {
-      color: light ? '#f5f5f7' : '#1e1e1e',
-      symbolColor: light ? '#1a1a1a' : '#e8e8ed',
-      height: 32
-    };
-  }
-  settingsWindow = new BrowserWindow(windowOptions);
-  const settingsPath = path.join(__dirname, 'settings.html');
-  settingsWindow.loadFile(settingsPath, { hash: tab || '' });
-  settingsWindow.once('ready-to-show', () => {
-    settingsWindow.show();
-  });
-  settingsWindow.on('closed', () => {
-    settingsWindow = null;
-  });
 }
 
 function menuAccel(key) {
@@ -2143,7 +2303,7 @@ function buildExtensionsSubmenu() {
   });
   items.push({
     label: 'Manage Extensions…',
-    click: () => openSettingsWindow('extensions')
+    click: () => openSettingsInBrowserTab('extensions')
   });
   return items;
 }
@@ -2199,11 +2359,11 @@ function createMenu() {
         {
           label: 'Settings…',
           ...(settingsShortcut ? { accelerator: settingsShortcut } : {}),
-          click: () => openSettingsWindow()
+          click: () => openSettingsInBrowserTab()
         },
         {
           label: 'Keyboard Shortcuts…',
-          click: () => openSettingsWindow('shortcuts')
+          click: () => openSettingsInBrowserTab('shortcuts')
         },
         { type: 'separator' },
         { role: 'services', submenu: [] },
@@ -2330,7 +2490,7 @@ function createMenu() {
           {
             label: 'Settings…',
             ...(settingsShortcut ? { accelerator: settingsShortcut } : {}),
-            click: () => openSettingsWindow()
+            click: () => openSettingsInBrowserTab()
           }
         ]
       : [])
@@ -2669,6 +2829,16 @@ function matchesSuppressed(text) {
   return typeof text === 'string' && SUPPRESSED_PATTERNS.some(p => text.includes(p));
 }
 
+function isSuppressedWarning(warning) {
+  const msg = typeof warning === 'string' ? warning
+    : (warning instanceof Error ? warning.message : '');
+  if (matchesSuppressed(msg)) return true;
+  return (
+    msg.includes('Manifest version 2 is deprecated') &&
+    msg.includes(`${path.sep}extension-runtime${path.sep}`)
+  );
+}
+
 const _origStderrWrite = process.stderr.write.bind(process.stderr);
 process.stderr.write = (chunk, ...rest) => {
   if (matchesSuppressed(typeof chunk === 'string' ? chunk : chunk?.toString?.())) return true;
@@ -2691,9 +2861,7 @@ console.error = (...args) => {
 
 const _origProcessEmitWarning = process.emitWarning;
 process.emitWarning = (warning, ...rest) => {
-  const msg = typeof warning === 'string' ? warning
-    : (warning instanceof Error ? warning.message : '');
-  if (matchesSuppressed(msg)) return;
+  if (isSuppressedWarning(warning)) return;
   _origProcessEmitWarning.call(process, warning, ...rest);
 };
 
@@ -2845,9 +3013,23 @@ app.on('activate', () => {
 
 // IPC handlers
 ipcMain.handle('open-settings-window', (event, tab) => {
-  openSettingsWindow(tab || null);
+  openSettingsInBrowserTab(tab || null);
   return true;
 });
+
+ipcMain.handle('get-settings-tab-load-url', (_event, section) => {
+  const filePath = path.join(__dirname, 'settings.html');
+  const u = pathToFileURL(filePath);
+  u.searchParams.set('embedded', '1');
+  if (section && typeof section === 'string') {
+    u.hash = section.replace(/^#/, '');
+  }
+  return u.href;
+});
+
+ipcMain.handle('get-settings-webview-preload-path', () =>
+  path.join(__dirname, 'webview-preload-settings.js')
+);
 
 ipcMain.handle('set-window-title', (event, title) => {
   const win = BrowserWindow.fromWebContents(event.sender);
