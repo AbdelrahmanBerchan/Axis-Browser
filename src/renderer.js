@@ -237,6 +237,21 @@ function axisParseFirefoxAmoAddonKey(raw) {
     return null;
 }
 
+/** Settings sidebar section ids (`settings.html` `data-section` values). */
+const AXIS_SETTINGS_SECTION_IDS = new Set([
+    'customization',
+    'history',
+    'shortcuts',
+    'permissions',
+    'extensions'
+]);
+
+/** Allowlisted settings section id for IPC (never embed arbitrary strings in guest JS). */
+function axisSanitizeSettingsSectionId(raw) {
+    const id = raw != null ? String(raw).replace(/^#/, '').trim() : '';
+    return AXIS_SETTINGS_SECTION_IDS.has(id) ? id : null;
+}
+
 /** Dismiss the extension-store install bar in the guest (`token`: Chrome id or `amo:slug`). */
 function axisNotifyExtensionStoreBarDismissed(webview, token) {
     const t = typeof token === 'string' ? token.trim() : '';
@@ -7198,7 +7213,7 @@ class AxisBrowser {
 
     focusSettingsSection(rawTabId, section) {
         const tabId = this._normalizeTabMapKey(rawTabId);
-        const sectionId = section != null ? String(section).replace(/^#/, '').trim() : '';
+        const sectionId = axisSanitizeSettingsSectionId(section);
         if (tabId == null || !sectionId) return;
         const tab = this.tabs.get(tabId);
         if (tab) {
@@ -7206,12 +7221,12 @@ class AxisBrowser {
             this.tabs.set(tabId, tab);
         }
         const wv = tab?.webview;
-        if (!wv || typeof wv.executeJavaScript !== 'function') return;
-        const payload = JSON.stringify(sectionId);
-        wv.executeJavaScript(
-            `(function(s){try{if(typeof window.__axisSwitchSettingsSection==="function")window.__axisSwitchSettingsSection(s);else location.hash=s;}catch(e){}})(${payload});`,
-            true
-        ).catch(() => {});
+        if (!wv || typeof wv.send !== 'function') return;
+        try {
+            wv.send('switch-settings-tab', sectionId);
+        } catch (_) {
+            /* guest may not be ready yet */
+        }
     }
 
     async createSettingsTab(section = null) {
@@ -7368,7 +7383,7 @@ class AxisBrowser {
             webview.style.removeProperty('background');
         } catch (_) {}
 
-        const targetSection = section || tab?.settingsSection || null;
+        const targetSection = axisSanitizeSettingsSectionId(section || tab?.settingsSection);
 
         const settingsPreload = this._settingsWebviewPreloadPath || '';
         let webviewPreload = '';
@@ -7402,23 +7417,23 @@ class AxisBrowser {
             currentSrc = '';
         }
 
+        const sectionToFocus = targetSection || 'customization';
         const focusLoadedSection = (attempt = 0) => {
+            const checkReady =
+                '(function(){if(typeof window.electronAPI==="undefined")return"no-api";if(typeof window.__axisSwitchSettingsSection!=="function")return"no-switch";return"ok";})();';
             try {
                 webview
-                    .executeJavaScript(
-                        `(function(){
-                            if (typeof window.electronAPI === "undefined") return "no-api";
-                            if (typeof window.__axisSwitchSettingsSection !== "function") return "no-switch";
-                            const active = document.querySelector(".sidebar-item.active")?.dataset?.section
-                                || ${JSON.stringify(targetSection || tab?.settingsSection || 'customization')};
-                            window.__axisSwitchSettingsSection(active);
-                            return "ok";
-                        })();`,
-                        true
-                    )
+                    .executeJavaScript(checkReady, true)
                     .then((result) => {
-                        if (result === 'ok' || attempt >= 50) return;
-                        setTimeout(() => focusLoadedSection(attempt + 1), 100);
+                        if (result === 'ok') {
+                            try {
+                                webview.send('switch-settings-tab', sectionToFocus);
+                            } catch (_) {}
+                            return;
+                        }
+                        if (attempt < 50) {
+                            setTimeout(() => focusLoadedSection(attempt + 1), 100);
+                        }
                     })
                     .catch(() => {
                         if (attempt < 50) {
