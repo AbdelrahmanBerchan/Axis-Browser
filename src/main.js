@@ -3017,12 +3017,27 @@ ipcMain.handle('open-settings-window', (event, tab) => {
   return true;
 });
 
+const AXIS_SETTINGS_SECTION_IDS = new Set([
+  'customization',
+  'history',
+  'shortcuts',
+  'permissions',
+  'extensions'
+]);
+
+function sanitizeSettingsSectionId(section) {
+  if (section == null || typeof section !== 'string') return null;
+  const id = section.replace(/^#/, '').trim();
+  return AXIS_SETTINGS_SECTION_IDS.has(id) ? id : null;
+}
+
 ipcMain.handle('get-settings-tab-load-url', (_event, section) => {
   const filePath = path.join(__dirname, 'settings.html');
   const u = pathToFileURL(filePath);
   u.searchParams.set('embedded', '1');
-  if (section && typeof section === 'string') {
-    u.hash = section.replace(/^#/, '');
+  const safeSection = sanitizeSettingsSectionId(section);
+  if (safeSection) {
+    u.hash = safeSection;
   }
   return u.href;
 });
