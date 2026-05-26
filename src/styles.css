@@ -251,24 +251,24 @@ body.incognito-window {
  * so the page doesn't inherit the theme color (which would be "theme affecting
  * the new tab page") and so the inner search / ask cards read correctly.
  */
-:root[data-ui-theme="light"] .new-tab-page {
+:root[data-ui-theme="light"] #new-tab-page.new-tab-page {
     background: transparent !important;
 }
 
 /*
- * When the new-tab-page is LIGHT, the `.webview-url-bar.new-tab-page` top bar
- * sitting above it also has to flip — otherwise the black bar (with white icons)
- * looks jarring against the light page underneath. Base rule sets:
- *   --url-bar-bg: #000000;
- *   --url-bar-border: rgba(255,255,255,0.1);
- *   --url-bar-text: rgba(255,255,255,0.96);
- *   --url-bar-text-muted: rgba(255,255,255,0.55);
- *   --url-bar-btn-hover: rgba(255,255,255,0.12);
- * We flip each to the black-alpha complement. Transparent-sites-mode has its
- * own stylesheet branch; we only need to override the non-transparent one.
+ * When the new-tab-page or Settings tab is LIGHT, the internal-page top bar
+ * sitting above it also has to flip — never reuse overlay class `new-tab-page` on `#webview-url-bar`.
  */
-:root[data-ui-theme="light"] .webview-url-bar.new-tab-page {
-    --url-bar-bg: rgba(244, 244, 246, 0.98) !important;
+:root[data-ui-theme="light"] .webview-url-bar.url-bar-internal-shell {
+    --url-bar-bg: #ffffff !important;
+    --url-bar-border: rgba(0, 0, 0, 0.08) !important;
+    --url-bar-text: rgba(0, 0, 0, 0.9) !important;
+    --url-bar-text-muted: rgba(0, 0, 0, 0.55) !important;
+    --url-bar-btn-hover: rgba(0, 0, 0, 0.08) !important;
+    background: #ffffff !important;
+}
+:root[data-ui-theme="light"] body.transparent-sites-mode .webview-url-bar.url-bar-internal-shell {
+    --url-bar-bg: var(--axis-nt-search-bg, rgba(244, 245, 247, 0.96)) !important;
     --url-bar-border: rgba(0, 0, 0, 0.08) !important;
     --url-bar-text: rgba(0, 0, 0, 0.9) !important;
     --url-bar-text-muted: rgba(0, 0, 0, 0.55) !important;
@@ -2572,6 +2572,19 @@ body.incognito-window .clear-unpinned-floating:active {
 :root[data-ui-theme="light"] .profile-switch-btn.active {
     color: rgba(0, 0, 0, 0.96);
     background: rgba(0, 0, 0, 0.14);
+}
+
+.tab.tab-favorite-host {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+    position: absolute !important;
+    visibility: hidden !important;
+    border: 0 !important;
 }
 
 .favorites-section {
@@ -6322,8 +6335,8 @@ body.light-theme .shortcut-desc {
     font-size: 14px;
 }
 
-/* New Tab Page - local overlay; solid black canvas (not transparent — shell / vibrancy was bleeding through as gray). */
-.new-tab-page {
+/* New Tab Page overlay only — do not use class `new-tab-page` on `#webview-url-bar`. */
+#new-tab-page.new-tab-page {
     position: absolute;
     top: 0;
     left: 0;
@@ -6338,7 +6351,7 @@ body.light-theme .shortcut-desc {
     overflow-y: auto;
     padding: 40px;
 }
-.new-tab-page.hidden {
+#new-tab-page.new-tab-page.hidden {
     display: none;
 }
 .new-tab-page-content {
@@ -11069,14 +11082,14 @@ body.light-theme .color-option.selected {
     display: none;
 }
 
-/* On new tab page: keep URL bar visible but hide copy link, security, and chat buttons */
-.webview-url-bar.new-tab-page .url-bar-actions,
-.webview-url-bar.new-tab-page .url-bar-right {
+/* New tab: hide copy / security / chat; Settings keeps full chrome. */
+.webview-url-bar.url-bar-ntp-chrome .url-bar-actions,
+.webview-url-bar.url-bar-ntp-chrome .url-bar-right {
     display: none;
 }
 
-/* New tab: black top bar (not user theme); transparent mode uses same shell variables as the search glass */
-body:not(.transparent-sites-mode) .webview-url-bar.new-tab-page {
+/* Internal pages (new tab, Settings): black top bar in dark uiTheme only. */
+:root[data-ui-theme="dark"] body:not(.transparent-sites-mode) .webview-url-bar.url-bar-internal-shell {
     --url-bar-bg: #000000;
     --url-bar-border: rgba(255, 255, 255, 0.1);
     --url-bar-text: rgba(255, 255, 255, 0.96);
@@ -11084,9 +11097,10 @@ body:not(.transparent-sites-mode) .webview-url-bar.new-tab-page {
     --url-bar-btn-hover: rgba(255, 255, 255, 0.12);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    background: #000000 !important;
 }
 
-body.transparent-sites-mode .webview-url-bar.new-tab-page {
+:root[data-ui-theme="dark"] body.transparent-sites-mode .webview-url-bar.url-bar-internal-shell {
     --url-bar-bg: var(--axis-nt-search-bg, rgba(14, 15, 18, 0.1));
     --url-bar-border: rgba(255, 255, 255, 0.1);
     --url-bar-text: rgba(255, 255, 255, 0.96);
