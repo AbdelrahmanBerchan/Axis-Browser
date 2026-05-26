@@ -2533,9 +2533,9 @@ class AxisBrowser {
             const wv = this.getActiveWebview();
             this.updateUrlBar(wv, { skipExtractTheme: true });
             if (tab && tab.url === this.NEWTAB_URL) {
-                /* handled in updateUrlBar → applyNewTabPageUrlBarStyle */
+                /* handled in updateUrlBar → applyInternalShellUrlBarStyle */
             } else if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
-                this.applyAppThemeToUrlBar();
+                this.applyInternalShellUrlBarStyle();
             } else if (wv) {
                 await this.extractUrlBarTheme(wv);
             } else {
@@ -4438,6 +4438,42 @@ class AxisBrowser {
                 document.body.classList.remove('theme-switching');
             });
         });
+        this._syncInternalShellUrlBarIfNeeded();
+    }
+
+    _isInternalShellUrlBar(urlBar = this.elements?.webviewUrlBar) {
+        return !!urlBar?.classList.contains('url-bar-internal-shell');
+    }
+
+    /** NTP / Settings URL chrome — never reuse overlay class `new-tab-page` on `#webview-url-bar`. */
+    _setUrlBarInternalShellMode(mode) {
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar) return;
+        urlBar.classList.remove(
+            'url-bar-internal-shell',
+            'url-bar-ntp-chrome',
+            'settings-page',
+            'new-tab-page'
+        );
+        if (mode === 'ntp') {
+            urlBar.classList.add('url-bar-internal-shell', 'url-bar-ntp-chrome');
+        } else if (mode === 'settings') {
+            urlBar.classList.add('url-bar-internal-shell', 'settings-page');
+        } else {
+            urlBar.style.removeProperty('background');
+        }
+    }
+
+    /** Re-apply NTP / Settings URL bar styling after global theme refresh. */
+    _syncInternalShellUrlBarIfNeeded() {
+        const curTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (curTab?.url === this.NEWTAB_URL) {
+            this._setUrlBarInternalShellMode('ntp');
+            this.applyInternalShellUrlBarStyle();
+        } else if (curTab?.url === 'axis://settings' || curTab?.isSettings) {
+            this._setUrlBarInternalShellMode('settings');
+            this.applyInternalShellUrlBarStyle();
+        }
     }
 
     /** 0 = opaque chrome, 1 = most desktop light through (settings slider / 100). */
@@ -4745,21 +4781,87 @@ class AxisBrowser {
         return webview;
     }
 
+    /** Reattach an existing guest in `#webviews-container` when the Map lost `tab.webview`. */
+    _findTabWebviewInContainer(tabId) {
+        const container = document.getElementById('webviews-container');
+        if (!container) return null;
+        const want = String(tabId);
+        for (const wv of container.querySelectorAll('webview')) {
+            if (String(wv.dataset.tabId) === want) return wv;
+        }
+        return null;
+    }
+
+    /**
+     * Favorites are shown as tiles, but each favorite owns a real tab id. A hidden `.tab` row
+     * keeps focus/layout code (`querySelector('[data-tab-id]')`) identical to pinned tabs.
+     */
+    _ensureFavoriteTabHostElement(tabId) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (id == null) return null;
+        let el = document.querySelector(`[data-tab-id="${id}"]`);
+        if (el) return el;
+        el = document.createElement('div');
+        el.className = 'tab tab-favorite-host';
+        el.dataset.tabId = String(id);
+        el.setAttribute('aria-hidden', 'true');
+        const tabsContainer = this.elements.tabsContainer;
+        const separator = this.elements.tabsSeparator;
+        if (tabsContainer) {
+            if (separator && separator.parentNode === tabsContainer) {
+                tabsContainer.insertBefore(el, separator);
+            } else {
+                tabsContainer.insertBefore(el, tabsContainer.firstChild);
+            }
+        }
+        return el;
+    }
+
+    _removeFavoriteTabHostElement(tabId) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (id == null) return;
+        const el = document.querySelector(`[data-tab-id="${id}"]`);
+        if (el?.classList.contains('tab-favorite-host')) {
+            try {
+                el.remove();
+            } catch (_) {}
+        }
+    }
+
+    /** Detach/reattach guest so Electron recomputes guest bounds after container width changes. */
+    _rebindWebviewGuestLayout(webview) {
+        if (!webview?.parentNode) return;
+        const parent = webview.parentNode;
+        const next = webview.nextSibling;
+        try {
+            parent.removeChild(webview);
+            if (next) parent.insertBefore(webview, next);
+            else parent.appendChild(webview);
+        } catch (_) {}
+        this._nudgeWebviewGuestLayout();
+    }
+
     /**
      * Cheap layout poke so Electron’s guest embedding matches settled host bounds (post-resize /
      * tab switch only — not during active edge drag; we avoid that workload entirely there).
      */
     _nudgeWebviewGuestLayout() {
         const container = document.getElementById('webviews-container');
+        let containerRect = null;
         if (container) {
             try {
+                containerRect = container.getBoundingClientRect();
                 void container.offsetHeight;
-                void container.getBoundingClientRect();
+                void containerRect;
             } catch (_) {}
         }
         const active = this.getActiveWebview();
         if (active) {
             try {
+                if (containerRect && containerRect.width > 0 && containerRect.height > 0) {
+                    active.style.width = `${Math.round(containerRect.width)}px`;
+                    active.style.height = `${Math.round(containerRect.height)}px`;
+                }
                 void active.offsetWidth;
                 void active.offsetHeight;
                 void active.getBoundingClientRect();
@@ -4773,18 +4875,64 @@ class AxisBrowser {
         }
     }
 
+    /** True when this tab already had a loaded guest before the current switch (getURL can lie while inactive). */
+    _tabGuestSessionEstablished(tab, currentSrc) {
+        if (currentSrc && currentSrc !== 'about:blank' && String(currentSrc).trim() !== '') {
+            // Internal pseudo-URLs / file guests — only count when the guest document is real.
+            if (currentSrc.includes('settings.html')) return true;
+            if (/^axis:/i.test(currentSrc) || currentSrc === this.NEWTAB_URL) return false;
+            return true;
+        }
+        if (!tab) return false;
+        const hist = tab.history;
+        if (!Array.isArray(hist) || hist.length === 0) return false;
+        const idx = typeof tab.historyIndex === 'number' && tab.historyIndex >= 0
+            ? tab.historyIndex
+            : hist.length - 1;
+        const u = hist[idx] ?? hist[hist.length - 1];
+        if (!u || u === 'about:blank' || u === this.NEWTAB_URL) return false;
+        // `axis://settings` in tab metadata does not mean the settings guest finished loading.
+        if (/^axis:/i.test(u)) return false;
+        return true;
+    }
+
+    _settingsGuestNeedsLoad(currentSrc) {
+        return !currentSrc || currentSrc === 'about:blank' || !currentSrc.includes('settings.html');
+    }
+
+    _guestLayoutLooksStale(container, webview) {
+        if (!container || !webview) return false;
+        try {
+            const cr = container.getBoundingClientRect();
+            const wr = webview.getBoundingClientRect();
+            return cr.width > 320 && wr.width > 0 && wr.width < cr.width * 0.55;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /** Rebind only when the guest viewport is still phone-width after the host has full bounds. */
+    _maybeRebindStaleGuestLayout() {
+        const container = document.getElementById('webviews-container');
+        const active = this.getActiveWebview();
+        if (!active || !this._guestLayoutLooksStale(container, active)) return;
+        this._rebindWebviewGuestLayout(active);
+        this._nudgeWebviewGuestLayout();
+        this._syncGuestWindowResizeEvent();
+    }
+
     /**
      * After bulk tab closes or switching to a favorite (no sidebar `.tab` row), `<webview>`
      * guests can keep a **stale viewport width**; responsive pages then use a phone-width column,
      * which looks like the page lives in the narrow sidebar beside an empty panel.
      */
     _forceGuestLayoutSync() {
+        const container = document.getElementById('webviews-container');
         try {
-            const c = document.getElementById('webviews-container');
-            if (c) {
-                void c.getBoundingClientRect();
-                void c.offsetWidth;
-                void c.offsetHeight;
+            if (container) {
+                void container.getBoundingClientRect();
+                void container.offsetWidth;
+                void container.offsetHeight;
             }
         } catch (_) {}
         this._nudgeWebviewGuestLayout();
@@ -4795,11 +4943,18 @@ class AxisBrowser {
         requestAnimationFrame(() => {
             this._nudgeWebviewGuestLayout();
             this._syncGuestWindowResizeEvent();
+            this._maybeRebindStaleGuestLayout();
         });
         setTimeout(() => {
             this._nudgeWebviewGuestLayout();
             this._syncGuestWindowResizeEvent();
+            this._maybeRebindStaleGuestLayout();
         }, 64);
+        setTimeout(() => {
+            this._nudgeWebviewGuestLayout();
+            this._syncGuestWindowResizeEvent();
+            this._maybeRebindStaleGuestLayout();
+        }, 200);
     }
 
     /** Dispatch window `resize` inside the active guest for pages that listen on `window`. */
@@ -5191,8 +5346,12 @@ class AxisBrowser {
         }
 
         // INSTANT tab switching - all critical updates happen synchronously
-        const activeTab = document.querySelector(`[data-tab-id="${tabId}"]`);
+        let activeTab = document.querySelector(`[data-tab-id="${tabId}"]`);
         const tab = this.tabs.get(tabId);
+        if (tab?.isFavoriteTab) {
+            this._ensureFavoriteTabHostElement(tabId);
+            activeTab = document.querySelector(`[data-tab-id="${tabId}"]`);
+        }
 
         const prevTabId = prevCur;
         if (prevTabId != null && prevTabId !== tabId) {
@@ -5232,11 +5391,20 @@ class AxisBrowser {
         
         if (tab) {
             // Ensure webview exists - create if missing
+            let webviewCreatedThisSwitch = false;
+            if (!tab.webview) {
+                const reclaimed = this._findTabWebviewInContainer(tabId);
+                if (reclaimed) {
+                    tab.webview = reclaimed;
+                    this.tabs.set(tabId, tab);
+                }
+            }
             if (!tab.webview) {
                 const webview = this.createTabWebview(tabId, this._settingsWebviewOptionsForTab(tab));
                 if (webview) {
                     tab.webview = webview;
                     this.tabs.set(tabId, tab);
+                    webviewCreatedThisSwitch = true;
                     // Update closed state for pinned tabs
                     if (tab.pinned) {
                         this.updatePinnedTabClosedState(tabId);
@@ -5263,6 +5431,9 @@ class AxisBrowser {
                 }
                 if (currentSrc === undefined || currentSrc === null) currentSrc = '';
 
+                const skipGuestSrcReload = !webviewCreatedThisSwitch
+                    && this._tabGuestSessionEstablished(tab, currentSrc)
+                    && !this._isSettingsTab(tab);
                 // If tab says new-tab but webview has navigated to a real page (e.g. user searched from new tab), sync tab.url so we show the page, not the overlay
                 const isWebviewRealPage = currentSrc && currentSrc !== 'about:blank' && currentSrc.trim() !== '' && currentSrc !== this.NEWTAB_URL && !currentSrc.startsWith('axis:');
                 if (tab.url === this.NEWTAB_URL && isWebviewRealPage) {
@@ -5271,19 +5442,30 @@ class AxisBrowser {
                 }
 
                 // Set webview.src BEFORE making visible so the load starts and content paints correctly
-                if (tab.url === this.NEWTAB_URL) {
-                    // No webview load for new tab page
-                } else if (tab.url && (tab.url === 'axis://settings' || tab.isSettings)) {
+                if (this._isSettingsTab(tab)) {
                     if (!tab.isSettings) {
                         tab.isSettings = true;
                         tab.url = 'axis://settings';
                         this.tabs.set(tabId, tab);
                     }
-                    if (currentSrc === 'about:blank' || !currentSrc || !currentSrc.includes('settings.html')) {
+                    if (this._settingsGuestNeedsLoad(currentSrc)) {
                         void this.loadSettingsInWebview(tab.settingsSection || null, tabId);
                     } else if (tab.settingsSection) {
                         this.focusSettingsSection(tabId, tab.settingsSection);
                     }
+                } else if (skipGuestSrcReload) {
+                    // Inactive guests often report about:blank from getURL() — never reassign src.
+                    if (currentSrc && currentSrc !== 'about:blank') {
+                        try {
+                            const cur = new URL(currentSrc);
+                            if ((cur.protocol === 'https:' || cur.protocol === 'http:') && currentSrc !== tab.url) {
+                                tab.url = currentSrc;
+                                this.tabs.set(tabId, tab);
+                            }
+                        } catch (_) {}
+                    }
+                } else if (tab.url === this.NEWTAB_URL) {
+                    // No webview load for new tab page
                 } else if (tab.url && tab.url.startsWith('axis:note://')) {
                     const noteId = tab.url.replace('axis:note://', '');
                     if (!currentSrc || currentSrc === 'about:blank' || !currentSrc.includes('axis:note://')) {
@@ -5342,6 +5524,10 @@ class AxisBrowser {
                 if (tab.url && tab.url !== 'about:blank' && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://')) {
                     this.applyCachedTheme(tab.url);
                 }
+                if (tab.isFavoriteTab) {
+                    this.renderFavorites();
+                    requestAnimationFrame(() => this._forceGuestLayoutSync());
+                }
             }
 
             /* #new-tab-page is z-index 50 — must hide when leaving axis://newtab or it covers every webview below. */
@@ -5358,10 +5544,8 @@ class AxisBrowser {
                 this._urlBarInstantThemeTabSwitch = true;
                 this.elements?.webviewUrlBar?.classList.add('url-bar--instant-theme');
             }
-            if (!(tab && tab.isFavoriteTab && !activeTab)) {
-                this._nudgeWebviewGuestLayout();
-                this._syncGuestWindowResizeEvent();
-            }
+            this._nudgeWebviewGuestLayout();
+            this._syncGuestWindowResizeEvent();
             if (activeTab) {
                 this.updateTabFavicon(tabId, activeTab);
             }
@@ -5406,9 +5590,8 @@ class AxisBrowser {
                     this.loadingBarTabId = null;
                 }
             }
-            if (tab && tab.isFavoriteTab && !activeTab) {
+            if (tab?.isFavoriteTab) {
                 this.renderFavorites();
-                this._forceGuestLayoutSync();
             }
         });
     }
@@ -5838,12 +6021,12 @@ class AxisBrowser {
         }
         if (urlBar) {
             if (show) {
-                // When the new tab page is open, keep the URL bar visible
-                // but force it to use the app's dark theme so it doesn't flash white.
                 urlBar.classList.remove('hidden');
-                this.applyNewTabPageUrlBarStyle();
+                this._setUrlBarInternalShellMode('ntp');
+                this.applyInternalShellUrlBarStyle();
             } else {
                 urlBar.classList.remove('hidden');
+                this._setUrlBarInternalShellMode(null);
             }
         }
     }
@@ -6041,12 +6224,23 @@ class AxisBrowser {
 
         const remainingUnpinned = Array.from(this.tabs.keys()).filter((id) => {
             const t = this.tabs.get(id);
-            return t && !t.pinned;
+            return t && !t.pinned && !t.isFavoriteTab;
         });
         for (let i = remainingUnpinned.length - 1; i >= 0; i--) {
             if (tryFocus(remainingUnpinned[i])) {
                 this._purgeStaleWebviewsInContainer();
                 return;
+            }
+        }
+
+        for (let i = this.favorites.length - 1; i >= 0; i--) {
+            const favId = this._normalizeTabMapKey(this.favorites[i].runtimeTabId);
+            if (favId != null) {
+                this._ensureFavoriteTabHostElement(favId);
+                if (tryFocus(favId)) {
+                    this._purgeStaleWebviewsInContainer();
+                    return;
+                }
             }
         }
         const remainingPinnedActive = Array.from(this.tabs.keys()).filter((id) => {
@@ -6263,6 +6457,10 @@ class AxisBrowser {
             } catch (e) {
                 console.error('Error removing webview:', e);
             }
+        }
+
+        if (tab?.isFavoriteTab) {
+            this._removeFavoriteTabHostElement(tid);
         }
         
         if (tabElement && tabElement.parentNode) {
@@ -7414,6 +7612,12 @@ class AxisBrowser {
                 } else if (key === 'themeColor' || key === 'gradientColor' || key === 'gradientEnabled' || key === 'gradientDirection' || key === 'uiTheme') {
                     // Apply theme / light-dark shell immediately
                     this.applyCustomThemeFromSettings();
+                    const activeTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+                    if (activeTab && (activeTab.url === 'axis://settings' || activeTab.isSettings)) {
+                        this.applyInternalShellUrlBarStyle();
+                    } else if (activeTab && activeTab.url === this.NEWTAB_URL) {
+                        this.applyInternalShellUrlBarStyle();
+                    }
                 }
                 // Theme mode and autoTheme changes will take effect on next page load
                 
@@ -9066,6 +9270,7 @@ class AxisBrowser {
             favoriteId: favorite.id,
             hiddenInSidebar: true
         });
+        this._ensureFavoriteTabHostElement(tabId);
         favorite.runtimeTabId = tabId;
         return tabId;
     }
@@ -9081,6 +9286,7 @@ class AxisBrowser {
             tabId = this.createFavoriteRuntimeTab(favorite);
         }
         if (tabId == null) return;
+        this._ensureFavoriteTabHostElement(tabId);
         this.switchToTab(tabId);
         this.renderFavorites();
     }
@@ -9211,7 +9417,7 @@ class AxisBrowser {
             const tabId = this._normalizeTabMapKey(child.dataset.tabId);
             if (tabId == null) continue;
             const tab = this.tabs.get(tabId);
-            if (tab && tab.pinned && !tab.tabGroupId) {
+            if (tab && tab.pinned && !tab.isFavoriteTab && !tab.tabGroupId) {
                 pinnedTabs.push({
                     id: tabId,
                     url: tab.url,
@@ -17663,8 +17869,8 @@ class AxisBrowser {
         const currentTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
         if (currentTab && currentTab.url === this.NEWTAB_URL) {
             el.webviewUrlBar.classList.remove('hidden');
-            el.webviewUrlBar.classList.add('new-tab-page');
-            this.applyNewTabPageUrlBarStyle();
+            this._setUrlBarInternalShellMode('ntp');
+            this.applyInternalShellUrlBarStyle();
             if (el.urlBarInput) el.urlBarInput.value = '';
             if (el.urlBarDisplay) el.urlBarDisplay.textContent = '';
             if (el.urlBarBack) el.urlBarBack.disabled = true;
@@ -17673,6 +17879,28 @@ class AxisBrowser {
                 el.urlBarCwsInstall.classList.add('hidden');
                 el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
             }
+            this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
+            return;
+        }
+
+        if (currentTab && (currentTab.url === 'axis://settings' || currentTab.isSettings)) {
+            el.webviewUrlBar.classList.remove('hidden');
+            this._setUrlBarInternalShellMode('settings');
+            this.applyInternalShellUrlBarStyle();
+            const settingsWv = currentTab.webview;
+            if (el.urlBarInput) el.urlBarInput.value = 'axis://settings';
+            if (el.urlBarDisplay) el.urlBarDisplay.textContent = 'Settings';
+            if (el.urlBarBack) {
+                el.urlBarBack.disabled = !settingsWv || !settingsWv.canGoBack();
+            }
+            if (el.urlBarForward) {
+                el.urlBarForward.disabled = !settingsWv || !settingsWv.canGoForward();
+            }
+            if (el.urlBarCwsInstall) {
+                el.urlBarCwsInstall.classList.add('hidden');
+                el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
+            }
+            this.updateExtensionStoreHostBar('');
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
             return;
         }
@@ -17688,7 +17916,7 @@ class AxisBrowser {
         // Hide URL bar if no webview or no current tab
         if (!webview || !this.currentTab || !this.tabs.has(this.currentTab)) {
             el.webviewUrlBar.classList.add('hidden');
-            el.webviewUrlBar.classList.remove('new-tab-page');
+            this._setUrlBarInternalShellMode(null);
             if (el.urlBarCwsInstall) {
                 el.urlBarCwsInstall.classList.add('hidden');
                 el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
@@ -17720,7 +17948,7 @@ class AxisBrowser {
         // Hide URL bar only for confirmed special pages
         if (isSpecialPage) {
             el.webviewUrlBar.classList.add('hidden');
-            el.webviewUrlBar.classList.remove('new-tab-page');
+            this._setUrlBarInternalShellMode(null);
             if (el.urlBarCwsInstall) {
                 el.urlBarCwsInstall.classList.add('hidden');
                 el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
@@ -17731,7 +17959,8 @@ class AxisBrowser {
         }
         
         // Show URL bar for regular websites (including about:blank during loading)
-        el.webviewUrlBar.classList.remove('hidden', 'new-tab-page');
+        el.webviewUrlBar.classList.remove('hidden');
+        this._setUrlBarInternalShellMode(null);
         
         // Update security icon based on URL
         if (el.urlBarSecurity) {
@@ -17835,13 +18064,6 @@ class AxisBrowser {
         }
         if (this.currentTab) this.updateTabTooltip(this.currentTab);
         
-        // Settings page (axis://settings) loads as data URL – use app theme for URL bar, not page theme
-        const tab = this.tabs.get(this.currentTab);
-        if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
-            this.applyAppThemeToUrlBar();
-            this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
-            return;
-        }
         // Extract theme color from website
         if (!opts.skipExtractTheme) {
             this.extractUrlBarTheme(webview);
@@ -17850,10 +18072,14 @@ class AxisBrowser {
         }
     }
     
-    // Apply app theme to URL bar (for axis://settings and other internal pages)
+    // Apply app theme to URL bar (for regular website tabs — not NTP / Settings)
     applyAppThemeToUrlBar() {
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
+        if (this._isInternalShellUrlBar(urlBar)) {
+            this.applyInternalShellUrlBarStyle();
+            return;
+        }
         const themeColor = this.settings?.themeColor || '#1a1a1a';
         const gradientColor = this.settings?.gradientColor || '#2a2a2a';
         const gradientEnabled = this.settings?.gradientEnabled && gradientColor;
@@ -17930,18 +18156,20 @@ class AxisBrowser {
         this.applyChatPanelTheme(urlBar);
     }
 
-    /** New tab page: black top bar (opaque). Transparent sites: same glass tint as the new-tab search shell (not user theme colors). */
-    applyNewTabPageUrlBarStyle() {
+    /** New tab + Settings: match `uiTheme` (light/dark), not the user theme color. */
+    applyInternalShellUrlBarStyle() {
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
 
+        const lightUi = this.settings?.uiTheme === 'light' && !this.isIncognitoWindow;
+        let paintBg = lightUi ? '#ffffff' : '#000000';
+
         if (this.settings?.transparentSites) {
             const sc = this.getShellChromeStyle();
-            const lightUi = this.settings?.uiTheme === 'light';
+            paintBg = sc.newTabSearchBg;
             urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
             urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
-            const bg = sc.newTabSearchBg;
-            urlBar.style.setProperty('--url-bar-bg', bg);
+            urlBar.style.setProperty('--url-bar-bg', paintBg);
             if (lightUi) {
                 urlBar.classList.remove('dark-mode');
                 urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.1)');
@@ -17955,20 +18183,32 @@ class AxisBrowser {
                 urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
                 urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
             }
-            this.applyChatPanelTheme(urlBar);
-            return;
+        } else {
+            urlBar.style.removeProperty('backdrop-filter');
+            urlBar.style.removeProperty('-webkit-backdrop-filter');
+            if (lightUi) {
+                urlBar.classList.remove('dark-mode');
+                urlBar.style.setProperty('--url-bar-bg', '#ffffff');
+                urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.08)');
+                urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
+                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.55)');
+                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.08)');
+            } else {
+                urlBar.classList.add('dark-mode');
+                urlBar.style.setProperty('--url-bar-bg', '#000000');
+                urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
+                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.55)');
+                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+            }
         }
-
-        urlBar.style.removeProperty('backdrop-filter');
-        urlBar.style.removeProperty('-webkit-backdrop-filter');
-        urlBar.classList.add('dark-mode');
-        const black = '#000000';
-        urlBar.style.setProperty('--url-bar-bg', black);
-        urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
-        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.55)');
-        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+        urlBar.style.setProperty('background', paintBg, 'important');
         this.applyChatPanelTheme(urlBar);
+    }
+
+    /** @deprecated alias — use applyInternalShellUrlBarStyle */
+    applyNewTabPageUrlBarStyle() {
+        this.applyInternalShellUrlBarStyle();
     }
     
     _clearUrlBarThemeRefineTimer() {
@@ -17998,6 +18238,9 @@ class AxisBrowser {
         
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
+        if (this._isInternalShellUrlBar(urlBar)) {
+            return;
+        }
 
         this._clearUrlBarThemeRefineTimer();
         const seq = ++this._urlBarThemeSeq;
