@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Sync; used by standalone `settings.html` before first paint so theme never follows the OS. */
   getSettingsWindowBootstrap: () => ipcRenderer.sendSync('axis-settings-window-bootstrap'),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
+  /** Sync write before quit — avoids losing tab groups when async setSetting does not finish. */
+  flushSessionSync: (payload) => ipcRenderer.sendSync('axis-flush-session-sync', payload),
   getSitePermissionOverrides: () => ipcRenderer.invoke('get-site-permission-overrides'),
   setSitePermissionOverrides: (obj) => ipcRenderer.invoke('set-site-permission-overrides', obj),
   sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
@@ -73,7 +75,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onOpenUrlInBrowser: (callback) => ipcRenderer.on('open-url-in-browser', (event, url) => callback(url)),
   onOpenSettingsTab: (callback) => ipcRenderer.on('open-settings-tab', (event, section) => callback(section)),
-  onSettingsUpdated: (callback) => ipcRenderer.on('settings-updated', callback),
+  onSettingsUpdated: (callback) =>
+    ipcRenderer.on('settings-updated', (_event, data) => callback(data)),
+  onProfilesUpdated: (callback) => ipcRenderer.on('profiles-updated', () => callback()),
+  onProfileMenuAction: (callback) =>
+    ipcRenderer.on('profile-menu-action', (_event, payload) => callback(payload)),
   onSwitchSettingsTab: (callback) => ipcRenderer.on('switch-settings-tab', (event, tab) => callback(tab)),
   onOpenPopupUrl: (callback) => ipcRenderer.on('open-popup-url', (event, url) => callback(url)),
   confirmQuit: () => ipcRenderer.send('confirm-quit'),
@@ -84,6 +90,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openIncognitoWindow: (url) => ipcRenderer.invoke('open-incognito-window', url),
   openOrFocusIncognitoWindow: () => ipcRenderer.invoke('open-or-focus-incognito-window'),
   openOrFocusPersonalWindow: () => ipcRenderer.invoke('open-or-focus-personal-window'),
+  getProfiles: () => ipcRenderer.invoke('get-profiles'),
+  createProfile: (payload) => ipcRenderer.invoke('create-profile', payload),
+  updateProfile: (payload) => ipcRenderer.invoke('update-profile', payload),
+  reorderProfiles: (orderedIds) => ipcRenderer.invoke('reorder-profiles', orderedIds),
+  deleteProfile: (profileId) =>
+    ipcRenderer.invoke(
+      'delete-profile',
+      typeof profileId === 'object' ? profileId : { id: profileId }
+    ),
+  openOrFocusProfileWindow: (profileId) => ipcRenderer.invoke('open-or-focus-profile-window', profileId),
   openUrlInNewWindow: (url) => ipcRenderer.invoke('open-url-in-new-window', url),
   
   // Sidebar favorites
@@ -93,6 +109,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showFavoriteContextMenu: (x, y, info) => ipcRenderer.invoke('show-favorite-context-menu', x, y, info),
   onFavoriteContextMenuAction: (callback) =>
     ipcRenderer.on('favorite-context-menu-action', (event, action, data) => callback(action, data)),
+
+  // Password & card vault (encrypted local store)
+  vaultStatus: () => ipcRenderer.invoke('axis-vault-status'),
+  vaultGetPageScanJs: () => ipcRenderer.invoke('axis-vault-get-page-scan-js'),
+  vaultGetAutofillInjectJs: () => ipcRenderer.invoke('axis-vault-get-autofill-inject-js'),
+  vaultBuildAutofillShowJs: (items, theme) =>
+    ipcRenderer.invoke('axis-vault-build-autofill-show-js', { items, theme }),
+  vaultBuildAutofillFillJs: (cred) => ipcRenderer.invoke('axis-vault-build-autofill-fill-js', cred),
+  vaultReportCredentials: (payload) => ipcRenderer.invoke('axis-vault-report-credentials', payload),
+  vaultVerifyDevice: (reason) => ipcRenderer.invoke('axis-vault-verify-device', reason),
+  vaultRevealLogin: (id) => ipcRenderer.invoke('axis-vault-reveal-login', id),
+  vaultRevealCard: (id) => ipcRenderer.invoke('axis-vault-reveal-card', id),
+  vaultGetLoginForFill: (id) => ipcRenderer.invoke('axis-vault-get-login-for-fill', id),
+  vaultGetCardForFill: (id) => ipcRenderer.invoke('axis-vault-get-card-for-fill', id),
+  vaultListLogins: () => ipcRenderer.invoke('axis-vault-list-logins'),
+  vaultGetLogin: (id) => ipcRenderer.invoke('axis-vault-get-login', id),
+  vaultSaveLogin: (entry) => ipcRenderer.invoke('axis-vault-save-login', entry),
+  vaultDeleteLogin: (id) => ipcRenderer.invoke('axis-vault-delete-login', id),
+  vaultListCards: () => ipcRenderer.invoke('axis-vault-list-cards'),
+  vaultGetCard: (id) => ipcRenderer.invoke('axis-vault-get-card', id),
+  vaultSaveCard: (entry) => ipcRenderer.invoke('axis-vault-save-card', entry),
+  vaultDeleteCard: (id) => ipcRenderer.invoke('axis-vault-delete-card', id),
+  vaultCaptureLogin: (payload) => ipcRenderer.invoke('axis-vault-capture-login', payload),
+  vaultShouldOfferLoginSave: (payload) => ipcRenderer.invoke('axis-vault-should-offer-login-save', payload),
+  vaultFillCandidates: (payload) => ipcRenderer.invoke('axis-vault-fill-candidates', payload),
+  onVaultGuestIpc: (callback) => {
+    const handler = (_event, msg) => callback(msg);
+    ipcRenderer.on('axis-vault-guest-ipc', handler);
+    return () => ipcRenderer.removeListener('axis-vault-guest-ipc', handler);
+  },
 
   // Notes management
   getNotes: () => ipcRenderer.invoke('get-notes'),
