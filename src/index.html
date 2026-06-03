@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: blob: https: http: file:; connect-src 'self' https://api.groq.com https://suggestqueries.google.com; media-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'; worker-src 'self' blob:; manifest-src 'self'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Axis Browser</title>
     <link rel="stylesheet" href="styles.css">
@@ -25,7 +26,6 @@
         <div id="main-area">
             <!-- Left Sidebar -->
             <aside id="sidebar">
-                <div id="sidebar-resize-handle" class="resize-handle"></div>
             <div class="sidebar-section tabs-section">
                     <div class="sidebar-tabs-topbar" aria-label="Sidebar actions">
                         <button type="button" id="clear-unpinned-floating" class="clear-unpinned-floating hidden" title="Clear all unpinned tabs">
@@ -98,7 +98,17 @@
                         </div>
                     </div>
                 </div>
-                <div class="sidebar-footer-profile-row" aria-label="Profile">
+                <div id="sidebar-profile-footer" class="sidebar-footer-profile-row" aria-label="Profile">
+                    <div id="profile-switcher-menu" class="profile-switcher-menu hidden" role="menu" aria-label="Profiles" aria-hidden="true">
+                        <div id="profile-switcher-panel" class="profile-switcher-panel">
+                            <div id="profile-switcher-list"></div>
+                            <div class="profile-switcher-divider" role="separator" aria-hidden="true"></div>
+                            <button type="button" id="profile-menu-add" class="profile-switch-btn profile-switch-btn-add" role="menuitem" title="Create profile">
+                                <span class="profile-switch-avatar profile-switch-avatar-add" aria-hidden="true"><i class="fas fa-plus"></i></span>
+                                <span>New profile</span>
+                            </button>
+                        </div>
+                    </div>
                     <div id="sidebar-profile-switcher" class="sidebar-profile-switcher">
                         <button
                             type="button"
@@ -108,18 +118,8 @@
                             aria-label="Switch profile"
                             aria-haspopup="menu"
                             aria-expanded="false">
-                            <i id="profile-switcher-icon" class="fas fa-user" aria-hidden="true"></i>
+                            <span id="profile-switcher-avatar" class="profile-switch-avatar profile-switch-avatar--icon" aria-hidden="true"><i class="fas fa-user"></i></span>
                         </button>
-                        <div id="profile-switcher-menu" class="profile-switcher-menu hidden" role="menu" aria-label="Profile options">
-                            <button type="button" id="profile-menu-personal" class="profile-switch-btn" role="menuitem" title="Open personal window">
-                                <i class="fas fa-user" aria-hidden="true"></i>
-                                <span>Personal</span>
-                            </button>
-                            <button type="button" id="profile-menu-incognito" class="profile-switch-btn" role="menuitem" title="Open incognito window">
-                                <i class="fas fa-user-secret" aria-hidden="true"></i>
-                                <span>Incognito</span>
-                            </button>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -140,6 +140,8 @@
                 </div>
             </div>
             </aside>
+
+            <div id="sidebar-resize-handle" class="resize-handle" title="Drag to resize sidebar" aria-label="Resize sidebar"></div>
 
             <!-- Web Content Area -->
             <div id="content-area">
@@ -180,14 +182,14 @@
                                     <button type="button" class="url-bar-btn url-bar-action-btn url-bar-copy-btn" id="url-bar-copy" title="Copy Link">
                                         <i class="fas fa-link"></i>
                                     </button>
-                                    <button class="url-bar-btn url-bar-action-btn" id="url-bar-security" title="Security Info">
-                                        <i class="fas fa-lock"></i>
+                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-extensions-btn" id="url-bar-extensions" title="Extensions">
+                                        <i class="fas fa-puzzle-piece" aria-hidden="true"></i>
                                     </button>
                                     <button type="button" class="url-bar-btn url-bar-action-btn url-bar-cws-install hidden" id="url-bar-cws-install" title="Install this extension in Axis" aria-hidden="true">
                                         <i class="fas fa-download" aria-hidden="true"></i>
                                     </button>
-                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-extensions-btn" id="url-bar-extensions" title="Extensions">
-                                        <i class="fas fa-puzzle-piece" aria-hidden="true"></i>
+                                    <button class="url-bar-btn url-bar-action-btn" id="url-bar-security" title="Security Info">
+                                        <i class="fas fa-lock"></i>
                                     </button>
                                 </div>
                                 <div id="loading-bar" class="loading-bar" aria-hidden="true">
@@ -298,6 +300,9 @@
                         <!-- Captures clicks over page content (<webview> does not bubble to document) -->
                         <div id="downloads-popup-backdrop" class="downloads-popup-backdrop hidden" aria-hidden="true"></div>
                         <div id="extensions-menu-backdrop" class="extensions-menu-backdrop hidden" aria-hidden="true"></div>
+                        <div id="vault-autofill-panel" class="vault-autofill-panel hidden" role="listbox" aria-label="Saved passwords">
+                            <ul id="vault-autofill-list" class="vault-autofill-list"></ul>
+                        </div>
                     </div>
             </div>
         </div>
@@ -912,6 +917,65 @@
 
     </div>
 
+    <!-- Vault modals on <body> so they paint above guest <webview> layers -->
+    <div id="vault-save-modal" class="vault-modal vault-save-modal hidden" role="dialog" aria-labelledby="vault-save-title" aria-modal="true">
+        <div class="vault-save-modal__card">
+            <h2 id="vault-save-title" class="vault-save-modal__title">Save password?</h2>
+            <p id="vault-save-site" class="vault-save-modal__site">—</p>
+            <p id="vault-save-user-row" class="vault-save-modal__meta">
+                <span class="vault-save-modal__meta-label">Account</span>
+                <span id="vault-save-user" class="vault-save-modal__meta-value">—</span>
+            </p>
+            <p id="vault-save-card-row" class="vault-save-modal__meta hidden">
+                <span class="vault-save-modal__meta-label">Card</span>
+                <span id="vault-save-card" class="vault-save-modal__meta-value">—</span>
+            </p>
+            <p id="vault-save-desc" class="vault-save-modal__hint">Stored only on this Mac.</p>
+            <div class="vault-save-modal__actions">
+                <button type="button" class="vault-save-modal__btn" id="vault-save-never">Not now</button>
+                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--primary" id="vault-save-confirm">Save</button>
+            </div>
+        </div>
+    </div>
+    <div id="vault-pick-modal" class="vault-modal hidden" role="dialog" aria-labelledby="vault-pick-title">
+        <div class="vault-modal-card vault-modal-card--pick">
+            <h2 id="vault-pick-title">Choose an item</h2>
+            <ul id="vault-pick-list" class="vault-pick-list"></ul>
+            <div class="vault-modal-actions">
+                <button type="button" class="vault-modal-btn secondary" id="vault-pick-cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="profile-create-modal" class="vault-modal vault-save-modal hidden" role="dialog" aria-labelledby="profile-create-title" aria-modal="true">
+        <div class="vault-save-modal__card">
+            <h2 id="profile-create-title" class="vault-save-modal__title">New profile</h2>
+            <p id="profile-create-hint" class="vault-save-modal__hint">Separate tabs, cookies, and settings from your other profiles.</p>
+            <label for="profile-create-name-input" class="profile-create-name-label">Name</label>
+            <input type="text" id="profile-create-name-input" class="profile-create-name-input" placeholder="Profile name" maxlength="48" autocomplete="off" spellcheck="false" />
+            <div class="profile-create-icon-field">
+                <span class="profile-create-icon-label" id="profile-create-icon-label">Icon</span>
+                <div id="profile-create-icon-grid" class="profile-create-icon-grid" role="radiogroup" aria-labelledby="profile-create-icon-label"></div>
+            </div>
+            <div class="vault-save-modal__actions">
+                <button type="button" class="vault-save-modal__btn" id="profile-create-cancel">Cancel</button>
+                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--primary" id="profile-create-confirm">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="profile-delete-modal" class="vault-modal vault-save-modal hidden" role="alertdialog" aria-labelledby="profile-delete-title" aria-modal="true">
+        <div class="vault-save-modal__card">
+            <h2 id="profile-delete-title" class="vault-save-modal__title">Delete profile?</h2>
+            <p id="profile-delete-message" class="vault-save-modal__hint">All tabs, cookies, history, passwords, extensions, and settings for this profile will be removed permanently. This cannot be undone.</p>
+            <div class="vault-save-modal__actions">
+                <button type="button" class="vault-save-modal__btn" id="profile-delete-cancel">Cancel</button>
+                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--danger" id="profile-delete-confirm">Delete profile</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="axis-profile-icons.js"></script>
     <script src="renderer.js"></script>
 </body>
 </html>
