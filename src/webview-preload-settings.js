@@ -28,6 +28,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeExtension: (id) => ipcRenderer.invoke('remove-extension', id),
   openExtensionOptions: (id) => ipcRenderer.invoke('open-extension-options', id),
 
+  vaultStatus: () => ipcRenderer.invoke('axis-vault-status'),
+  vaultVerifyDevice: (reason) => ipcRenderer.invoke('axis-vault-verify-device', reason),
+  vaultRevealLogin: (id) => ipcRenderer.invoke('axis-vault-reveal-login', id),
+  vaultRevealCard: (id) => ipcRenderer.invoke('axis-vault-reveal-card', id),
+  vaultListLogins: () => ipcRenderer.invoke('axis-vault-list-logins'),
+  vaultGetLogin: (id) => ipcRenderer.invoke('axis-vault-get-login', id),
+  vaultSaveLogin: (entry) => ipcRenderer.invoke('axis-vault-save-login', entry),
+  vaultDeleteLogin: (id) => ipcRenderer.invoke('axis-vault-delete-login', id),
+  vaultListCards: () => ipcRenderer.invoke('axis-vault-list-cards'),
+  vaultGetCard: (id) => ipcRenderer.invoke('axis-vault-get-card', id),
+  vaultSaveCard: (entry) => ipcRenderer.invoke('axis-vault-save-card', entry),
+  vaultDeleteCard: (id) => ipcRenderer.invoke('axis-vault-delete-card', id),
+
   getShortcuts: () => ipcRenderer.invoke('get-shortcuts'),
   getShortcutOverrides: () => ipcRenderer.invoke('get-shortcut-overrides'),
   getDefaultShortcuts: () => ipcRenderer.invoke('get-default-shortcuts'),
@@ -36,7 +49,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   disableShortcuts: () => ipcRenderer.invoke('disable-shortcuts'),
   enableShortcuts: () => ipcRenderer.invoke('enable-shortcuts'),
 
-  onSettingsUpdated: (callback) => ipcRenderer.on('settings-updated', callback),
+  onSettingsUpdated: (callback) =>
+    ipcRenderer.on('settings-updated', (_event, data) => callback(data)),
   onSwitchSettingsTab: (callback) =>
     ipcRenderer.on('switch-settings-tab', (_event, tab) => callback(tab))
 });
