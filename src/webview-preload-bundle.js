@@ -67,3 +67,4 @@
 })();
 
 require('./webview-preload-cws.js');
+require('./webview-preload-vault.js');
