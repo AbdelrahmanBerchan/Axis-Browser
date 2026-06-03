@@ -243,7 +243,8 @@ const AXIS_SETTINGS_SECTION_IDS = new Set([
     'history',
     'shortcuts',
     'permissions',
-    'extensions'
+    'extensions',
+    'vault'
 ]);
 
 /** Allowlisted settings section id for IPC (never embed arbitrary strings in guest JS). */
@@ -342,6 +343,8 @@ class AxisBrowser {
         this._sidebarMediaDockPoll = null;
         /** ResizeObserver for sidebar mini-player title slide distance when the dock width changes. */
         this._sidebarMediaTitleResizeObserver = null;
+        /** Bumps when dock hides or tab changes so async favicon glow does not apply to a stale card. */
+        this._sidebarMediaGlowSeq = 0;
         this._urlBarThemeSeq = 0;
         /** Deferred second pass after SPAs paint sticky chrome / theme-color settles. */
         this._urlBarThemeRefineTimer = null;
@@ -358,8 +361,26 @@ class AxisBrowser {
         /** Absolute path to `webview-preload-bundle.js` — nav gestures + CWS/AMO store UI (guest preload). */
         this._webviewCwsPreloadPath = null;
         this._settingsWebviewPreloadPath = null;
+        this._vaultPageScanJs = null;
 
-        this.isIncognitoWindow = (window.location.hash === '#incognito');
+        const hash = String(window.location.hash || '').replace(/^#/, '');
+        this.isIncognitoWindow = hash === 'incognito';
+        const params = new URLSearchParams(hash);
+        this.profileId = this.isIncognitoWindow
+            ? 'incognito'
+            : (() => {
+                  const raw = params.get('profile');
+                  const decoded = raw ? decodeURIComponent(raw) : 'personal';
+                  return String(decoded).toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'personal';
+              })();
+        const iconFromHash = params.get('icon');
+        this.windowProfileIcon =
+            iconFromHash && window.AXIS_PROFILE_ICONS?.sanitizeProfileIcon
+                ? window.AXIS_PROFILE_ICONS.sanitizeProfileIcon(decodeURIComponent(iconFromHash))
+                : iconFromHash
+                  ? String(iconFromHash).trim().toLowerCase()
+                  : null;
+        this.profiles = [];
         
         // Cache frequently accessed DOM elements for performance
         this.cacheDOMElements();
@@ -396,11 +417,10 @@ class AxisBrowser {
             downloadsBtnFooter: document.getElementById('downloads-btn-footer'),
             sidebarPlusBtn: document.getElementById('sidebar-plus-btn'),
             sidebarPlusMenu: document.getElementById('sidebar-plus-menu'),
+            profileSwitcherRoot: document.getElementById('sidebar-profile-footer'),
             profileSwitcherTrigger: document.getElementById('profile-switcher-trigger'),
-            profileSwitcherIcon: document.getElementById('profile-switcher-icon'),
+            profileSwitcherAvatar: document.getElementById('profile-switcher-avatar'),
             profileSwitcherMenu: document.getElementById('profile-switcher-menu'),
-            profileMenuPersonal: document.getElementById('profile-menu-personal'),
-            profileMenuIncognito: document.getElementById('profile-menu-incognito'),
             closeDownloads: document.getElementById('close-downloads'),
             refreshDownloads: document.getElementById('refresh-downloads'),
             closeSecurity: document.getElementById('close-security'),
@@ -432,6 +452,9 @@ class AxisBrowser {
             axisStoreInstallHostText: document.getElementById('axis-store-install-host-text'),
             axisStoreInstallHostBtn: document.getElementById('axis-store-install-host-btn'),
             urlBarExtensions: document.getElementById('url-bar-extensions'),
+            vaultSaveModal: document.getElementById('vault-save-modal'),
+            vaultAutofillPanel: document.getElementById('vault-autofill-panel'),
+            vaultPickModal: document.getElementById('vault-pick-modal'),
             urlBarChat: document.getElementById('url-bar-chat'),
             sidebarMediaDock: document.getElementById('sidebar-media-dock'),
             sidebarMediaDockCard: document.querySelector('#sidebar-media-dock .sidebar-media-dock-card'),
@@ -446,6 +469,8 @@ class AxisBrowser {
             sidebarMediaNextBtn: document.getElementById('sidebar-media-next-btn'),
             sidebarMediaVolBtn: document.getElementById('sidebar-media-vol-btn')
         };
+        this.elements.profileSwitcherList = document.getElementById('profile-switcher-list');
+        this.elements.profileMenuAdd = document.getElementById('profile-menu-add');
     }
 
     async init() {
@@ -472,12 +497,35 @@ class AxisBrowser {
         } catch (_) {
             this._settingsWebviewPreloadPath = null;
         }
+        try {
+            this._vaultPageScanJs = (await window.electronAPI.vaultGetPageScanJs?.()) || null;
+        } catch (_) {
+            this._vaultPageScanJs = null;
+        }
+        try {
+            const inj = await window.electronAPI.vaultGetAutofillInjectJs?.();
+            this._vaultAutofillBootstrapJs = inj?.bootstrap || null;
+            this._vaultAutofillProbeJs = inj?.probe || null;
+            this._vaultAutofillHideJs = inj?.hide || null;
+        } catch (_) {
+            this._vaultAutofillBootstrapJs = null;
+            this._vaultAutofillProbeJs = null;
+            this._vaultAutofillHideJs = null;
+        }
+        try {
+            window.electronAPI.onVaultGuestIpc?.((msg) => this.handleVaultGuestIpc(msg));
+        } catch (_) {}
         if (this._webviewCwsPreloadPath && this.elements?.webview) {
             try {
                 this.elements.webview.setAttribute('preload', this._webviewCwsPreloadPath);
             } catch (_) {
                 /* ignore */
             }
+        }
+        if (this.elements?.webview) {
+            try {
+                this.elements.webview.setAttribute('partition', this.getSessionPartition());
+            } catch (_) {}
         }
         this._lastJavascriptEnabled = this.settings?.javascriptEnabled !== false;
         this.syncTransparentSitesUi();
@@ -495,6 +543,17 @@ class AxisBrowser {
         if (this.isIncognitoWindow) {
             document.body.classList.add('incognito-window');
         }
+        try {
+            window.electronAPI.onProfilesUpdated?.(() => {
+                void this.refreshProfilesMenu();
+            });
+        } catch (_) {}
+        try {
+            window.electronAPI.onProfileMenuAction?.((payload) => {
+                void this.handleProfileMenuAction(payload);
+            });
+        } catch (_) {}
+        await this.refreshProfilesMenu();
         this.syncProfileSwitcherState();
         
         // ALWAYS apply theme on startup (incognito: always black, unchangable)
@@ -542,6 +601,17 @@ class AxisBrowser {
         }, 50);
         
         this.applySidebarPosition(); // Apply saved sidebar position
+        this._vaultPickWebview = null;
+        this._vaultPendingSave = null;
+        this._vaultDismissedOffers = new Set();
+        this._vaultSaveOfferAt = new Map();
+        this._vaultLastShownOfferKey = '';
+        this._vaultPollTimer = null;
+        this._vaultAutofillWebview = null;
+        this._vaultAutofillPayload = null;
+        this.setupVaultUi();
+        this.setupProfileUi();
+        this.startVaultCredentialWatcher();
         this.setupEventListeners();
         this.setupSidebarMediaDockListeners();
         this.setupNewTabPage();
@@ -708,9 +778,18 @@ class AxisBrowser {
 
     _touchTransparentSitesForWebview(webview) {
         if (!webview || this.isBenchmarking || !this.settings?.transparentSites) return;
-        void this.flushTransparentSitesForWebview(webview).then((didInject) => {
-            if (didInject) this._scheduleTransparentSitesReinjection(webview);
-        });
+        void this.flushTransparentSitesForWebview(webview)
+            .then((didInject) => {
+                if (didInject) this._scheduleTransparentSitesReinjection(webview);
+            })
+            .catch(() => {});
+    }
+
+    /** Fire-and-forget async guest work — never leave unhandled rejections in the terminal. */
+    _voidGuestTask(promise) {
+        if (promise && typeof promise.catch === 'function') {
+            promise.catch(() => {});
+        }
     }
 
     /**
@@ -1250,17 +1329,11 @@ class AxisBrowser {
             e.stopPropagation();
             this.toggleProfileSwitcherMenu();
         });
-        el.profileMenuPersonal?.addEventListener('click', () => {
+        el.profileMenuAdd?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             this.hideProfileSwitcherMenu();
-            if (this.isIncognitoWindow) {
-                this.openPersonalProfileWindow();
-            }
-        });
-        el.profileMenuIncognito?.addEventListener('click', () => {
-            this.hideProfileSwitcherMenu();
-            if (!this.isIncognitoWindow) {
-                this.openIncognitoProfileWindow();
-            }
+            this.showProfileCreateModal();
         });
         
         el.closeDownloads?.addEventListener('click', () => this.toggleDownloads());
@@ -2134,6 +2207,13 @@ class AxisBrowser {
         
         // Click anywhere else to close context menus (for non-webview areas)
         document.addEventListener('mousedown', (e) => {
+            if (
+                !e.target.closest('#profile-switch-row-menu') &&
+                !e.target.closest('.profile-switch-more-btn')
+            ) {
+                this.closeProfileRowMenu();
+            }
+
             // Check if clicking on any context menu or backdrop - if so, don't close
             if (e.target.closest('.context-menu') || e.target.id === 'context-menu-backdrop') {
                 return;
@@ -2141,7 +2221,7 @@ class AxisBrowser {
             if (e.target.closest('#sidebar-plus-btn') || e.target.closest('#sidebar-plus-menu')) {
                 return;
             }
-            if (e.target.closest('#sidebar-profile-switcher')) {
+            if (e.target.closest('#sidebar-profile-footer') || e.target.closest('#sidebar-profile-switcher')) {
                 return;
             }
             
@@ -2461,7 +2541,16 @@ class AxisBrowser {
         });
         
         // Listen for settings updates from the settings tab / store (refresh theme)
-        window.electronAPI.onSettingsUpdated?.(() => {
+        window.electronAPI.onSettingsUpdated?.((data) => {
+            const updatedProfile =
+                data && typeof data.profileId === 'string' ? data.profileId : null;
+            if (
+                updatedProfile &&
+                String(updatedProfile).toLowerCase() !==
+                    String(this.profileId || 'personal').toLowerCase()
+            ) {
+                return;
+            }
             if (this._settingsUpdatedRaf != null) cancelAnimationFrame(this._settingsUpdatedRaf);
             this._settingsUpdatedRaf = requestAnimationFrame(() => {
                 this._settingsUpdatedRaf = null;
@@ -2477,35 +2566,349 @@ class AxisBrowser {
         });
     }
 
+    getProfileIconHelpers() {
+        return window.AXIS_PROFILE_ICONS || {};
+    }
+
+    sanitizeProfileIcon(icon) {
+        const fn = this.getProfileIconHelpers().sanitizeProfileIcon;
+        return typeof fn === 'function' ? fn(icon) : 'user';
+    }
+
+    getActiveProfileIcon() {
+        const active = this.profiles.find((p) => p.id === this.profileId);
+        if (active?.icon) return this.sanitizeProfileIcon(active.icon);
+        if (this.windowProfileIcon) return this.sanitizeProfileIcon(this.windowProfileIcon);
+        return 'user';
+    }
+
+    async handleProfileMenuAction(payload) {
+        const action = payload?.action;
+        if (!action) return;
+        if (action === 'create') {
+            this.showProfileCreateModal();
+            return;
+        }
+        const profileId = String(payload?.profileId || '').trim();
+        if (!profileId) return;
+        await this.refreshProfilesMenu();
+        const profile =
+            this.profiles.find((p) => p.id === profileId) ||
+            {
+                id: profileId,
+                name: payload?.name || profileId,
+                icon: payload?.icon || 'user'
+            };
+        if (action === 'edit') {
+            this.showProfileEditModal(profile);
+            return;
+        }
+        if (action === 'delete' && profileId !== 'personal') {
+            await this.beginProfileDelete(profile);
+        }
+    }
+
     syncProfileSwitcherState() {
         const trigger = this.elements?.profileSwitcherTrigger;
-        const icon = this.elements?.profileSwitcherIcon;
-        const personalBtn = this.elements?.profileMenuPersonal;
-        const incognitoBtn = this.elements?.profileMenuIncognito;
-        if (!trigger || !icon || !personalBtn || !incognitoBtn) return;
+        if (!trigger) return;
         const isIncog = !!this.isIncognitoWindow;
-        icon.className = isIncog ? 'fas fa-user-secret' : 'fas fa-user';
-        trigger.setAttribute('aria-label', isIncog ? 'Current profile: Incognito' : 'Current profile: Personal');
-        personalBtn.classList.toggle('active', !isIncog);
-        incognitoBtn.classList.toggle('active', isIncog);
-        this.hideProfileSwitcherMenu();
+        const active = this.profiles.find((p) => p.id === this.profileId);
+        const activeName = active?.name || (this.profileId === 'personal' ? 'Personal' : this.profileId);
+        trigger.classList.toggle('profile-switcher-trigger--incognito', isIncog);
+        if (isIncog) {
+            trigger.innerHTML = '<i class="fas fa-user-secret" aria-hidden="true"></i>';
+        } else {
+            const iconId = this.getActiveProfileIcon();
+            if (active?.icon) this.windowProfileIcon = this.sanitizeProfileIcon(active.icon);
+            trigger.innerHTML = this.profileAvatarMarkup(this.profileId, activeName, iconId);
+        }
+        trigger.setAttribute(
+            'aria-label',
+            isIncog ? 'Private browsing — switch profile' : `Current profile: ${activeName}`
+        );
+        trigger.title = isIncog ? 'Switch profile' : `Switch profile (${activeName})`;
+    }
+
+    profileAvatarMarkup(_profileId, _name, icon) {
+        const iconId = this.sanitizeProfileIcon(icon);
+        const fa = this.getProfileIconHelpers().profileIconFaClass?.(iconId) || `fa-${iconId}`;
+        return `<span class="profile-switch-avatar profile-switch-avatar--icon" aria-hidden="true"><i class="fas ${fa}"></i></span>`;
+    }
+
+    async refreshProfilesMenu() {
+        const list = this.elements?.profileSwitcherList;
+        if (!list) return;
+        let profiles = [];
+        try {
+            profiles = await window.electronAPI.getProfiles();
+        } catch (_) {
+            profiles = [];
+        }
+        this.profiles = Array.isArray(profiles) ? profiles : [];
+        list.innerHTML = '';
+        for (const profile of this.profiles) {
+            const id = String(profile?.id || '').trim();
+            if (!id) continue;
+            const name = String(profile?.name || id);
+            const isActive = !this.isIncognitoWindow && id === this.profileId;
+            const canDelete = id !== 'personal';
+
+            const row = document.createElement('div');
+            row.className = 'profile-switch-row';
+            row.dataset.profileId = id;
+            row.draggable = false;
+
+            const dragBtn = document.createElement('button');
+            dragBtn.type = 'button';
+            dragBtn.className = 'profile-switch-drag';
+            dragBtn.title = 'Reorder profile';
+            dragBtn.setAttribute('aria-label', 'Reorder profile');
+            dragBtn.innerHTML = '<i class="fas fa-grip-vertical" aria-hidden="true"></i>';
+            dragBtn.addEventListener('mousedown', () => {
+                this._profileDragFromHandle = true;
+                row.draggable = true;
+            });
+            dragBtn.addEventListener('mouseup', () => {
+                row.draggable = false;
+                this._profileDragFromHandle = false;
+            });
+
+            const switchBtn = document.createElement('button');
+            switchBtn.type = 'button';
+            switchBtn.className = 'profile-switch-btn';
+            switchBtn.setAttribute('role', 'menuitem');
+            switchBtn.classList.toggle('active', isActive);
+            switchBtn.innerHTML = `${this.profileAvatarMarkup(id, name, profile?.icon)}<span>${this.escapeHtml(name)}</span>${
+                isActive ? '<i class="fas fa-check profile-switch-btn-check" aria-hidden="true"></i>' : ''
+            }`;
+            switchBtn.addEventListener('click', async () => {
+                this.hideProfileSwitcherMenu();
+                if (id === this.profileId && !this.isIncognitoWindow) return;
+                try {
+                    await window.electronAPI.openOrFocusProfileWindow(id);
+                } catch (_) {}
+            });
+
+            const moreBtn = document.createElement('button');
+            moreBtn.type = 'button';
+            moreBtn.className = 'profile-switch-more-btn';
+            moreBtn.title = 'Profile options';
+            moreBtn.setAttribute('aria-label', `Options for ${name}`);
+            moreBtn.setAttribute('aria-haspopup', 'menu');
+            moreBtn.setAttribute('aria-expanded', 'false');
+            moreBtn.innerHTML = '<i class="fas fa-ellipsis-vertical" aria-hidden="true"></i>';
+            moreBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleProfileRowMenu(row, profile, moreBtn, canDelete);
+            });
+
+            row.appendChild(dragBtn);
+            row.appendChild(switchBtn);
+            row.appendChild(moreBtn);
+
+            row.addEventListener('dragstart', (e) => {
+                if (!this._profileDragFromHandle) {
+                    e.preventDefault();
+                    return;
+                }
+                e.dataTransfer.effectAllowed = 'move';
+                try {
+                    e.dataTransfer.setData('text/plain', id);
+                } catch (_) {}
+                this._profileDragId = id;
+                row.classList.add('is-dragging');
+            });
+            row.addEventListener('dragend', () => {
+                this._profileDragFromHandle = false;
+                this._profileDragId = null;
+                row.draggable = false;
+                list.querySelectorAll('.profile-switch-row').forEach((r) => {
+                    r.classList.remove('is-dragging', 'is-drag-over');
+                });
+            });
+            row.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                list.querySelectorAll('.profile-switch-row').forEach((r) => r.classList.remove('is-drag-over'));
+                row.classList.add('is-drag-over');
+            });
+            row.addEventListener('dragleave', () => {
+                row.classList.remove('is-drag-over');
+            });
+            row.addEventListener('drop', (e) => {
+                void this.onProfileListDrop(e, row);
+            });
+
+            list.appendChild(row);
+        }
+        this.syncProfileSwitcherState();
+    }
+
+    closeProfileRowMenu() {
+        const menu = document.getElementById('profile-switch-row-menu');
+        if (menu) menu.classList.add('hidden');
+        document.querySelectorAll('.profile-switch-row.is-menu-open').forEach((row) => {
+            row.classList.remove('is-menu-open');
+        });
+        document.querySelectorAll('.profile-switch-more-btn').forEach((btn) => {
+            btn.classList.remove('is-open');
+            btn.setAttribute('aria-expanded', 'false');
+        });
+        const active = document.activeElement;
+        if (active?.closest?.('.profile-switch-row') || active?.closest?.('#profile-switch-row-menu')) {
+            try {
+                active.blur();
+            } catch (_) {}
+        }
+        this._profileRowMenuProfile = null;
+    }
+
+    ensureProfileRowMenu() {
+        let menu = document.getElementById('profile-switch-row-menu');
+        if (menu) return menu;
+        const panel = document.getElementById('profile-switcher-panel');
+        if (!panel) return null;
+        menu = document.createElement('div');
+        menu.id = 'profile-switch-row-menu';
+        menu.className = 'profile-switch-row-menu hidden';
+        menu.setAttribute('role', 'menu');
+        panel.appendChild(menu);
+        return menu;
+    }
+
+    toggleProfileRowMenu(row, profile, anchorBtn, canDelete) {
+        const menu = this.ensureProfileRowMenu();
+        if (!menu || !row || !anchorBtn) return;
+        const isOpen =
+            !menu.classList.contains('hidden') &&
+            this._profileRowMenuProfile?.id === profile?.id;
+        if (isOpen) {
+            this.closeProfileRowMenu();
+            return;
+        }
+        this.closeProfileRowMenu();
+        this._profileRowMenuProfile = profile;
+        row.classList.add('is-menu-open');
+        anchorBtn.classList.add('is-open');
+        anchorBtn.setAttribute('aria-expanded', 'true');
+        menu.innerHTML = '';
+        const editItem = document.createElement('button');
+        editItem.type = 'button';
+        editItem.className = 'profile-switch-row-menu-item';
+        editItem.setAttribute('role', 'menuitem');
+        editItem.textContent = 'Edit profile';
+        editItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.closeProfileRowMenu();
+            this.showProfileEditModal(profile);
+        });
+        menu.appendChild(editItem);
+        if (canDelete) {
+            const deleteItem = document.createElement('button');
+            deleteItem.type = 'button';
+            deleteItem.className = 'profile-switch-row-menu-item profile-switch-row-menu-item--danger';
+            deleteItem.setAttribute('role', 'menuitem');
+            deleteItem.textContent = 'Delete profile';
+            deleteItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closeProfileRowMenu();
+                void this.beginProfileDelete(profile);
+            });
+            menu.appendChild(deleteItem);
+        }
+        menu.classList.remove('hidden');
+        const rowRect = row.getBoundingClientRect();
+        const panel = document.getElementById('profile-switcher-panel');
+        const panelRect = panel?.getBoundingClientRect();
+        if (panelRect) {
+            menu.style.top = `${Math.max(0, rowRect.bottom - panelRect.top + 2)}px`;
+            menu.style.right = `${Math.max(0, panelRect.right - rowRect.right + 2)}px`;
+            menu.style.left = 'auto';
+        }
+    }
+
+    async onProfileListDrop(e, targetRow) {
+        e.preventDefault();
+        e.stopPropagation();
+        const list = this.elements?.profileSwitcherList;
+        if (!list || !targetRow) return;
+        const draggedId = (() => {
+            try {
+                return e.dataTransfer.getData('text/plain') || this._profileDragId;
+            } catch (_) {
+                return this._profileDragId;
+            }
+        })();
+        if (!draggedId) return;
+        const draggedRow = list.querySelector(`.profile-switch-row[data-profile-id="${draggedId}"]`);
+        if (!draggedRow || draggedRow === targetRow) return;
+        const rect = targetRow.getBoundingClientRect();
+        const before = e.clientY < rect.top + rect.height / 2;
+        if (before) targetRow.before(draggedRow);
+        else targetRow.after(draggedRow);
+        list.querySelectorAll('.profile-switch-row').forEach((r) => r.classList.remove('is-drag-over'));
+        const ids = [...list.querySelectorAll('.profile-switch-row')].map((r) => r.dataset.profileId).filter(Boolean);
+        try {
+            await window.electronAPI.reorderProfiles(ids);
+            await this.refreshProfilesMenu();
+        } catch (err) {
+            console.error('reorderProfiles failed', err);
+            await this.refreshProfilesMenu();
+        }
     }
 
     toggleProfileSwitcherMenu() {
+        const root = this.elements?.profileSwitcherRoot;
         const menu = this.elements?.profileSwitcherMenu;
         const trigger = this.elements?.profileSwitcherTrigger;
-        if (!menu || !trigger) return;
-        const opening = menu.classList.contains('hidden');
-        menu.classList.toggle('hidden', !opening);
-        trigger.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        if (!root || !menu || !trigger) return;
+        const switcher = document.getElementById('sidebar-profile-switcher');
+        const opening = !root.classList.contains('is-open');
+        if (!opening) {
+            this.hideProfileSwitcherMenu();
+            return;
+        }
+        if (this._profileSwitcherCloseTimer != null) {
+            clearTimeout(this._profileSwitcherCloseTimer);
+            this._profileSwitcherCloseTimer = null;
+        }
+        menu.classList.remove('hidden');
+        menu.setAttribute('aria-hidden', 'false');
+        trigger.setAttribute('aria-expanded', 'true');
+        void this.refreshProfilesMenu().then(() => {
+            this.syncProfileSwitcherState();
+            requestAnimationFrame(() => {
+                root.classList.add('is-open');
+                switcher?.classList.add('is-open');
+            });
+        });
     }
 
     hideProfileSwitcherMenu() {
+        this.closeProfileRowMenu();
+        const root = this.elements?.profileSwitcherRoot;
         const menu = this.elements?.profileSwitcherMenu;
         const trigger = this.elements?.profileSwitcherTrigger;
-        if (!menu || !trigger) return;
-        menu.classList.add('hidden');
+        const switcher = document.getElementById('sidebar-profile-switcher');
+        if (!root || !menu || !trigger) return;
+        if (!root.classList.contains('is-open')) {
+            menu.classList.add('hidden');
+            menu.setAttribute('aria-hidden', 'true');
+            trigger.setAttribute('aria-expanded', 'false');
+            switcher?.classList.remove('is-open');
+            return;
+        }
+        root.classList.remove('is-open');
+        switcher?.classList.remove('is-open');
         trigger.setAttribute('aria-expanded', 'false');
+        if (this._profileSwitcherCloseTimer != null) clearTimeout(this._profileSwitcherCloseTimer);
+        this._profileSwitcherCloseTimer = setTimeout(() => {
+            this._profileSwitcherCloseTimer = null;
+            if (!root.classList.contains('is-open')) {
+                menu.classList.add('hidden');
+                menu.setAttribute('aria-hidden', 'true');
+            }
+        }, 320);
     }
 
     getActiveHttpUrlForProfileSwitch() {
@@ -2515,12 +2918,281 @@ class AxisBrowser {
         return /^https?:\/\//i.test(url) ? url : null;
     }
 
-    openIncognitoProfileWindow() {
-        window.electronAPI.openOrFocusIncognitoWindow();
+    openPersonalProfileWindow() {
+        window.electronAPI.openOrFocusProfileWindow('personal');
     }
 
-    openPersonalProfileWindow() {
-        window.electronAPI.openOrFocusPersonalWindow();
+    setupProfileCreateIconGrid() {
+        const grid = document.getElementById('profile-create-icon-grid');
+        if (!grid || grid.dataset.built === '1') return;
+        const options = this.getProfileIconHelpers().AXIS_PROFILE_ICON_OPTIONS || [];
+        grid.innerHTML = '';
+        for (const opt of options) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'profile-create-icon-btn';
+            btn.setAttribute('role', 'radio');
+            btn.setAttribute('aria-checked', 'false');
+            btn.title = opt.label || opt.id;
+            btn.dataset.iconId = opt.id;
+            btn.innerHTML = `<i class="fas fa-${this.escapeHtml(opt.id)}" aria-hidden="true"></i>`;
+            btn.addEventListener('click', () => this.setProfileCreateIcon(opt.id));
+            grid.appendChild(btn);
+        }
+        grid.dataset.built = '1';
+        this.setProfileCreateIcon('user');
+    }
+
+    setProfileCreateIcon(iconId) {
+        const id = this.sanitizeProfileIcon(iconId);
+        this._profileCreateIcon = id;
+        const grid = document.getElementById('profile-create-icon-grid');
+        if (!grid) return;
+        grid.querySelectorAll('.profile-create-icon-btn').forEach((btn) => {
+            const selected = btn.dataset.iconId === id;
+            btn.classList.toggle('is-selected', selected);
+            btn.setAttribute('aria-checked', selected ? 'true' : 'false');
+        });
+    }
+
+    setupProfileUi() {
+        const modal = document.getElementById('profile-create-modal');
+        const input = document.getElementById('profile-create-name-input');
+        const confirmBtn = document.getElementById('profile-create-confirm');
+        const cancelBtn = document.getElementById('profile-create-cancel');
+        const deleteModal = document.getElementById('profile-delete-modal');
+        const deleteConfirmBtn = document.getElementById('profile-delete-confirm');
+        const deleteCancelBtn = document.getElementById('profile-delete-cancel');
+        if (!modal || !input || !confirmBtn || !cancelBtn) return;
+
+        this._profileModalMode = 'create';
+        this._profileEditId = null;
+        this._profileDeleteId = null;
+        this._profileDragFromHandle = false;
+        this._profileDragId = null;
+
+        this.setupProfileCreateIconGrid();
+
+        const hideForm = () => this.hideProfileFormModal();
+        cancelBtn.addEventListener('click', hideForm);
+        confirmBtn.addEventListener('click', () => void this.confirmProfileForm());
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                void this.confirmProfileForm();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                hideForm();
+            }
+        });
+        modal.addEventListener('mousedown', (e) => e.stopPropagation());
+
+        if (deleteModal && deleteConfirmBtn && deleteCancelBtn) {
+            deleteCancelBtn.addEventListener('click', () => this.hideProfileDeleteModal());
+            deleteConfirmBtn.addEventListener('click', () => void this.confirmProfileDelete());
+            deleteModal.addEventListener('mousedown', (e) => e.stopPropagation());
+        }
+
+        const profilePanel = document.getElementById('profile-switcher-panel');
+        profilePanel?.addEventListener('mouseleave', () => {
+            this.closeProfileRowMenu();
+        });
+    }
+
+    setProfileFormModalTheme(modal) {
+        if (!modal) return;
+        modal.setAttribute('data-ui-theme', this.getVaultAutofillUiTheme());
+    }
+
+    showProfileEditModal(profile) {
+        const modal = document.getElementById('profile-create-modal');
+        const input = document.getElementById('profile-create-name-input');
+        const title = document.getElementById('profile-create-title');
+        const hint = document.getElementById('profile-create-hint');
+        const confirmBtn = document.getElementById('profile-create-confirm');
+        const backdrop = this.elements?.modalBackdrop;
+        if (!modal || !input || !profile?.id) return;
+        this.hideProfileSwitcherMenu();
+        this._profileModalMode = 'edit';
+        this._profileEditId = profile.id;
+        if (title) title.textContent = 'Edit profile';
+        if (hint) hint.textContent = 'Change the name or icon for this profile.';
+        if (confirmBtn) confirmBtn.textContent = 'Save';
+        this.setupProfileCreateIconGrid();
+        this.setProfileCreateIcon(profile.icon || 'user');
+        input.value = String(profile.name || '');
+        this.setProfileFormModalTheme(modal);
+        modal.classList.remove('hidden');
+        if (backdrop) backdrop.classList.remove('hidden');
+        document.body.classList.add('axis-vault-modal-open');
+        requestAnimationFrame(() => {
+            try {
+                input.focus();
+                input.select();
+            } catch (_) {}
+        });
+    }
+
+    showProfileCreateModal() {
+        const modal = document.getElementById('profile-create-modal');
+        const input = document.getElementById('profile-create-name-input');
+        const title = document.getElementById('profile-create-title');
+        const hint = document.getElementById('profile-create-hint');
+        const confirmBtn = document.getElementById('profile-create-confirm');
+        const backdrop = this.elements?.modalBackdrop;
+        if (!modal || !input) return;
+        this._profileModalMode = 'create';
+        this._profileEditId = null;
+        if (title) title.textContent = 'New profile';
+        if (hint) hint.textContent = 'Separate tabs, cookies, and settings from your other profiles.';
+        if (confirmBtn) confirmBtn.textContent = 'Create';
+        this.setupProfileCreateIconGrid();
+        this.setProfileCreateIcon('user');
+        input.value = '';
+        this.setProfileFormModalTheme(modal);
+        modal.classList.remove('hidden');
+        if (backdrop) backdrop.classList.remove('hidden');
+        document.body.classList.add('axis-vault-modal-open');
+        requestAnimationFrame(() => {
+            try {
+                input.focus();
+                input.select();
+            } catch (_) {}
+        });
+    }
+
+    hideProfileFormModal() {
+        const modal = document.getElementById('profile-create-modal');
+        const backdrop = this.elements?.modalBackdrop;
+        if (modal) modal.classList.add('hidden');
+        this.maybeHideProfileModalBackdrop(backdrop);
+    }
+
+    async beginProfileDelete(profile) {
+        if (!profile?.id || profile.id === 'personal') return;
+        this.hideProfileSwitcherMenu();
+        try {
+            const authed = await window.electronAPI.vaultVerifyDevice('Delete this profile');
+            if (!authed) return;
+        } catch (_) {
+            return;
+        }
+        this.showProfileDeleteModal(profile);
+    }
+
+    showProfileDeleteModal(profile) {
+        const modal = document.getElementById('profile-delete-modal');
+        const title = document.getElementById('profile-delete-title');
+        const message = document.getElementById('profile-delete-message');
+        const backdrop = this.elements?.modalBackdrop;
+        if (!modal || !profile?.id || profile.id === 'personal') return;
+        this._profileDeleteId = profile.id;
+        const name = String(profile.name || profile.id);
+        if (title) title.textContent = `Delete “${name}”?`;
+        if (message) {
+            message.textContent = `All tabs, cookies, history, passwords, extensions, and settings for “${name}” will be removed permanently. This cannot be undone.`;
+        }
+        this.setProfileFormModalTheme(modal);
+        modal.classList.remove('hidden');
+        if (backdrop) backdrop.classList.remove('hidden');
+        document.body.classList.add('axis-vault-modal-open');
+    }
+
+    hideProfileDeleteModal() {
+        const modal = document.getElementById('profile-delete-modal');
+        const backdrop = this.elements?.modalBackdrop;
+        if (modal) modal.classList.add('hidden');
+        this._profileDeleteId = null;
+        this.maybeHideProfileModalBackdrop(backdrop);
+    }
+
+    maybeHideProfileModalBackdrop(backdrop) {
+        const vaultSave = document.getElementById('vault-save-modal');
+        const vaultPick = document.getElementById('vault-pick-modal');
+        const profileCreate = document.getElementById('profile-create-modal');
+        const profileDelete = document.getElementById('profile-delete-modal');
+        const vaultOpen =
+            (vaultSave && !vaultSave.classList.contains('hidden')) ||
+            (vaultPick && !vaultPick.classList.contains('hidden'));
+        const profileOpen =
+            (profileCreate && !profileCreate.classList.contains('hidden')) ||
+            (profileDelete && !profileDelete.classList.contains('hidden'));
+        if (!vaultOpen && !profileOpen) {
+            document.body.classList.remove('axis-vault-modal-open');
+            if (
+                backdrop &&
+                !document.querySelector(
+                    '#downloads-panel:not(.hidden), #security-panel:not(.hidden), #settings-panel:not(.hidden)'
+                )
+            ) {
+                backdrop.classList.add('hidden');
+            }
+        }
+    }
+
+    hideProfileCreateModal() {
+        this.hideProfileFormModal();
+    }
+
+    async confirmProfileForm() {
+        const input = document.getElementById('profile-create-name-input');
+        const name = input?.value?.trim() || '';
+        if (!name) {
+            input?.focus();
+            return;
+        }
+        const pickedIcon = this.sanitizeProfileIcon(this._profileCreateIcon || 'user');
+        this.hideProfileFormModal();
+        if (this._profileModalMode === 'edit' && this._profileEditId) {
+            try {
+                const updated = await window.electronAPI.updateProfile({
+                    id: this._profileEditId,
+                    name,
+                    icon: pickedIcon
+                });
+                if (updated?.id === this.profileId) {
+                    this.windowProfileIcon = this.sanitizeProfileIcon(updated.icon);
+                }
+                await this.refreshProfilesMenu();
+            } catch (err) {
+                console.error('updateProfile failed', err);
+            }
+            return;
+        }
+        try {
+            const created = await window.electronAPI.createProfile({
+                name,
+                icon: pickedIcon
+            });
+            if (!created?.id) return;
+            if (created.icon) this.windowProfileIcon = this.sanitizeProfileIcon(created.icon);
+            await this.refreshProfilesMenu();
+            await window.electronAPI.openOrFocusProfileWindow(created.id);
+        } catch (err) {
+            console.error('createProfile failed', err);
+        }
+    }
+
+    async confirmProfileDelete() {
+        const id = this._profileDeleteId;
+        if (!id) return;
+        this.hideProfileDeleteModal();
+        this.hideProfileSwitcherMenu();
+        try {
+            const result = await window.electronAPI.deleteProfile({ id, skipChecks: true });
+            if (result?.cancelled) return;
+            if (!result?.ok) {
+                console.error('deleteProfile failed', result?.error || 'unknown error');
+                return;
+            }
+            await this.refreshProfilesMenu();
+        } catch (err) {
+            console.error('deleteProfile failed', err);
+        }
+    }
+
+    async confirmProfileCreate() {
+        await this.confirmProfileForm();
     }
 
     async applySettingsUpdateFromMain() {
@@ -2939,6 +3611,9 @@ class AxisBrowser {
                 this._touchTransparentSitesForWebview(webview);
             }
             
+            if (isActiveTab()) {
+                this._voidGuestTask(this.injectVaultAutofillBootstrap(webview));
+            }
             if (!isActiveTab() || this.isBenchmarking) return;
         };
         webview.__eventHandlers.domReady = domReadyHandler;
@@ -3031,6 +3706,9 @@ class AxisBrowser {
                     })();
                 `).catch(() => {});
             } catch (e) {}
+            if (isActiveTab()) {
+                this._voidGuestTask(this.injectVaultAutofillBootstrap(webview));
+            }
         };
         webview.__eventHandlers.didFinishLoad = didFinishLoadHandler;
         webview.addEventListener('did-finish-load', didFinishLoadHandler);
@@ -3331,6 +4009,36 @@ class AxisBrowser {
                         );
                     }
                 })();
+                return;
+            }
+            if (channel === 'axis-vault-save-offer') {
+                const payload = args && args[0];
+                this.routeVaultGuestMessage(channel, payload, webview);
+                return;
+            }
+            if (channel === 'axis-vault-autofill-hide') {
+                this.hideVaultAutofillPanel();
+                void this.hideVaultAutofillInPage(webview);
+                return;
+            }
+            if (channel === 'axis-vault-autofill-request') {
+                const payload = args && args[0];
+                void this.presentVaultAutofill(webview, payload);
+                return;
+            }
+            if (channel === 'axis-vault-autofill-query') {
+                const payload = args && args[0];
+                void this.handleVaultAutofillQuery(webview, payload);
+                return;
+            }
+            if (channel === 'axis-vault-pick-login') {
+                const payload = args && args[0];
+                this.routeVaultGuestMessage(channel, payload, webview);
+                return;
+            }
+            if (channel === 'axis-vault-pick-card') {
+                const payload = args && args[0];
+                this.routeVaultGuestMessage(channel, payload, webview);
                 return;
             }
             if (!isActiveTab()) return;
@@ -4167,6 +4875,7 @@ class AxisBrowser {
         // is never visually altered. Incognito ignores this flag (forced black below).
         const preferLightUi = this.settings?.uiTheme === 'light' && !this.isIncognitoWindow;
         document.documentElement.setAttribute('data-ui-theme', preferLightUi ? 'light' : 'dark');
+        void this.syncVaultAutofillUiTheme(this.getActiveWebview()).catch(() => {});
 
         // Pre-calculate all color values once to avoid repeated calculations
         const darkerPrimary = colors.primary;
@@ -4722,6 +5431,13 @@ class AxisBrowser {
         return this._isSettingsTab(tab) ? { useSettingsPreload: true } : {};
     }
 
+    getSessionPartition() {
+        if (this.isIncognitoWindow) return 'incognito';
+        const id = String(this.profileId || 'personal').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+        if (id === 'personal') return 'persist:main';
+        return `persist:profile-${id}`;
+    }
+
     /** Destroy all tab webviews so they are recreated with current webpreferences (e.g. JavaScript on/off). */
     rebuildAllTabWebviewsForWebPreferences() {
         if (!this.tabs || this.tabs.size === 0) return;
@@ -4771,7 +5487,7 @@ class AxisBrowser {
                 /* ignore */
             }
         }
-        webview.setAttribute('partition', this.isIncognitoWindow ? 'incognito' : 'persist:main');
+        webview.setAttribute('partition', this.getSessionPartition());
         // Let Electron use its real Chromium version in the UA string;
         // hardcoding an old Chrome version can cause sites to refuse loading.
         webview.setAttribute('autosize', 'true');
@@ -5317,6 +6033,7 @@ class AxisBrowser {
     }
 
     switchToTab(rawTabId) {
+        this.hideVaultAutofillPanel();
         const tabId = this._normalizeTabMapKey(rawTabId);
         if (tabId == null || !this.tabs.has(tabId)) {
             if (this.tabs.size === 0) {
@@ -6281,6 +6998,10 @@ class AxisBrowser {
         this._purgeStaleWebviewsInContainer();
         const webview = document.getElementById('webview');
         if (webview) webview.src = 'about:blank';
+        this._pruneAllTabGroupsTabIds();
+        this._removeEmptyTabGroupsWithHadTabs();
+        void this.saveTabGroups();
+        void this.savePinnedTabs();
         this.resetToBlackTheme();
         this.updateNewTabPageVisibility(false);
         this.updateEmptyState();
@@ -6370,11 +7091,7 @@ class AxisBrowser {
                 const neighborPref = closingCurrent ? this._findNeighborTabToActivate(tid) : null;
                 // Completely remove inactive pinned tabs
                 // Remove from tab groups first (sync may move the tab element)
-                this.tabGroups.forEach((tabGroup, tabGroupId) => {
-                    if (tabGroup.tabIds.includes(tid)) {
-                        this.removeTabFromTabGroup(tid, tabGroupId);
-                    }
-                });
+                this._removeTabIdFromAllTabGroups(tid, true);
                 // Re-query in case sync moved the element
                 const elToRemove = document.querySelector(`[data-tab-id="${tid}"]`);
                 if (elToRemove) elToRemove.remove();
@@ -6432,10 +7149,8 @@ class AxisBrowser {
         const tabGroupIdForUndo = tab && tab.tabGroupId;
         const closingUnpinnedCurrent = cur === tid;
         const neighborUnpinnedPref = closingUnpinnedCurrent ? this._findNeighborTabToActivate(tid) : null;
-        // Remove from tab group first (without recording undo) so group state stays consistent
-        if (tab && tab.tabGroupId) {
-            this.removeTabFromTabGroup(tid, tab.tabGroupId, true);
-        }
+        // Remove from every group that still lists this tab (delete-group clears tabGroupId but not tabIds)
+        this._removeTabIdFromAllTabGroups(tid, true);
         // Store closed tab for recovery (only if it's not a new tab)
         if (tab && tab.url && tab.url !== 'about:blank') {
             this.closedTabs.unshift({
@@ -7740,14 +8455,16 @@ class AxisBrowser {
                 // Send confirmation back to webview
                 const webview = document.getElementById('webview');
                 if (webview) {
-                    webview.executeJavaScript(`
+                    webview
+                        .executeJavaScript(`
                         (function() {
                             if (window.updateSaveStatus) {
                                 window.updateSaveStatus(true);
                             }
                             window.postMessage({ type: 'noteSaved' }, '*');
                         })();
-                    `);
+                    `)
+                        .catch(() => {});
                 }
                 
                 // Refresh notes list if panel is open
@@ -7760,11 +8477,13 @@ class AxisBrowser {
             console.error('Error saving note:', error);
             const webview = document.getElementById('webview');
             if (webview) {
-                webview.executeJavaScript(`
+                webview
+                    .executeJavaScript(`
                     if (window.updateSaveStatus) {
                         window.updateSaveStatus(false);
                     }
-                `);
+                `)
+                    .catch(() => {});
             }
         }
     }
@@ -9417,13 +10136,10 @@ class AxisBrowser {
         this.renderFavorites();
     }
     
-    savePinnedTabs() {
+    _collectPinnedTabsPayload() {
         const tabsContainer = this.elements.tabsContainer;
-        if (!tabsContainer) return;
+        if (!tabsContainer) return [];
 
-        // Get all pinned loose tabs in current visual order.
-        // Do not depend on "above separator" placement; if drag/layout is mid-transition
-        // we still persist tabs marked `pinned: true`.
         const pinnedTabs = [];
         let pinnedOrder = 0;
         const allChildren = Array.from(tabsContainer.children);
@@ -9437,17 +10153,20 @@ class AxisBrowser {
                     id: tabId,
                     url: tab.url,
                     title: tab.title,
-                    favicon: tab.favicon || null, // Save favicon
-                    customIcon: tab.customIcon || null, // Save custom icon
-                    customIconType: tab.customIconType || null, // Save icon type (emoji or fontawesome)
-                    customTitle: tab.customTitle || null, // Save custom title
+                    favicon: tab.favicon || null,
+                    customIcon: tab.customIcon || null,
+                    customIconType: tab.customIconType || null,
+                    customTitle: tab.customTitle || null,
                     order: pinnedOrder++
                 });
             }
         }
-        
-        // Save to settings
-        this.saveSetting('pinnedTabs', pinnedTabs);
+        return pinnedTabs;
+    }
+
+    async savePinnedTabs() {
+        const pinnedTabs = this._collectPinnedTabsPayload();
+        await this.saveSetting('pinnedTabs', pinnedTabs);
     }
     
     async loadPinnedTabs() {
@@ -11103,12 +11822,13 @@ class AxisBrowser {
             open: true,
             order: this.tabGroups.size,
             color: color,
-            pinned: true
+            pinned: true,
+            hadTabs: false
         };
         
         this.tabGroups.set(tabGroupId, tabGroup);
         this.renderTabGroups();
-        this.saveTabGroups();
+        void this.saveTabGroups();
         
         // Focus the tab group name for editing when newly created
         setTimeout(() => {
@@ -11517,18 +12237,25 @@ class AxisBrowser {
 
         for (const [id, tg] of this.tabGroups) {
             if (String(id) === String(resolvedId)) continue;
-            if (!tg.tabIds.includes(tabId)) continue;
-            tg.tabIds = tg.tabIds.filter((tid) => tid !== tabId);
+            if (!this._tabIdIsInGroup(tg.tabIds, tabId)) continue;
+            tg.tabIds = tg.tabIds.filter((id) => this._normalizeTabMapKey(id) !== this._normalizeTabMapKey(tabId));
             if (tg.tabIds.length === 0) {
-                tg.open = false;
-                if (this.settings?.autoCollapseEmptyTabGroup !== false) {
-                    this._pendingEmptyGroupCollapseId = id;
+                if (tg.hadTabs) {
+                    this.tabGroups.delete(id);
+                    document.querySelector(`[data-tab-group-id="${id}"]`)?.remove();
+                } else {
+                    tg.open = false;
+                    if (this.settings?.autoCollapseEmptyTabGroup !== false) {
+                        this._pendingEmptyGroupCollapseId = id;
+                    }
+                    this.tabGroups.set(id, tg);
                 }
+            } else {
+                this.tabGroups.set(id, tg);
             }
-            this.tabGroups.set(id, tg);
         }
 
-        if (!tabGroup.tabIds.includes(tabId)) {
+        if (!this._tabIdIsInGroup(tabGroup.tabIds, tabId)) {
             if (insertIndex !== undefined && insertIndex >= 0 && insertIndex <= tabGroup.tabIds.length) {
                 tabGroup.tabIds.splice(insertIndex, 0, tabId);
             } else {
@@ -11536,6 +12263,7 @@ class AxisBrowser {
             }
         }
         tabGroup.open = true;
+        tabGroup.hadTabs = true;
         this.tabGroups.set(resolvedId, tabGroup);
 
         tab.tabGroupId = resolvedId;
@@ -11553,49 +12281,129 @@ class AxisBrowser {
         }
     }
 
+    /** Whether `tabId` is listed in a group's `tabIds` (numeric/string safe). */
+    _tabIdIsInGroup(tabIds, rawTabId) {
+        const tid = this._normalizeTabMapKey(rawTabId);
+        if (tid == null || !Array.isArray(tabIds)) return false;
+        return tabIds.some((id) => this._normalizeTabMapKey(id) === tid);
+    }
+
+    /** Drop tab ids that no longer exist in `this.tabs` (does not remove empty groups — new groups start empty). */
+    _pruneAllTabGroupsTabIds() {
+        let changed = false;
+        for (const [groupKey, tabGroup] of this.tabGroups) {
+            const pruned = tabGroup.tabIds
+                .map((id) => this._normalizeTabMapKey(id))
+                .filter((id) => id != null && this.tabs.has(id));
+            if (pruned.length > 0 && !tabGroup.hadTabs) {
+                tabGroup.hadTabs = true;
+                changed = true;
+            }
+            if (pruned.length !== tabGroup.tabIds.length) {
+                tabGroup.tabIds = pruned;
+                changed = true;
+            }
+            if (changed) this.tabGroups.set(groupKey, tabGroup);
+        }
+        return changed;
+    }
+
+    /** Remove groups that previously had tabs and are now empty (keeps brand-new empty groups). */
+    _removeEmptyTabGroupsWithHadTabs() {
+        const emptyGroupIds = [];
+        for (const [groupKey, tabGroup] of this.tabGroups) {
+            if ((!tabGroup.tabIds || tabGroup.tabIds.length === 0) && tabGroup.hadTabs) {
+                emptyGroupIds.push(groupKey);
+            }
+        }
+        emptyGroupIds.forEach((gid) => {
+            this.tabGroups.delete(gid);
+            const groupEl = document.querySelector(`[data-tab-group-id="${gid}"]`);
+            if (groupEl?.parentNode) groupEl.remove();
+        });
+        return emptyGroupIds.length > 0;
+    }
+
+    _deleteTabGroupFromMapAndDom(groupKey) {
+        this.tabGroups.delete(groupKey);
+        const groupEl = document.querySelector(`[data-tab-group-id="${groupKey}"]`);
+        if (groupEl?.parentNode) groupEl.remove();
+    }
+
+    /**
+     * Remove a tab from every group that still lists it (fixes delete-group-then-close leaving stale ids).
+     * @param {boolean} skipUndo
+     * @param {number|string|null} onlyGroupId When set, only touch that group.
+     */
+    _removeTabIdFromTabGroups(rawTabId, skipUndo = false, onlyGroupId = null) {
+        const tid = this._normalizeTabMapKey(rawTabId);
+        if (tid == null) return false;
+
+        let changed = false;
+
+        for (const [groupKey, tabGroup] of this.tabGroups) {
+            const resolvedOnly = onlyGroupId != null ? this.findTabGroupKey(onlyGroupId) : null;
+            if (onlyGroupId != null && groupKey !== resolvedOnly && String(groupKey) !== String(resolvedOnly)) {
+                continue;
+            }
+            if (!this._tabIdIsInGroup(tabGroup.tabIds, tid)) continue;
+
+            const indexInGroup = tabGroup.tabIds.findIndex((id) => this._normalizeTabMapKey(id) === tid);
+            if (!skipUndo && indexInGroup !== -1) {
+                this.tabUndoStack.push({
+                    type: 'remove_from_group',
+                    tabId: tid,
+                    tabGroupId: groupKey,
+                    indexInGroup
+                });
+                if (this.tabUndoStack.length > 15) this.tabUndoStack = this.tabUndoStack.slice(-15);
+            }
+
+            tabGroup.tabIds = tabGroup.tabIds.filter((id) => this._normalizeTabMapKey(id) !== tid);
+            changed = true;
+
+            const tab = this.tabs.get(tid);
+            if (tab && this._normalizeTabMapKey(tab.tabGroupId) === this._normalizeTabMapKey(groupKey)) {
+                tab.tabGroupId = undefined;
+                this.tabs.set(tid, tab);
+            }
+
+            if (tabGroup.tabIds.length === 0) {
+                tabGroup.open = false;
+                if (tabGroup.hadTabs) {
+                    this._deleteTabGroupFromMapAndDom(groupKey);
+                } else {
+                    this.tabGroups.set(groupKey, tabGroup);
+                }
+            } else {
+                this.tabGroups.set(groupKey, tabGroup);
+            }
+        }
+
+        if (changed) {
+            this.syncSidebarFromTabGroups();
+        }
+        return changed;
+    }
+
+    _removeTabIdFromAllTabGroups(rawTabId, skipUndo = false) {
+        return this._removeTabIdFromTabGroups(rawTabId, skipUndo, null);
+    }
+
     removeTabFromTabGroup(tabId, tabGroupId, skipUndo = false) {
+        const resolvedId = this.findTabGroupKey(tabGroupId);
+        if (resolvedId == null) return;
+        this._removeTabIdFromTabGroups(tabId, skipUndo, resolvedId);
+    }
+
+    deleteTabGroup(tabGroupId) {
         const resolvedId = this.findTabGroupKey(tabGroupId);
         const tabGroup = resolvedId != null ? this.tabGroups.get(resolvedId) : null;
         if (!tabGroup) return;
 
-        const indexInGroup = tabGroup.tabIds.indexOf(tabId);
-        if (!skipUndo && indexInGroup !== -1) {
-            this.tabUndoStack.push({ type: 'remove_from_group', tabId, tabGroupId, indexInGroup });
-            if (this.tabUndoStack.length > 15) this.tabUndoStack = this.tabUndoStack.slice(-15);
-        }
-
-        tabGroup.tabIds = tabGroup.tabIds.filter(id => id !== tabId);
-        if (tabGroup.tabIds.length === 0) {
-            tabGroup.open = false;
-            if (this.settings?.autoCollapseEmptyTabGroup !== false) {
-                this._pendingEmptyGroupCollapseId = resolvedId;
-            }
-        }
-        this.tabGroups.set(resolvedId, tabGroup);
-
-        const tab = this.tabs.get(tabId);
-        if (tab) {
-            tab.tabGroupId = undefined;
-            this.tabs.set(tabId, tab);
-        }
-
-        this.syncSidebarFromTabGroups();
-
-        if (this._pendingEmptyGroupCollapseId != null) {
-            const gid = this._pendingEmptyGroupCollapseId;
-            this._pendingEmptyGroupCollapseId = null;
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => this.runTabGroupCollapseAnimation(gid));
-            });
-        }
-    }
-
-    deleteTabGroup(tabGroupId) {
-        const tabGroup = this.tabGroups.get(tabGroupId);
-        if (!tabGroup) return;
-
-        tabGroup.tabIds.forEach(tabId => {
-            const tab = this.tabs.get(tabId);
+        tabGroup.tabIds.forEach(rawTabId => {
+            const tabId = this._normalizeTabMapKey(rawTabId);
+            const tab = tabId != null ? this.tabs.get(tabId) : null;
             if (tab) {
                 tab.tabGroupId = undefined;
                 tab.pinned = tabGroup.pinned !== false;
@@ -11603,44 +12411,67 @@ class AxisBrowser {
             }
         });
 
-        this.tabGroups.delete(tabGroupId);
+        this.tabGroups.delete(resolvedId);
 
-        const groupEl = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
+        const groupEl = document.querySelector(`[data-tab-group-id="${resolvedId}"]`);
         if (groupEl && groupEl.parentNode) groupEl.remove();
 
         this.syncSidebarFromTabGroups();
     }
 
-    saveTabGroups() {
-        const tabGroupsArray = Array.from(this.tabGroups.values()).map(tabGroup => {
-            // Save tab data for each tab in the group so we can recreate them on load
-            const tabs = tabGroup.tabIds.map(tabId => {
+    _buildTabGroupsSavePayload() {
+        this._pruneAllTabGroupsTabIds();
+        return Array.from(this.tabGroups.values()).map(tabGroup => {
+            const tabIds = tabGroup.tabIds
+                .map((id) => this._normalizeTabMapKey(id))
+                .filter((id) => id != null && this.tabs.has(id));
+            const tabs = tabIds.map(tabId => {
                 const tab = this.tabs.get(tabId);
-                if (tab) {
-                    return {
-                        id: tabId,
-                        url: tab.url || null,
-                        title: tab.title || 'New Tab',
-                        favicon: tab.favicon || null
-                    };
-                }
-                return null;
+                if (!tab) return null;
+                return {
+                    id: tabId,
+                    url: tab.url || null,
+                    title: tab.title || 'New Tab',
+                    favicon: tab.favicon || null
+                };
             }).filter(t => t !== null);
-            
+
             return {
                 id: tabGroup.id,
                 name: tabGroup.name,
-                tabIds: tabGroup.tabIds,
+                tabIds,
                 tabs,
                 open: tabGroup.open,
                 order: tabGroup.order,
                 color: tabGroup.color || '#FF6B6B',
                 pinned: tabGroup.pinned !== false,
                 icon: tabGroup.icon || null,
-                iconType: tabGroup.iconType || null
+                iconType: tabGroup.iconType || null,
+                hadTabs: tabGroup.hadTabs === true
             };
         });
-        this.saveSetting('tabGroups', tabGroupsArray);
+    }
+
+    async saveTabGroups() {
+        const tabGroupsArray = this._buildTabGroupsSavePayload();
+        await this.saveSetting('tabGroups', tabGroupsArray);
+    }
+
+    /** Called from main via executeJavaScript when quit is confirmed (never during beforeunload). */
+    flushSessionStatePayload() {
+        if (this.isIncognitoWindow) return { incognito: true };
+        try {
+            this._pruneAllTabGroupsTabIds();
+            this._removeEmptyTabGroupsWithHadTabs();
+            const tabGroups = this._buildTabGroupsSavePayload();
+            const pinnedTabs = this._collectPinnedTabsPayload();
+            this.settings.tabGroups = tabGroups;
+            this.settings.pinnedTabs = pinnedTabs;
+            return { incognito: false, tabGroups, pinnedTabs };
+        } catch (e) {
+            console.error('flushSessionStatePayload failed:', e);
+            return { incognito: true };
+        }
     }
 
     async loadTabGroups() {
@@ -11650,42 +12481,65 @@ class AxisBrowser {
 
             this.tabGroups.clear();
             tabGroupsData.forEach((tabGroupData, index) => {
+                const savedTabIds = Array.isArray(tabGroupData.tabIds) ? tabGroupData.tabIds : [];
+                const savedTabs = Array.isArray(tabGroupData.tabs) ? tabGroupData.tabs : [];
+                const hadTabs =
+                    tabGroupData.hadTabs === true || savedTabIds.length > 0 || savedTabs.length > 0;
+
                 const group = {
                     id: tabGroupData.id,
                     name: tabGroupData.name || `Tab Group ${index + 1}`,
-                    tabIds: Array.isArray(tabGroupData.tabIds) ? tabGroupData.tabIds.slice() : [],
+                    tabIds: [],
                     open: tabGroupData.open !== false,
                     order: typeof tabGroupData.order === 'number' ? tabGroupData.order : index,
                     color: tabGroupData.color || '#FF6B6B',
                     pinned: tabGroupData.pinned !== false,
                     icon: tabGroupData.icon || null,
-                    iconType: tabGroupData.iconType || null
+                    iconType: tabGroupData.iconType || null,
+                    hadTabs
                 };
-                this.tabGroups.set(group.id, group);
 
-                const savedTabs = Array.isArray(tabGroupData.tabs) ? tabGroupData.tabs : [];
-                group.tabIds.forEach(tabId => {
-                    if (this.tabs.has(tabId)) {
-                        const tab = this.tabs.get(tabId);
-                        tab.tabGroupId = group.id;
-                        tab.pinned = group.pinned;
-                        this.tabs.set(tabId, tab);
-                        return;
-                    }
-                    const saved = savedTabs.find(t => t && t.id === tabId);
+                savedTabs.forEach((saved) => {
+                    if (!saved || saved.id == null) return;
+                    const tabId = this._normalizeTabMapKey(saved.id);
+                    if (tabId == null || this.tabs.has(tabId)) return;
                     this.tabs.set(tabId, {
                         id: tabId,
-                        url: saved?.url || null,
-                        title: saved?.title || 'New Tab',
-                        favicon: saved?.favicon || null,
+                        url: saved.url || null,
+                        title: saved.title || 'New Tab',
+                        favicon: saved.favicon || null,
                         canGoBack: false,
                         canGoForward: false,
-                        history: saved?.url ? [saved.url] : [],
-                        historyIndex: saved?.url ? 0 : -1,
+                        history: saved.url ? [saved.url] : [],
+                        historyIndex: saved.url ? 0 : -1,
                         pinned: group.pinned,
                         tabGroupId: group.id,
                         webview: null
                     });
+                });
+
+                const tabIdSet = new Set();
+                savedTabIds.forEach((id) => {
+                    const nid = this._normalizeTabMapKey(id);
+                    if (nid != null && this.tabs.has(nid)) tabIdSet.add(nid);
+                });
+                savedTabs.forEach((saved) => {
+                    const nid = this._normalizeTabMapKey(saved?.id);
+                    if (nid != null && this.tabs.has(nid)) tabIdSet.add(nid);
+                });
+                group.tabIds = Array.from(tabIdSet);
+
+                if (group.tabIds.length === 0 && hadTabs) {
+                    return;
+                }
+
+                this.tabGroups.set(group.id, group);
+                group.tabIds.forEach(tabId => {
+                    const tab = this.tabs.get(tabId);
+                    if (!tab) return;
+                    tab.tabGroupId = group.id;
+                    tab.pinned = group.pinned;
+                    this.tabs.set(tabId, tab);
                 });
             });
 
@@ -11756,6 +12610,8 @@ class AxisBrowser {
         const separator = this.elements.tabsSeparator;
         const newTabBtn = this.elements.sidebarNewTabBtn;
         if (!container || !separator) return;
+
+        this._pruneAllTabGroupsTabIds();
 
         // Remove any group elements whose group was deleted (e.g. after deleteTabGroup)
         container.querySelectorAll('.tab-group').forEach(groupEl => {
@@ -11839,7 +12695,7 @@ class AxisBrowser {
         
         // Separator visibility is based on actual DOM content above it
         this.updatePinnedSeparatorVisibility();
-        this.saveTabGroups();
+        void this.saveTabGroups();
     }
 
     getOrCreateGroupElement(group) {
@@ -12051,6 +12907,7 @@ class AxisBrowser {
             order: this.tabGroups.size,
             color: originalTabGroup.color || '#FF6B6B',
             pinned: originalTabGroup.pinned !== false,
+            hadTabs: false,
             tabs: []
         };
 
@@ -12098,6 +12955,7 @@ class AxisBrowser {
 
         // Set the new tab IDs
         newTabGroup.tabIds = newTabIds;
+        newTabGroup.hadTabs = newTabIds.length > 0;
 
         this.tabGroups.set(newTabGroupId, newTabGroup);
         newTabIds.forEach(tabId => {
@@ -12581,7 +13439,8 @@ class AxisBrowser {
         try {
             webview.focus();
         } catch (_) {}
-        webview.executeJavaScript(`
+        webview
+            .executeJavaScript(`
             (function() {
                 try {
                     var el = document.activeElement;
@@ -12596,7 +13455,8 @@ class AxisBrowser {
                     document.execCommand('selectAll');
                 } catch (e) {}
             })();
-        `);
+        `)
+            .catch(() => {});
     }
 
     cut() {
@@ -12605,13 +13465,15 @@ class AxisBrowser {
         try {
             webview.focus();
         } catch (_) {}
-        webview.executeJavaScript(`
+        webview
+            .executeJavaScript(`
             (function() {
                 try {
                     return document.execCommand('cut');
                 } catch (e) { return false; }
             })();
-        `);
+        `)
+            .catch(() => {});
     }
 
     copy() {
@@ -14390,114 +15252,48 @@ class AxisBrowser {
 
     setupSidebarResize() {
         const sidebar = document.getElementById('sidebar');
+        const mainArea = document.getElementById('main-area');
+        const contentArea = document.getElementById('content-area');
         const resizeHandle = document.getElementById('sidebar-resize-handle');
-        
+        if (!sidebar || !mainArea || !contentArea || !resizeHandle) return;
+
+        const syncSidebarResizeHandleLayout = () => {
+            const sidebarHidden = sidebar.classList.contains('hidden') && !sidebar.classList.contains('slide-out');
+            if (sidebarHidden) {
+                resizeHandle.style.display = 'none';
+                return;
+            }
+            resizeHandle.style.display = '';
+            const top = contentArea.offsetTop;
+            const height = contentArea.offsetHeight;
+            const isRightSide = mainArea.classList.contains('sidebar-right');
+            const seamX = isRightSide
+                ? mainArea.clientWidth - sidebar.offsetWidth
+                : sidebar.offsetWidth;
+            resizeHandle.style.top = `${top}px`;
+            resizeHandle.style.height = `${height}px`;
+            resizeHandle.style.left = `${Math.round(seamX - 6)}px`;
+            resizeHandle.style.right = 'auto';
+        };
+
+        syncSidebarResizeHandleLayout();
+        window.addEventListener('resize', syncSidebarResizeHandleLayout);
+        if (typeof ResizeObserver !== 'undefined') {
+            const layoutObserver = new ResizeObserver(() => syncSidebarResizeHandleLayout());
+            layoutObserver.observe(contentArea);
+            layoutObserver.observe(sidebar);
+            layoutObserver.observe(mainArea);
+        }
+        if (typeof MutationObserver !== 'undefined') {
+            const classObserver = new MutationObserver(() => syncSidebarResizeHandleLayout());
+            classObserver.observe(sidebar, { attributes: true, attributeFilter: ['class'] });
+            classObserver.observe(mainArea, { attributes: true, attributeFilter: ['class'] });
+        }
+
         let isResizing = false;
         let startX = 0;
         let startWidth = 0;
         let animationFrame = null;
-        let hoverTimeout = null;
-        let hideTimeout = null;
-        let isNearEdge = false;
-        
-        // Show resize handle after a delay of hovering near the edge
-        const showResizeHandle = () => {
-            if (hoverTimeout) {
-                clearTimeout(hoverTimeout);
-            }
-            // Clear any pending hide
-            if (hideTimeout) {
-                clearTimeout(hideTimeout);
-                hideTimeout = null;
-            }
-            hoverTimeout = setTimeout(() => {
-                if (isNearEdge) {
-                    resizeHandle.classList.add('visible');
-                }
-            }, 1500); // Increased delay to 1.5 seconds
-        };
-        
-        // Hide resize handle with a delay to prevent flickering
-        const hideResizeHandle = () => {
-            if (hoverTimeout) {
-                clearTimeout(hoverTimeout);
-                hoverTimeout = null;
-            }
-            // Add a small delay before hiding to prevent flickering when mouse moves slightly
-            if (hideTimeout) {
-                clearTimeout(hideTimeout);
-            }
-            hideTimeout = setTimeout(() => {
-                resizeHandle.classList.remove('visible');
-                isNearEdge = false;
-            }, 300); // 300ms delay before hiding
-        };
-        
-        // Track mouse movement on sidebar to detect when near edge
-        // Use throttling to reduce sensitivity
-        let lastMoveTime = 0;
-        const moveThrottle = 50; // Only check every 50ms
-        
-        sidebar.addEventListener('mousemove', (e) => {
-            if (sidebar.classList.contains('hidden') && !sidebar.classList.contains('slide-out')) {
-                return;
-            }
-            const now = performance.now();
-            if (now - lastMoveTime < moveThrottle) {
-                return; // Skip if too soon
-            }
-            lastMoveTime = now;
-            
-            const rect = sidebar.getBoundingClientRect();
-            const isRightSide = sidebar.classList.contains('sidebar-right');
-            const edgeThreshold = 15; // Reduced threshold for more precise detection
-            
-            let nearEdge = false;
-            if (isRightSide) {
-                // Sidebar on right - check left edge
-                nearEdge = e.clientX <= rect.left + edgeThreshold;
-            } else {
-                // Sidebar on left - check right edge
-                nearEdge = e.clientX >= rect.right - edgeThreshold;
-            }
-            
-            if (nearEdge && !isNearEdge) {
-                // Just entered edge area
-                isNearEdge = true;
-                showResizeHandle();
-            } else if (!nearEdge && isNearEdge) {
-                // Just left edge area
-                hideResizeHandle();
-            }
-        });
-        
-        // Hide when mouse leaves sidebar
-        sidebar.addEventListener('mouseleave', () => {
-            hideResizeHandle();
-        });
-        
-        // Show immediately when directly hovering on resize handle
-        resizeHandle.addEventListener('mouseenter', () => {
-            isNearEdge = true;
-            // Clear any pending timeouts
-            if (hoverTimeout) {
-                clearTimeout(hoverTimeout);
-                hoverTimeout = null;
-            }
-            if (hideTimeout) {
-                clearTimeout(hideTimeout);
-                hideTimeout = null;
-            }
-            resizeHandle.classList.add('visible');
-        });
-        
-        resizeHandle.addEventListener('mouseleave', () => {
-            // Don't hide immediately when leaving the handle itself
-            // Only hide if we're not near the edge anymore
-            if (!isNearEdge) {
-                hideResizeHandle();
-            }
-        });
 
         const startResize = (e) => {
             if (isResizing) return;
@@ -14557,6 +15353,7 @@ class AxisBrowser {
                 // Apply the new width with CSS transition disabled during resize for immediate feedback
                 sidebar.style.transition = 'none';
                 sidebar.style.width = clampedWidth + 'px';
+                syncSidebarResizeHandleLayout();
             });
         };
 
@@ -15262,10 +16059,17 @@ class AxisBrowser {
                     if (!isNaN(tabId)) {
                         const tab = this.tabs.get(tabId);
                         if (tab && tab.tabGroupId) {
-                            const prevGroup = this.tabGroups.get(tab.tabGroupId);
+                            const prevKey = this.findTabGroupKey(tab.tabGroupId);
+                            const prevGroup = prevKey != null ? this.tabGroups.get(prevKey) : null;
                             if (prevGroup) {
-                                prevGroup.tabIds = prevGroup.tabIds.filter(id => id !== tabId);
-                                this.tabGroups.set(tab.tabGroupId, prevGroup);
+                                prevGroup.tabIds = prevGroup.tabIds.filter(
+                                    (id) => this._normalizeTabMapKey(id) !== tabId
+                                );
+                                if (prevGroup.tabIds.length === 0 && prevGroup.hadTabs) {
+                                    this._deleteTabGroupFromMapAndDom(prevKey);
+                                } else {
+                                    this.tabGroups.set(prevKey, prevGroup);
+                                }
                             }
                             tab.tabGroupId = undefined;
                             this.tabs.set(tabId, tab);
@@ -15305,17 +16109,20 @@ class AxisBrowser {
                                     }
                                 }
                             });
-                            tabGroup.tabIds = newTabIds;
-                            this.tabGroups.set(tabGroupId, tabGroup);
+                            if (newTabIds.length === 0 && tabGroup.hadTabs) {
+                                this._deleteTabGroupFromMapAndDom(tabGroupId);
+                            } else {
+                                tabGroup.tabIds = newTabIds;
+                                if (newTabIds.length > 0) tabGroup.hadTabs = true;
+                                this.tabGroups.set(tabGroupId, tabGroup);
+                            }
                         }
                     }
                 }
                 
                 requestAnimationFrame(() => {
-                    this.savePinnedTabs();
-                    if (this.saveTabGroups) {
-                        this.saveTabGroups();
-                    }
+                    void this.savePinnedTabs();
+                    void this.saveTabGroups();
                 });
             }
             
@@ -18081,7 +18888,7 @@ class AxisBrowser {
         
         // Extract theme color from website
         if (!opts.skipExtractTheme) {
-            this.extractUrlBarTheme(webview);
+            this._voidGuestTask(this.extractUrlBarTheme(webview));
         } else {
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         }
@@ -18866,7 +19673,23 @@ class AxisBrowser {
         this._stopSidebarMediaDockPoll();
         this._sidebarMediaTitleDisconnectResizeObserver();
         this._sidebarMediaDock = null;
-        this.elements?.sidebarMediaDock?.classList.add('hidden');
+        this._sidebarMediaGlowSeq += 1;
+        const dock = this.elements?.sidebarMediaDock;
+        if (!dock) return;
+        const card = dock.querySelector('.sidebar-media-dock-card');
+        if (card) {
+            card.classList.remove('sidebar-media-dock-card--playing', 'sidebar-media-dock-card--paused');
+        }
+        dock.classList.remove('sidebar-media-dock--shown');
+        const finishHide = () => {
+            dock.classList.add('hidden');
+            dock.classList.remove('sidebar-media-dock--mounted');
+        };
+        if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+            finishHide();
+            return;
+        }
+        window.setTimeout(finishHide, 280);
     }
 
     _stopSidebarMediaDockPoll() {
@@ -18884,8 +19707,16 @@ class AxisBrowser {
         const dock = this.elements?.sidebarMediaDock;
         if (dock) {
             dock.classList.remove('hidden');
+            dock.classList.add('sidebar-media-dock--mounted');
+            dock.classList.remove('sidebar-media-dock--shown');
             const card = dock.querySelector('.sidebar-media-dock-card');
             if (card) this.elements.sidebarMediaDockCard = card;
+            const reveal = () => dock.classList.add('sidebar-media-dock--shown');
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => requestAnimationFrame(reveal));
+            } else {
+                reveal();
+            }
         }
         this._refreshSidebarMediaDockChrome();
         this._sidebarMediaTitleEnsureResizeObserver();
@@ -18951,7 +19782,7 @@ class AxisBrowser {
             el.sidebarMediaDock?.querySelector?.('.sidebar-media-dock-card');
         if (card) {
             el.sidebarMediaDockCard = card;
-            card.classList.toggle('sidebar-media-dock-card--yt', isYouTube);
+            card.classList.remove('sidebar-media-dock-card--yt');
         }
 
         const playI = el.sidebarMediaPlayBtn?.querySelector('i');
@@ -18959,14 +19790,165 @@ class AxisBrowser {
         const volI = el.sidebarMediaVolBtn?.querySelector('i');
         if (volI) volI.className = 'fas fa-volume-high';
         const badge = el.sidebarMediaSourceBadge;
+        const faviconUrl = tab?.favicon || (rawUrl ? this.getFaviconUrl(rawUrl) : null);
         if (badge) {
-            if (isYouTube) {
+            if (faviconUrl) {
+                badge.innerHTML = `<img class="sidebar-media-favicon" src="${this.escapeHtml(faviconUrl)}" alt="" draggable="false" />`;
+            } else if (isYouTube) {
                 badge.innerHTML = '<span class="sidebar-media-yt" title="YouTube"></span>';
             } else {
-                badge.innerHTML = '<i class="fas fa-film sidebar-media-source-generic" aria-hidden="true"></i>';
+                badge.innerHTML =
+                    '<i class="fas fa-film sidebar-media-source-generic" aria-hidden="true"></i>';
             }
         }
         this._layoutSidebarMediaTitleSlide();
+        if (card && tab) {
+            const faviconImg = badge?.querySelector?.('.sidebar-media-favicon');
+            if (faviconImg) {
+                const runGlow = () => void this._applySidebarMediaDockGlow(tab, card, faviconImg);
+                if (faviconImg.complete) runGlow();
+                else {
+                    faviconImg.addEventListener('load', runGlow, { once: true });
+                    faviconImg.addEventListener('error', runGlow, { once: true });
+                }
+            } else {
+                void this._applySidebarMediaDockGlow(tab, card, null);
+            }
+        }
+    }
+
+    /** Pick a saturated accent RGB from favicon pixels (for the dock radial glow). */
+    _accentFromFaviconImage(img) {
+        if (!img || !img.naturalWidth || !img.naturalHeight) return null;
+        try {
+            const size = 32;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            if (!ctx) return null;
+            ctx.drawImage(img, 0, 0, size, size);
+            const data = ctx.getImageData(0, 0, size, size).data;
+            let bestSat = 0;
+            let br = 0;
+            let bg = 0;
+            let bb = 0;
+            let ar = 0;
+            let ag = 0;
+            let ab = 0;
+            let n = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                const pr = data[i];
+                const pg = data[i + 1];
+                const pb = data[i + 2];
+                const pa = data[i + 3];
+                if (pa < 100) continue;
+                const max = Math.max(pr, pg, pb);
+                const min = Math.min(pr, pg, pb);
+                const lum = (pr + pg + pb) / 3;
+                if (lum < 28 || lum > 245) continue;
+                const sat = max === 0 ? 0 : (max - min) / max;
+                ar += pr;
+                ag += pg;
+                ab += pb;
+                n += 1;
+                if (sat >= 0.14 && sat >= bestSat) {
+                    bestSat = sat;
+                    br = pr;
+                    bg = pg;
+                    bb = pb;
+                }
+            }
+            if (bestSat >= 0.14) return { r: br, g: bg, b: bb };
+            if (n > 0) {
+                return {
+                    r: Math.round(ar / n),
+                    g: Math.round(ag / n),
+                    b: Math.round(ab / n)
+                };
+            }
+        } catch (_) {
+            /* canvas tainted or unavailable */
+        }
+        return null;
+    }
+
+    _sidebarMediaFallbackAccent(rawUrl, isYouTube) {
+        if (isYouTube) return { r: 230, g: 52, b: 60 };
+        try {
+            const host = new URL(rawUrl).hostname || '';
+            let hash = 0;
+            for (let i = 0; i < host.length; i++) hash = (hash * 31 + host.charCodeAt(i)) >>> 0;
+            const hue = hash % 360;
+            const s = 0.48;
+            const l = 0.54;
+            const c = (1 - Math.abs(2 * l - 1)) * s;
+            const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+            const m = l - c / 2;
+            let rp = 0;
+            let gp = 0;
+            let bp = 0;
+            if (hue < 60) {
+                rp = c;
+                gp = x;
+            } else if (hue < 120) {
+                rp = x;
+                gp = c;
+            } else if (hue < 180) {
+                gp = c;
+                bp = x;
+            } else if (hue < 240) {
+                gp = x;
+                bp = c;
+            } else if (hue < 300) {
+                rp = x;
+                bp = c;
+            } else {
+                rp = c;
+                bp = x;
+            }
+            return {
+                r: Math.round((rp + m) * 255),
+                g: Math.round((gp + m) * 255),
+                b: Math.round((bp + m) * 255)
+            };
+        } catch (_) {
+            return { r: 88, g: 118, b: 198 };
+        }
+    }
+
+    _setSidebarMediaDockGlow(card, accent) {
+        if (!card || !accent) return;
+        card.style.setProperty('--sidebar-media-glow-r', String(accent.r));
+        card.style.setProperty('--sidebar-media-glow-g', String(accent.g));
+        card.style.setProperty('--sidebar-media-glow-b', String(accent.b));
+        card.classList.add('sidebar-media-dock-card--glow');
+    }
+
+    async _applySidebarMediaDockGlow(tab, card, faviconImg) {
+        if (!card || !tab) return;
+        const seq = ++this._sidebarMediaGlowSeq;
+        const rawUrl = tab.url || '';
+        const isYouTube = this.isYouTubeHost(rawUrl);
+        let accent = null;
+        if (faviconImg) {
+            accent = this._accentFromFaviconImage(faviconImg);
+        }
+        if (!accent) {
+            const faviconUrl = tab.favicon || (rawUrl ? this.getFaviconUrl(rawUrl) : null);
+            if (faviconUrl && faviconUrl !== faviconImg?.src) {
+                accent = await new Promise((resolve) => {
+                    const probe = new Image();
+                    probe.crossOrigin = 'anonymous';
+                    probe.onload = () => resolve(this._accentFromFaviconImage(probe));
+                    probe.onerror = () => resolve(null);
+                    probe.src = faviconUrl;
+                });
+            }
+        }
+        if (seq !== this._sidebarMediaGlowSeq) return;
+        if (!accent) accent = this._sidebarMediaFallbackAccent(rawUrl, isYouTube);
+        this._setSidebarMediaDockGlow(card, accent);
     }
 
     _startSidebarMediaDockPoll() {
@@ -19020,6 +20002,13 @@ class AxisBrowser {
         const volI = this.elements?.sidebarMediaVolBtn?.querySelector('i');
         if (volI) {
             volI.className = muted ? 'fas fa-volume-xmark' : 'fas fa-volume-high';
+        }
+        const card =
+            this.elements?.sidebarMediaDockCard ||
+            this.elements?.sidebarMediaDock?.querySelector?.('.sidebar-media-dock-card');
+        if (card) {
+            card.classList.toggle('sidebar-media-dock-card--playing', !paused);
+            card.classList.toggle('sidebar-media-dock-card--paused', !!paused);
         }
     }
 
@@ -19207,6 +20196,786 @@ class AxisBrowser {
     startPIPProgressUpdate() {
         // Not needed for native PIP - browser handles progress display
     }
+
+    findWebviewByGuestContentsId(guestWebContentsId) {
+        if (guestWebContentsId == null) return null;
+        for (const tab of this.tabs.values()) {
+            const wv = tab.webview;
+            if (!wv) continue;
+            try {
+                const wc = wv.getWebContents && wv.getWebContents();
+                if (wc && wc.id === guestWebContentsId) return wv;
+            } catch (_) {}
+        }
+        const legacy = this.elements?.webview;
+        if (legacy) {
+            try {
+                const wc = legacy.getWebContents && legacy.getWebContents();
+                if (wc && wc.id === guestWebContentsId) return legacy;
+            } catch (_) {}
+        }
+        return null;
+    }
+
+    routeVaultGuestMessage(channel, payload, webviewHint) {
+        const webview = webviewHint || this.getActiveWebview();
+        if (channel === 'axis-vault-save-offer') {
+            if (!payload) return;
+            if (payload.type === 'card' && payload.number && payload.cardholder) {
+                void this.handleVaultSaveOffer(webview, payload);
+            } else if (payload.username && payload.password) {
+                void this.handleVaultSaveOffer(webview, { ...payload, type: 'login' });
+            }
+            return;
+        }
+        if (!webview) return;
+        if (channel === 'axis-vault-autofill-hide') {
+            this.hideVaultAutofillPanel();
+            void this.hideVaultAutofillInPage(webview);
+            return;
+        }
+        if (channel === 'axis-vault-autofill-request') {
+            void this.presentVaultAutofill(webview, payload);
+            return;
+        }
+        if (channel === 'axis-vault-autofill-query' && payload && payload.rect) {
+            void this.handleVaultAutofillQuery(webview, payload);
+            return;
+        }
+        if (channel === 'axis-vault-pick-login' && payload && Array.isArray(payload.logins)) {
+            void this.showVaultPickLogin(webview, payload.logins);
+            return;
+        }
+        if (channel === 'axis-vault-pick-card' && payload && Array.isArray(payload.cards)) {
+            void this.showVaultPickCard(webview, payload.cards);
+        }
+    }
+
+    handleVaultGuestIpc(msg) {
+        const { channel, payload, guestWebContentsId } = msg || {};
+        if (!channel) return;
+        const webview = this.findWebviewByGuestContentsId(guestWebContentsId) || this.getActiveWebview();
+        if (channel === 'axis-vault-save-offer' && payload) {
+            if (payload.type === 'card' && payload.number && payload.cardholder) {
+                void this.handleVaultSaveOffer(webview, payload);
+            } else if (payload.username && payload.password) {
+                void this.handleVaultSaveOffer(webview, { ...payload, type: 'login' });
+            }
+            return;
+        }
+        if (!webview) return;
+        this.routeVaultGuestMessage(channel, payload, webview);
+    }
+
+    async isVaultCredentialTypingIdle(webview) {
+        const js = `(function(){var t=window.__axisVaultCredentialEditAt||0;return Date.now()-t>2200})()`;
+        let idle = true;
+        const visit = async (frame) => {
+            if (!frame) return;
+            try {
+                const r = await frame.executeJavaScript(js, false);
+                if (r === false) idle = false;
+            } catch (_) {}
+            let kids = [];
+            try {
+                kids = frame.frames || [];
+            } catch (_) {
+                return;
+            }
+            for (let i = 0; i < kids.length; i++) {
+                try {
+                    await visit(kids[i]);
+                } catch (_) {}
+            }
+        };
+        try {
+            const wc = typeof webview.getWebContents === 'function' ? webview.getWebContents() : null;
+            if (wc && !wc.isDestroyed() && wc.mainFrame) {
+                await visit(wc.mainFrame);
+            } else if (typeof webview.executeJavaScript === 'function') {
+                const r = await webview.executeJavaScript(js, true);
+                if (r === false) idle = false;
+            }
+        } catch (_) {}
+        return idle;
+    }
+
+    async pollVaultCredentialsFromPage(webview) {
+        try {
+            if (!webview || !this._vaultPageScanJs) return;
+            if (!(await this.isVaultCredentialTypingIdle(webview))) return;
+            const scanJs = this._vaultPageScanJs;
+            let login = null;
+            let card = null;
+            const visit = async (frame) => {
+                if (!frame) return;
+                try {
+                    const result = await frame.executeJavaScript(scanJs, false);
+                    if (!login && result?.login?.username && result.login.password) {
+                        login = {
+                            ...result.login,
+                            type: 'login',
+                            pageUrl: result.login.pageUrl || result.login.origin
+                        };
+                    }
+                    if (!card && result?.card?.number && result.card.cardholder) {
+                        card = { ...result.card, type: 'card' };
+                    }
+                } catch (_) {}
+                let kids = [];
+                try {
+                    kids = frame.frames || [];
+                } catch (_) {
+                    return;
+                }
+                for (let i = 0; i < kids.length; i++) {
+                    try {
+                        await visit(kids[i]);
+                    } catch (_) {}
+                }
+            };
+            try {
+                const wc = typeof webview.getWebContents === 'function' ? webview.getWebContents() : null;
+                if (wc && !wc.isDestroyed() && wc.mainFrame) {
+                    await visit(wc.mainFrame);
+                } else if (typeof webview.executeJavaScript === 'function') {
+                    const result = await webview.executeJavaScript(scanJs, true);
+                    if (result?.login?.username && result.login.password) login = result.login;
+                    if (result?.card?.number && result.card.cardholder) card = result.card;
+                }
+            } catch (_) {}
+            if (login) {
+                await this.handleVaultSaveOffer(webview, login);
+                return;
+            }
+            if (card) await this.handleVaultSaveOffer(webview, card);
+        } catch (_) {}
+    }
+
+    startVaultCredentialWatcher() {
+        if (this._vaultPollTimer) clearInterval(this._vaultPollTimer);
+        this._vaultPollTimer = setInterval(() => {
+            const saveModal = document.getElementById('vault-save-modal');
+            if (saveModal && !saveModal.classList.contains('hidden')) return;
+            const wv = this.getActiveWebview();
+            if (!wv) return;
+            let url = '';
+            try {
+                url = wv.getURL() || '';
+            } catch (_) {}
+            if (!/^https?:/i.test(url)) return;
+            void this.pollVaultCredentialsFromPage(wv).catch(() => {});
+        }, 7000);
+        if (this._vaultAutofillPollTimer) clearInterval(this._vaultAutofillPollTimer);
+        this._vaultAutofillPollTimer = setInterval(() => {
+            const wv = this.getActiveWebview();
+            if (!wv) return;
+            let url = '';
+            try {
+                url = wv.getURL() || '';
+            } catch (_) {}
+            if (!/^https?:/i.test(url)) return;
+            void this.pollVaultAutofillFocus(wv).catch(() => {});
+        }, 280);
+    }
+
+    async executeInGuestFrames(webview, js, userGesture = false) {
+        if (!webview || !js) return;
+        let ran = false;
+        const runFrame = async (frame) => {
+            if (!frame) return;
+            try {
+                await frame.executeJavaScript(js, userGesture);
+            } catch (_) {
+                /* guest frame not ready / cross-origin / destroyed */
+            }
+            let kids = [];
+            try {
+                kids = frame.frames || [];
+            } catch (_) {
+                return;
+            }
+            for (let i = 0; i < kids.length; i++) {
+                try {
+                    await runFrame(kids[i]);
+                } catch (_) {}
+            }
+        };
+        try {
+            const wc = typeof webview.getWebContents === 'function' ? webview.getWebContents() : null;
+            if (wc && !wc.isDestroyed() && wc.mainFrame) {
+                await runFrame(wc.mainFrame);
+                ran = true;
+            }
+        } catch (_) {}
+        if (!ran && typeof webview.executeJavaScript === 'function') {
+            try {
+                await webview.executeJavaScript(js, userGesture);
+            } catch (_) {}
+        }
+    }
+
+    getVaultAutofillUiTheme() {
+        return this.settings?.uiTheme === 'light' && !this.isIncognitoWindow ? 'light' : 'dark';
+    }
+
+    async syncVaultAutofillUiTheme(webview) {
+        if (!webview) return;
+        try {
+            const theme = this.getVaultAutofillUiTheme();
+            await this.executeInGuestFrames(
+                webview,
+                `window.__axisVaultUiTheme=${JSON.stringify(theme)};`,
+                false
+            );
+            const menu = document.getElementById('vault-autofill-panel');
+            if (menu) menu.setAttribute('data-ui-theme', theme === 'light' ? 'light' : 'dark');
+            const saveModal = document.getElementById('vault-save-modal');
+            if (saveModal) saveModal.setAttribute('data-ui-theme', theme);
+        } catch (_) {}
+    }
+
+    async injectVaultAutofillBootstrap(webview) {
+        try {
+            const js = this._vaultAutofillBootstrapJs;
+            if (!webview || !js) return;
+            if (webview.classList?.contains('inactive')) return;
+            let url = '';
+            try {
+                url = webview.getURL() || '';
+            } catch (_) {}
+            if (!/^https?:/i.test(url)) return;
+            await this.syncVaultAutofillUiTheme(webview);
+            await this.executeInGuestFrames(webview, js, false);
+            webview.__axisVaultAutofillInjected = true;
+        } catch (_) {}
+    }
+
+    async hideVaultAutofillInPage(webview) {
+        try {
+            const js = this._vaultAutofillHideJs;
+            if (!webview || !js) return;
+            await this.executeInGuestFrames(webview, js, false);
+        } catch (_) {}
+    }
+
+    async probeVaultAutofillGuest(webview) {
+        const js = this._vaultAutofillProbeJs;
+        if (!webview || !js) return null;
+        let pick = null;
+        let focus = null;
+        let focusKey = '';
+        const visitFrame = async (frame) => {
+            if (!frame) return;
+            try {
+                const r = await frame.executeJavaScript(js, false);
+                if (r?.pick) pick = r.pick;
+                if (r?.focus) {
+                    focus = r.focus;
+                    focusKey = r.focusKey || '';
+                }
+            } catch (_) {}
+            let kids = [];
+            try {
+                kids = frame.frames || [];
+            } catch (_) {
+                return;
+            }
+            for (let i = 0; i < kids.length; i++) {
+                try {
+                    await visitFrame(kids[i]);
+                } catch (_) {}
+            }
+        };
+        try {
+            const wc = typeof webview.getWebContents === 'function' ? webview.getWebContents() : null;
+            if (wc && !wc.isDestroyed() && wc.mainFrame) {
+                await visitFrame(wc.mainFrame);
+                return pick ? { pick } : focus ? { focus, focusKey } : null;
+            }
+        } catch (_) {}
+        try {
+            return await webview.executeJavaScript(js, true);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    async presentVaultAutofill(webview, payload) {
+        if (!webview || !payload) return;
+        try {
+            const status = await window.electronAPI.vaultStatus();
+            if (status?.autofillEnabled === false) return;
+        } catch (_) {}
+        const kind = payload.kind === 'card' ? 'card' : 'login';
+        let items = [];
+        try {
+            const res = await window.electronAPI.vaultFillCandidates({
+                kind,
+                origin: payload.origin || '',
+                pageUrl: payload.pageUrl || '',
+                usernameHint: payload.usernameHint || ''
+            });
+            items = kind === 'card' ? res?.cards || [] : res?.logins || [];
+        } catch (_) {
+            return;
+        }
+        if (!items.length) return;
+        await this.showVaultAutofillInPage(webview, items);
+        try {
+            webview.send('axis-vault-show-autofill', { kind, items });
+        } catch (_) {}
+    }
+
+    async showVaultAutofillInPage(webview, items) {
+        try {
+            if (!webview || !items?.length) return;
+            const theme = this.getVaultAutofillUiTheme();
+            await this.syncVaultAutofillUiTheme(webview);
+            let showJs = null;
+            try {
+                showJs = await window.electronAPI.vaultBuildAutofillShowJs(items, theme);
+            } catch (_) {
+                return;
+            }
+            if (!showJs) return;
+            await this.executeInGuestFrames(webview, showJs, true);
+            webview.__axisVaultAutofillShownKey = JSON.stringify({
+                url: (() => {
+                    try {
+                        return webview.getURL() || '';
+                    } catch (_) {
+                        return '';
+                    }
+                })(),
+                n: items.length
+            });
+        } catch (_) {}
+    }
+
+    async pollVaultAutofillFocus(webview) {
+        try {
+            if (!webview) return;
+            try {
+                const status = await window.electronAPI.vaultStatus();
+                if (status?.autofillEnabled === false) return;
+            } catch (_) {}
+            if (!webview.__axisVaultAutofillInjected) {
+                await this.injectVaultAutofillBootstrap(webview);
+            }
+            const probe = await this.probeVaultAutofillGuest(webview);
+            if (!probe) return;
+            if (probe.menuOpen) {
+                if (!probe.focus) {
+                    this._voidGuestTask(this.hideVaultAutofillInPage(webview));
+                    this.hideVaultAutofillPanel();
+                }
+                return;
+            }
+            if (probe.pick) {
+                try {
+                    const login = await window.electronAPI.vaultGetLoginForFill(probe.pick);
+                    const fillJs = await window.electronAPI.vaultBuildAutofillFillJs(login);
+                    if (fillJs) await this.executeInGuestFrames(webview, fillJs, true);
+                } catch (_) {}
+                return;
+            }
+            const focus = probe.focus;
+            if (!focus) return;
+            const key = probe.focusKey || JSON.stringify(focus);
+            if (key === webview.__axisVaultAutofillLastKey) return;
+            webview.__axisVaultAutofillLastKey = key;
+            await this.presentVaultAutofill(webview, focus);
+        } catch (_) {}
+    }
+
+    async tryOfferVaultSaveFromWebview(webview) {
+        if (!webview) return false;
+        if (!(await this.isVaultCredentialTypingIdle(webview))) return false;
+        const saveModal = document.getElementById('vault-save-modal');
+        const wasHidden = saveModal?.classList.contains('hidden');
+        try {
+            if (typeof webview.send === 'function') webview.send('axis-vault-scan-now');
+        } catch (_) {}
+        await new Promise((r) => setTimeout(r, 600));
+        return !!(saveModal && wasHidden && !saveModal.classList.contains('hidden'));
+    }
+
+    setupVaultUi() {
+        const saveModal = this.elements.vaultSaveModal;
+        const pickModal = this.elements.vaultPickModal;
+        const backdrop = this.elements.modalBackdrop;
+
+        const hideVaultModals = () => {
+            if (saveModal) saveModal.classList.add('hidden');
+            pickModal?.classList.add('hidden');
+            if (
+                backdrop &&
+                saveModal?.classList.contains('hidden') &&
+                pickModal?.classList.contains('hidden')
+            ) {
+                const otherOpen = document.querySelector(
+                    '#downloads-panel:not(.hidden), #security-panel:not(.hidden), #settings-panel:not(.hidden)'
+                );
+                if (!otherOpen) backdrop.classList.add('hidden');
+            }
+        };
+
+        const showBackdrop = () => {
+            if (backdrop) backdrop.classList.remove('hidden');
+        };
+
+        const hideAllVaultUi = () => {
+            hideVaultModals();
+            this._setVaultModalOverlay(false);
+        };
+
+        document.getElementById('vault-save-never')?.addEventListener('click', () => {
+            const pending = this._vaultPendingSave;
+            if (pending?.payload) {
+                this._vaultDismissedOffers.add(this._vaultOfferKey(pending.payload));
+            }
+            this._vaultPendingSave = null;
+            hideAllVaultUi();
+        });
+        document.getElementById('vault-save-confirm')?.addEventListener('click', () => void this.confirmVaultSave());
+        document.getElementById('vault-pick-cancel')?.addEventListener('click', () => {
+            this._vaultPickWebview = null;
+            hideAllVaultUi();
+        });
+
+        this._hideVaultModals = hideAllVaultUi;
+        this._showVaultBackdrop = showBackdrop;
+
+        document.addEventListener('mousedown', (e) => {
+            const panel = this.elements.vaultAutofillPanel;
+            if (!panel || panel.classList.contains('hidden')) return;
+            if (panel.contains(e.target)) return;
+            const tag = e.target && e.target.tagName;
+            if (tag === 'WEBVIEW' || (e.target && e.target.closest && e.target.closest('webview'))) {
+                return;
+            }
+            this.hideVaultAutofillPanel();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') this.hideVaultAutofillPanel();
+        });
+        window.addEventListener(
+            'scroll',
+            () => {
+                if (this.elements.vaultAutofillPanel?.classList.contains('hidden')) return;
+                this.repositionVaultAutofillPanel();
+            },
+            true
+        );
+        window.addEventListener('resize', () => this.repositionVaultAutofillPanel());
+
+        const panel = this.elements.vaultAutofillPanel;
+        if (panel && panel.parentElement !== document.body) {
+            document.body.appendChild(panel);
+        }
+    }
+
+    hideVaultAutofillPanel() {
+        if (this._vaultAutofillShownAt && Date.now() - this._vaultAutofillShownAt < 500) return;
+        const panel = this.elements.vaultAutofillPanel;
+        if (panel) panel.classList.add('hidden');
+        this._vaultAutofillWebview = null;
+        this._vaultAutofillPayload = null;
+    }
+
+    repositionVaultAutofillPanel() {
+        const panel = this.elements.vaultAutofillPanel;
+        const wv = this._vaultAutofillWebview;
+        const payload = this._vaultAutofillPayload;
+        if (!panel || panel.classList.contains('hidden') || !wv || !payload?.rect) return;
+        try {
+            const fr = payload.rect;
+            const wvRect = wv.getBoundingClientRect();
+            const minW = Math.max(220, fr.width || 220);
+            let left = Math.max(8, wvRect.left + fr.left);
+            let top = Math.max(8, wvRect.top + fr.bottom + 4);
+            panel.style.position = 'fixed';
+            panel.style.minWidth = `${minW}px`;
+            const panelH = panel.offsetHeight || 180;
+            if (top + panelH > window.innerHeight - 8) {
+                top = Math.max(8, wvRect.top + fr.top - panelH - 4);
+            }
+            if (left + minW > window.innerWidth - 8) {
+                left = Math.max(8, window.innerWidth - minW - 8);
+            }
+            panel.style.left = `${left}px`;
+            panel.style.top = `${top}px`;
+        } catch (_) {}
+    }
+
+    async handleVaultAutofillQuery(webview, payload) {
+        if (!webview || !payload) return;
+        const kind = payload.kind === 'card' ? 'card' : 'login';
+        let items = Array.isArray(payload.items) ? payload.items : [];
+        if (!items.length) {
+            try {
+                const res = await window.electronAPI.vaultFillCandidates({
+                    kind,
+                    origin: payload.origin || '',
+                    pageUrl: payload.pageUrl || '',
+                    usernameHint: payload.usernameHint || ''
+                });
+                if (!res?.ok) return;
+                items = kind === 'card' ? res.cards || [] : res.logins || [];
+            } catch (_) {
+                return;
+            }
+        }
+        if (!items.length) return;
+        await this.showVaultAutofillInPage(webview, items);
+        try {
+            webview.send('axis-vault-show-autofill', { kind, items });
+        } catch (_) {}
+        if (payload.rect) {
+            this.showVaultAutofillPanel(webview, payload, kind, items);
+        }
+    }
+
+    showVaultAutofillPanel(webview, payload, kind, items) {
+        const panel = this.elements.vaultAutofillPanel;
+        const list = document.getElementById('vault-autofill-list');
+        if (!panel || !list) return;
+        this._vaultAutofillWebview = webview;
+        this._vaultAutofillPayload = payload;
+        list.innerHTML = '';
+        for (const row of items) {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'vault-autofill-item';
+            btn.setAttribute('role', 'option');
+            if (kind === 'login') {
+                btn.innerHTML = `<span class="vault-autofill-item-title">${this.escapeHtml(row.title || row.username || 'Saved login')}</span><span class="vault-autofill-item-sub">${this.escapeHtml(row.username || '')}</span>`;
+                btn.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    this.hideVaultAutofillPanel();
+                    void this.applyVaultAutofillLogin(webview, row.id);
+                });
+            } else {
+                const label = row.label || row.cardholder || 'Card';
+                const sub = row.masked || `•••• ${String(row.number || '').slice(-4)}`;
+                btn.innerHTML = `<span class="vault-autofill-item-title">${this.escapeHtml(label)}</span><span class="vault-autofill-item-sub">${this.escapeHtml(sub)}</span>`;
+                btn.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    this.hideVaultAutofillPanel();
+                    void this.applyVaultAutofillCard(webview, row.id);
+                });
+            }
+            li.appendChild(btn);
+            list.appendChild(li);
+        }
+        panel.classList.remove('hidden');
+        panel.setAttribute('data-ui-theme', this.getVaultAutofillUiTheme());
+        this._vaultAutofillShownAt = Date.now();
+        this.repositionVaultAutofillPanel();
+    }
+
+    async applyVaultAutofillLogin(webview, id) {
+        if (!webview || !id) return;
+        try {
+            const login = await window.electronAPI.vaultGetLoginForFill(id);
+            webview.send('axis-vault-apply-login', login);
+        } catch (_) {}
+    }
+
+    async applyVaultAutofillCard(webview, id) {
+        if (!webview || !id) return;
+        try {
+            const card = await window.electronAPI.vaultGetCardForFill(id);
+            webview.send('axis-vault-apply-card', card);
+        } catch (_) {}
+    }
+
+    _vaultOfferKey(payload) {
+        if (!payload) return '';
+        if (payload.type === 'card') {
+            return `card:${payload.origin}:${String(payload.number || '').slice(-4)}`;
+        }
+        const pass = payload.password || '';
+        return `login:${payload.origin}:${payload.username}:${pass.length}`;
+    }
+
+    async handleVaultSaveOffer(webview, payload) {
+        if (!payload) return;
+        webview = webview || this.getActiveWebview();
+        const prechecked = !!payload.vaultSavePrechecked;
+        const cred = { ...payload };
+        delete cred.vaultSavePrechecked;
+        if (cred.type !== 'card' && !prechecked) {
+            try {
+                const gate = await window.electronAPI.vaultShouldOfferLoginSave({
+                    origin: cred.origin,
+                    username: cred.username,
+                    password: cred.password
+                });
+                if (!gate?.offer) return;
+            } catch (_) {
+                /* guest poll may still be valid */
+            }
+        }
+        const key = this._vaultOfferKey(cred);
+        if (this._vaultDismissedOffers?.has(key)) return;
+        const saveModal = document.getElementById('vault-save-modal');
+        if (saveModal && !saveModal.classList.contains('hidden')) {
+            if (this._vaultLastShownOfferKey === key) return;
+            return;
+        }
+        const lastAt = this._vaultSaveOfferAt?.get(key);
+        if (lastAt && Date.now() - lastAt < 20000) return;
+        this._vaultSaveOfferAt?.set(key, Date.now());
+        this._vaultLastShownOfferKey = key;
+        this._vaultPendingSave = { webview, payload: cred };
+        this.showVaultSaveModal(cred);
+    }
+
+    _setVaultModalOverlay(open) {
+        document.body.classList.toggle('axis-vault-modal-open', !!open);
+    }
+
+    hideVaultSaveModal() {
+        const modal = document.getElementById('vault-save-modal');
+        if (modal) modal.classList.add('hidden');
+        this._setVaultModalOverlay(false);
+    }
+
+    showVaultSaveModal(payload) {
+        const modal = document.getElementById('vault-save-modal');
+        if (!modal) return;
+        const title = document.getElementById('vault-save-title');
+        const siteEl = document.getElementById('vault-save-site');
+        const userRow = document.getElementById('vault-save-user-row');
+        const userEl = document.getElementById('vault-save-user');
+        const cardRow = document.getElementById('vault-save-card-row');
+        const cardEl = document.getElementById('vault-save-card');
+        const isCard = payload.type === 'card';
+        let host = payload.origin || '';
+        try {
+            host = new URL(host).hostname || host;
+        } catch (_) {}
+        modal.setAttribute('data-ui-theme', this.getVaultAutofillUiTheme());
+        if (title) {
+            title.textContent = isCard ? 'Save this card?' : 'Save password?';
+        }
+        if (siteEl) siteEl.textContent = host || '—';
+        if (userRow) userRow.classList.toggle('hidden', isCard);
+        if (cardRow) cardRow.classList.toggle('hidden', !isCard);
+        if (userEl && !isCard) userEl.textContent = payload.username || '—';
+        if (cardEl && isCard) {
+            const label = payload.masked || '••••';
+            const who = payload.cardholder || '';
+            cardEl.textContent = who ? `${label} · ${who}` : label;
+        }
+        modal.classList.remove('hidden');
+        this._setVaultModalOverlay(true);
+    }
+
+    async confirmVaultSave() {
+        const pending = this._vaultPendingSave;
+        this._vaultPendingSave = null;
+        this.hideVaultSaveModal();
+        if (!pending?.payload) return;
+        this._vaultDismissedOffers.add(this._vaultOfferKey(pending.payload));
+        const payload = pending.payload;
+        try {
+            if (payload.type === 'card') {
+                await window.electronAPI.vaultSaveCard({
+                    label: payload.label || '',
+                    cardholder: payload.cardholder,
+                    number: payload.number,
+                    expMonth: payload.expMonth,
+                    expYear: payload.expYear,
+                    cvv: payload.cvv || '',
+                    billingZip: payload.billingZip || ''
+                });
+                this.showNotification('Card saved', 'success');
+            } else {
+                await window.electronAPI.vaultCaptureLogin(payload);
+                this.showNotification('Password saved', 'success');
+            }
+        } catch (e) {
+            this.showNotification(e?.message || 'Could not save', 'error');
+        }
+    }
+
+    async showVaultPickLogin(webview, logins) {
+        this._vaultPickWebview = webview;
+        const list = document.getElementById('vault-pick-list');
+        const modal = this.elements.vaultPickModal;
+        const title = document.getElementById('vault-pick-title');
+        if (title) title.textContent = 'Choose a login';
+        if (!list || !modal) return;
+        list.innerHTML = '';
+        for (const row of logins) {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'vault-pick-item';
+            btn.textContent = `${row.title || row.username} — ${row.username}`;
+            btn.addEventListener('click', () => void this.applyVaultLoginPick(row.id));
+            li.appendChild(btn);
+            list.appendChild(li);
+        }
+        modal.classList.remove('hidden');
+        this._showVaultBackdrop?.();
+        this._setVaultModalOverlay(true);
+    }
+
+    async showVaultPickCard(webview, cards) {
+        this._vaultPickWebview = webview;
+        const list = document.getElementById('vault-pick-list');
+        const modal = this.elements.vaultPickModal;
+        const title = document.getElementById('vault-pick-title');
+        if (title) title.textContent = 'Choose a card';
+        if (!list || !modal) return;
+        list.innerHTML = '';
+        for (const row of cards) {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'vault-pick-item';
+            btn.textContent = `${row.label || row.cardholder || 'Card'} — ${row.masked}`;
+            btn.addEventListener('click', () => void this.applyVaultCardPick(row.id));
+            li.appendChild(btn);
+            list.appendChild(li);
+        }
+        modal.classList.remove('hidden');
+        this._showVaultBackdrop?.();
+        this._setVaultModalOverlay(true);
+    }
+
+    async applyVaultLoginPick(id) {
+        const wv = this._vaultPickWebview;
+        this._vaultPickWebview = null;
+        this.elements.vaultPickModal?.classList.add('hidden');
+        this._hideVaultModals?.();
+        if (!wv || !id) return;
+        try {
+            const login = await window.electronAPI.vaultGetLoginForFill(id);
+            wv.send('axis-vault-apply-login', login);
+        } catch (e) {
+            this.showNotification(e?.message || 'Could not fill login', 'error');
+        }
+    }
+
+    async applyVaultCardPick(id) {
+        const wv = this._vaultPickWebview;
+        this._vaultPickWebview = null;
+        this.elements.vaultPickModal?.classList.add('hidden');
+        this._hideVaultModals?.();
+        if (!wv || !id) return;
+        try {
+            const card = await window.electronAPI.vaultGetCardForFill(id);
+            wv.send('axis-vault-apply-card', card);
+        } catch (e) {
+            this.showNotification(e?.message || 'Could not fill card', 'error');
+        }
+    }
 }
 
 // Initialize the browser when DOM is loaded
@@ -19215,6 +20984,7 @@ let browserInstance = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     browserInstance = new AxisBrowser();
+    window.__axisBrowser = browserInstance;
 });
 
 // Also ensure theme applies on window load as backup
