@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen, nativeImage, clipboard, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen, nativeImage, clipboard, nativeTheme, systemPreferences } = require('electron');
 // Must run before `ready`. `package.json` `name` is lowercase `axis` (npm); Dock tooltip and `getName()` use this human-readable label.
 app.setName('Axis');
 const path = require('path');
@@ -8,6 +8,17 @@ const os = require('os');
 const { exec } = require('child_process');
 const AdmZip = require('adm-zip');
 const { pathToFileURL, fileURLToPath } = require('url');
+const { installAxisShellCspOnAllSessions } = require('./axis-shell-csp');
+const { createAxisVault } = require('./axis-vault');
+const { sanitizeProfileIcon } = require('./axis-profile-icons');
+const { AXIS_VAULT_PAGE_SCAN_JS } = require('./axis-vault-page-scan');
+const {
+  AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS,
+  AXIS_VAULT_AUTOFILL_PROBE_JS,
+  AXIS_VAULT_AUTOFILL_HIDE_JS,
+  buildVaultAutofillShowMenuJs,
+  buildVaultAutofillFillLoginJs
+} = require('./axis-vault-autofill-inject');
 
 /** App branding image (project root). Used for windows, macOS Dock, About panel, and packaged .app icon. */
 const APP_ICON_PATH = path.join(__dirname, '..', 'Axis_logo.png');
@@ -148,6 +159,12 @@ async function showMacAboutDialog() {
 
 // Initialize settings store
 const store = new Store();
+const AXIS_DEFAULT_PROFILE_ID = 'personal';
+const AXIS_PROFILES_STORE_KEY = 'profiles';
+const axisProfileStores = new Map();
+
+/** Per-profile vault instances (separate password/card files). */
+const axisVaultByProfile = new Map();
 
 // Electron defaults `nativeTheme.themeSource` to `system`, so when the OS switches
 // light/dark, Chromium's `prefers-color-scheme`, vibrancy materials, and native form
@@ -170,8 +187,339 @@ const axisExtensionPopupByRecordId = new Map();
 
 const AXIS_EXTENSION_SESSION_PARTITION = 'persist:main';
 
-function getAxisExtensionSession() {
-  return session.fromPartition(AXIS_EXTENSION_SESSION_PARTITION);
+function sanitizeProfileId(raw) {
+  const id = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (!id) return AXIS_DEFAULT_PROFILE_ID;
+  const safe = id.replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').slice(0, 48);
+  return safe || AXIS_DEFAULT_PROFILE_ID;
+}
+
+function normalizeAxisProfileRecord(p) {
+  const id = sanitizeProfileId(p?.id);
+  return {
+    id,
+    name: typeof p?.name === 'string' && p.name.trim() ? p.name.trim() : 'Profile',
+    icon: sanitizeProfileIcon(p?.icon)
+  };
+}
+
+function listAxisProfiles() {
+  const fromStore = store.get(AXIS_PROFILES_STORE_KEY, []);
+  const out = Array.isArray(fromStore) ? [...fromStore] : [];
+  if (!out.some((p) => sanitizeProfileId(p?.id) === AXIS_DEFAULT_PROFILE_ID)) {
+    out.unshift({ id: AXIS_DEFAULT_PROFILE_ID, name: 'Personal', icon: 'user' });
+  }
+  return out
+    .map(normalizeAxisProfileRecord)
+    .filter((p, idx, arr) => arr.findIndex((x) => x.id === p.id) === idx);
+}
+
+function saveAxisProfiles(profiles) {
+  const cleaned = (Array.isArray(profiles) ? profiles : [])
+    .map(normalizeAxisProfileRecord)
+    .filter((p, idx, arr) => arr.findIndex((x) => x.id === p.id) === idx);
+  store.set(AXIS_PROFILES_STORE_KEY, cleaned);
+}
+
+function broadcastProfilesUpdated() {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed() || w.__axisIsIncognito) continue;
+    try {
+      w.webContents.send('profiles-updated');
+    } catch (_) {}
+  }
+  try {
+    createMenu();
+  } catch (_) {}
+}
+
+function refreshProfileWindowTitles(profileId) {
+  const id = sanitizeProfileId(profileId);
+  const name = getProfileName(id);
+  const title =
+    id === AXIS_DEFAULT_PROFILE_ID && name === 'Personal' ? 'Axis Browser' : `Axis — ${name}`;
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed() || w.__axisIsIncognito) continue;
+    if (sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID) === id) {
+      try {
+        w.setTitle(title);
+      } catch (_) {}
+    }
+  }
+}
+
+function getProfileVaultFilePath(profileId) {
+  const id = sanitizeProfileId(profileId);
+  if (id === AXIS_DEFAULT_PROFILE_ID) {
+    return path.join(app.getPath('userData'), 'axis-vault-v2.json');
+  }
+  return path.join(app.getPath('userData'), `axis-vault-v2-${id}.json`);
+}
+
+function getProfileStoreFilePath(profileId) {
+  return path.join(app.getPath('userData'), `profile-${sanitizeProfileId(profileId)}.json`);
+}
+
+function updateAxisProfile(profileId, updates = {}) {
+  const id = sanitizeProfileId(profileId);
+  const profiles = listAxisProfiles();
+  const idx = profiles.findIndex((p) => p.id === id);
+  if (idx === -1) throw new Error('Profile not found');
+  if (updates.name != null) {
+    const name = typeof updates.name === 'string' ? updates.name.trim() : '';
+    if (!name) throw new Error('Profile name is required');
+    profiles[idx].name = name.slice(0, 48);
+  }
+  if (updates.icon != null) {
+    profiles[idx].icon = sanitizeProfileIcon(updates.icon);
+  }
+  saveAxisProfiles(profiles);
+  refreshProfileWindowTitles(id);
+  broadcastProfilesUpdated();
+  return profiles[idx];
+}
+
+function reorderAxisProfiles(orderedIds) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    throw new Error('Invalid profile order');
+  }
+  const current = listAxisProfiles();
+  const byId = new Map(current.map((p) => [p.id, p]));
+  const next = [];
+  for (const raw of orderedIds) {
+    const id = sanitizeProfileId(raw);
+    const rec = byId.get(id);
+    if (rec) {
+      next.push({ id: rec.id, name: rec.name, icon: rec.icon });
+      byId.delete(id);
+    }
+  }
+  for (const rec of byId.values()) {
+    next.push({ id: rec.id, name: rec.name, icon: rec.icon });
+  }
+  if (next.length !== current.length) {
+    throw new Error('Profile order must include every profile');
+  }
+  saveAxisProfiles(next);
+  broadcastProfilesUpdated();
+  return next;
+}
+
+async function deleteAxisProfile(profileId) {
+  const id = sanitizeProfileId(profileId);
+  if (id === AXIS_DEFAULT_PROFILE_ID) {
+    throw new Error('The Personal profile cannot be deleted.');
+  }
+
+  const wins = BrowserWindow.getAllWindows().filter(
+    (w) =>
+      w &&
+      !w.isDestroyed() &&
+      w.__axisIsIncognito !== true &&
+      sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID) === id
+  );
+  for (const w of wins) {
+    try {
+      w.destroy();
+    } catch (_) {}
+  }
+
+  const extensions = getStoredAxisExtensions(id);
+  for (const record of extensions) {
+    try {
+      await removeAxisExtension(record.id, id);
+    } catch (_) {}
+  }
+
+  const sess = getAxisExtensionSession(id);
+  try {
+    await sess.clearStorageData();
+    await sess.clearCache();
+    await sess.clearAuthCache();
+    await sess.clearHostResolverCache();
+  } catch (_) {}
+
+  axisVaultByProfile.delete(id);
+  try {
+    await fs.promises.unlink(getProfileVaultFilePath(id));
+  } catch (_) {}
+
+  if (axisProfileStores.has(id)) {
+    axisProfileStores.delete(id);
+  }
+  try {
+    await fs.promises.unlink(getProfileStoreFilePath(id));
+  } catch (_) {}
+
+  const profiles = listAxisProfiles().filter((p) => p.id !== id);
+  saveAxisProfiles(profiles);
+  broadcastProfilesUpdated();
+
+  const remaining = BrowserWindow.getAllWindows().filter((w) => w && !w.isDestroyed() && w.__axisIsIncognito !== true);
+  if (remaining.length === 0) {
+    createWindow({ profileId: AXIS_DEFAULT_PROFILE_ID });
+  }
+
+  return { ok: true };
+}
+
+function ensureAxisProfile(profileId, displayName, icon) {
+  const id = sanitizeProfileId(profileId);
+  const profiles = listAxisProfiles();
+  const exists = profiles.find((p) => p.id === id);
+  if (!exists) {
+    profiles.push({
+      id,
+      name: typeof displayName === 'string' && displayName.trim() ? displayName.trim() : id,
+      icon: sanitizeProfileIcon(icon)
+    });
+    saveAxisProfiles(profiles);
+  }
+  getProfileStore(id);
+  initializeProfileDefaults(id);
+  return id;
+}
+
+function allocateProfileId(displayName) {
+  const profiles = listAxisProfiles();
+  const name = typeof displayName === 'string' && displayName.trim() ? displayName.trim() : 'New Profile';
+  let base = sanitizeProfileId(name);
+  if (!base || base === AXIS_DEFAULT_PROFILE_ID || profiles.some((p) => p.id === base)) {
+    base = `profile-${Date.now().toString(36)}`;
+  }
+  let id = base;
+  let n = 2;
+  while (profiles.some((p) => p.id === id)) {
+    id = `${base}-${n++}`;
+  }
+  return { id, name };
+}
+
+function getProfileStore(profileId) {
+  const id = sanitizeProfileId(profileId);
+  if (axisProfileStores.has(id)) return axisProfileStores.get(id);
+  const profileStore = new Store({ name: `profile-${id}` });
+  if (id === AXIS_DEFAULT_PROFILE_ID) {
+    try {
+      const seeded = profileStore.get('__seededFromLegacyStore', false);
+      if (!seeded) {
+        profileStore.set(store.store || {});
+        profileStore.set('__seededFromLegacyStore', true);
+        if (!profileStore.get('historyItems')) {
+          profileStore.set('historyItems', historyStore.get('items', []) || []);
+        }
+        if (!profileStore.get('downloadItems')) {
+          profileStore.set('downloadItems', downloadsStore.get('items', []) || []);
+        }
+        if (!profileStore.get('noteItems')) {
+          profileStore.set('noteItems', notesStore.get('items', []) || []);
+        }
+        profileStore.set('__historySeeded', true);
+      }
+    } catch (_) {}
+  }
+  initializeProfileDefaults(id, profileStore);
+  axisProfileStores.set(id, profileStore);
+  return profileStore;
+}
+
+function initializeProfileDefaults(profileId, profileStore) {
+  const s = profileStore || getProfileStore(profileId);
+  if (s.get('__profileInitialized')) return;
+  const defaults = {
+    uiTheme: 'dark',
+    theme: 'dark',
+    accentColor: '#555',
+    adBlockerEnabled: true,
+    blockTrackers: true,
+    blockAds: true,
+    javascriptEnabled: true,
+    transparentSites: false,
+    vaultAutofillEnabled: true,
+    sidebarPosition: 'left',
+    windowChromeLight: 50,
+    searchEngine: 'google',
+    recentSearches: [],
+    dismissedSuggestions: [],
+    favorites: [],
+    pinnedTabs: [],
+    tabGroups: [],
+    sitePermissionOverrides: {},
+    historyItems: [],
+    downloadItems: [],
+    noteItems: []
+  };
+  for (const [key, value] of Object.entries(defaults)) {
+    if (s.get(key) === undefined) s.set(key, value);
+  }
+  s.set('__profileInitialized', true);
+}
+
+function getProfilePartition(profileId) {
+  const id = sanitizeProfileId(profileId);
+  if (id === AXIS_DEFAULT_PROFILE_ID) {
+    return AXIS_EXTENSION_SESSION_PARTITION;
+  }
+  return `persist:profile-${id}`;
+}
+
+function getProfileIdFromSession(sess) {
+  if (!sess || typeof sess.getPartition !== 'function') return AXIS_DEFAULT_PROFILE_ID;
+  const part = sess.getPartition();
+  if (!part || part === 'incognito') return AXIS_DEFAULT_PROFILE_ID;
+  if (part === AXIS_EXTENSION_SESSION_PARTITION || part === 'persist:main') {
+    return AXIS_DEFAULT_PROFILE_ID;
+  }
+  const m = /^persist:profile-(.+)$/.exec(part);
+  return m ? sanitizeProfileId(m[1]) : AXIS_DEFAULT_PROFILE_ID;
+}
+
+function getProfileSitePermissionStore(profileId) {
+  return getProfileStore(profileId);
+}
+
+function getHistoryItems(profileId) {
+  return getProfileStore(profileId).get('historyItems', []) || [];
+}
+
+function setHistoryItems(profileId, items) {
+  getProfileStore(profileId).set('historyItems', Array.isArray(items) ? items : []);
+}
+
+function getDownloadItems(profileId) {
+  return getProfileStore(profileId).get('downloadItems', []) || [];
+}
+
+function setDownloadItems(profileId, items) {
+  getProfileStore(profileId).set('downloadItems', Array.isArray(items) ? items : []);
+}
+
+function getNoteItems(profileId) {
+  return getProfileStore(profileId).get('noteItems', []) || [];
+}
+
+function setNoteItems(profileId, items) {
+  getProfileStore(profileId).set('noteItems', Array.isArray(items) ? items : []);
+}
+
+function ensureAxisVaultForProfile(profileId) {
+  const id = sanitizeProfileId(profileId);
+  if (!axisVaultByProfile.has(id)) {
+    axisVaultByProfile.set(id, createAxisVault(app, null, id));
+  }
+  return axisVaultByProfile.get(id);
+}
+
+function ensureAxisVaultFromEvent(event) {
+  return ensureAxisVaultForProfile(getProfileIdForEvent(event));
+}
+
+function getAxisExtensionSession(profileId = AXIS_DEFAULT_PROFILE_ID) {
+  return session.fromPartition(getProfilePartition(profileId));
+}
+
+function extensionRuntimeKey(profileId, recordId) {
+  return `${sanitizeProfileId(profileId)}::${recordId}`;
 }
 
 /**
@@ -271,13 +619,25 @@ function makeExtensionRecordId(name) {
   return `${base}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function getStoredAxisExtensions() {
-  const raw = store.get(AXIS_EXTENSIONS_STORE_KEY, []);
+function getStoredAxisExtensions(profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const raw = getProfileStore(profileId).get(AXIS_EXTENSIONS_STORE_KEY, []);
   return Array.isArray(raw) ? raw.filter((x) => x && typeof x === 'object') : [];
 }
 
-function setStoredAxisExtensions(list) {
-  store.set(AXIS_EXTENSIONS_STORE_KEY, Array.isArray(list) ? list : []);
+function setStoredAxisExtensions(profileId, list) {
+  getProfileStore(profileId).set(AXIS_EXTENSIONS_STORE_KEY, Array.isArray(list) ? list : []);
+}
+
+function getExtensionRuntimeState(profileId, recordId) {
+  return axisExtensionRuntime.get(extensionRuntimeKey(profileId, recordId)) || {};
+}
+
+function setExtensionRuntimeState(profileId, recordId, state) {
+  axisExtensionRuntime.set(extensionRuntimeKey(profileId, recordId), state);
+}
+
+function deleteExtensionRuntimeState(profileId, recordId) {
+  axisExtensionRuntime.delete(extensionRuntimeKey(profileId, recordId));
 }
 
 async function readAxisExtensionManifest(extensionPath) {
@@ -599,20 +959,21 @@ async function fetchXpiBufferForFirefoxAmo(addonKey) {
   return buf;
 }
 
-async function installAxisExtensionFromXpiBuffer(xpiBuffer) {
+async function installAxisExtensionFromXpiBuffer(xpiBuffer, profileId = AXIS_DEFAULT_PROFILE_ID) {
   const tempRoot = path.join(os.tmpdir(), `axis-ext-xpi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const unpackedDir = path.join(tempRoot, 'unpacked');
   await fs.promises.mkdir(unpackedDir, { recursive: true });
   try {
     const zip = new AdmZip(xpiBuffer);
     zip.extractAllTo(unpackedDir, true);
-    return await commitAxisExtensionInstall(unpackedDir);
+    return await commitAxisExtensionInstall(unpackedDir, profileId);
   } finally {
     await fs.promises.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function installExtensionFromStoreUrlOrId(rawInput) {
+async function installExtensionFromStoreUrlOrId(rawInput, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
   const s = String(rawInput || '').trim();
   const compact = s.replace(/\s+/g, '');
 
@@ -622,21 +983,21 @@ async function installExtensionFromStoreUrlOrId(rawInput) {
       throw new Error('Could not read the add-on slug from this Mozilla Add-ons URL.');
     }
     const xpi = await fetchXpiBufferForFirefoxAmo(mozKey);
-    return installAxisExtensionFromXpiBuffer(xpi);
+    return installAxisExtensionFromXpiBuffer(xpi, pid);
   }
 
   if (/^[a-p]{32}$/i.test(compact)) {
     const crx = await fetchCrxBufferForExtensionId(compact.toLowerCase());
-    return installAxisExtensionFromCrxBuffer(crx);
+    return installAxisExtensionFromCrxBuffer(crx, pid);
   }
 
   const firefoxKey = parseFirefoxAmoAddonKey(rawInput);
   if (firefoxKey) {
     const xpi = await fetchXpiBufferForFirefoxAmo(firefoxKey);
-    return installAxisExtensionFromXpiBuffer(xpi);
+    return installAxisExtensionFromXpiBuffer(xpi, pid);
   }
 
-  return installAxisExtensionFromChromeWebStoreInput(rawInput);
+  return installAxisExtensionFromChromeWebStoreInput(rawInput, pid);
 }
 
 /** CRX2 / CRX3: payload after header is a ZIP of the unpacked extension. */
@@ -698,7 +1059,8 @@ async function fetchCrxBufferForExtensionId(extensionId) {
   return buf;
 }
 
-async function commitAxisExtensionInstall(sourceDir) {
+async function commitAxisExtensionInstall(sourceDir, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
   const manifest = await readAxisExtensionManifest(sourceDir);
   await fs.promises.mkdir(getAxisExtensionsDir(), { recursive: true });
   const id = makeExtensionRecordId(manifest.name);
@@ -722,23 +1084,23 @@ async function commitAxisExtensionInstall(sourceDir) {
     popupPage: getAxisExtensionDefaultPopup(manifest),
     installedAt: Date.now()
   };
-  const all = getStoredAxisExtensions();
+  const all = getStoredAxisExtensions(pid);
   all.push(record);
-  setStoredAxisExtensions(all);
-  const loaded = await loadAxisExtensionRecord(record);
+  setStoredAxisExtensions(pid, all);
+  const loaded = await loadAxisExtensionRecord(record, pid);
   if (loaded.error) {
     await fs.promises.rm(destPath, { recursive: true, force: true }).catch(() => {});
-    setStoredAxisExtensions(getStoredAxisExtensions().filter((x) => x.id !== id));
+    setStoredAxisExtensions(pid, getStoredAxisExtensions(pid).filter((x) => x.id !== id));
     throw new Error(loaded.error);
   }
-  broadcastSettingsUpdated();
+  broadcastSettingsUpdated(pid);
   try {
     createMenu();
   } catch (_) {}
-  return { extension: loaded, extensions: await listAxisExtensions() };
+  return { extension: loaded, extensions: await listAxisExtensions(pid) };
 }
 
-async function installAxisExtensionFromCrxBuffer(crxBuffer) {
+async function installAxisExtensionFromCrxBuffer(crxBuffer, profileId = AXIS_DEFAULT_PROFILE_ID) {
   const zipBuf = extractZipPayloadFromCrx(crxBuffer);
   const tempRoot = path.join(os.tmpdir(), `axis-ext-crx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const unpackedDir = path.join(tempRoot, 'unpacked');
@@ -746,13 +1108,13 @@ async function installAxisExtensionFromCrxBuffer(crxBuffer) {
   try {
     const zip = new AdmZip(zipBuf);
     zip.extractAllTo(unpackedDir, true);
-    return await commitAxisExtensionInstall(unpackedDir);
+    return await commitAxisExtensionInstall(unpackedDir, profileId);
   } finally {
     await fs.promises.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function installAxisExtensionFromChromeWebStoreInput(rawInput) {
+async function installAxisExtensionFromChromeWebStoreInput(rawInput, profileId = AXIS_DEFAULT_PROFILE_ID) {
   const extId = parseChromeWebStoreExtensionId(rawInput);
   if (!extId) {
     throw new Error(
@@ -760,11 +1122,11 @@ async function installAxisExtensionFromChromeWebStoreInput(rawInput) {
     );
   }
   const crx = await fetchCrxBufferForExtensionId(extId);
-  return installAxisExtensionFromCrxBuffer(crx);
+  return installAxisExtensionFromCrxBuffer(crx, profileId);
 }
 
-function toAxisExtensionView(record) {
-  const rt = axisExtensionRuntime.get(record.id) || {};
+function toAxisExtensionView(record, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const rt = getExtensionRuntimeState(profileId, record.id);
   const loadedId = rt.loadedId || record.extensionId || '';
   const activeExtensionId = rt.loadedId || '';
   const optionsPath = record.optionsPage || '';
@@ -787,15 +1149,16 @@ function toAxisExtensionView(record) {
   };
 }
 
-async function loadAxisExtensionRecord(record) {
-  if (!record || record.enabled === false) return toAxisExtensionView(record);
-  const existing = axisExtensionRuntime.get(record.id);
-  if (existing?.loadedId) return toAxisExtensionView(record);
+async function loadAxisExtensionRecord(record, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
+  if (!record || record.enabled === false) return toAxisExtensionView(record, pid);
+  const existing = getExtensionRuntimeState(pid, record.id);
+  if (existing?.loadedId) return toAxisExtensionView(record, pid);
 
   try {
     const manifest = await readAxisExtensionManifest(record.path);
     const loadPath = await prepareAxisExtensionLoadPath(record, manifest);
-    const extSession = session.fromPartition('persist:main');
+    const extSession = getAxisExtensionSession(pid);
     const loadExtension =
       extSession.extensions && typeof extSession.extensions.loadExtension === 'function'
         ? extSession.extensions.loadExtension.bind(extSession.extensions)
@@ -814,52 +1177,63 @@ async function loadAxisExtensionRecord(record) {
       popupPage: getAxisExtensionDefaultPopup(manifest),
       iconUrl: getAxisExtensionIconUrl(record.path, manifest)
     };
-    axisExtensionRuntime.set(record.id, { loadedId: ext.id, error: '' });
-    const all = getStoredAxisExtensions();
+    setExtensionRuntimeState(pid, record.id, { loadedId: ext.id, error: '' });
+    const all = getStoredAxisExtensions(pid);
     const idx = all.findIndex((x) => x.id === record.id);
     if (idx >= 0) {
       all[idx] = next;
-      setStoredAxisExtensions(all);
+      setStoredAxisExtensions(pid, all);
     }
-    return toAxisExtensionView(next);
+    return toAxisExtensionView(next, pid);
   } catch (error) {
-    axisExtensionRuntime.set(record.id, {
+    setExtensionRuntimeState(pid, record.id, {
       loadedId: '',
       error: error && error.message ? error.message : String(error)
     });
-    return toAxisExtensionView(record);
+    return toAxisExtensionView(record, pid);
   }
 }
 
-function unloadAxisExtensionRecord(record) {
+function unloadAxisExtensionRecord(record, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
   if (!record) return;
-  const prevWin = axisExtensionPopupByRecordId.get(record.id);
+  const popupKey = extensionRuntimeKey(pid, record.id);
+  const prevWin = axisExtensionPopupByRecordId.get(popupKey);
   if (prevWin && !prevWin.isDestroyed()) {
     try {
       prevWin.close();
     } catch (_) {}
-    axisExtensionPopupByRecordId.delete(record.id);
+    axisExtensionPopupByRecordId.delete(popupKey);
   }
-  const rt = axisExtensionRuntime.get(record.id);
+  const rt = getExtensionRuntimeState(pid, record.id);
   const extensionId = rt?.loadedId || record.extensionId;
   if (extensionId) {
     try {
-      session.fromPartition('persist:main').removeExtension(extensionId);
+      getAxisExtensionSession(pid).removeExtension(extensionId);
     } catch (_) {}
   }
-  axisExtensionRuntime.set(record.id, { loadedId: '', error: '' });
+  setExtensionRuntimeState(pid, record.id, { loadedId: '', error: '' });
 }
 
-async function loadStoredAxisExtensions() {
-  const all = getStoredAxisExtensions();
+async function loadStoredAxisExtensionsForProfile(profileId) {
+  const pid = sanitizeProfileId(profileId);
+  const all = getStoredAxisExtensions(pid);
   for (const record of all) {
     if (record.enabled === false) continue;
-    await loadAxisExtensionRecord(record);
+    await loadAxisExtensionRecord(record, pid);
   }
 }
 
-async function migrateAxisExtensionPopupPagesIfNeeded() {
-  const all = getStoredAxisExtensions();
+async function loadAllProfileExtensions() {
+  for (const p of listAxisProfiles()) {
+    await migrateAxisExtensionPopupPagesIfNeeded(p.id);
+    await loadStoredAxisExtensionsForProfile(p.id);
+  }
+}
+
+async function migrateAxisExtensionPopupPagesIfNeeded(profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
+  const all = getStoredAxisExtensions(pid);
   let changed = false;
   const out = await Promise.all(
     all.map(async (rec) => {
@@ -876,15 +1250,20 @@ async function migrateAxisExtensionPopupPagesIfNeeded() {
       }
     })
   );
-  if (changed) setStoredAxisExtensions(out);
+  if (changed) setStoredAxisExtensions(pid, out);
 }
 
-function listAxisExtensions() {
-  const all = getStoredAxisExtensions();
-  return all.map(toAxisExtensionView);
+function listAxisExtensions(profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const all = getStoredAxisExtensions(profileId);
+  return all.map((rec) => toAxisExtensionView(rec, profileId));
 }
 
-async function installAxisExtensionFromFolder(ownerWindow) {
+async function installAxisExtensionFromFolder(ownerWindow, profileId) {
+  const pid =
+    profileId ||
+    (ownerWindow && !ownerWindow.isDestroyed()
+      ? sanitizeProfileId(ownerWindow.__axisProfileId)
+      : AXIS_DEFAULT_PROFILE_ID);
   const dialogOptions = {
     title: 'Install Extension',
     message: 'Choose an unpacked Chrome extension folder that contains manifest.json',
@@ -894,15 +1273,20 @@ async function installAxisExtensionFromFolder(ownerWindow) {
     ? await dialog.showOpenDialog(ownerWindow, dialogOptions)
     : await dialog.showOpenDialog(dialogOptions);
   if (result.canceled || !result.filePaths || !result.filePaths[0]) {
-    return { canceled: true, extensions: await listAxisExtensions() };
+    return { canceled: true, extensions: await listAxisExtensions(pid) };
   }
 
   const sourcePath = result.filePaths[0];
-  const out = await commitAxisExtensionInstall(sourcePath);
+  const out = await commitAxisExtensionInstall(sourcePath, pid);
   return { canceled: false, ...out };
 }
 
-async function installAxisExtensionFromCrxFile(ownerWindow) {
+async function installAxisExtensionFromCrxFile(ownerWindow, profileId) {
+  const pid =
+    profileId ||
+    (ownerWindow && !ownerWindow.isDestroyed()
+      ? sanitizeProfileId(ownerWindow.__axisProfileId)
+      : AXIS_DEFAULT_PROFILE_ID);
   const dialogOptions = {
     title: 'Install Extension from .crx',
     message: 'Choose a Chrome extension package (.crx)',
@@ -913,37 +1297,39 @@ async function installAxisExtensionFromCrxFile(ownerWindow) {
     ? await dialog.showOpenDialog(ownerWindow, dialogOptions)
     : await dialog.showOpenDialog(dialogOptions);
   if (result.canceled || !result.filePaths || !result.filePaths[0]) {
-    return { canceled: true, extensions: await listAxisExtensions() };
+    return { canceled: true, extensions: await listAxisExtensions(pid) };
   }
   const crxBuf = await fs.promises.readFile(result.filePaths[0]);
-  const out = await installAxisExtensionFromCrxBuffer(crxBuf);
+  const out = await installAxisExtensionFromCrxBuffer(crxBuf, pid);
   return { canceled: false, ...out };
 }
 
-async function setAxisExtensionEnabled(id, enabled) {
-  const all = getStoredAxisExtensions();
+async function setAxisExtensionEnabled(id, enabled, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
+  const all = getStoredAxisExtensions(pid);
   const idx = all.findIndex((x) => x.id === id);
   if (idx < 0) throw new Error('Extension not found');
   all[idx] = { ...all[idx], enabled: !!enabled };
-  setStoredAxisExtensions(all);
+  setStoredAxisExtensions(pid, all);
   if (enabled) {
-    await loadAxisExtensionRecord(all[idx]);
+    await loadAxisExtensionRecord(all[idx], pid);
   } else {
-    unloadAxisExtensionRecord(all[idx]);
+    unloadAxisExtensionRecord(all[idx], pid);
   }
-  broadcastSettingsUpdated();
+  broadcastSettingsUpdated(pid);
   try {
     createMenu();
   } catch (_) {}
-  return listAxisExtensions();
+  return listAxisExtensions(pid);
 }
 
-async function removeAxisExtension(id) {
-  const all = getStoredAxisExtensions();
+async function removeAxisExtension(id, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
+  const all = getStoredAxisExtensions(pid);
   const record = all.find((x) => x.id === id);
   if (!record) throw new Error('Extension not found');
-  unloadAxisExtensionRecord(record);
-  setStoredAxisExtensions(all.filter((x) => x.id !== id));
+  unloadAxisExtensionRecord(record, pid);
+  setStoredAxisExtensions(pid, all.filter((x) => x.id !== id));
   try {
     const root = getAxisExtensionsDir();
     const rel = path.relative(root, record.path || '');
@@ -951,37 +1337,40 @@ async function removeAxisExtension(id) {
       await fs.promises.rm(record.path, { recursive: true, force: true });
     }
   } catch (_) {}
-  axisExtensionRuntime.delete(id);
-  broadcastSettingsUpdated();
+  deleteExtensionRuntimeState(pid, id);
+  broadcastSettingsUpdated(pid);
   try {
     createMenu();
   } catch (_) {}
-  return listAxisExtensions();
+  return listAxisExtensions(pid);
 }
 
-async function openAxisExtensionOptions(id) {
-  const record = getStoredAxisExtensions().find((x) => x.id === id);
+async function openAxisExtensionOptions(id, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
+  const record = getStoredAxisExtensions(pid).find((x) => x.id === id);
   if (!record) throw new Error('Extension not found');
   if (record.enabled === false) throw new Error('Enable this extension before opening its options.');
-  let view = toAxisExtensionView(record);
+  let view = toAxisExtensionView(record, pid);
   if (record.enabled !== false && !view.loaded) {
-    view = await loadAxisExtensionRecord(record);
+    view = await loadAxisExtensionRecord(record, pid);
   }
   if (!view.optionsUrl) throw new Error('This extension does not provide an options page');
   openUrlInAxisBrowser(view.optionsUrl);
   return true;
 }
 
-async function openAxisExtensionPopup(id) {
-  const record = getStoredAxisExtensions().find((x) => x.id === id);
+async function openAxisExtensionPopup(id, profileId = AXIS_DEFAULT_PROFILE_ID, ownerWindow) {
+  const pid = sanitizeProfileId(profileId);
+  const record = getStoredAxisExtensions(pid).find((x) => x.id === id);
   if (!record) throw new Error('Extension not found');
   if (record.enabled === false) throw new Error('Enable this extension before opening its popup.');
-  let view = toAxisExtensionView(record);
+  let view = toAxisExtensionView(record, pid);
   if (record.enabled !== false && !view.loaded) {
-    view = await loadAxisExtensionRecord(record);
+    view = await loadAxisExtensionRecord(record, pid);
   }
   if (!view.popupUrl) throw new Error('This extension does not provide a toolbar popup.');
-  const prev = axisExtensionPopupByRecordId.get(id);
+  const popupKey = extensionRuntimeKey(pid, id);
+  const prev = axisExtensionPopupByRecordId.get(popupKey);
   if (prev && !prev.isDestroyed()) {
     try {
       if (prev.isMinimized()) prev.restore();
@@ -989,12 +1378,17 @@ async function openAxisExtensionPopup(id) {
       prev.focus();
       return true;
     } catch (_) {
-      axisExtensionPopupByRecordId.delete(id);
+      axisExtensionPopupByRecordId.delete(popupKey);
     }
   }
 
-  const extSession = getAxisExtensionSession();
-  const parentWin = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const extSession = getAxisExtensionSession(pid);
+  const parentWin =
+    ownerWindow && !ownerWindow.isDestroyed()
+      ? ownerWindow
+      : mainWindow && !mainWindow.isDestroyed()
+        ? mainWindow
+        : null;
 
   const popupWin = new BrowserWindow({
     width: 400,
@@ -1020,10 +1414,10 @@ async function openAxisExtensionPopup(id) {
     }
   });
 
-  axisExtensionPopupByRecordId.set(id, popupWin);
+  axisExtensionPopupByRecordId.set(popupKey, popupWin);
   popupWin.on('closed', () => {
-    if (axisExtensionPopupByRecordId.get(id) === popupWin) {
-      axisExtensionPopupByRecordId.delete(id);
+    if (axisExtensionPopupByRecordId.get(popupKey) === popupWin) {
+      axisExtensionPopupByRecordId.delete(popupKey);
     }
   });
 
@@ -1036,7 +1430,7 @@ async function openAxisExtensionPopup(id) {
     // the expected top-level extension page context.
     await popupWin.loadURL(view.popupUrl);
   } catch (err) {
-    axisExtensionPopupByRecordId.delete(id);
+    axisExtensionPopupByRecordId.delete(popupKey);
     if (!popupWin.isDestroyed()) {
       try {
         popupWin.close();
@@ -1079,15 +1473,16 @@ function cleanSitePermissionOverrides(raw) {
   return out;
 }
 
-/** Notify every window (main + Settings) so UIs reload store-backed state (e.g. site permissions). */
-function broadcastSettingsUpdated() {
-  try {
-    applyMainWindowVibrancyFromStore();
-  } catch (_) {}
+/** Notify windows for one profile (or all if profileId omitted) to reload store-backed state. */
+function broadcastSettingsUpdated(profileId = null) {
+  const target = profileId != null ? sanitizeProfileId(profileId) : null;
   for (const w of BrowserWindow.getAllWindows()) {
-    if (w.isDestroyed()) continue;
+    if (w.isDestroyed() || w.__axisIsIncognito) continue;
+    const winProfile = sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+    if (target && winProfile !== target) continue;
     try {
-      w.webContents.send('settings-updated');
+      applyVibrancyToWindow(w);
+      w.webContents.send('settings-updated', { profileId: winProfile });
     } catch (_) {
       /* window gone */
     }
@@ -1101,23 +1496,34 @@ function broadcastSettingsUpdated() {
  * @param {string} permission Electron permission id
  * @param {Record<string, unknown> | undefined} details `mediaTypes` for `media` requests
  */
-function recordSitePermissionAllowance(origin, permission, details) {
+function getProfileIdFromWebContents(webContents) {
+  if (!webContents || webContents.isDestroyed()) return AXIS_DEFAULT_PROFILE_ID;
+  try {
+    return getProfileIdFromSession(webContents.session);
+  } catch (_) {
+    return AXIS_DEFAULT_PROFILE_ID;
+  }
+}
+
+function recordSitePermissionAllowance(origin, permission, details, profileId = AXIS_DEFAULT_PROFILE_ID) {
   if (!origin || typeof origin !== 'string') return;
+  const pid = sanitizeProfileId(profileId);
+  const profileStore = getProfileSitePermissionStore(pid);
 
   if (permission === 'geolocation' || permission === 'notifications') {
-    const raw = store.get('sitePermissionOverrides', {});
+    const raw = profileStore.get('sitePermissionOverrides', {});
     const base = raw && typeof raw === 'object' ? raw : {};
     const site = { ...(base[origin] || {}) };
     site[permission] = 'allow';
     const next = { ...base, [origin]: site };
-    store.set('sitePermissionOverrides', cleanSitePermissionOverrides(next));
-    broadcastSettingsUpdated();
+    profileStore.set('sitePermissionOverrides', cleanSitePermissionOverrides(next));
+    broadcastSettingsUpdated(pid);
     return;
   }
 
   if (permission === 'media') {
     const types = details && Array.isArray(details.mediaTypes) ? details.mediaTypes : ['video', 'audio'];
-    const raw = store.get('sitePermissionOverrides', {});
+    const raw = profileStore.get('sitePermissionOverrides', {});
     const base = raw && typeof raw === 'object' ? raw : {};
     const site = { ...(base[origin] || {}) };
     if (types.length === 0) {
@@ -1128,14 +1534,14 @@ function recordSitePermissionAllowance(origin, permission, details) {
       if (types.includes('audio')) site.microphone = 'allow';
     }
     const next = { ...base, [origin]: site };
-    store.set('sitePermissionOverrides', cleanSitePermissionOverrides(next));
-    broadcastSettingsUpdated();
+    profileStore.set('sitePermissionOverrides', cleanSitePermissionOverrides(next));
+    broadcastSettingsUpdated(pid);
   }
 }
 
 /** @param {string|null} origin @param {string} permission Electron permission id */
-function getSitePermissionDecision(origin, permission) {
-  const overrides = store.get('sitePermissionOverrides', {});
+function getSitePermissionDecision(origin, permission, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const overrides = getProfileStore(profileId).get('sitePermissionOverrides', {});
   if (!origin || typeof overrides !== 'object') return null;
   const site = overrides[origin];
   if (!site || typeof site !== 'object') return null;
@@ -1158,9 +1564,10 @@ function getSitePermissionDecision(origin, permission) {
 }
 
 function permissionRequestHandler(webContents, permission, callback, details) {
+  const profileId = getProfileIdFromWebContents(webContents);
   const requestingUrl = details && details.requestingUrl;
   const origin = normalizePermissionOrigin(requestingUrl);
-  const decided = getSitePermissionDecision(origin, permission);
+  const decided = getSitePermissionDecision(origin, permission, profileId);
   if (decided === 'deny') {
     callback(false);
     return;
@@ -1196,7 +1603,7 @@ function permissionRequestHandler(webContents, permission, callback, details) {
   const grant = allowedPermissions.includes(permission);
   if (grant) {
     try {
-      recordSitePermissionAllowance(origin, permission, details);
+      recordSitePermissionAllowance(origin, permission, details, profileId);
     } catch (err) {
       console.warn('recordSitePermissionAllowance failed:', err);
     }
@@ -1205,8 +1612,9 @@ function permissionRequestHandler(webContents, permission, callback, details) {
 }
 
 function permissionCheckHandler(webContents, permission, requestingOrigin, details) {
+  const profileId = getProfileIdFromWebContents(webContents);
   const origin = normalizePermissionOrigin(requestingOrigin) || requestingOrigin;
-  const decided = getSitePermissionDecision(origin, permission);
+  const decided = getSitePermissionDecision(origin, permission, profileId);
   if (decided === 'deny') return false;
   if (decided === 'allow') return true;
   return true;
@@ -1215,6 +1623,31 @@ function permissionCheckHandler(webContents, permission, requestingOrigin, detai
 function installSessionPermissionHandlers(sess) {
   sess.setPermissionRequestHandler(permissionRequestHandler);
   sess.setPermissionCheckHandler(permissionCheckHandler);
+}
+
+const axisConfiguredSessionPartitions = new Set();
+const axisCertBypass = (_request, callback) => callback(0);
+
+function configureAxisSessionInstance(sess) {
+  if (!sess) return;
+  const key = typeof sess.getPartition === 'function' ? sess.getPartition() || 'default' : 'default';
+  if (axisConfiguredSessionPartitions.has(key)) return;
+  axisConfiguredSessionPartitions.add(key);
+  try {
+    installSessionPermissionHandlers(sess);
+  } catch (_) {}
+  try {
+    configureSpellChecker(sess);
+  } catch (_) {}
+  try {
+    sess.setCertificateVerifyProc(axisCertBypass);
+  } catch (_) {}
+  try {
+    attachDownloadActivityTracking(sess);
+  } catch (_) {}
+  try {
+    syncAdBlockerForProfile(getProfileIdFromSession(sess));
+  } catch (_) {}
 }
 
 // Keep a global reference of the window object
@@ -1247,31 +1680,17 @@ function configureSession() {
     } catch (_) {}
   });
 
-  installSessionPermissionHandlers(mainSession);
-  installSessionPermissionHandlers(session.fromPartition('persist:main'));
+  configureAxisSessionInstance(mainSession);
   try {
-    installSessionPermissionHandlers(session.fromPartition('incognito'));
-  } catch (_) {
-    console.warn('Could not attach permission handlers to incognito session');
-  }
-
-  configureSpellChecker(mainSession);
-  try { configureSpellChecker(session.fromPartition('persist:main')); } catch (_) {}
-  try { configureSpellChecker(session.fromPartition('incognito')); } catch (_) {}
-
-  // Trust all certificates for every session (default, persist:main, incognito)
-  const certBypass = (request, callback) => callback(0);
-  mainSession.setCertificateVerifyProc(certBypass);
-  try { session.fromPartition('persist:main').setCertificateVerifyProc(certBypass); } catch (_) {}
-  try { session.fromPartition('incognito').setCertificateVerifyProc(certBypass); } catch (_) {}
-
-  attachDownloadActivityTracking(mainSession);
-  try {
-    attachDownloadActivityTracking(session.fromPartition('persist:main'));
+    configureAxisSessionInstance(session.fromPartition('persist:main'));
   } catch (_) {}
   try {
-    attachDownloadActivityTracking(session.fromPartition('incognito'));
+    configureAxisSessionInstance(session.fromPartition('incognito'));
   } catch (_) {}
+
+  installAxisShellCspOnAllSessions(session);
+
+  ensureAxisVaultForProfile(AXIS_DEFAULT_PROFILE_ID);
 }
 
 /** In-flight downloads from any Axis session — drives URL-bar ring + popup activity in renderer. */
@@ -1348,23 +1767,35 @@ function getAxisAdblockSessions() {
   return out;
 }
 
-function syncAdBlockerFromStore() {
-  const enabled = store.get('adBlockerEnabled', true) !== false;
-  void applyAxisAdBlockerEnabled(enabled);
+function syncAdBlockerForProfile(profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
+  const enabled = getProfileStore(pid).get('adBlockerEnabled', true) !== false;
+  void applyAxisAdBlockerToSession(getAxisExtensionSession(pid), enabled);
 }
 
-async function applyAxisAdBlockerEnabled(enabled) {
-  const sessions = getAxisAdblockSessions();
+function syncAdBlockerFromStore() {
+  syncAdBlockerForProfile(AXIS_DEFAULT_PROFILE_ID);
+}
+
+async function syncAllProfilesAdBlocker() {
+  for (const p of listAxisProfiles()) {
+    syncAdBlockerForProfile(p.id);
+  }
+  try {
+    await applyAxisAdBlockerToSession(session.fromPartition('incognito'), false);
+  } catch (_) {}
+}
+
+async function applyAxisAdBlockerToSession(sess, enabled) {
+  if (!sess) return;
   if (!enabled) {
     if (!axisAdblockBlocker) return;
-    for (const s of sessions) {
-      try {
-        if (axisAdblockBlocker.isBlockingEnabled(s)) {
-          axisAdblockBlocker.disableBlockingInSession(s);
-        }
-        axisAdblockEnabledSessionKeys.delete(getAxisSessionKey(s));
-      } catch (_) {}
-    }
+    try {
+      if (axisAdblockBlocker.isBlockingEnabled(sess)) {
+        axisAdblockBlocker.disableBlockingInSession(sess);
+      }
+      axisAdblockEnabledSessionKeys.delete(getAxisSessionKey(sess));
+    } catch (_) {}
     return;
   }
   try {
@@ -1389,26 +1820,34 @@ async function applyAxisAdBlockerEnabled(enabled) {
     }
     const blocker = await axisAdblockLoadPromise;
     axisAdblockBlocker = blocker;
-    for (const s of sessions) {
-      try {
-        const key = getAxisSessionKey(s);
-        if (key && axisAdblockEnabledSessionKeys.has(key)) continue;
-        if (!blocker.isBlockingEnabled(s)) {
-          blocker.enableBlockingInSession(s);
-        }
-        if (key) axisAdblockEnabledSessionKeys.add(key);
-      } catch (e) {
-        const msg = e && e.message ? String(e.message) : String(e);
-        if (msg.includes("Attempted to register a second handler for '@ghostery/adblocker/inject-cosmetic-filters'")) {
-          const key = getAxisSessionKey(s);
-          if (key) axisAdblockEnabledSessionKeys.add(key);
-          continue;
-        }
-        console.warn('Axis: enable ad blocker on session failed:', e);
-      }
+    const key = getAxisSessionKey(sess);
+    if (key && axisAdblockEnabledSessionKeys.has(key)) return;
+    if (!blocker.isBlockingEnabled(sess)) {
+      blocker.enableBlockingInSession(sess);
     }
-  } catch (_) {
-    /* logged in load promise */
+    if (key) axisAdblockEnabledSessionKeys.add(key);
+  } catch (e) {
+    const msg = e && e.message ? String(e.message) : String(e);
+    if (msg.includes("Attempted to register a second handler for '@ghostery/adblocker/inject-cosmetic-filters'")) {
+      const key = getAxisSessionKey(sess);
+      if (key) axisAdblockEnabledSessionKeys.add(key);
+      return;
+    }
+    console.warn('Axis: enable ad blocker on session failed:', e);
+  }
+}
+
+async function applyAxisAdBlockerEnabled(enabled) {
+  const sessions = getAxisAdblockSessions();
+  if (!enabled) {
+    if (!axisAdblockBlocker) return;
+    for (const s of sessions) {
+      await applyAxisAdBlockerToSession(s, false);
+    }
+    return;
+  }
+  for (const s of sessions) {
+    await applyAxisAdBlockerToSession(s, true);
   }
 }
 
@@ -1665,7 +2104,11 @@ function listAxisActiveDownloads() {
 function applyVibrancyToWindow(browserWindow) {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   if (process.platform !== 'darwin') return;
-  const raw = store.get('windowChromeLight', 50);
+  const profileId =
+    browserWindow.__axisIsIncognito === true
+      ? AXIS_DEFAULT_PROFILE_ID
+      : sanitizeProfileId(browserWindow.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+  const raw = getProfileStore(profileId).get('windowChromeLight', 50);
   const n = Number(raw);
   const solidChrome = Number.isFinite(n) ? n <= 0 : false;
   try {
@@ -1682,6 +2125,9 @@ function applyVibrancyToWindow(browserWindow) {
 function applyMainWindowVibrancyFromStore() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   applyVibrancyToWindow(mainWindow);
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed() && w !== mainWindow) applyVibrancyToWindow(w);
+  }
 }
 let isQuitConfirmed = false;
 let isUserQuitting = false;
@@ -1798,9 +2244,18 @@ const getDefaultShortcuts = () => {
  * Merged active shortcuts for global registration and menus.
  * Store may set an action to null / '' / '__disabled__' to turn that shortcut off.
  */
-const getShortcuts = () => {
+function getActiveProfileId() {
+  const win = getActiveAxisWindow();
+  if (win && !win.isDestroyed() && win.__axisIsIncognito !== true && win.__axisProfileId) {
+    return sanitizeProfileId(win.__axisProfileId);
+  }
+  return AXIS_DEFAULT_PROFILE_ID;
+}
+
+const getShortcuts = (profileId) => {
+  const pid = sanitizeProfileId(profileId || getActiveProfileId());
   const defaults = getDefaultShortcuts();
-  const custom = store.get('keyboardShortcuts', null);
+  const custom = getProfileStore(pid).get('keyboardShortcuts', null);
   if (!custom) return { ...defaults };
   const out = {};
   for (const action of Object.keys(defaults)) {
@@ -1822,7 +2277,8 @@ const getShortcuts = () => {
 };
 
 /** Raw user overrides (null = disabled for that action). */
-const getShortcutOverrides = () => store.get('keyboardShortcuts', null) || {};
+const getShortcutOverrides = (profileId) =>
+  getProfileStore(sanitizeProfileId(profileId || getActiveProfileId())).get('keyboardShortcuts', null) || {};
 
 // Get the active Axis window (prefers focused, then main, then any)
 function getActiveAxisWindow() {
@@ -1839,6 +2295,108 @@ function sendBrowserShortcut(action) {
   if (win && !win.isDestroyed()) {
     win.webContents.send('browser-shortcut', action);
   }
+}
+
+function getFocusedProfileMenuContext() {
+  const win = getActiveAxisWindow();
+  if (!win || win.isDestroyed() || win.__axisIsIncognito === true) {
+    return { isIncognito: true, profileId: null, profileName: null, canManage: false };
+  }
+  const profileId = sanitizeProfileId(win.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+  return {
+    isIncognito: false,
+    profileId,
+    profileName: getProfileName(profileId),
+    canManage: true
+  };
+}
+
+function sendProfileMenuAction(action, payload = {}) {
+  const win = getActiveAxisWindow();
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send('profile-menu-action', { action, ...payload });
+}
+
+function openOrFocusProfileWindowById(profileId) {
+  const id = ensureAxisProfile(profileId || AXIS_DEFAULT_PROFILE_ID);
+  let focused = focusExistingProfileWindow(id);
+  if (!focused) {
+    focused = createWindow({ profileId: id });
+  }
+  if (focused && !focused.isDestroyed()) {
+    try {
+      if (focused.isMinimized()) focused.restore();
+      focused.show();
+      focused.focus();
+    } catch (_) {}
+  }
+  return focused;
+}
+
+function truncateProfileMenuLabel(name, max = 52) {
+  const text = typeof name === 'string' && name.trim() ? name.trim() : 'Profile';
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** Menu bar: Profiles → switch, create, edit, delete. */
+function buildProfilesSubmenu() {
+  const profiles = listAxisProfiles();
+  const ctx = getFocusedProfileMenuContext();
+  /** @type {import('electron').MenuItemConstructorOptions[]} */
+  const items = [];
+
+  if (ctx.isIncognito) {
+    items.push({ label: 'Private browsing', enabled: false });
+    items.push({ type: 'separator' });
+  }
+
+  for (const profile of profiles) {
+    const isActive = !ctx.isIncognito && profile.id === ctx.profileId;
+    items.push({
+      label: truncateProfileMenuLabel(profile.name),
+      type: 'checkbox',
+      checked: isActive,
+      click: () => openOrFocusProfileWindowById(profile.id)
+    });
+  }
+
+  items.push({ type: 'separator' });
+  items.push({
+    label: 'New Profile…',
+    click: () => sendProfileMenuAction('create')
+  });
+
+  if (ctx.canManage && ctx.profileId) {
+    items.push({
+      label: `Edit “${truncateProfileMenuLabel(ctx.profileName, 32)}”…`,
+      click: () => {
+        const rec = profiles.find((p) => p.id === ctx.profileId);
+        sendProfileMenuAction('edit', {
+          profileId: ctx.profileId,
+          name: rec?.name || ctx.profileName,
+          icon: rec?.icon || 'user'
+        });
+      }
+    });
+    if (ctx.profileId !== AXIS_DEFAULT_PROFILE_ID) {
+      items.push({
+        label: `Delete “${truncateProfileMenuLabel(ctx.profileName, 32)}”…`,
+        click: () => {
+          const rec = profiles.find((p) => p.id === ctx.profileId);
+          sendProfileMenuAction('delete', {
+            profileId: ctx.profileId,
+            name: rec?.name || ctx.profileName,
+            icon: rec?.icon || 'user'
+          });
+        }
+      });
+    }
+  } else if (ctx.isIncognito) {
+    items.push({ label: 'Edit Current Profile…', enabled: false });
+    items.push({ label: 'Delete Current Profile…', enabled: false });
+  }
+
+  return items;
 }
 
 // Register global shortcuts (works in all Axis windows, including incognito)
@@ -1959,14 +2517,30 @@ function attachAxisHostNavigationGestures(browserWindow) {
   });
 }
 
-function createWindow() {
+function getWindowHash({ incognito = false, profileId = AXIS_DEFAULT_PROFILE_ID } = {}) {
+  if (incognito) return 'incognito';
+  const id = sanitizeProfileId(profileId);
+  const rec = listAxisProfiles().find((p) => p.id === id);
+  const icon = sanitizeProfileIcon(rec?.icon);
+  return `profile=${encodeURIComponent(id)}&icon=${encodeURIComponent(icon)}`;
+}
+
+function getProfileName(profileId) {
+  const id = sanitizeProfileId(profileId);
+  const item = listAxisProfiles().find((p) => p.id === id);
+  return item?.name || (id === AXIS_DEFAULT_PROFILE_ID ? 'Personal' : id);
+}
+
+function createWindow(options = {}) {
+  const profileId = ensureAxisProfile(options.profileId || AXIS_DEFAULT_PROFILE_ID);
+  const profileName = getProfileName(profileId);
   // Create the browser window with optimized settings
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'Axis Browser',
+    title: profileName === 'Personal' ? 'Axis Browser' : `Axis — ${profileName}`,
     icon: APP_ICON_PATH,
     webPreferences: {
       nodeIntegration: false,
@@ -1993,57 +2567,63 @@ function createWindow() {
     ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
   });
 
-  attachAxisHostNavigationGestures(mainWindow);
+  attachAxisHostNavigationGestures(win);
 
-  if (process.platform === 'darwin' && mainWindow) {
-    mainWindow.__axisSidebarRight = false;
-    attachMacTrafficLightResize(mainWindow);
+  if (process.platform === 'darwin' && win) {
+    win.__axisSidebarRight = false;
+    attachMacTrafficLightResize(win);
   }
+  win.__axisIsIncognito = false;
+  win.__axisProfileId = profileId;
+  win.__axisProfileName = profileName;
 
   // Load the app
-  mainWindow.loadFile('src/index.html');
+  win.loadFile('src/index.html', { hash: getWindowHash({ profileId }) });
 
   // Show window when ready
-  mainWindow.once('ready-to-show', () => {
-    if (process.platform === 'darwin' && mainWindow && !mainWindow.isDestroyed()) {
-      const side = !!mainWindow.__axisSidebarRight;
-      positionMacTrafficLights(mainWindow, side);
+  win.once('ready-to-show', () => {
+    if (process.platform === 'darwin' && win && !win.isDestroyed()) {
+      const side = !!win.__axisSidebarRight;
+      positionMacTrafficLights(win, side);
       setImmediate(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) positionMacTrafficLights(mainWindow, side);
+        if (win && !win.isDestroyed()) positionMacTrafficLights(win, side);
       });
     }
-    applyMainWindowVibrancyFromStore();
-    mainWindow.show();
+    applyVibrancyToWindow(win);
+    syncAdBlockerForProfile(profileId);
+    void loadStoredAxisExtensionsForProfile(profileId);
+    win.show();
+    win.focus();
     // Show window controls by default (sidebar is visible)
-    mainWindow.setWindowButtonVisibility(true);
+    win.setWindowButtonVisibility(true);
   });
 
   // Handle window closed
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
   });
 
   // Intercept close - only show quit confirmation for actual quit actions, not window close
-  mainWindow.on('close', (e) => {
+  win.on('close', (e) => {
     // On macOS, clicking X should just hide the window, not quit
     if (process.platform === 'darwin' && !isUserQuitting) {
       // Just hide the window instead of closing it
       e.preventDefault();
-      mainWindow.hide();
+      win.hide();
       return;
     }
     
     // For actual quit actions (non-macOS), confirmation is sent from main via request-quit
     if (!isQuitConfirmed && isUserQuitting) {
       e.preventDefault();
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('request-quit');
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('request-quit');
       }
     }
   });
 
   // Handle new window requests with URL validation
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url }) => {
     // Validate URL before allowing new windows
     if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
       // Additional security checks - reject dangerous URL schemes
@@ -2061,6 +2641,11 @@ function createWindow() {
 
   // Create application menu
   createMenu();
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = win;
+  }
+  return win;
 }
 
 /** Open Settings as an in-browser tab (`axis://settings`) in the main shell. */
@@ -2238,7 +2823,8 @@ function axisNativeImageForExtensionMenu(iconUrl) {
 
 /** macOS menu bar (and other platforms): Extensions → installed items, store links, Settings. */
 function buildExtensionsSubmenu() {
-  const exts = listAxisExtensions();
+  const activeProfileId = getActiveProfileId();
+  const exts = listAxisExtensions(activeProfileId);
   /** @type {import('electron').MenuItemConstructorOptions[]} */
   const items = [];
   if (!exts.length) {
@@ -2257,18 +2843,19 @@ function buildExtensionsSubmenu() {
         ...(menuIcon ? { icon: menuIcon } : {}),
         click: async () => {
           try {
-            const v = listAxisExtensions().find((x) => x.id === extId);
+            const pid = getActiveProfileId();
+            const v = listAxisExtensions(pid).find((x) => x.id === extId);
             if (!v) return;
             if (v.enabled === false) return;
+            const win = getActiveAxisWindow();
             if (v.popupUrl) {
-              await openAxisExtensionPopup(extId);
+              await openAxisExtensionPopup(extId, pid, win || undefined);
               return;
             }
             if (v.optionsUrl) {
-              await openAxisExtensionOptions(extId);
+              await openAxisExtensionOptions(extId, pid);
               return;
             }
-            const win = getActiveAxisWindow();
             void dialog.showMessageBox(win && !win.isDestroyed() ? win : BrowserWindow.getFocusedWindow() || undefined, {
               type: 'info',
               title: v.name || 'Extension',
@@ -2377,11 +2964,11 @@ function createMenu() {
           accelerator: 'Cmd+Q',
           click: () => {
             const win = getActiveAxisWindow();
-            if (win && !win.isDestroyed() && showNativeQuitDialog()) {
-              isQuitConfirmed = true;
-              isUserQuitting = true;
-              app.quit();
-            } else if (!getActiveAxisWindow()) {
+            if (win && !win.isDestroyed()) {
+              if (showNativeQuitDialog()) {
+                void finishConfirmedQuit();
+              }
+            } else {
               app.quit();
             }
           }
@@ -2658,6 +3245,11 @@ function createMenu() {
 
   const helpSubmenu = [
     {
+      label: 'Visit Website',
+      click: () => openUrlInAxisBrowser('https://abdelrahmanberchan.github.io/axis.github.io/')
+    },
+    { type: 'separator' },
+    {
       label: 'View License',
       click: () =>
         openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser/blob/main/LICENSE.md')
@@ -2685,6 +3277,7 @@ function createMenu() {
   template.push({ label: 'Edit', submenu: editSubmenu });
   template.push({ label: 'Tabs', submenu: tabsSubmenu });
   template.push({ label: 'View', submenu: viewSubmenu });
+  template.push({ label: 'Profiles', submenu: buildProfilesSubmenu() });
   template.push({ label: 'History', submenu: historySubmenu });
   template.push({ label: 'Extensions', submenu: buildExtensionsSubmenu() });
   template.push({ label: 'Window', submenu: windowSubmenu });
@@ -2731,6 +3324,8 @@ function createIncognitoWindow(initialUrl = null) {
     ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
   });
   incognitoWindow.__axisIsIncognito = true;
+  incognitoWindow.__axisProfileId = 'incognito';
+  incognitoWindow.__axisProfileName = 'Incognito';
 
   attachAxisHostNavigationGestures(incognitoWindow);
 
@@ -2785,9 +3380,12 @@ function focusExistingIncognitoWindow() {
   return existing;
 }
 
-function focusExistingPersonalWindow() {
+function focusExistingProfileWindow(profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const target = sanitizeProfileId(profileId);
   const all = BrowserWindow.getAllWindows().filter((w) => w && !w.isDestroyed());
-  const existing = all.find((w) => w.__axisIsIncognito !== true);
+  const existing = all.find(
+    (w) => w.__axisIsIncognito !== true && sanitizeProfileId(w.__axisProfileId) === target
+  );
   if (!existing) return null;
   try {
     if (existing.isMinimized()) existing.restore();
@@ -2795,6 +3393,10 @@ function focusExistingPersonalWindow() {
     existing.focus();
   } catch (_) {}
   return existing;
+}
+
+function focusExistingPersonalWindow() {
+  return focusExistingProfileWindow(AXIS_DEFAULT_PROFILE_ID);
 }
 
 function updateDockMenu() {
@@ -2907,9 +3509,8 @@ app.whenReady().then(async () => {
       };
     });
 
-    // Belt-and-suspenders: make sure spellcheck is enabled on EVERY session a
-    // webContents touches (default, persist:main, incognito, + any custom partitions).
-    try { configureSpellChecker(contents.session); } catch (_) {}
+    // Ensure every dynamic profile partition gets handlers (cookies, downloads, permissions, spellcheck).
+    try { configureAxisSessionInstance(contents.session); } catch (_) {}
 
     if (!isGuest) return;
 
@@ -2938,8 +3539,8 @@ app.whenReady().then(async () => {
   });
 
   configureSession();
-  syncAdBlockerFromStore();
-  await loadStoredAxisExtensions();
+  await syncAllProfilesAdBlocker();
+  await loadAllProfileExtensions();
   ensureSpellEngineLoaded();
   warmUpMainProcessNativePaths();
   createWindow();
@@ -2950,6 +3551,9 @@ app.whenReady().then(async () => {
   app.on('browser-window-focus', () => {
     unregisterShortcuts();
     registerShortcuts();
+    try {
+      createMenu();
+    } catch (_) {}
   });
   // When no Axis window is focused (app in background), remove global shortcuts
   app.on('browser-window-blur', () => {
@@ -2974,9 +3578,14 @@ app.on('window-all-closed', () => {
 
 // Native macOS quit confirmation (Cmd+Q or when quit is requested)
 function showNativeQuitDialog() {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  mainWindow.focus();
-  const response = dialog.showMessageBoxSync(mainWindow, {
+  const win = getActiveAxisWindow();
+  if (!win || win.isDestroyed()) return false;
+  try {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } catch (_) {}
+  const response = dialog.showMessageBoxSync(win, {
     type: 'question',
     buttons: ['Cancel', 'Quit'],
     defaultId: 0,
@@ -2987,14 +3596,54 @@ function showNativeQuitDialog() {
   return response === 1;
 }
 
+/** Persist tab groups / pinned tabs from a personal window before app.quit (async, not during unload). */
+async function persistSessionBeforeQuit() {
+  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+  for (const win of wins) {
+    try {
+      const payload = await win.webContents.executeJavaScript(
+        `(function () {
+          try {
+            return window.__axisBrowser && typeof window.__axisBrowser.flushSessionStatePayload === 'function'
+              ? window.__axisBrowser.flushSessionStatePayload()
+              : null;
+          } catch (err) {
+            return null;
+          }
+        })()`,
+        true
+      );
+      if (payload && payload.incognito === false) {
+        const profileId = sanitizeProfileId(win.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+        const s = getProfileStore(profileId);
+        if (payload.tabGroups != null) s.set('tabGroups', payload.tabGroups);
+        if (payload.pinnedTabs != null) s.set('pinnedTabs', payload.pinnedTabs);
+      }
+    } catch (err) {
+      console.error('persistSessionBeforeQuit:', err);
+    }
+  }
+}
+
+async function finishConfirmedQuit() {
+  isQuitConfirmed = true;
+  isUserQuitting = true;
+  try {
+    for (const vault of axisVaultByProfile.values()) {
+      vault.flushUnlocked();
+    }
+  } catch (_) {}
+  await persistSessionBeforeQuit();
+  app.quit();
+}
+
 // Handle Cmd+Q on macOS (before-quit fires before window close)
 app.on('before-quit', (e) => {
   if (process.platform === 'darwin' && !isQuitConfirmed) {
     e.preventDefault();
     isUserQuitting = true;
     if (showNativeQuitDialog()) {
-      isQuitConfirmed = true;
-      app.quit();
+      void finishConfirmedQuit();
     } else {
       isUserQuitting = false;
     }
@@ -3007,8 +3656,284 @@ app.on('activate', () => {
     mainWindow.show();
     mainWindow.focus();
   } else if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
+    createWindow({ profileId: AXIS_DEFAULT_PROFILE_ID });
   }
+});
+
+async function axisVerifyDeviceOwner(reason) {
+  const text =
+    typeof reason === 'string' && reason.trim()
+      ? reason.trim()
+      : 'Authenticate to view saved passwords';
+  if (process.platform === 'darwin') {
+    const canTouch =
+      typeof systemPreferences.canPromptTouchID === 'function' &&
+      systemPreferences.canPromptTouchID();
+    if (canTouch && typeof systemPreferences.promptTouchID === 'function') {
+      try {
+        await systemPreferences.promptTouchID(text);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+  }
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    message: text,
+    detail:
+      process.platform === 'darwin'
+        ? 'Use Touch ID on the next prompt, or confirm here to continue.'
+        : 'Confirm it is you to view sensitive information.',
+    buttons: ['Cancel', 'Continue'],
+    defaultId: 1,
+    cancelId: 0
+  });
+  return response === 1;
+}
+
+function vaultStatusPayload(profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
+  ensureAxisVaultForProfile(pid).ensureLoaded();
+  let touchIdAvailable = false;
+  if (process.platform === 'darwin') {
+    try {
+      touchIdAvailable =
+        typeof systemPreferences.canPromptTouchID === 'function' &&
+        systemPreferences.canPromptTouchID();
+    } catch (_) {}
+  }
+  return {
+    configured: true,
+    unlocked: true,
+    autofillEnabled: getProfileStore(pid).get('vaultAutofillEnabled', true) !== false,
+    touchIdAvailable
+  };
+}
+
+ipcMain.handle('axis-vault-get-page-scan-js', () => AXIS_VAULT_PAGE_SCAN_JS);
+
+ipcMain.handle('axis-vault-get-autofill-inject-js', () => ({
+  bootstrap: AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS,
+  probe: AXIS_VAULT_AUTOFILL_PROBE_JS,
+  hide: AXIS_VAULT_AUTOFILL_HIDE_JS
+}));
+
+ipcMain.handle('axis-vault-build-autofill-show-js', (_e, payload) => {
+  const data = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : { items: payload };
+  const items = Array.isArray(data.items) ? data.items : [];
+  const theme = data.theme === 'light' ? 'light' : 'dark';
+  return buildVaultAutofillShowMenuJs(items, theme);
+});
+
+ipcMain.handle('axis-vault-build-autofill-fill-js', (_e, cred) =>
+  cred && typeof cred === 'object' ? buildVaultAutofillFillLoginJs(cred) : '(function(){})()'
+);
+
+ipcMain.handle('axis-vault-status', (event) => vaultStatusPayload(getProfileIdForEvent(event)));
+
+ipcMain.handle('axis-vault-verify-device', async (_e, reason) => axisVerifyDeviceOwner(reason));
+
+ipcMain.handle('axis-vault-reveal-login', async (event, id) => {
+  const ok = await axisVerifyDeviceOwner('Show saved login');
+  if (!ok) return { ok: false, cancelled: true };
+  const login = ensureAxisVaultFromEvent(event).getLogin(id);
+  return { ok: true, username: login.username, password: login.password };
+});
+
+ipcMain.handle('axis-vault-reveal-card', async (event, id) => {
+  const ok = await axisVerifyDeviceOwner('Show saved card');
+  if (!ok) return { ok: false, cancelled: true };
+  const card = ensureAxisVaultFromEvent(event).getCard(id);
+  return {
+    ok: true,
+    number: card.number,
+    cvv: card.cvv,
+    expMonth: card.expMonth,
+    expYear: card.expYear
+  };
+});
+
+ipcMain.handle('axis-vault-list-logins', (event) => ({
+  ok: true,
+  items: ensureAxisVaultFromEvent(event).listLogins()
+}));
+
+ipcMain.handle('axis-vault-get-login', (event, id) => {
+  const login = ensureAxisVaultFromEvent(event).getLogin(id);
+  return {
+    id: login.id,
+    origin: login.origin,
+    username: login.username,
+    title: login.title,
+    notes: login.notes,
+    updatedAt: login.updatedAt
+  };
+});
+
+ipcMain.handle('axis-vault-save-login', (event, entry) => {
+  return ensureAxisVaultFromEvent(event).saveLogin(entry || {});
+});
+
+ipcMain.handle('axis-vault-delete-login', (event, id) => {
+  ensureAxisVaultFromEvent(event).deleteLogin(id);
+  return true;
+});
+
+ipcMain.handle('axis-vault-get-login-for-fill', (event, id) => {
+  const login = ensureAxisVaultFromEvent(event).getLogin(id);
+  return {
+    id: login.id,
+    origin: login.origin,
+    username: login.username,
+    password: login.password,
+    title: login.title
+  };
+});
+
+ipcMain.handle('axis-vault-get-card-for-fill', (event, id) => {
+  const card = ensureAxisVaultFromEvent(event).getCard(id);
+  return {
+    id: card.id,
+    label: card.label,
+    cardholder: card.cardholder,
+    number: card.number,
+    expMonth: card.expMonth,
+    expYear: card.expYear,
+    cvv: card.cvv,
+    billingZip: card.billingZip
+  };
+});
+
+ipcMain.handle('axis-vault-list-cards', (event) => ({
+  ok: true,
+  items: ensureAxisVaultFromEvent(event).listCards()
+}));
+
+ipcMain.handle('axis-vault-get-card', (event, id) => {
+  const card = ensureAxisVaultFromEvent(event).getCard(id);
+  return {
+    id: card.id,
+    label: card.label,
+    cardholder: card.cardholder,
+    masked: card.number ? `•••• ${String(card.number).replace(/\D/g, '').slice(-4)}` : '••••',
+    expMonth: card.expMonth,
+    expYear: card.expYear,
+    billingZip: card.billingZip
+  };
+});
+
+ipcMain.handle('axis-vault-save-card', (event, entry) => {
+  return ensureAxisVaultFromEvent(event).saveCard(entry || {});
+});
+
+ipcMain.handle('axis-vault-delete-card', (event, id) => {
+  ensureAxisVaultFromEvent(event).deleteCard(id);
+  return true;
+});
+
+ipcMain.handle('axis-vault-capture-login', (event, payload) => {
+  return ensureAxisVaultFromEvent(event).captureLogin(payload || {});
+});
+
+ipcMain.handle('axis-vault-should-offer-login-save', (event, payload) => ({
+  offer: ensureAxisVaultFromEvent(event).shouldOfferLoginSave(payload || {})
+}));
+
+function forwardVaultGuestMessageToShell(event, channel, payload) {
+  if (!channel || !event.sender || event.sender.isDestroyed()) return;
+  const out = { channel, payload, guestWebContentsId: event.sender.id };
+  try {
+    const host = event.sender.hostWebContents;
+    if (host && !host.isDestroyed()) {
+      host.send('axis-vault-guest-ipc', out);
+      return;
+    }
+  } catch (_) {}
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) {
+    focused.webContents.send('axis-vault-guest-ipc', out);
+    return;
+  }
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('axis-vault-guest-ipc', out);
+      break;
+    }
+  }
+}
+
+function vaultAutofillCandidates(profileId, payload) {
+  const pid = sanitizeProfileId(profileId);
+  const v = ensureAxisVaultForProfile(pid);
+  const status = vaultStatusPayload(pid);
+  if (status.autofillEnabled === false) {
+    return { ok: true, kind: 'login', items: [] };
+  }
+  let origin = v.normalizeVaultOrigin(payload && payload.origin);
+  if (!origin && payload && payload.pageUrl) {
+    origin = v.normalizeVaultOrigin(payload.pageUrl);
+  }
+  if (!origin) return { ok: true, kind: 'login', items: [] };
+  const kind = payload && payload.kind === 'card' ? 'card' : 'login';
+  if (kind === 'card') {
+    const cards = v.matchCards().map((c) => ({
+      id: c.id,
+      label: c.label,
+      cardholder: c.cardholder,
+      masked: c.masked,
+      number: c.number,
+      expMonth: c.expMonth,
+      expYear: c.expYear,
+      cvv: c.cvv,
+      billingZip: c.billingZip
+    }));
+    return { ok: true, kind: 'card', items: cards };
+  }
+  const logins = v
+    .matchLogins(origin, payload && payload.usernameHint, payload && payload.pageUrl)
+    .map((e) => ({
+      id: e.id,
+      username: e.username,
+      password: e.password,
+      title: e.title
+    }));
+  return { ok: true, kind: 'login', items: logins };
+}
+
+/** Guest preload: autofill menu data (invoke — reliable in webview). */
+ipcMain.handle('axis-vault-autofill-query', (event, payload) =>
+  vaultAutofillCandidates(getProfileIdFromWebContents(event.sender), payload)
+);
+
+/** Guest preload → shell (invoke — reliable in sandboxed guests). */
+ipcMain.handle('axis-vault-report-credentials', (event, payload) => {
+  if (!payload || typeof payload !== 'object') return false;
+  forwardVaultGuestMessageToShell(event, 'axis-vault-save-offer', payload);
+  return true;
+});
+
+/** Guest preload → shell: show autofill menu (invoke; sendToHost backup). */
+ipcMain.handle('axis-vault-autofill-present', (event, payload) => {
+  if (!payload || typeof payload !== 'object') return false;
+  forwardVaultGuestMessageToShell(event, 'axis-vault-autofill-request', payload);
+  return true;
+});
+
+/** Guest `<webview>` → shell: vault save/autofill (sendToHost backup). */
+ipcMain.on('axis-vault-guest-ipc', (event, msg) => {
+  const data = msg && typeof msg === 'object' ? msg : {};
+  const { channel, payload } = data;
+  forwardVaultGuestMessageToShell(event, channel, payload);
+});
+
+ipcMain.handle('axis-vault-fill-candidates', (event, payload) => {
+  const res = vaultAutofillCandidates(getProfileIdForEvent(event), payload || {});
+  if (!res.ok) return { ok: true, logins: [], cards: [] };
+  if (res.kind === 'card') {
+    return { ok: true, logins: [], cards: res.items };
+  }
+  return { ok: true, logins: res.items, cards: [] };
 });
 
 // IPC handlers
@@ -3022,7 +3947,8 @@ const AXIS_SETTINGS_SECTION_IDS = new Set([
   'history',
   'shortcuts',
   'permissions',
-  'extensions'
+  'extensions',
+  'vault'
 ]);
 
 function sanitizeSettingsSectionId(section) {
@@ -3031,10 +3957,48 @@ function sanitizeSettingsSectionId(section) {
   return AXIS_SETTINGS_SECTION_IDS.has(id) ? id : null;
 }
 
-ipcMain.handle('get-settings-tab-load-url', (_event, section) => {
+function getWindowFromSender(webContents) {
+  if (!webContents || webContents.isDestroyed()) return null;
+  const direct = BrowserWindow.fromWebContents(webContents);
+  if (direct && !direct.isDestroyed()) return direct;
+  try {
+    const host = webContents.hostWebContents;
+    if (host && !host.isDestroyed()) {
+      const hostWin = BrowserWindow.fromWebContents(host);
+      if (hostWin && !hostWin.isDestroyed()) return hostWin;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function getProfileIdForEvent(event) {
+  const sender = event?.sender;
+  if (sender && !sender.isDestroyed()) {
+    try {
+      const part =
+        sender.session && typeof sender.session.getPartition === 'function'
+          ? sender.session.getPartition()
+          : '';
+      if (part && part !== 'incognito') {
+        return getProfileIdFromSession(sender.session);
+      }
+    } catch (_) {}
+  }
+  const win = getWindowFromSender(sender);
+  return win && win.__axisIsIncognito !== true
+    ? sanitizeProfileId(win.__axisProfileId)
+    : AXIS_DEFAULT_PROFILE_ID;
+}
+
+function getSettingsStoreForEvent(event) {
+  return getProfileStore(getProfileIdForEvent(event));
+}
+
+ipcMain.handle('get-settings-tab-load-url', (event, section) => {
   const filePath = path.join(__dirname, 'settings.html');
   const u = pathToFileURL(filePath);
   u.searchParams.set('embedded', '1');
+  u.searchParams.set('profile', getProfileIdForEvent(event));
   const safeSection = sanitizeSettingsSectionId(section);
   if (safeSection) {
     u.hash = safeSection;
@@ -3057,8 +4021,8 @@ ipcMain.handle('set-window-title', (event, title) => {
   return true;
 });
 
-ipcMain.on('settings-updated', () => {
-  broadcastSettingsUpdated();
+ipcMain.on('settings-updated', (event) => {
+  broadcastSettingsUpdated(getProfileIdForEvent(event));
 });
 
 ipcMain.handle('print-page', (event, webContentsId) => {
@@ -3071,55 +4035,85 @@ ipcMain.handle('print-page', (event, webContentsId) => {
 });
 
 ipcMain.handle('open-url-in-browser', (event, url) => {
-  openUrlInAxisBrowser(url);
+  const win = getWindowFromSender(event.sender);
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send('open-url-in-browser', url);
+  } else {
+    openUrlInAxisBrowser(url);
+  }
   return true;
 });
 
-ipcMain.handle('get-settings', () => {
-  return store.store;
+ipcMain.handle('get-settings', (event) => {
+  const s = getSettingsStoreForEvent(event);
+  return s.store;
 });
 
 /** Sync payload for `settings.html` first paint — `uiTheme` from the store only, never the OS. */
 ipcMain.on('axis-settings-window-bootstrap', (event) => {
   try {
-    const ui = store.get('uiTheme', 'dark');
+    const s = getSettingsStoreForEvent(event);
+    const ui = s.get('uiTheme', 'dark');
     event.returnValue = { uiTheme: ui === 'light' ? 'light' : 'dark' };
   } catch (_) {
     event.returnValue = { uiTheme: 'dark' };
   }
 });
 
-ipcMain.handle('get-site-permission-overrides', () => {
-  return store.get('sitePermissionOverrides', {});
+ipcMain.handle('get-site-permission-overrides', (event) => {
+  const s = getSettingsStoreForEvent(event);
+  return s.get('sitePermissionOverrides', {});
 });
 
 ipcMain.handle('set-site-permission-overrides', (event, obj) => {
+  const pid = getProfileIdForEvent(event);
+  const s = getSettingsStoreForEvent(event);
   const cleaned = cleanSitePermissionOverrides(obj);
-  store.set('sitePermissionOverrides', cleaned);
-  broadcastSettingsUpdated();
+  s.set('sitePermissionOverrides', cleaned);
+  broadcastSettingsUpdated(pid);
   return cleaned;
 });
 
 ipcMain.handle('set-setting', (event, key, value) => {
-  store.set(key, value);
+  const pid = getProfileIdForEvent(event);
+  const s = getSettingsStoreForEvent(event);
+  s.set(key, value);
   if (key === 'adBlockerEnabled') {
-    syncAdBlockerFromStore();
+    syncAdBlockerForProfile(pid);
   }
+  broadcastSettingsUpdated(pid);
   return true;
 });
 
-ipcMain.handle('get-extensions', async () => {
-  await migrateAxisExtensionPopupPagesIfNeeded();
-  return listAxisExtensions();
+/** Synchronous session flush before window teardown (tab groups, pinned tabs). */
+ipcMain.on('axis-flush-session-sync', (event, payload) => {
+  if (!payload || payload.incognito) return;
+  try {
+    const s = getSettingsStoreForEvent(event);
+    if (payload.tabGroups != null) s.set('tabGroups', payload.tabGroups);
+    if (payload.pinnedTabs != null) s.set('pinnedTabs', payload.pinnedTabs);
+  } catch (e) {
+    console.error('axis-flush-session-sync failed:', e);
+  }
+});
+
+ipcMain.handle('get-extensions', async (event) => {
+  const pid = getProfileIdForEvent(event);
+  await migrateAxisExtensionPopupPagesIfNeeded(pid);
+  return listAxisExtensions(pid);
 });
 
 ipcMain.handle('install-extension', async (event) => {
+  const pid = getProfileIdForEvent(event);
   const win = BrowserWindow.fromWebContents(event.sender);
-  return installAxisExtensionFromFolder(win && !win.isDestroyed() ? win : undefined);
+  return installAxisExtensionFromFolder(win && !win.isDestroyed() ? win : undefined, pid);
 });
 
-ipcMain.handle('install-extension-from-web-store', async (_event, rawInput) => {
-  const out = await installExtensionFromStoreUrlOrId(rawInput);
+ipcMain.handle('install-extension-from-web-store', async (event, rawInput) => {
+  const out = await installExtensionFromStoreUrlOrId(rawInput, getProfileIdForEvent(event));
   return { canceled: false, ...out };
 });
 
@@ -3129,54 +4123,58 @@ ipcMain.handle('get-webview-cws-preload-path', () =>
 );
 
 ipcMain.handle('install-extension-crx', async (event) => {
+  const pid = getProfileIdForEvent(event);
   const win = BrowserWindow.fromWebContents(event.sender);
-  return installAxisExtensionFromCrxFile(win && !win.isDestroyed() ? win : undefined);
+  return installAxisExtensionFromCrxFile(win && !win.isDestroyed() ? win : undefined, pid);
 });
 
-ipcMain.handle('set-extension-enabled', async (_event, id, enabled) => {
-  return setAxisExtensionEnabled(id, enabled);
+ipcMain.handle('set-extension-enabled', async (event, id, enabled) => {
+  return setAxisExtensionEnabled(id, enabled, getProfileIdForEvent(event));
 });
 
-ipcMain.handle('remove-extension', async (_event, id) => {
-  return removeAxisExtension(id);
+ipcMain.handle('remove-extension', async (event, id) => {
+  return removeAxisExtension(id, getProfileIdForEvent(event));
 });
 
-ipcMain.handle('open-extension-options', async (_event, id) => {
-  return openAxisExtensionOptions(id);
+ipcMain.handle('open-extension-options', async (event, id) => {
+  return openAxisExtensionOptions(id, getProfileIdForEvent(event));
 });
 
-ipcMain.handle('open-extension-popup', async (_event, id) => {
-  return openAxisExtensionPopup(id);
+ipcMain.handle('open-extension-popup', async (event, id) => {
+  const pid = getProfileIdForEvent(event);
+  const win = getWindowFromSender(event.sender);
+  return openAxisExtensionPopup(id, pid, win || undefined);
 });
 
 // Keyboard shortcuts management
-ipcMain.handle('get-shortcuts', () => {
-  return getShortcuts();
+ipcMain.handle('get-shortcuts', (event) => {
+  return getShortcuts(getProfileIdForEvent(event));
 });
 
 ipcMain.handle('get-default-shortcuts', () => {
   return getDefaultShortcuts();
 });
 
-ipcMain.handle('get-shortcut-overrides', () => {
-  return getShortcutOverrides();
+ipcMain.handle('get-shortcut-overrides', (event) => {
+  return getShortcutOverrides(getProfileIdForEvent(event));
 });
 
 ipcMain.handle('set-shortcuts', (event, shortcuts) => {
-  store.set('keyboardShortcuts', shortcuts);
-  // Re-register shortcuts with new values
+  const pid = getProfileIdForEvent(event);
+  getProfileStore(pid).set('keyboardShortcuts', shortcuts);
   unregisterShortcuts();
   registerShortcuts();
-  // Rebuild application menu so accelerators match new shortcuts
   createMenu();
+  broadcastSettingsUpdated(pid);
   return shortcuts;
 });
 
-ipcMain.handle('reset-shortcuts', () => {
-  store.delete('keyboardShortcuts');
-  // Re-register shortcuts with defaults
+ipcMain.handle('reset-shortcuts', (event) => {
+  const pid = getProfileIdForEvent(event);
+  getProfileStore(pid).delete('keyboardShortcuts');
   unregisterShortcuts();
   registerShortcuts();
+  broadcastSettingsUpdated(pid);
   return getDefaultShortcuts();
 });
 
@@ -3192,12 +4190,13 @@ ipcMain.handle('enable-shortcuts', () => {
 });
 
 // History management
-ipcMain.handle('get-history', () => {
-  return historyStore.get('items', []);
+ipcMain.handle('get-history', (event) => {
+  return getHistoryItems(getProfileIdForEvent(event));
 });
 
 ipcMain.handle('add-history-item', (event, item) => {
-  const history = historyStore.get('items', []);
+  const pid = getProfileIdForEvent(event);
+  const history = getHistoryItems(pid);
   const newItem = {
     id: Date.now(),
     url: item.url,
@@ -3218,25 +4217,26 @@ ipcMain.handle('add-history-item', (event, item) => {
     history.splice(1000);
   }
   
-  historyStore.set('items', history);
+  setHistoryItems(pid, history);
   return newItem;
 });
 
-ipcMain.handle('clear-history', () => {
-  historyStore.set('items', []);
+ipcMain.handle('clear-history', (event) => {
+  setHistoryItems(getProfileIdForEvent(event), []);
   return true;
 });
 
 ipcMain.handle('delete-history-item', (event, id) => {
-  const history = historyStore.get('items', []);
-  const filtered = history.filter(item => item.id !== id);
-  historyStore.set('items', filtered);
+  const pid = getProfileIdForEvent(event);
+  const history = getHistoryItems(pid);
+  const filtered = history.filter((item) => item.id !== id);
+  setHistoryItems(pid, filtered);
   return true;
 });
 
 // Downloads management (history of browser downloads)
-ipcMain.handle('get-downloads', () => {
-  return downloadsStore.get('items', []);
+ipcMain.handle('get-downloads', (event) => {
+  return getDownloadItems(getProfileIdForEvent(event));
 });
 
 ipcMain.handle('get-active-downloads', () => {
@@ -3261,7 +4261,8 @@ ipcMain.handle('cancel-active-download', (_event, axisId) => {
 });
 
 ipcMain.handle('add-download', (event, downloadInfo) => {
-  const downloads = downloadsStore.get('items', []);
+  const pid = getProfileIdForEvent(event);
+  const downloads = getDownloadItems(pid);
   const newDownload = {
     id: Date.now(),
     url: downloadInfo.url,
@@ -3272,32 +4273,34 @@ ipcMain.handle('add-download', (event, downloadInfo) => {
     status: 'downloading',
     timestamp: new Date().toISOString()
   };
-  
+
   downloads.unshift(newDownload);
-  downloadsStore.set('items', downloads);
+  setDownloadItems(pid, downloads);
   return newDownload;
 });
 
 ipcMain.handle('update-download-progress', (event, id, progress) => {
-  const downloads = downloadsStore.get('items', []);
-  const download = downloads.find(d => d.id === id);
+  const pid = getProfileIdForEvent(event);
+  const downloads = getDownloadItems(pid);
+  const download = downloads.find((d) => d.id === id);
   if (download) {
     download.receivedBytes = progress.receivedBytes;
     download.status = progress.status || download.status;
-    downloadsStore.set('items', downloads);
+    setDownloadItems(pid, downloads);
   }
   return download;
 });
 
-ipcMain.handle('clear-downloads', () => {
-  downloadsStore.set('items', []);
+ipcMain.handle('clear-downloads', (event) => {
+  setDownloadItems(getProfileIdForEvent(event), []);
   return true;
 });
 
 ipcMain.handle('delete-download', (event, id) => {
-  const downloads = downloadsStore.get('items', []);
-  const filtered = downloads.filter(item => item.id !== id);
-  downloadsStore.set('items', filtered);
+  const pid = getProfileIdForEvent(event);
+  const downloads = getDownloadItems(pid);
+  const filtered = downloads.filter((item) => item.id !== id);
+  setDownloadItems(pid, filtered);
   return true;
 });
 
@@ -3428,7 +4431,63 @@ ipcMain.handle('open-or-focus-incognito-window', () => {
 
 ipcMain.handle('open-or-focus-personal-window', () => {
   const focused = focusExistingPersonalWindow();
-  if (!focused) createWindow();
+  if (!focused) createWindow({ profileId: AXIS_DEFAULT_PROFILE_ID });
+  return true;
+});
+
+ipcMain.handle('get-profiles', () => {
+  return listAxisProfiles();
+});
+
+ipcMain.handle('create-profile', (_event, payload) => {
+  const { id, name } = allocateProfileId(payload?.name || payload?.id || 'New Profile');
+  const icon = sanitizeProfileIcon(payload?.icon);
+  ensureAxisProfile(id, name, icon);
+  broadcastProfilesUpdated();
+  return { id, name, icon };
+});
+
+ipcMain.handle('update-profile', (_event, payload) => {
+  const id = sanitizeProfileId(payload?.id || payload?.profileId);
+  const updates = {};
+  if (payload?.name != null) updates.name = payload.name;
+  if (payload?.icon != null) updates.icon = payload.icon;
+  return updateAxisProfile(id, updates);
+});
+
+ipcMain.handle('reorder-profiles', (_event, orderedIds) => reorderAxisProfiles(orderedIds));
+
+ipcMain.handle('delete-profile', async (_event, payload) => {
+  const id = sanitizeProfileId(payload?.id || payload?.profileId);
+  if (id === AXIS_DEFAULT_PROFILE_ID) {
+    return { ok: false, error: 'The Personal profile cannot be deleted.' };
+  }
+  const profileName = getProfileName(id);
+  if (payload?.skipChecks !== true) {
+    const authed = await axisVerifyDeviceOwner('Delete this profile');
+    if (!authed) return { ok: false, cancelled: true };
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      message: `Delete “${profileName}”?`,
+      detail:
+        'All tabs, cookies, history, saved passwords, extensions, and settings for this profile will be removed permanently. This cannot be undone.',
+      buttons: ['Cancel', 'Delete Profile'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    });
+    if (response !== 1) return { ok: false, cancelled: true };
+  }
+  try {
+    await deleteAxisProfile(id);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Could not delete profile' };
+  }
+});
+
+ipcMain.handle('open-or-focus-profile-window', (_event, profileId) => {
+  openOrFocusProfileWindowById(profileId);
   return true;
 });
 
@@ -3440,12 +4499,13 @@ ipcMain.handle('open-url-in-new-window', (event, url) => {
 });
 
 // Notes management
-ipcMain.handle('get-notes', () => {
-  return notesStore.get('items', []);
+ipcMain.handle('get-notes', (event) => {
+  return getNoteItems(getProfileIdForEvent(event));
 });
 
 ipcMain.handle('save-note', (event, note) => {
-  const notes = notesStore.get('items', []);
+  const pid = getProfileIdForEvent(event);
+  const notes = getNoteItems(pid);
   const existingIndex = notes.findIndex(n => n.id === note.id);
   
   if (existingIndex !== -1) {
@@ -3468,14 +4528,15 @@ ipcMain.handle('save-note', (event, note) => {
     notes.unshift(newNote);
   }
   
-  notesStore.set('items', notes);
+  setNoteItems(pid, notes);
   return notes[existingIndex !== -1 ? existingIndex : 0];
 });
 
 ipcMain.handle('delete-note', (event, id) => {
-  const notes = notesStore.get('items', []);
-  const filtered = notes.filter(note => note.id !== id);
-  notesStore.set('items', filtered);
+  const pid = getProfileIdForEvent(event);
+  const notes = getNoteItems(pid);
+  const filtered = notes.filter((note) => note.id !== id);
+  setNoteItems(pid, filtered);
   return true;
 });
 
@@ -4698,9 +5759,7 @@ ipcMain.handle('show-icon-picker', async (event, type) => {
 });
 
 ipcMain.on('confirm-quit', () => {
-  isQuitConfirmed = true;
-  isUserQuitting = true;
-  app.quit();
+  void finishConfirmedQuit();
 });
 
 ipcMain.on('cancel-quit', () => {
