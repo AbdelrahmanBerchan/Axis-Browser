@@ -204,7 +204,7 @@
                 html.axis-dark .row-desc { color: #98989d; }
         
         /* Native form controls */
-        select, input[type="text"], input[type="search"] {
+        select {
             -webkit-appearance: none;
             appearance: none;
             padding: 4px 24px 4px 8px;
@@ -215,10 +215,27 @@
             min-width: 120px;
             color: inherit;
         }
-                html.axis-dark select, html.axis-dark input[type="text"], html.axis-dark input[type="search"], html.axis-dark input[type="password"], html.axis-dark input[type="number"] { border-color: rgba(255,255,255,0.2);
-                background-color: #3a3a3c; }
-        input[type="search"] {
+        input[type="text"],
+        input[type="search"],
+        input[type="password"],
+        input[type="number"] {
+            -webkit-appearance: none;
+            appearance: none;
+            padding: 4px 8px;
+            font-size: 13px;
+            border: 1px solid rgba(0,0,0,0.2);
+            border-radius: 6px;
+            background-color: #fff;
             background-image: none;
+            min-width: 120px;
+            color: inherit;
+        }
+                html.axis-dark select { border-color: rgba(255,255,255,0.2);
+                background-color: #3a3a3c; }
+                html.axis-dark input[type="text"], html.axis-dark input[type="search"], html.axis-dark input[type="password"], html.axis-dark input[type="number"] { border-color: rgba(255,255,255,0.2);
+                background-color: #3a3a3c;
+                background-image: none; }
+        input[type="search"] {
             padding: 6px 12px;
             min-width: 200px;
         }
@@ -295,6 +312,27 @@
                 html.axis-dark button.destructive { color: #ff453a; }
         
         .row-controls { display: flex; gap: 12px; align-items: center; }
+        .ai-settings-intro {
+            padding: 0 4px 10px;
+            font-size: 13px;
+            line-height: 1.55;
+            opacity: 0.9;
+        }
+        .ai-settings-intro p { margin: 0; }
+        .ai-settings-key-row { align-items: flex-start; }
+        .ai-settings-key-controls {
+            flex-direction: column;
+            align-items: stretch;
+            min-width: min(100%, 340px);
+            gap: 8px;
+        }
+        .groq-api-key-input {
+            width: 100%;
+            min-width: 200px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px;
+        }
+        button.secondary { opacity: 0.88; }
         .shortcut-input {
             font-family: 'SF Mono', Monaco, monospace;
             font-size: 12px;
@@ -671,6 +709,20 @@
         .shortcut-row.shortcut-row-disabled .shortcut-input { opacity: 0.55; pointer-events: none; }
         .gradient-rows { display: none; }
         .gradient-rows.visible { display: flex; flex-direction: column; }
+        .ntp-nested-rows { display: none; }
+        .ntp-nested-rows.visible { display: flex; flex-direction: column; }
+        .ntp-settings-intro {
+            padding: 14px 18px;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #86868b;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+        }
+        html.axis-dark .ntp-settings-intro {
+            color: #98989d;
+            border-bottom-color: rgba(255,255,255,0.06);
+        }
+        .ntp-settings-intro p { margin: 0; }
         .settings-search-wrap {
             margin-bottom: 16px;
         }
@@ -1179,22 +1231,241 @@
                 flex-wrap: wrap;
             }
         }
+
+        /* —— Native Settings popup (frosted glass BrowserWindow, not in-tab) —— */
+        html.settings-native-window {
+            background: transparent !important;
+            background-color: transparent !important;
+        }
+        html.settings-native-window,
+        html.settings-native-window body,
+        html.settings-native-window.axis-dark body,
+        html.settings-native-window:not(.axis-dark) body {
+            background: transparent !important;
+            --settings-bg: transparent;
+            --settings-sidebar-bg: transparent;
+        }
+        html.settings-native-window .settings-wrap {
+            flex-direction: row;
+            flex: 1;
+            min-height: 0;
+            height: 100%;
+        }
+        html.settings-native-window .settings-window-chrome {
+            display: none !important;
+        }
+        html.settings-native-window .settings-content-row {
+            flex: 1;
+            min-height: 0;
+            min-width: 0;
+            overflow: hidden;
+            flex-direction: row;
+        }
+        html.settings-native-window .sidebar {
+            display: flex !important;
+            flex-direction: column;
+            width: 200px;
+            flex-shrink: 0;
+            padding: 48px 10px 16px;
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(28, 28, 30, 0.35);
+            backdrop-filter: blur(20px) saturate(1.2);
+            -webkit-backdrop-filter: blur(20px) saturate(1.2);
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-app-region: no-drag;
+        }
+        html.settings-native-window:not(.axis-dark) .sidebar {
+            border-right-color: rgba(0, 0, 0, 0.08);
+            background: rgba(255, 255, 255, 0.4);
+        }
+        html.settings-native-window.macos .sidebar {
+            padding-top: 52px;
+        }
+        html.settings-native-window .native-sidebar-title {
+            display: block;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            line-height: 1.2;
+            margin: 0 8px 16px;
+            padding: 0 6px;
+            color: var(--settings-text);
+            flex-shrink: 0;
+        }
+        html:not(.settings-native-window) .native-sidebar-title {
+            display: none;
+        }
+        html.settings-native-window .sidebar-item {
+            margin: 0 4px 2px;
+            padding: 7px 12px;
+            border-radius: 8px;
+            font-size: 12.5px;
+            background: transparent;
+            border: none;
+            color: var(--settings-muted);
+        }
+        html.settings-native-window .sidebar-item svg {
+            width: 15px;
+            height: 15px;
+            opacity: 0.75;
+        }
+        html.settings-native-window .sidebar-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--settings-text);
+        }
+        html.settings-native-window:not(.axis-dark) .sidebar-item:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+        html.settings-native-window .sidebar-item.active {
+            background: rgba(255, 255, 255, 0.14);
+            color: var(--settings-text);
+            font-weight: 600;
+            box-shadow: none;
+        }
+        html.settings-native-window:not(.axis-dark) .sidebar-item.active {
+            background: rgba(0, 0, 0, 0.08);
+            color: var(--settings-text);
+        }
+        html.settings-native-window .sidebar-item.active svg {
+            opacity: 1;
+        }
+        html.settings-native-window .main {
+            padding: 0;
+            flex: 1;
+            min-height: 0;
+            min-width: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+        }
+        html.settings-native-window .main-inner {
+            max-width: 640px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 28px 28px 36px;
+        }
+        html.settings-native-window.macos .main-inner {
+            padding-top: 30px;
+        }
+        html.settings-native-window .settings-native-win-controls {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 40px;
+            z-index: 20;
+            -webkit-app-region: drag;
+            align-items: center;
+            padding: 0 12px;
+            box-sizing: border-box;
+        }
+        html.settings-native-window:not(.macos) .settings-native-win-controls {
+            display: flex;
+        }
+        html.settings-native-window .settings-native-close {
+            -webkit-app-region: no-drag;
+            width: 28px;
+            height: 28px;
+            border: none;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+            color: rgba(255, 255, 255, 0.85);
+            background: rgba(255, 255, 255, 0.08);
+            transition: background 0.15s ease;
+        }
+        html.settings-native-window:not(.axis-dark) .settings-native-close {
+            color: rgba(0, 0, 0, 0.65);
+            background: rgba(0, 0, 0, 0.06);
+        }
+        html.settings-native-window .settings-native-close:hover {
+            background: rgba(255, 255, 255, 0.16);
+        }
+        html.settings-native-window:not(.axis-dark) .settings-native-close:hover {
+            background: rgba(0, 0, 0, 0.1);
+        }
+        html.settings-native-window .native-settings-title {
+            display: none;
+        }
+        html.settings-native-window .native-pane-heading {
+            display: none !important;
+        }
+        html.settings-native-window .pane {
+            display: none;
+        }
+        html.settings-native-window .pane.active {
+            display: block;
+        }
+        html.settings-native-window .group-content,
+        html.settings-native-window.axis-dark .group-content {
+            background: rgba(36, 36, 38, 0.48);
+            backdrop-filter: blur(16px) saturate(1.2);
+            -webkit-backdrop-filter: blur(16px) saturate(1.2);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+            border-radius: 12px;
+        }
+        html.settings-native-window:not(.axis-dark) .group-content {
+            background: rgba(255, 255, 255, 0.55);
+            border-color: rgba(0, 0, 0, 0.08);
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.06);
+        }
+        html.settings-native-window .group-title {
+            font-size: 11px;
+            letter-spacing: 0.04em;
+            margin-bottom: 8px;
+        }
+        html.settings-native-window .settings-search-wrap {
+            position: relative;
+            top: 0;
+            margin-bottom: 18px;
+        }
+        html.settings-native-window .settings-search {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        html.settings-native-window:not(.axis-dark) .settings-search {
+            background: rgba(255, 255, 255, 0.72);
+            border-color: rgba(0, 0, 0, 0.1);
+        }
+        html.settings-native-window select,
+        html.settings-native-window input[type="text"],
+        html.settings-native-window input[type="password"],
+        html.settings-native-window input[type="search"],
+        html.settings-native-window .perm-table select {
+            background: rgba(0, 0, 0, 0.22);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        html.settings-native-window:not(.axis-dark) select,
+        html.settings-native-window:not(.axis-dark) input[type="text"],
+        html.settings-native-window:not(.axis-dark) input[type="password"],
+        html.settings-native-window:not(.axis-dark) input[type="search"],
+        html.settings-native-window:not(.axis-dark) .perm-table select {
+            background: rgba(255, 255, 255, 0.85);
+            border-color: rgba(0, 0, 0, 0.12);
+        }
     </style>
     <script>
-        // Apply the in-app `uiTheme` from the store only (never OS appearance).
-        // Sync bootstrap runs before first paint; async getSettings confirms afterward.
+        // Settings always renders in dark chrome. `uiTheme` in General only affects the main browser.
         (function applyInitialAxisTheme() {
             try {
                 if (new URLSearchParams(location.search).get('embedded') === '1') {
                     document.documentElement.classList.add('settings-embedded');
+                } else {
+                    document.documentElement.classList.add('settings-native-window');
                 }
             } catch (_) {}
-            const normalizeUiTheme = (v) => (v === 'light' ? 'light' : 'dark');
-
-            const setFromValue = (v) => {
-                const mode = normalizeUiTheme(v);
-                const isDark = mode !== 'light';
-                document.documentElement.classList.toggle('axis-dark', isDark);
+            const setFromValue = () => {
+                const isDark = true;
+                document.documentElement.classList.add('axis-dark');
                 try {
                     if (window.electronAPI && window.electronAPI.platform === 'darwin') {
                         document.documentElement.classList.add('macos');
@@ -1209,56 +1480,30 @@
                 } catch (_) {}
             };
 
-            let boot = 'dark';
-            try {
-                if (window.electronAPI && typeof window.electronAPI.getSettingsWindowBootstrap === 'function') {
-                    const b = window.electronAPI.getSettingsWindowBootstrap();
-                    if (b && typeof b.uiTheme === 'string') boot = normalizeUiTheme(b.uiTheme);
-                }
-            } catch (_) {}
-            setFromValue(boot);
-
-            try {
-                if (window.electronAPI && typeof window.electronAPI.getSettings === 'function') {
-                    window.electronAPI.getSettings().then((s) => {
-                        const v = s && typeof s.uiTheme === 'string' ? s.uiTheme : 'dark';
-                        setFromValue(v);
-                    }).catch(() => {});
-                }
-            } catch (_) {}
-            // Live-update when the user flips the Appearance dropdown in this window
-            // (the main form `change` handler runs later — we listen here to update
-            // the class immediately without waiting for the round-trip).
-            document.addEventListener('change', (e) => {
-                const t = e.target;
-                if (t && t.id === 'ui-theme') setFromValue(t.value);
-            }, true);
-            // If `uiTheme` gets toggled from the in-app settings panel (not this
-            // window) while this window is open, refresh from the store so both
-            // UIs stay in sync.
-            try {
-                if (window.electronAPI && typeof window.electronAPI.onSettingsUpdated === 'function') {
-                    window.electronAPI.onSettingsUpdated(() => {
-                        try {
-                            window.electronAPI.getSettings().then((s) => {
-                                const v = s && typeof s.uiTheme === 'string' ? s.uiTheme : 'dark';
-                                setFromValue(v);
-                            }).catch(() => {});
-                        } catch (_) {}
-                    });
-                }
-            } catch (_) {}
+            setFromValue();
         })();
     </script>
 </head>
 <body>
   <div class="settings-wrap">
+    <div class="settings-native-win-controls" aria-hidden="false">
+      <button type="button" id="settings-native-close" class="settings-native-close" aria-label="Close Settings">&#10005;</button>
+    </div>
     <header class="settings-window-chrome" translate="no">Settings</header>
     <div class="settings-content-row">
     <nav class="sidebar">
+        <h1 class="native-sidebar-title">Settings</h1>
         <div class="sidebar-item active" data-section="customization">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
             <span>General</span>
+        </div>
+        <div class="sidebar-item" data-section="newtab">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7v-7zm4-3h2v10h-2V7zm4 6h2v4h-2v-4z"/></svg>
+            <span>New Tab</span>
+        </div>
+        <div class="sidebar-item" data-section="ai">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12zM7 9h2v2H7V9zm4 0h2v2h-2V9zm4 0h2v2h-2V9z"/></svg>
+            <span>AI Chat</span>
         </div>
         <div class="sidebar-item" data-section="history">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7.1-7 7-7v2c4.97 0 9 4.03 9 9s-4.03 9-9 9-9-4.03-9-9H4l3.89-3.89.07-.14L11 12h3c0 3.87-3.13 7-7 7s-7-3.13-7-7 3.13-7 7-7V3z"/></svg>
@@ -1284,6 +1529,7 @@
     
     <main class="main">
         <div class="main-inner">
+        <h1 class="native-settings-title">Settings</h1>
         <div class="settings-search-wrap">
             <input type="search" id="settings-search" class="settings-search" placeholder="Search settings...">
         </div>
@@ -1351,7 +1597,7 @@
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title">Appearance</div>
-                            <div class="row-desc">Light or dark mode for the Axis UI (tabs, sidebar, popups). Does not affect the window frame or your theme color.</div>
+                            <div class="row-desc">Light or dark mode for the Axis UI (tabs, sidebar, popups). Does not change this Settings window, the new tab page, or AI chat — those stay dark.</div>
                         </div>
                         <select id="ui-theme">
                             <option value="dark">Dark</option>
@@ -1672,6 +1918,74 @@
             </div>
         </div>
 
+        <div class="pane" id="newtab-pane">
+            <div class="group">
+                <div class="group-title">New Tab</div>
+                <div class="group-content">
+                    <div class="ntp-settings-intro">
+                        <p>Customize the start page greeting and suggestions. Changes apply to this profile and show up the next time you open a new tab.</p>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Show welcome</div>
+                            <div class="row-desc">Greeting and tips above the search box</div>
+                        </div>
+                        <input type="checkbox" id="ntp-welcome-enabled">
+                    </div>
+                    <div class="row ntp-nested-rows" id="ntp-welcome-greeting-row">
+                        <div class="row-label">
+                            <div class="row-title">Greeting</div>
+                            <div class="row-desc">“Good morning” style line</div>
+                        </div>
+                        <input type="checkbox" id="ntp-welcome-greeting">
+                    </div>
+                    <div class="row ntp-nested-rows" id="ntp-welcome-tips-row">
+                        <div class="row-label">
+                            <div class="row-title">Tips</div>
+                            <div class="row-desc">Short hints under the greeting</div>
+                        </div>
+                        <input type="checkbox" id="ntp-welcome-tips">
+                    </div>
+                    <div class="row ntp-nested-rows" id="ntp-welcome-updates-row">
+                        <div class="row-label">
+                            <div class="row-title">Update reminders</div>
+                            <div class="row-desc">Let you know when a newer version is available</div>
+                        </div>
+                        <input type="checkbox" id="ntp-welcome-updates">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Ask AI in suggestions</div>
+                            <div class="row-desc">Shows Search and Ask AI rows at the top when you type in the search box</div>
+                        </div>
+                        <input type="checkbox" id="ntp-ai-search">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="pane" id="ai-pane">
+            <div class="group">
+                <div class="group-title">AI Chat</div>
+                <div class="group-content">
+                    <div class="ai-settings-intro">
+                        <p>Axis uses <strong>Groq</strong> for fast replies in the sidebar chat and the new tab <strong>Ask</strong> mode. Groq has a <strong>free tier</strong> — create an account, copy an API key, and paste it below. Your key is saved in this profile on your device only.</p>
+                    </div>
+                    <div class="row ai-settings-key-row">
+                        <div class="row-label">
+                            <div class="row-title">Groq API key</div>
+                            <div class="row-desc" id="groq-api-key-status">Not set — AI chat is off until you add a key.</div>
+                        </div>
+                        <div class="row-controls ai-settings-key-controls">
+                            <input type="password" id="groq-api-key" class="groq-api-key-input" placeholder="Paste key (gsk_…)" autocomplete="off" spellcheck="false">
+                            <button type="button" id="groq-get-key-btn">Get free key</button>
+                            <button type="button" id="groq-clear-key-btn" class="secondary hidden">Remove key</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="pane" id="history-pane">
             <div class="group">
                 <div class="group-title">Browsing History</div>
@@ -1799,7 +2113,13 @@
                     key === 'ambientAudioEnabled' ||
                     key === 'ambientMuteWhenTabAudio' ||
                     key === 'ambientAudioPreset' ||
-                    key === 'ambientAudioVolume'
+                    key === 'ambientAudioVolume' ||
+                    key === 'groqApiKey' ||
+                    key === 'ntpWelcomeEnabled' ||
+                    key === 'ntpWelcomeGreeting' ||
+                    key === 'ntpWelcomeUpdates' ||
+                    key === 'ntpWelcomeTips' ||
+                    key === 'ntpAiSearchEnabled'
                 ) {
                     window.electronAPI.sendSettingsUpdated();
                 }
@@ -1874,6 +2194,26 @@
             document.getElementById('gradient-direction').value = settings.gradientDirection || '135deg';
             document.getElementById('transparent-sites').checked = !!settings.transparentSites;
 
+            const groqKeyInput = document.getElementById('groq-api-key');
+            const groqKeyStatus = document.getElementById('groq-api-key-status');
+            const groqClearBtn = document.getElementById('groq-clear-key-btn');
+            function updateGroqKeyStatus() {
+                const has = !!(settings.groqApiKey && String(settings.groqApiKey).trim());
+                if (groqKeyStatus) {
+                    groqKeyStatus.textContent = has
+                        ? 'Key saved on this profile. AI chat and Ask are ready to use.'
+                        : 'Not set — add a free Groq key to use AI chat and Ask on the new tab page.';
+                }
+                if (groqClearBtn) groqClearBtn.classList.toggle('hidden', !has);
+                if (groqKeyInput) {
+                    groqKeyInput.value = '';
+                    groqKeyInput.placeholder = has
+                        ? 'Enter a new key to replace the saved one'
+                        : 'Paste key (gsk_…)';
+                }
+            }
+            updateGroqKeyStatus();
+
             const wclRaw = Number(settings.windowChromeLight);
             const wclVal = Math.max(0, Math.min(100, Number.isFinite(wclRaw) ? wclRaw : 50));
             const wclInput = document.getElementById('window-chrome-light');
@@ -1905,6 +2245,24 @@
                 document.getElementById('ambient-mute-when-tab-audio').disabled = !aOn;
             }
             syncAmbientControlsDisabled();
+
+            const setNtpCheck = (id, val) => {
+                const el = document.getElementById(id);
+                if (el) el.checked = !!val;
+            };
+            setNtpCheck('ntp-welcome-enabled', settings.ntpWelcomeEnabled !== false);
+            setNtpCheck('ntp-welcome-greeting', settings.ntpWelcomeGreeting !== false);
+            setNtpCheck('ntp-welcome-updates', settings.ntpWelcomeUpdates !== false);
+            setNtpCheck('ntp-welcome-tips', settings.ntpWelcomeTips !== false);
+            setNtpCheck('ntp-ai-search', settings.ntpAiSearchEnabled !== false);
+
+            function syncNtpSettingsNestedState() {
+                const welcomeOn = document.getElementById('ntp-welcome-enabled')?.checked !== false;
+                document.getElementById('ntp-welcome-greeting-row')?.classList.toggle('visible', welcomeOn);
+                document.getElementById('ntp-welcome-tips-row')?.classList.toggle('visible', welcomeOn);
+                document.getElementById('ntp-welcome-updates-row')?.classList.toggle('visible', welcomeOn);
+            }
+            syncNtpSettingsNestedState();
             
             const gradRows = document.querySelectorAll('.gradient-rows');
             gradRows.forEach(r => r.classList.toggle('visible', settings.gradientEnabled));
@@ -1922,6 +2280,15 @@
             // Sidebar nav
             let activeSection = 'customization';
             let suppressSectionRefresh = false;
+            const isNativeSettingsWindow =
+                document.documentElement.classList.contains('settings-native-window');
+
+            if (isNativeSettingsWindow) {
+                document.getElementById('settings-native-close')?.addEventListener('click', () => {
+                    window.electronAPI?.closeSettingsWindow?.();
+                });
+            }
+
             let switchSection = function(section) {
                 document.querySelectorAll('.sidebar-item').forEach(n => n.classList.remove('active'));
                 document.querySelectorAll('.pane').forEach(p => {
@@ -1936,7 +2303,9 @@
                     pane.style.display = 'block';
                 }
                 activeSection = section;
-            }
+                const mainEl = document.querySelector('.main');
+                if (mainEl) mainEl.scrollTop = 0;
+            };
             window.__axisSwitchSettingsSection = switchSection;
             document.querySelectorAll('.sidebar-item').forEach(item => {
                 item.addEventListener('click', () => switchSection(item.dataset.section));
@@ -2067,7 +2436,7 @@
                     document.getElementById('site-perm-add-btn')?.click();
                 }
             });
-            loadSitePermissionOverrides();
+            // Site permission overrides load when that section is opened (or prefetched in native mode).
 
             let extensionsCache = [];
             function renderExtensions(list) {
@@ -2222,6 +2591,10 @@
                             window.electronAPI.getSettings().then((s) => {
                                 const ab = document.getElementById('ad-blocker-enabled');
                                 if (ab && s) ab.checked = s.adBlockerEnabled !== false;
+                                if (s) {
+                                    settings.groqApiKey = s.groqApiKey;
+                                    updateGroqKeyStatus();
+                                }
                             }).catch(() => {});
                         } catch (_) {}
                     });
@@ -2282,7 +2655,6 @@
                 if (settingsSearchEmpty) settingsSearchEmpty.style.display = hasAnyMatch ? 'none' : 'block';
             }
             settingsSearchInput?.addEventListener('input', (e) => applySettingsSearch(e.target.value));
-            loadExtensions();
             
             // Change handlers
             document.getElementById('sidebar-position').addEventListener('change', e => saveSetting('sidebarPosition', e.target.value, false));
@@ -2310,6 +2682,25 @@
                 ambientVolLabel.textContent = parseInt(e.target.value, 10) + '%';
             });
             ambientVolInput.addEventListener('change', e => saveSetting('ambientAudioVolume', parseInt(e.target.value, 10), false));
+            groqKeyInput?.addEventListener('change', async (e) => {
+                const v = String(e.target.value || '').trim();
+                if (!v) return;
+                await saveSetting('groqApiKey', v, false);
+                settings.groqApiKey = v;
+                updateGroqKeyStatus();
+            });
+            groqClearBtn?.addEventListener('click', async () => {
+                await saveSetting('groqApiKey', '', false);
+                settings.groqApiKey = '';
+                updateGroqKeyStatus();
+            });
+            document.getElementById('groq-get-key-btn')?.addEventListener('click', () => {
+                if (window.electronAPI?.openExternalUrl) {
+                    window.electronAPI.openExternalUrl('https://console.groq.com/keys');
+                } else if (window.electronAPI?.openUrlInBrowser) {
+                    window.electronAPI.openUrlInBrowser('https://console.groq.com/keys');
+                }
+            });
             document.getElementById('ui-theme').addEventListener('change', e => {
                 const v = e.target.value === 'light' ? 'light' : 'dark';
                 saveSetting('uiTheme', v, true);
@@ -2332,6 +2723,14 @@
                 saveSetting('gradientDirection', e.target.value, true);
                 updateThemePreview();
             });
+            document.getElementById('ntp-welcome-enabled')?.addEventListener('change', e => {
+                syncNtpSettingsNestedState();
+                saveSetting('ntpWelcomeEnabled', e.target.checked, false);
+            });
+            document.getElementById('ntp-welcome-greeting')?.addEventListener('change', e => saveSetting('ntpWelcomeGreeting', e.target.checked, false));
+            document.getElementById('ntp-welcome-tips')?.addEventListener('change', e => saveSetting('ntpWelcomeTips', e.target.checked, false));
+            document.getElementById('ntp-welcome-updates')?.addEventListener('change', e => saveSetting('ntpWelcomeUpdates', e.target.checked, false));
+            document.getElementById('ntp-ai-search')?.addEventListener('change', e => saveSetting('ntpAiSearchEnabled', e.target.checked, false));
             document.getElementById('transparent-sites').addEventListener('change', e => {
                 saveSetting('transparentSites', e.target.checked, true);
             });
@@ -2397,7 +2796,7 @@
                     populateHistory();
                 }
             });
-            await populateHistory();
+            // History loads when that section is opened (or prefetched in native mode).
             
             // Shortcuts: overrides store null = disabled; omitted key = use default
             async function persistShortcutOverrides() {
@@ -2536,7 +2935,6 @@
                 });
                 applySettingsSearch(settingsSearchInput?.value || '');
             }
-            renderShortcuts();
             document.getElementById('reset-shortcuts').addEventListener('click', async () => {
                 if (confirm('Reset all shortcuts?')) {
                     await window.electronAPI.resetShortcuts();
@@ -3028,7 +3426,7 @@
             document.getElementById('vault-editor-save')?.addEventListener('click', () => void saveVaultEditor());
             document.getElementById('vault-editor-cancel')?.addEventListener('click', () => hideVaultEditor());
 
-            const refreshSettingsSection = (section) => {
+            const refreshSettingsSectionInternal = (section) => {
                 if (section === 'history') void populateHistory();
                 else if (section === 'extensions') void loadExtensions();
                 else if (section === 'permissions') void loadSitePermissionOverrides();
@@ -3044,11 +3442,28 @@
                 void refreshVaultPane();
                 void reloadShortcutState().then(() => renderShortcuts());
             };
+
+            const LAZY_SECTIONS = ['vault', 'permissions', 'extensions', 'history', 'shortcuts'];
+            const loadedLazySections = new Set();
+            const loadLazySectionOnce = (section) => {
+                if (!section || loadedLazySections.has(section)) return;
+                loadedLazySections.add(section);
+                refreshSettingsSectionInternal(section);
+            };
+            const refreshSettingsSection = (section) => {
+                if (LAZY_SECTIONS.includes(section)) {
+                    loadLazySectionOnce(section);
+                    return;
+                }
+                refreshSettingsSectionInternal(section);
+            };
+
             switchSection = (section) => {
                 baseSwitchSection(section);
                 if (!suppressSectionRefresh) refreshSettingsSection(section);
             };
             window.__axisSwitchSettingsSection = switchSection;
+
             refreshSettingsSection(activeSection || 'customization');
         })();
     </script>
