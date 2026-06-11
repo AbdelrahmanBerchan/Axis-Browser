@@ -32,10 +32,18 @@ html, html[dark], html[dark="true"], html[system-icons][dark], ytd-app {
   --yt-spec-static-background: transparent !important;
   --yt-spec-static-overlay-background-solid: rgba(0, 0, 0, 0.2) !important;
 }
-ytd-app, ytd-browse, ytd-page-manager, ytd-watch-flexy, ytd-miniplayer,
-ytd-masthead, ytd-app-drawer, ytd-video-preview, #content.ytd-page-manager {
+ytd-app, ytd-browse, ytd-page-manager, ytd-miniplayer,
+ytd-masthead, ytd-app-drawer, ytd-video-preview, #content.ytd-page-manager,
+ytd-watch-flexy #secondary, ytd-watch-flexy #related {
   background-color: transparent !important;
   background: transparent !important;
+}
+/* YouTube player must stay opaque — transparent design tokens break hardware video compositing */
+#movie_player, #player, #player-container, #player-api, ytd-player,
+.html5-video-player, .html5-video-container, #player-container-inner,
+ytd-watch-flexy #primary, ytd-watch-flexy #primary-inner {
+  background-color: #000 !important;
+  background: #000 !important;
 }
 /* Google web (Search, Images, etc.): main chrome ids */
 #viewport, #cnt, #gsr, #main, #center_col, #rcnt, #rhs, #rhscol, #lhcol,
@@ -55,32 +63,58 @@ header, footer, [role="banner"], [role="contentinfo"] {
 }
 `.replace(/\s+/g, ' ').trim();
 
+/** Nudge YouTube watch-page `<video>` after tab switch / guest hide-show (black player recovery). */
+const AXIS_YOUTUBE_PLAYER_RECOVERY_JS = `
+(function(){
+try{
+var href=String(location.href||"");
+if(!/(^|\\/\\/)((www\\.)?youtube\\.com\\/(watch|shorts|live|embed)|youtu\\.be\\/)/.test(href))return;
+var player=document.querySelector("#movie_player,ytd-player,.html5-video-player");
+if(!player)return;
+var pr=player.getBoundingClientRect();
+if(pr.width<120||pr.height<80)return;
+window.dispatchEvent(new Event("resize"));
+var v=player.querySelector("video")||document.querySelector("video");
+if(!v){return;}
+var broken=v.readyState===0&&!v.error;
+if(!broken&&(v.videoWidth||0)===0&&(v.videoHeight||0)===0&&pr.width>200&&pr.height>150)broken=true;
+if(!broken)return;
+try{v.load();}catch(e){}
+}catch(e){}
+})();
+`.replace(/\s+/g, ' ').trim();
+
 /**
  * YouTube tokens + Google ids + generic sweep: large opaque layers (any host) get cleared.
- * Skips modals, media, form controls, ytd-* hosts (tokens handle those).
+ * Skips modals, media, form controls, ytd-* hosts, and the YouTube player container.
  */
 const AXIS_TRANSPARENT_SITES_DOM_PATCH = `
 (function(){
 try{
 var OLD_NS="__axisTransparentV4";
-var NS="__axisTransparentV5";
+var NS="__axisTransparentV7";
+var OLD_V5="__axisTransparentV5";
+var OLD_V6="__axisTransparentV6";
 var T="transparent";
 var IMP="important";
 function ytVarNames(){return["--yt-spec-base-background","--yt-spec-general-background-a","--yt-spec-general-background-b","--yt-spec-general-background-c","--yt-spec-brand-background-solid","--yt-spec-brand-background-primary","--yt-spec-brand-background-secondary","--yt-raised-background","--yt-spec-menu-background","--yt-spec-feed-background-a","--yt-spec-feed-background-b","--yt-spec-static-background","--yt-spec-static-overlay-background-solid","--yt-spec-10-percent-layer","--yt-spec-themed-blue","--yt-spec-themed-green"];}
-function stopOld(){var st=window[OLD_NS];if(!st)return false;try{if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}}catch(e){}delete window[OLD_NS];return true;}
-function cleanupOldInline(){try{ytVarNames().forEach(function(n){var v=document.documentElement.style.getPropertyValue(n);if(v==="transparent"||v.indexOf("rgba(0,0,0,0.18)")>=0)document.documentElement.style.removeProperty(n);});var sel="html,body,#viewport,#cnt,#gsr,#main,#center_col,#rcnt,#rhs,#rhscol,#lhcol,#islsp,#islmp,#iur,#isr_m,#iry,#rso,#searchform,#tsf,#layout,#arc_tp,#appbar,#main-content,#search,#before-appbar,#sfcnt,#top_nav,#yDmH0d,#scb,#eUDTde,#MAmRG,#lfooter,#tw-container,#analytics-ddh,[role='main'],ytd-app,ytd-browse,ytd-watch-flexy,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer,[style]";document.querySelectorAll(sel).forEach(function(el){try{["background-color","background","background-image"].forEach(function(p){var v=el.style.getPropertyValue(p);var pr=el.style.getPropertyPriority(p);if(pr==="important"&&(v==="transparent"||v==="rgba(0, 0, 0, 0)"||v==="none"))el.style.removeProperty(p);});}catch(e){}});}catch(e){}}
-if(stopOld())cleanupOldInline();
-var st=window[NS]||(window[NS]={mo:null,t:0,idle:null,sweepTO:null,records:[]});
-function remember(el,prop){if(!el||!el.style)return;var key="__axisTransparentV5Props";var seen=el[key]||(el[key]={});if(seen[prop])return;seen[prop]=1;var val=el.style.getPropertyValue(prop);var priority=el.style.getPropertyPriority(prop);st.records.push({el:el,prop:prop,value:val,priority:priority,had:!!(val||priority)});}
+function stopNs(ns){var st=window[ns];if(!st)return false;try{if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}}catch(e){}delete window[ns];return true;}
+function cleanupOldInline(){try{ytVarNames().forEach(function(n){var v=document.documentElement.style.getPropertyValue(n);if(v==="transparent"||v.indexOf("rgba(0,0,0,0.18)")>=0)document.documentElement.style.removeProperty(n);});var sel="html,body,#viewport,#cnt,#gsr,#main,#center_col,#rcnt,#rhs,#rhscol,#lhcol,#islsp,#islmp,#iur,#isr_m,#iry,#rso,#searchform,#tsf,#layout,#arc_tp,#appbar,#main-content,#search,#before-appbar,#sfcnt,#top_nav,#yDmH0d,#scb,#eUDTde,#MAmRG,#lfooter,#tw-container,#analytics-ddh,[role='main'],ytd-app,ytd-browse,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer,[style]";document.querySelectorAll(sel).forEach(function(el){try{["background-color","background","background-image"].forEach(function(p){var v=el.style.getPropertyValue(p);var pr=el.style.getPropertyPriority(p);if(pr==="important"&&(v==="transparent"||v==="rgba(0, 0, 0, 0)"||v==="none"))el.style.removeProperty(p);});}catch(e){}});}catch(e){}}
+if(stopNs(OLD_NS))cleanupOldInline();
+if(stopNs(OLD_V5))cleanupOldInline();
+if(stopNs(OLD_V6))cleanupOldInline();
+var st=window[NS]||(window[NS]={mo:null,t:0,idle:null,sweepTO:null,records:[],lastSweep:0});
+function remember(el,prop){if(!el||!el.style)return;var key="__axisTransparentV7Props";var seen=el[key]||(el[key]={});if(seen[prop])return;seen[prop]=1;var val=el.style.getPropertyValue(prop);var priority=el.style.getPropertyPriority(prop);st.records.push({el:el,prop:prop,value:val,priority:priority,had:!!(val||priority)});}
 function setStyle(el,prop,value){try{remember(el,prop);el.style.setProperty(prop,value,IMP);}catch(e){}}
-function applyYt(){var r=document.documentElement;ytVarNames().forEach(function(n){var v=T;if(n.indexOf("overlay")>=0)v="rgba(0,0,0,0.18)";if(n.indexOf("blue")>=0||n.indexOf("green")>=0||n.indexOf("percent-layer")>=0)return;setStyle(r,n,v);});try{var app=document.querySelector("ytd-app");if(app){setStyle(app,"background",T);setStyle(app,"background-color",T);}document.querySelectorAll("ytd-browse,ytd-watch-flexy,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer").forEach(function(el){setStyle(el,"background",T);setStyle(el,"background-color",T);});}catch(e){}}
+function isYtWatch(){try{var p=location.pathname||"";if(location.hostname==="youtu.be")return p.length>1;return p.indexOf("/watch")===0||p.indexOf("/shorts/")===0||p.indexOf("/live/")===0||p.indexOf("/embed/")===0;}catch(e){return false;}}
+function applyYt(){var r=document.documentElement;ytVarNames().forEach(function(n){var v=T;if(n.indexOf("overlay")>=0)v="rgba(0,0,0,0.18)";if(n.indexOf("blue")>=0||n.indexOf("green")>=0||n.indexOf("percent-layer")>=0)return;setStyle(r,n,v);});try{var app=document.querySelector("ytd-app");if(app){setStyle(app,"background",T);setStyle(app,"background-color",T);}document.querySelectorAll("ytd-browse,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer").forEach(function(el){setStyle(el,"background",T);setStyle(el,"background-color",T);});document.querySelectorAll("ytd-watch-flexy #secondary,ytd-watch-flexy #related").forEach(function(el){setStyle(el,"background",T);setStyle(el,"background-color",T);});}catch(e){}}
 function googleIds(){return["viewport","cnt","gsr","main","center_col","rcnt","rhs","rhscol","lhcol","islsp","islmp","iur","isr_m","iry","rso","searchform","tsf","layout","arc_tp","appbar","main-content","search","before-appbar","sfcnt","top_nav","yDmH0d","scb","eUDTde","MAmRG","lfooter","tw-container","analytics-ddh"];}
 function applyGoogle(){googleIds().forEach(function(id){try{var el=document.getElementById(id);if(el){setStyle(el,"background-color",T);setStyle(el,"background-image","none");}}catch(e){}});try{var main=document.querySelector('[role="main"]');if(main){setStyle(main,"background-color",T);setStyle(main,"background-image","none");}}catch(e){}}
-function sweepLargeOpaqueLayers(){var b=document.body;if(!b)return;var sk={IMG:1,VIDEO:1,AUDIO:1,CANVAS:1,IFRAME:1,SVG:1,PICTURE:1,OBJECT:1,EMBED:1,STYLE:1,SCRIPT:1,LINK:1,META:1,NOSCRIPT:1,TEMPLATE:1,INPUT:1,TEXTAREA:1,SELECT:1,BUTTON:1,OPTION:1,LABEL:1};var n=0,mx=6500,vh=window.innerHeight||800,vw=window.innerWidth||1200,vA=Math.max(1,vh*vw);if(typeof NodeFilter==="undefined")return;var w=document.createTreeWalker(b,NodeFilter.SHOW_ELEMENT,null),el;while((el=w.nextNode())&&n<mx){n++;var t=el.tagName;if(sk[t])continue;if(t&&t.indexOf("-")>0){var q=t.toLowerCase();if(q.slice(0,4)==="ytd-"||q.slice(0,3)==="yt-")continue;}try{if(el.closest('[aria-modal="true"],[role="dialog"],dialog,[data-radix-portal],.modal,.Modal,[class*="modal_root"]'))continue;}catch(e){}try{var cs=getComputedStyle(el);if(cs.display==="none"||cs.visibility==="hidden"||(cs.position==="fixed"&&parseFloat(cs.opacity||"1")<0.04))continue;var bg=cs.backgroundColor;if(!bg||bg==="transparent"||bg==="rgba(0, 0, 0, 0)")continue;var a=1;if(bg.indexOf("rgba")===0){var i=bg.lastIndexOf(",");if(i>0){var tail=bg.slice(i+1,-1).trim();var pv=parseFloat(tail);if(!isNaN(pv))a=pv;}}if(a<0.12)continue;var r=el.getBoundingClientRect();if(r.width<24||r.height<22)continue;var f=r.width*r.height/vA,tl=r.height>Math.min(340,vh*0.38),tb=r.width>vw*0.86&&r.height>90;if(f<0.032&&!tl&&!tb)continue;setStyle(el,"background-color",T);var bi=cs.backgroundImage;if(bi&&bi!=="none"&&bi.indexOf("url(")<0&&(bi.indexOf("gradient")>=0||bi.indexOf("linear-gradient")>=0))setStyle(el,"background-image","none");}catch(e2){}}}
-function scheduleSweep(){if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}var go=function(){st.idle=null;st.sweepTO=null;try{sweepLargeOpaqueLayers();}catch(e){}};if(window.requestIdleCallback)st.idle=window.requestIdleCallback(go,{timeout:950});else st.sweepTO=setTimeout(go,200);}
-function run(){var host=(String(location.hostname||"")).toLowerCase();var isYt=host.indexOf("youtube.com")>=0||host==="youtu.be";var isGo=host.indexOf("google.")>=0;if(isYt)applyYt();if(isGo)applyGoogle();try{setStyle(document.documentElement,"background-color",T);if(document.body){setStyle(document.body,"background-color",T);setStyle(document.body,"background-image","none");}}catch(e){}scheduleSweep();}
+function sweepLargeOpaqueLayers(){var b=document.body;if(!b)return;var sk={IMG:1,VIDEO:1,AUDIO:1,CANVAS:1,IFRAME:1,SVG:1,PICTURE:1,OBJECT:1,EMBED:1,STYLE:1,SCRIPT:1,LINK:1,META:1,NOSCRIPT:1,TEMPLATE:1,INPUT:1,TEXTAREA:1,SELECT:1,BUTTON:1,OPTION:1,LABEL:1};var n=0,mx=6500,vh=window.innerHeight||800,vw=window.innerWidth||1200,vA=Math.max(1,vh*vw);if(typeof NodeFilter==="undefined")return;var w=document.createTreeWalker(b,NodeFilter.SHOW_ELEMENT,null),el;while((el=w.nextNode())&&n<mx){n++;var t=el.tagName;if(sk[t])continue;if(t&&t.indexOf("-")>0){var q=t.toLowerCase();if(q.slice(0,4)==="ytd-"||q.slice(0,3)==="yt-")continue;}try{if(el.closest('[aria-modal="true"],[role="dialog"],dialog,[data-radix-portal],.modal,.Modal,[class*="modal_root"]'))continue;if(el.closest("#movie_player,#player,#player-container,#player-api,ytd-player,.html5-video-player,.html5-video-container,#ytd-player"))continue;}catch(e){}try{var cs=getComputedStyle(el);if(cs.display==="none"||cs.visibility==="hidden"||(cs.position==="fixed"&&parseFloat(cs.opacity||"1")<0.04))continue;var bg=cs.backgroundColor;if(!bg||bg==="transparent"||bg==="rgba(0, 0, 0, 0)")continue;var a=1;if(bg.indexOf("rgba")===0){var i=bg.lastIndexOf(",");if(i>0){var tail=bg.slice(i+1,-1).trim();var pv=parseFloat(tail);if(!isNaN(pv))a=pv;}}if(a<0.12)continue;var r=el.getBoundingClientRect();if(r.width<24||r.height<22)continue;var f=r.width*r.height/vA,tl=r.height>Math.min(340,vh*0.38),tb=r.width>vw*0.86&&r.height>90;if(f<0.032&&!tl&&!tb)continue;setStyle(el,"background-color",T);var bi=cs.backgroundImage;if(bi&&bi!=="none"&&bi.indexOf("url(")<0&&(bi.indexOf("gradient")>=0||bi.indexOf("linear-gradient")>=0))setStyle(el,"background-image","none");}catch(e2){}}}
+function scheduleSweep(){if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}var go=function(){st.idle=null;st.sweepTO=null;var now=Date.now();if(now-(st.lastSweep||0)<900)return;st.lastSweep=now;try{sweepLargeOpaqueLayers();}catch(e){}};if(window.requestIdleCallback)st.idle=window.requestIdleCallback(go,{timeout:1200});else st.sweepTO=setTimeout(go,320);}
+function run(){var host=(String(location.hostname||"")).toLowerCase();var isYt=host.indexOf("youtube.com")>=0||host==="youtu.be";var isGo=host.indexOf("google.")>=0;if(isYt&&!isYtWatch())applyYt();if(isGo)applyGoogle();try{setStyle(document.documentElement,"background-color",T);if(document.body){setStyle(document.body,"background-color",T);setStyle(document.body,"background-image","none");}}catch(e){}scheduleSweep();}
 run();
-if(!st.mo&&document.body){st.mo=new MutationObserver(function(){clearTimeout(st.t);st.t=setTimeout(run,155);});st.mo.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["style","class","data-darkreader-inline-bgcolor"]});}else{run();}
+if(!st.mo&&document.body){st.mo=new MutationObserver(function(){clearTimeout(st.t);st.t=setTimeout(run,480);});st.mo.observe(document.body,{childList:true,subtree:true});}else if(!st.mo){run();}
 }catch(e){}
 })();
 `.replace(/\s+/g, ' ').trim();
@@ -88,14 +122,18 @@ if(!st.mo&&document.body){st.mo=new MutationObserver(function(){clearTimeout(st.
 const AXIS_TRANSPARENT_SITES_DOM_PATCH_CLEANUP = `
 (function(){
 try{
-var NS="__axisTransparentV5";
+var NS="__axisTransparentV7";
 var OLD_NS="__axisTransparentV4";
+var OLD_V5="__axisTransparentV5";
+var OLD_V6="__axisTransparentV6";
 function ytVarNames(){return["--yt-spec-base-background","--yt-spec-general-background-a","--yt-spec-general-background-b","--yt-spec-general-background-c","--yt-spec-brand-background-solid","--yt-spec-brand-background-primary","--yt-spec-brand-background-secondary","--yt-raised-background","--yt-spec-menu-background","--yt-spec-feed-background-a","--yt-spec-feed-background-b","--yt-spec-static-background","--yt-spec-static-overlay-background-solid"];}
-function stop(ns){var st=window[ns];if(!st)return false;try{if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}if(st.records){for(var i=st.records.length-1;i>=0;i--){var r=st.records[i];try{if(!r||!r.el||!r.el.style)continue;if(r.had)r.el.style.setProperty(r.prop,r.value,r.priority||"");else r.el.style.removeProperty(r.prop);if(r.el.__axisTransparentV5Props)delete r.el.__axisTransparentV5Props[r.prop];}catch(e){}}}}catch(e){}delete window[ns];return true;}
-function cleanupOldInline(){try{ytVarNames().forEach(function(n){var v=document.documentElement.style.getPropertyValue(n);if(v==="transparent"||v.indexOf("rgba(0,0,0,0.18)")>=0)document.documentElement.style.removeProperty(n);});var sel="html,body,#viewport,#cnt,#gsr,#main,#center_col,#rcnt,#rhs,#rhscol,#lhcol,#islsp,#islmp,#iur,#isr_m,#iry,#rso,#searchform,#tsf,#layout,#arc_tp,#appbar,#main-content,#search,#before-appbar,#sfcnt,#top_nav,#yDmH0d,#scb,#eUDTde,#MAmRG,#lfooter,#tw-container,#analytics-ddh,[role='main'],ytd-app,ytd-browse,ytd-watch-flexy,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer,[style]";document.querySelectorAll(sel).forEach(function(el){try{["background-color","background","background-image"].forEach(function(p){var v=el.style.getPropertyValue(p);var pr=el.style.getPropertyPriority(p);if(pr==="important"&&(v==="transparent"||v==="rgba(0, 0, 0, 0)"||v==="none"))el.style.removeProperty(p);});}catch(e){}});}catch(e){}}
-var hadV5=stop(NS);
+function stop(ns){var st=window[ns];if(!st)return false;try{if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}if(st.records){for(var i=st.records.length-1;i>=0;i--){var r=st.records[i];try{if(!r||!r.el||!r.el.style)continue;if(r.had)r.el.style.setProperty(r.prop,r.value,r.priority||"");else r.el.style.removeProperty(r.prop);if(r.el.__axisTransparentV7Props)delete r.el.__axisTransparentV7Props[r.prop];}catch(e){}}}}catch(e){}delete window[ns];return true;}
+function cleanupOldInline(){try{ytVarNames().forEach(function(n){var v=document.documentElement.style.getPropertyValue(n);if(v==="transparent"||v.indexOf("rgba(0,0,0,0.18)")>=0)document.documentElement.style.removeProperty(n);});var sel="html,body,#viewport,#cnt,#gsr,#main,#center_col,#rcnt,#rhs,#rhscol,#lhcol,#islsp,#islmp,#iur,#isr_m,#iry,#rso,#searchform,#tsf,#layout,#arc_tp,#appbar,#main-content,#search,#before-appbar,#sfcnt,#top_nav,#yDmH0d,#scb,#eUDTde,#MAmRG,#lfooter,#tw-container,#analytics-ddh,[role='main'],ytd-app,ytd-browse,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer,[style]";document.querySelectorAll(sel).forEach(function(el){try{["background-color","background","background-image"].forEach(function(p){var v=el.style.getPropertyValue(p);var pr=el.style.getPropertyPriority(p);if(pr==="important"&&(v==="transparent"||v==="rgba(0, 0, 0, 0)"||v==="none"))el.style.removeProperty(p);});}catch(e){}});}catch(e){}}
+var hadV7=stop(NS);
+var hadV6=stop(OLD_V6);
+var hadV5=stop(OLD_V5);
 var hadV4=stop(OLD_NS);
-if(!hadV5&&hadV4)cleanupOldInline();
+if(!hadV7&&!hadV6&&!hadV5&&hadV4)cleanupOldInline();
 }catch(e){}
 })();
 `.replace(/\s+/g, ' ').trim();
@@ -240,6 +278,8 @@ function axisParseFirefoxAmoAddonKey(raw) {
 /** Settings sidebar section ids (`settings.html` `data-section` values). */
 const AXIS_SETTINGS_SECTION_IDS = new Set([
     'customization',
+    'newtab',
+    'ai',
     'history',
     'shortcuts',
     'permissions',
@@ -262,6 +302,36 @@ function axisNotifyExtensionStoreBarDismissed(webview, token) {
     } catch (_) {
         /* webview may be destroyed or not ready */
     }
+}
+
+/** Tell the guest store bar install failed (`token`, optional `message`). */
+function axisNotifyExtensionStoreBarFailed(webview, token, message) {
+    const t = typeof token === 'string' ? token.trim() : '';
+    if (!t || !webview || typeof webview.send !== 'function') return;
+    try {
+        webview.send('axis-cws-install-failed', t, message || '');
+    } catch (_) {
+        /* webview may be destroyed or not ready */
+    }
+}
+
+/** Sync installed / not-installed state to the in-page store bar. */
+function axisNotifyExtensionStoreBarStatus(webview, payload) {
+    if (!webview || typeof webview.send !== 'function' || !payload || typeof payload !== 'object') return;
+    try {
+        webview.send('axis-cws-install-status', payload);
+    } catch (_) {
+        /* webview may be destroyed or not ready */
+    }
+}
+
+/** Store listing token + ids from a Chrome Web Store or Mozilla Add-ons URL. */
+function axisParseStoreListingContext(rawUrl) {
+    const cwsId = axisParseChromeWebStoreExtensionId(rawUrl);
+    const amoKey = axisParseFirefoxAmoAddonKey(rawUrl);
+    if (!cwsId && !amoKey) return null;
+    const token = amoKey ? `amo:${amoKey.toLowerCase()}` : cwsId;
+    return { cwsId, amoKey, token, dismissToken: token };
 }
 
 class AxisBrowser {
@@ -319,6 +389,8 @@ class AxisBrowser {
         this.isWebviewLoading = false; // Track if webview is currently loading
         this.spotlightSelectedIndex = -1; // Track selected suggestion index
         this.NEWTAB_URL = 'axis://newtab'; // Custom new tab page (replaces spotlight)
+        this.NTP_DEFAULT_FAVICON = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><g fill="none" stroke="%23ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.25"/><path d="M10.25 10.25L13 13"/></g></svg>';
+        this.NTP_AI_CHAT_FAVICON = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path fill="none" stroke="%23ffffff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h10a1 1 0 0 1 1 1v4.5a1 1 0 0 1-1 1H6.2L3.5 13V10H3a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1z"/></svg>';
         this.contextMenuTabGroupId = null; // Track which tab group context menu is open
         this.contextMenuFavoriteId = null; // Sidebar favorite tile native context menu
         /** Tab whose guest fired the last webpage context menu (may differ from `currentTab`). */
@@ -350,6 +422,14 @@ class AxisBrowser {
         this._urlBarThemeRefineTimer = null;
         /** Tab switch: disable URL bar tint fade until sync styling or first extract completes. */
         this._urlBarInstantThemeTabSwitch = false;
+        /** Last palette passed to applyCustomTheme — restored on profile switch without recomputing. */
+        this._lastShellThemeColors = null;
+        /** Profile commit: skip the next switchToTab rAF URL bar refresh (chrome already restored). */
+        this._skipNextUrlBarRefresh = false;
+        /** Profile switch restored URL bar from runtime cache — skip async extract until tab changes. */
+        this._profileUrlBarRestoredFromCache = false;
+        /** Tab switch restored URL bar from per-tab snapshot — skip async extract on first refresh. */
+        this._tabUrlBarRestoredFromCache = false;
         this._settingsUpdatedRaf = null;
         this._ambientAudioCtx = null;
         this._ambientAudioChain = null;
@@ -449,7 +529,9 @@ class AxisBrowser {
             urlBarCopy: document.getElementById('url-bar-copy'),
             urlBarCwsInstall: document.getElementById('url-bar-cws-install'),
             axisStoreInstallHostBar: document.getElementById('axis-store-install-host-bar'),
+            axisStoreInstallHostBadge: document.getElementById('axis-store-install-host-badge'),
             axisStoreInstallHostText: document.getElementById('axis-store-install-host-text'),
+            axisStoreInstallHostOpen: document.getElementById('axis-store-install-host-open'),
             axisStoreInstallHostBtn: document.getElementById('axis-store-install-host-btn'),
             urlBarExtensions: document.getElementById('url-bar-extensions'),
             vaultSaveModal: document.getElementById('vault-save-modal'),
@@ -476,6 +558,7 @@ class AxisBrowser {
     async init() {
         // Load settings + shortcut cache in parallel (faster first interaction)
         await Promise.all([this.loadSettings(), this.refreshShortcutCache()]);
+        this.syncGroqApiKeyFromSettings?.();
         const fallbackWebviewPreloadPath = (() => {
             try {
                 return decodeURIComponent(new URL('webview-preload-bundle.js', window.location.href).pathname);
@@ -611,6 +694,8 @@ class AxisBrowser {
         this._vaultAutofillPayload = null;
         this.setupVaultUi();
         this.setupProfileUi();
+        this.ensureProfileSwipeChrome?.();
+        this.setupProfileSwipeGestures?.();
         this.startVaultCredentialWatcher();
         this.setupEventListeners();
         this.setupSidebarMediaDockListeners();
@@ -633,6 +718,10 @@ class AxisBrowser {
             this.setupTabDragDrop();
             // Move preloading to idle to avoid impacting benchmarks and first paint
             this.setupPerformanceOptimizations();
+            if (!this.isIncognitoWindow) {
+                this._seedCurrentProfileRuntimeCache?.();
+                this._prefetchAdjacentProfileCaches?.();
+            }
         });
         
         // Show empty state initially (no tabs on startup)
@@ -751,12 +840,23 @@ class AxisBrowser {
             /* webview may be torn down or API unavailable */
         }
         webview.__axisTransparentCssKey = null;
+        webview.__axisTransparentUrl = null;
+        webview.__axisTransparentDomPatchUrl = null;
     }
 
-    async _runTransparentSitesDomPatch(webview) {
+    async _runTransparentSitesDomPatch(webview, url) {
         if (!webview) return;
+        const pageUrl = url || (() => {
+            try {
+                return webview.getURL() || '';
+            } catch (_) {
+                return '';
+            }
+        })();
+        if (webview.__axisTransparentDomPatchUrl === pageUrl) return;
         try {
             await webview.executeJavaScript(AXIS_TRANSPARENT_SITES_DOM_PATCH);
+            webview.__axisTransparentDomPatchUrl = pageUrl;
         } catch (e) {
             /* guest destroyed / CSP (rare for top document) */
         }
@@ -778,6 +878,13 @@ class AxisBrowser {
 
     _touchTransparentSitesForWebview(webview) {
         if (!webview || this.isBenchmarking || !this.settings?.transparentSites) return;
+        let url = '';
+        try {
+            url = webview.getURL() || '';
+        } catch (_) {
+            return;
+        }
+        if (webview.__axisTransparentCssKey && webview.__axisTransparentUrl === url) return;
         void this.flushTransparentSitesForWebview(webview)
             .then((didInject) => {
                 if (didInject) this._scheduleTransparentSitesReinjection(webview);
@@ -789,6 +896,16 @@ class AxisBrowser {
     _voidGuestTask(promise) {
         if (promise && typeof promise.catch === 'function') {
             promise.catch(() => {});
+        }
+    }
+
+    /** Origin + pathname — hash/query-only in-page nav should not re-theme or re-inject transparency. */
+    _urlStablePageKey(url) {
+        try {
+            const u = new URL(String(url || ''));
+            return `${u.origin}${u.pathname}`;
+        } catch (_) {
+            return String(url || '');
         }
     }
 
@@ -829,6 +946,14 @@ class AxisBrowser {
             await this.removeTransparentSitesFromWebview(webview);
             return false;
         }
+        // Transparent-site CSS breaks YouTube hardware video compositing on watch pages.
+        if (this.isYouTubeWatchUrl(url)) {
+            await this.removeTransparentSitesFromWebview(webview);
+            return false;
+        }
+        if (webview.__axisTransparentCssKey && webview.__axisTransparentUrl === url) {
+            return true;
+        }
         try {
             const prev = webview.__axisTransparentCssKey;
             if (prev) {
@@ -836,11 +961,13 @@ class AxisBrowser {
                     await webview.removeInsertedCSS(prev);
                 } catch (e) {}
                 webview.__axisTransparentCssKey = null;
+                webview.__axisTransparentDomPatchUrl = null;
             }
             const key = await webview.insertCSS(AXIS_TRANSPARENT_SITES_CSS);
             if (key) {
                 webview.__axisTransparentCssKey = key;
-                await this._runTransparentSitesDomPatch(webview);
+                webview.__axisTransparentUrl = url;
+                await this._runTransparentSitesDomPatch(webview, url);
                 return true;
             }
             return false;
@@ -952,19 +1079,271 @@ class AxisBrowser {
             urlBar.style.backdropFilter = '';
             urlBar.style.webkitBackdropFilter = '';
         }
+        this._syncNewTabWebviewUnderlay();
+    }
+
+    /** Hide the guest webview under the new-tab overlay so shell vibrancy shows through. */
+    _syncNewTabWebviewUnderlay() {
         const ntp = document.getElementById('new-tab-page');
         const ntpOpen = ntp && !ntp.classList.contains('hidden');
         const tab = this.currentTab && this.tabs.has(this.currentTab) ? this.tabs.get(this.currentTab) : null;
         const wv = tab?.webview;
-        if (ntpOpen && wv && tab?.url === this.NEWTAB_URL) {
-            if (on) {
-                wv.style.opacity = '0';
-                wv.style.visibility = 'hidden';
-            } else {
-                wv.style.opacity = '1';
-                wv.style.visibility = 'visible';
+        if (!wv || tab?.url !== this.NEWTAB_URL) return;
+        if (ntpOpen) {
+            wv.style.opacity = '0';
+            wv.style.visibility = 'hidden';
+        } else {
+            wv.style.opacity = '1';
+            wv.style.visibility = 'visible';
+        }
+    }
+
+    getActiveProfileDisplayName() {
+        if (this.isIncognitoWindow) return 'Incognito';
+        const active = this.profiles?.find((p) => p.id === this.profileId);
+        return active?.name || (this.profileId === 'personal' ? 'Personal' : this.profileId);
+    }
+
+    getTimeGreeting() {
+        const h = new Date().getHours();
+        if (h < 12) return 'Good morning';
+        if (h < 17) return 'Good afternoon';
+        if (h < 22) return 'Good evening';
+        return 'Good night';
+    }
+
+    updateNewTabHero() {
+        const greetingEl = document.getElementById('new-tab-greeting');
+        const tipEl = document.getElementById('new-tab-tip');
+        const newTabPage = document.getElementById('new-tab-page');
+        const input = document.getElementById('new-tab-input');
+        if (!greetingEl) return;
+        const name = this.getActiveProfileDisplayName();
+        greetingEl.textContent = `${this.getTimeGreeting()}, ${name}.`;
+        const s = this.settings || {};
+        const welcomeOn = s.ntpWelcomeEnabled !== false;
+        const tipsOn = welcomeOn && s.ntpWelcomeTips !== false;
+        const aiOn = s.ntpAiSearchEnabled !== false;
+        const tips = [];
+        if (tipsOn) {
+            tips.push('Search the web or paste a link to open a site.');
+            if (aiOn && !this.hasGroqApiKey()) {
+                tips.push('Add a Groq API key in Settings to ask AI from the start tab.');
+            }
+            if (s.ntpWelcomeUpdates !== false) {
+                tips.push('Use Help → Check for Updates when you want the latest Axis build.');
             }
         }
+        if (tipEl) {
+            if (tips.length) {
+                tipEl.textContent = tips[Math.floor(Date.now() / 45000) % tips.length];
+                tipEl.style.display = '';
+            } else {
+                tipEl.textContent = '';
+                tipEl.style.display = 'none';
+            }
+        }
+        const greetingOn = welcomeOn && s.ntpWelcomeGreeting !== false;
+        const hero = document.getElementById('new-tab-hero');
+        hero?.classList.toggle('hidden', !welcomeOn);
+        if (greetingEl) greetingEl.style.display = greetingOn ? '' : 'none';
+        const hasQuery = !!(input?.value?.trim());
+        newTabPage?.classList.toggle('has-query', hasQuery);
+    }
+
+    isNewTabInChat() {
+        const page = document.getElementById('new-tab-page');
+        const bar = document.getElementById('new-tab-search-bar');
+        return !!(
+            (page && page.classList.contains('ntp-ai-chat-mode'))
+            || bar?.classList.contains('new-tab-ai-composer-bar')
+        );
+    }
+
+    mountNewTabSearchBarToStart() {
+        const wrapper = document.getElementById('new-tab-search-wrapper');
+        const bar = document.getElementById('new-tab-search-bar');
+        if (!wrapper || !bar) return;
+        if (bar.parentElement !== wrapper) {
+            wrapper.insertBefore(bar, wrapper.firstChild);
+        }
+        bar.classList.remove('new-tab-ai-composer-bar');
+    }
+
+    mountNewTabSearchBarToComposer() {
+        const slot = document.getElementById('new-tab-ai-composer-slot');
+        const bar = document.getElementById('new-tab-search-bar');
+        if (!slot || !bar) return;
+        slot.appendChild(bar);
+        bar.classList.add('new-tab-ai-composer-bar');
+    }
+
+    _finishNewTabAiChatLayout({ hideStartView = true } = {}) {
+        const startView = document.getElementById('new-tab-start-view');
+        const chatView = document.getElementById('new-tab-ai-chat-view');
+        const messages = document.getElementById('new-tab-ask-messages');
+        if (hideStartView) startView?.classList.add('hidden');
+        chatView?.classList.remove('hidden');
+        messages?.classList.remove('hidden');
+        this.mountNewTabSearchBarToComposer();
+        this.setNewTabAiChatChromeVisible(true);
+        this.syncNewTabInputChrome();
+    }
+
+    async beginNewTabAiChatTransition({ animate = true } = {}) {
+        const page = document.getElementById('new-tab-page');
+        const startView = document.getElementById('new-tab-start-view');
+        if (!page) return;
+        if (this.isNewTabInChat()) return;
+
+        if (!animate) {
+            this._finishNewTabAiChatLayout();
+            page.classList.add('ntp-ai-chat-mode');
+            this.syncNewTabInputChrome();
+            if (this.currentTab != null) {
+                this.applyNewTabTabChrome(this.currentTab);
+                this.updateUrlBar(null);
+            }
+            this._focusNewTabInput();
+            return;
+        }
+
+        page.classList.add('ntp-ai-chat-entering');
+        const chatView = document.getElementById('new-tab-ai-chat-view');
+        const messages = document.getElementById('new-tab-ask-messages');
+        chatView?.classList.remove('hidden');
+        messages?.classList.remove('hidden');
+        this.mountNewTabSearchBarToComposer();
+        this.setNewTabAiChatChromeVisible(true);
+        this.syncNewTabInputChrome();
+        await new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+        });
+        page.classList.add('ntp-ai-chat-mode');
+        this.syncNewTabInputChrome();
+        await new Promise((resolve) => setTimeout(resolve, 420));
+        page.classList.remove('ntp-ai-chat-entering');
+        startView?.classList.add('hidden');
+        if (this.currentTab != null) {
+            this.applyNewTabTabChrome(this.currentTab);
+            this.updateUrlBar(null);
+        }
+        this._focusNewTabInput();
+    }
+
+    isTabInNtpAiChat(tabId) {
+        if (tabId == null) return false;
+        const tab = this.tabs.get(tabId);
+        if (!tab || tab.url !== this.NEWTAB_URL) return false;
+        if (tabId === this.currentTab) return this.isNewTabInChat();
+        const st = tab.newTabPageState;
+        return st?.inChat === true || !!(st?.askMessagesHtml && String(st.askMessagesHtml).trim());
+    }
+
+    setNewTabAiChatChromeVisible(enabled) {
+        document.getElementById('new-tab-menu-btn')?.classList.toggle('hidden', enabled);
+    }
+
+    _scrollNewTabAskMessagesToBottom() {
+        const messages = document.getElementById('new-tab-ask-messages');
+        if (!messages) return;
+        requestAnimationFrame(() => {
+            messages.scrollTop = messages.scrollHeight;
+        });
+    }
+
+    _focusNewTabInput() {
+        requestAnimationFrame(() => document.getElementById('new-tab-input')?.focus());
+    }
+
+    _persistNewTabChatStateIfNeeded() {
+        if (this.currentTab != null) {
+            this.saveNewTabPageStateToTab(this.currentTab);
+        }
+    }
+
+    applyNewTabTabChrome(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab || tab.url !== this.NEWTAB_URL || tab.customTitle) return;
+
+        const inAiChat = this.isTabInNtpAiChat(tabId);
+        const title = inAiChat ? 'AI Chat' : 'New Tab';
+        const favicon = inAiChat ? this.NTP_AI_CHAT_FAVICON : this.NTP_DEFAULT_FAVICON;
+        tab.title = title;
+        tab.favicon = favicon;
+
+        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+        if (tabElement) {
+            const titleEl = tabElement.querySelector('.tab-title');
+            if (titleEl && titleEl.textContent !== title) titleEl.textContent = title;
+            const faviconEl = tabElement.querySelector('.tab-favicon');
+            if (faviconEl && faviconEl.tagName === 'IMG') {
+                faviconEl.style.visibility = 'visible';
+                if (faviconEl.src !== favicon) faviconEl.src = favicon;
+            }
+            this.updateTabTooltip(tabId);
+        }
+
+        if (tabId === this.currentTab && window.electronAPI?.setWindowTitle) {
+            const fallback = this.isIncognitoWindow ? 'Axis — Incognito' : 'Axis Browser';
+            window.electronAPI.setWindowTitle(inAiChat ? 'AI Chat' : fallback);
+        }
+    }
+
+    updateNewTabSendButtonState() {
+        const input = document.getElementById('new-tab-input');
+        const btn = document.getElementById('new-tab-send-btn');
+        if (!btn || !input) return;
+        const canSend = this.isNewTabInChat() && !!input.value.trim();
+        btn.disabled = !canSend;
+        btn.classList.toggle('is-disabled', !canSend);
+    }
+
+    syncNewTabInputChrome() {
+        const input = document.getElementById('new-tab-input');
+        const page = document.getElementById('new-tab-page');
+        const inChat = this.isNewTabInChat();
+        if (input) {
+            input.placeholder = inChat ? 'Message AI…' : 'Search or Enter URL...';
+            input.setAttribute('aria-label', inChat ? 'Message AI' : 'Search or URL');
+        }
+        page?.classList.toggle('ntp-in-chat', inChat);
+        this.updateNewTabSendButtonState();
+        this.updateNewTabHero();
+    }
+
+    showNewTabAskSetup() {
+        document.getElementById('new-tab-ask-setup')?.classList.remove('hidden');
+    }
+
+    hideNewTabAskSetup() {
+        document.getElementById('new-tab-ask-setup')?.classList.add('hidden');
+    }
+
+    performNewTabSearch() {
+        const input = document.getElementById('new-tab-input');
+        if (!input?.value?.trim()) return;
+        const suggestionsContainer = document.getElementById('new-tab-suggestions');
+        const items = suggestionsContainer?.querySelectorAll('.spotlight-suggestion-item');
+        if (this.spotlightSelectedIndex >= 0 && items?.[this.spotlightSelectedIndex]) {
+            const selected = items[this.spotlightSelectedIndex];
+            if (!selected.classList.contains('new-tab-action-item')) {
+                selected.click();
+                return;
+            }
+        }
+        this.performSpotlightSearch();
+    }
+
+    triggerNewTabAskFromSearch() {
+        const input = document.getElementById('new-tab-input');
+        if (!input?.value?.trim()) return;
+        if (!this.hasGroqApiKey()) {
+            this.showNewTabAskSetup();
+            return;
+        }
+        this.hideNewTabAskSetup();
+        void this.sendNewTabAskMessage();
     }
 
     stopAmbientAudio() {
@@ -2537,7 +2916,7 @@ class AxisBrowser {
         });
 
         window.electronAPI.onOpenSettingsTab?.((section) => {
-            this.openSettingsTab(section || null);
+            void window.electronAPI.openSettingsWindow(section || null);
         });
         
         // Listen for settings updates from the settings tab / store (refresh theme)
@@ -2556,6 +2935,24 @@ class AxisBrowser {
                 this._settingsUpdatedRaf = null;
                 void this.applySettingsUpdateFromMain();
             });
+        });
+
+        window.electronAPI.onExtensionsReady?.((data) => {
+            const updatedProfile =
+                data && typeof data.profileId === 'string' ? data.profileId : null;
+            if (
+                updatedProfile &&
+                String(updatedProfile).toLowerCase() !==
+                    String(this.profileId || 'personal').toLowerCase()
+            ) {
+                return;
+            }
+            const wv = this.getActiveWebview();
+            if (!wv) return;
+            try {
+                const url = wv.getURL() || '';
+                this._touchExtensionStoreListingUiForWebview(wv, url);
+            } catch (_) {}
         });
 
         document.addEventListener('visibilitychange', () => {
@@ -2685,7 +3082,14 @@ class AxisBrowser {
                 this.hideProfileSwitcherMenu();
                 if (id === this.profileId && !this.isIncognitoWindow) return;
                 try {
-                    await window.electronAPI.openOrFocusProfileWindow(id);
+                    if (this.isIncognitoWindow) {
+                        await window.electronAPI.openOrFocusProfileWindow(id);
+                        return;
+                    }
+                    await this.switchToProfileId(id, {
+                        animate: true,
+                        direction: this._profileSwipeDirectionFor?.(id) ?? 1
+                    });
                 } catch (_) {}
             });
 
@@ -3167,7 +3571,7 @@ class AxisBrowser {
             if (!created?.id) return;
             if (created.icon) this.windowProfileIcon = this.sanitizeProfileIcon(created.icon);
             await this.refreshProfilesMenu();
-            await window.electronAPI.openOrFocusProfileWindow(created.id);
+            await this.switchToProfileId(created.id, { animate: true, direction: 1 });
         } catch (err) {
             console.error('createProfile failed', err);
         }
@@ -3186,6 +3590,7 @@ class AxisBrowser {
                 return;
             }
             await this.refreshProfilesMenu();
+            this.evictProfileLayerCache?.(id);
         } catch (err) {
             console.error('deleteProfile failed', err);
         }
@@ -3200,6 +3605,7 @@ class AxisBrowser {
             const prevJs = this._lastJavascriptEnabled;
             await this.loadSettings();
             await this.refreshShortcutCache();
+            this.syncGroqApiKeyFromSettings?.();
             const curJs = this.settings?.javascriptEnabled !== false;
             if (prevJs !== undefined && prevJs !== curJs) {
                 this.rebuildAllTabWebviewsForWebPreferences();
@@ -3220,7 +3626,8 @@ class AxisBrowser {
             const wv = this.getActiveWebview();
             this.updateUrlBar(wv, { skipExtractTheme: true });
             if (tab && tab.url === this.NEWTAB_URL) {
-                /* handled in updateUrlBar → applyInternalShellUrlBarStyle */
+                this.applyNewTabCustomization();
+                this.updateNewTabHero();
             } else if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
                 this.applyInternalShellUrlBarStyle();
             } else if (wv) {
@@ -3233,6 +3640,11 @@ class AxisBrowser {
             const emp = document.getElementById('extensions-menu-panel');
             if (emp && !emp.classList.contains('hidden')) {
                 void this.populateExtensionsMenu();
+            }
+            if (wv) {
+                try {
+                    this._touchExtensionStoreListingUiForWebview(wv, wv.getURL() || '');
+                } catch (_) {}
             }
         } catch (e) {
             console.error('applySettingsUpdateFromMain failed', e);
@@ -3541,6 +3953,8 @@ class AxisBrowser {
         // Create named handler functions that can be removed
         const didStartLoadingHandler = () => {
             if (!isActiveTab()) return;
+            // Sub-frame loads (ads, lazy embeds while scrolling) must not flash the shell loading bar.
+            if (!webview.__axisMainNavPending) return;
 
             const currentUrl = webview.getURL() || '';
             this.isBenchmarking = /browserbench\.org\/speedometer/i.test(currentUrl);
@@ -3614,6 +4028,12 @@ class AxisBrowser {
             if (isActiveTab()) {
                 this._voidGuestTask(this.injectVaultAutofillBootstrap(webview));
             }
+            if (isActiveTab() && !this.isBenchmarking) {
+                try {
+                    const readyUrl = webview.getURL() || '';
+                    this._touchExtensionStoreListingUiForWebview(webview, readyUrl);
+                } catch (_) {}
+            }
             if (!isActiveTab() || this.isBenchmarking) return;
         };
         webview.__eventHandlers.domReady = domReadyHandler;
@@ -3648,6 +4068,9 @@ class AxisBrowser {
                 this.bumpUrlBarLoadMilestone(webview, tabId, 1);
                 this.hideLoadingIndicator();
                 this.loadingBarTabId = null;
+            }
+            if (isMainFrame) {
+                webview.__axisMainNavPending = false;
             }
             if (isMainFrame && tabId === this.currentTab) {
                 this.isWebviewLoading = false;
@@ -3709,23 +4132,37 @@ class AxisBrowser {
             if (isActiveTab()) {
                 this._voidGuestTask(this.injectVaultAutofillBootstrap(webview));
             }
+            const finishUrl = (() => {
+                try {
+                    return webview.getURL() || '';
+                } catch (_) {
+                    return '';
+                }
+            })();
+            if (isMainFrame && finishUrl) {
+                this._nudgeYouTubePlayerIfNeeded(webview, finishUrl);
+            }
+            if (isMainFrame && isActiveTab() && !this.isBenchmarking && finishUrl) {
+                this._touchExtensionStoreListingUiForWebview(webview, finishUrl);
+            }
         };
         webview.__eventHandlers.didFinishLoad = didFinishLoadHandler;
         webview.addEventListener('did-finish-load', didFinishLoadHandler);
 
         const didStopLoadingHandler = () => {
+            const wasMainNav = !!webview.__axisMainNavPending;
             clearLoadingTimeout();
-            // Always hide loading bar when this tab stops loading (even if user switched tabs)
-            if (this.loadingBarTabId === tabId) {
+            if (this.loadingBarTabId === tabId && wasMainNav) {
                 this.bumpUrlBarLoadMilestone(webview, tabId, 1);
                 this.hideLoadingIndicator();
                 this.loadingBarTabId = null;
             }
+            webview.__axisMainNavPending = false;
             if (tabId === this.currentTab) {
                 this.isWebviewLoading = false;
                 this.updateRefreshButton(false);
             }
-            if (!isActiveTab() || this.isBenchmarking) return;
+            if (!isActiveTab() || this.isBenchmarking || !wasMainNav) return;
 
             this.batchDOMUpdates([
                 () => this.updateUrlBar(),
@@ -3785,6 +4222,7 @@ class AxisBrowser {
                 this.hideLoadingIndicator();
                 this.loadingBarTabId = null;
             }
+            webview.__axisMainNavPending = false;
             if (tabId === this.currentTab) {
                 this.isWebviewLoading = false;
                 this.updateRefreshButton(false);
@@ -3832,6 +4270,9 @@ class AxisBrowser {
                 return;
             }
             this.isBenchmarking = /browserbench\.org\/speedometer/i.test(nextUrl);
+            if (event.isMainFrame !== false) {
+                webview.__axisMainNavPending = true;
+            }
             if (!this.isBenchmarking) {
                 this.updateUrlBar();
                 // Apply cached theme immediately on navigation start for instant feedback
@@ -3847,6 +4288,16 @@ class AxisBrowser {
             if (!this.isBenchmarking && this.settings?.transparentSites) {
                 this._touchTransparentSitesForWebview(webview);
             }
+            try {
+                const navUrl = webview.getURL();
+                if (navUrl) this._nudgeYouTubePlayerIfNeeded(webview, navUrl);
+            } catch (_) {}
+            if (isActiveTab() && !this.isBenchmarking) {
+                try {
+                    const navUrl = webview.getURL() || '';
+                    this._touchExtensionStoreListingUiForWebview(webview, navUrl);
+                } catch (_) {}
+            }
             if (!isActiveTab() || this.isBenchmarking) return;
                 this.batchDOMUpdates([
                     () => this.updateUrlBar(),
@@ -3859,16 +4310,36 @@ class AxisBrowser {
         webview.addEventListener('did-navigate', didNavigateHandler);
 
         const didNavigateInPageHandler = () => {
-            if (!this.isBenchmarking && this.settings?.transparentSites) {
+            let navUrl = '';
+            try {
+                navUrl = webview.getURL() || '';
+            } catch (_) {
+                navUrl = '';
+            }
+            const stableKey = this._urlStablePageKey(navUrl);
+            const pageChanged = stableKey !== webview.__axisLastStablePageKey;
+            webview.__axisLastInPageUrl = navUrl;
+            if (pageChanged) {
+                webview.__axisLastStablePageKey = stableKey;
+            }
+
+            if (!this.isBenchmarking && this.settings?.transparentSites && pageChanged) {
                 this._touchTransparentSitesForWebview(webview);
             }
+            try {
+                if (navUrl) this._nudgeYouTubePlayerIfNeeded(webview, navUrl);
+            } catch (_) {}
+            if (isActiveTab() && !this.isBenchmarking) {
+                try {
+                    this._touchExtensionStoreListingUiForWebview(webview, navUrl);
+                } catch (_) {}
+            }
             if (!isActiveTab() || this.isBenchmarking) return;
-                this.batchDOMUpdates([
-                    () => this.updateUrlBar(),
-                    () => this.updateNavigationButtons(),
-                    () => this.updateTabTitle()
-                ]);
-                this.updateUrlBar(webview);
+            this.batchDOMUpdates([
+                () => this.updateNavigationButtons(),
+                () => (pageChanged ? this.updateTabTitle() : undefined),
+                () => this.updateUrlBar(webview, { skipExtractTheme: !pageChanged })
+            ]);
         };
         webview.__eventHandlers.didNavigateInPage = didNavigateInPageHandler;
         webview.addEventListener('did-navigate-in-page', didNavigateInPageHandler);
@@ -3977,38 +4448,31 @@ class AxisBrowser {
                 if (!isActiveTab()) return;
                 const id = args && args[0];
                 if (!id || typeof id !== 'string') return;
-                void (async () => {
-                    try {
-                        await window.electronAPI.installExtensionFromWebStore(id);
-                        axisNotifyExtensionStoreBarDismissed(webview, id.trim().toLowerCase());
-                        this.showNotification('Extension installed', 'success');
-                        this.updateUrlBar(webview);
-                    } catch (e) {
-                        this.showNotification(
-                            e && e.message ? e.message : 'Could not install this extension.',
-                            'error'
-                        );
-                    }
-                })();
+                void this._runExtensionStoreInstall(id.trim(), {
+                    webview,
+                    dismissToken: id.trim().toLowerCase(),
+                    triggerBtn: this.elements?.urlBarCwsInstall
+                });
                 return;
             }
             if (channel === 'axis-amo-install-in-axis') {
                 if (!isActiveTab()) return;
                 const slug = args && args[0];
                 if (!slug || typeof slug !== 'string') return;
-                void (async () => {
-                    try {
-                        await window.electronAPI.installExtensionFromWebStore(slug.trim());
-                        axisNotifyExtensionStoreBarDismissed(webview, `amo:${slug.trim().toLowerCase()}`);
-                        this.showNotification('Extension installed', 'success');
-                        this.updateUrlBar(webview);
-                    } catch (e) {
-                        this.showNotification(
-                            e && e.message ? e.message : 'Could not install this extension.',
-                            'error'
-                        );
-                    }
-                })();
+                const key = slug.trim().toLowerCase();
+                void this._runExtensionStoreInstall(slug.trim(), {
+                    webview,
+                    dismissToken: `amo:${key}`,
+                    triggerBtn: this.elements?.urlBarCwsInstall
+                });
+                return;
+            }
+            if (channel === 'axis-request-store-listing-status') {
+                if (!isActiveTab()) return;
+                try {
+                    const listingUrl = webview.getURL() || '';
+                    this._touchExtensionStoreListingUiForWebview(webview, listingUrl);
+                } catch (_) {}
                 return;
             }
             if (channel === 'axis-vault-save-offer') {
@@ -4805,6 +5269,148 @@ class AxisBrowser {
         }
         return false;
     }
+
+    _captureShellChromeSnapshot() {
+        if (!this._lastShellThemeColors) return null;
+        return { colors: { ...this._lastShellThemeColors } };
+    }
+
+    _restoreShellChromeSnapshot(snapshot) {
+        if (!snapshot?.colors) return false;
+        this.applyCustomTheme(snapshot.colors);
+        return true;
+    }
+
+    _captureUrlBarChromeSnapshot() {
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar) return null;
+        const varKeys = [
+            '--url-bar-bg',
+            '--url-bar-border',
+            '--url-bar-text',
+            '--url-bar-text-muted',
+            '--url-bar-btn-hover'
+        ];
+        const vars = {};
+        for (const key of varKeys) {
+            const val = urlBar.style.getPropertyValue(key);
+            if (val) vars[key] = val;
+        }
+        const backdrop = urlBar.style.getPropertyValue('backdrop-filter');
+        const webkitBackdrop = urlBar.style.getPropertyValue('-webkit-backdrop-filter');
+        if (backdrop) vars['backdrop-filter'] = backdrop;
+        if (webkitBackdrop) vars['-webkit-backdrop-filter'] = webkitBackdrop;
+        return {
+            hidden: urlBar.classList.contains('hidden'),
+            darkMode: urlBar.classList.contains('dark-mode'),
+            internalShell: this._isInternalShellUrlBar(urlBar),
+            internalShellMode: urlBar.classList.contains('url-bar-ntp-chrome')
+                ? 'ntp'
+                : urlBar.classList.contains('settings-page')
+                  ? 'settings'
+                  : null,
+            vars
+        };
+    }
+
+    _restoreUrlBarChromeSnapshot(snapshot) {
+        if (!snapshot) return false;
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar) return false;
+
+        urlBar.classList.toggle('hidden', !!snapshot.hidden);
+        urlBar.classList.toggle('dark-mode', !!snapshot.darkMode);
+
+        if (snapshot.internalShell) {
+            this._setUrlBarInternalShellMode(snapshot.internalShellMode);
+            this.applyInternalShellUrlBarStyle();
+            return true;
+        }
+
+        this._setUrlBarInternalShellMode(null);
+        urlBar.style.removeProperty('backdrop-filter');
+        urlBar.style.removeProperty('-webkit-backdrop-filter');
+        const vars = snapshot.vars || {};
+        for (const key of [
+            '--url-bar-bg',
+            '--url-bar-border',
+            '--url-bar-text',
+            '--url-bar-text-muted',
+            '--url-bar-btn-hover',
+            'backdrop-filter',
+            '-webkit-backdrop-filter'
+        ]) {
+            const val = vars[key];
+            if (val) urlBar.style.setProperty(key, val);
+            else urlBar.style.removeProperty(key);
+        }
+        this.applyChatPanelTheme(urlBar);
+        return Object.keys(vars).length > 0;
+    }
+
+    _persistUrlBarChromeToTab(tabId) {
+        const tid = this._normalizeTabMapKey(tabId);
+        if (tid == null || !this.tabs.has(tid)) return;
+        const snap = this._captureUrlBarChromeSnapshot();
+        if (!snap) return;
+        const t = this.tabs.get(tid);
+        t.urlBarChromeSnapshot = snap;
+        this.tabs.set(tid, t);
+    }
+
+    /** Restore URL bar tint instantly when switching tabs (same idea as profile chrome cache). */
+    _applyTabChromeImmediate(tab) {
+        if (!tab) return;
+        try {
+            this._tabUrlBarRestoredFromCache = false;
+
+            this._urlBarInstantThemeTabSwitch = true;
+            this.elements?.webviewUrlBar?.classList.add('url-bar--instant-theme');
+
+            const urlSnap = tab.urlBarChromeSnapshot;
+            const hasUrlSnap =
+                urlSnap &&
+                (urlSnap.internalShell || (urlSnap.vars && Object.keys(urlSnap.vars).length > 0));
+
+            if (tab.url === this.NEWTAB_URL) {
+                this._setUrlBarInternalShellMode('ntp');
+                if (hasUrlSnap && urlSnap.internalShell) {
+                    this._restoreUrlBarChromeSnapshot(urlSnap);
+                    this._tabUrlBarRestoredFromCache = true;
+                } else {
+                    this.applyInternalShellUrlBarStyle();
+                }
+            } else if (tab.url === 'axis://settings' || tab.isSettings) {
+                this._setUrlBarInternalShellMode('settings');
+                if (hasUrlSnap && urlSnap.internalShell) {
+                    this._restoreUrlBarChromeSnapshot(urlSnap);
+                    this._tabUrlBarRestoredFromCache = true;
+                } else {
+                    this.applyInternalShellUrlBarStyle();
+                }
+            } else if (hasUrlSnap) {
+                this._restoreUrlBarChromeSnapshot(urlSnap);
+                this._tabUrlBarRestoredFromCache = true;
+            } else if (
+                tab.url &&
+                tab.url !== 'about:blank' &&
+                !String(tab.url).startsWith('axis:note://')
+            ) {
+                if (!this.applyCachedTheme(tab.url)) {
+                    this.applyAppThemeToUrlBar();
+                }
+            } else {
+                this.applyAppThemeToUrlBar();
+            }
+
+            const wv = tab.webview;
+            if (wv) {
+                this.updateUrlBar(wv, { skipExtractTheme: true, keepInstantTheme: true });
+            }
+        } catch (e) {
+            console.error('tab chrome immediate apply failed', e);
+        }
+    }
     
     resetToBlackTheme() {
         // Incognito: always true black theme, unchangable
@@ -4842,6 +5448,9 @@ class AxisBrowser {
     }
     
     applyCustomTheme(colors) {
+        if (colors && typeof colors === 'object') {
+            this._lastShellThemeColors = { ...colors };
+        }
         // Ensure document.body exists before applying theme
         if (!document.body) {
             // If body doesn't exist yet, wait for it
@@ -4864,10 +5473,10 @@ class AxisBrowser {
         // Disable transitions for instant theme switching
         document.body.classList.add('theme-switching');
 
-        // `uiTheme` flips ONLY the overlay/secondary surfaces (popups, menus, Cmd+F,
-        // security panel, AI chat panel, new-tab-page inner cards, zoom indicator,
-        // context menus, notes/history/downloads/bookmark panels) via the
-        // `data-ui-theme="light"` attribute + targeted CSS in styles.css. The main
+        // `uiTheme` flips ONLY overlay/secondary surfaces (popups, menus, Cmd+F,
+        // security panel, zoom indicator, context menus, notes/history/downloads panels)
+        // via `data-ui-theme="light"` + targeted CSS. Settings, new tab, and AI chat
+        // stay dark. The main
         // shell (tabs, sidebar, url bar strip, nav buttons, background gradient) and
         // every theme-color-driven variable (`--theme-color`, `--gradient-color`,
         // `--primary-gradient`, `--accent-color`, `--primary-color`, shell glass,
@@ -5143,17 +5752,18 @@ class AxisBrowser {
 
         // Transparent-sites UI (URL bar / new tab) reads these from :root — match #app shell blur/sat
         if (!forceOpaqueBlack) {
+            const ntChrome = this.getShellChromeStyle({ forceDarkNewTabSurfaces: true });
             style.setProperty('--axis-ts-urlbar-blur', `${chrome.blurMain}px`);
             style.setProperty('--axis-ts-urlbar-sat', `${chrome.satMain}%`);
-            style.setProperty('--axis-nt-search-bg', chrome.newTabSearchBg);
-            style.setProperty('--axis-nt-search-blur', `${chrome.newTabSearchBlur}px`);
-            style.setProperty('--axis-nt-search-sat', `${chrome.newTabSearchSat}%`);
-            style.setProperty('--axis-nt-toggle-bg', chrome.newTabToggleBg);
-            style.setProperty('--axis-nt-toggle-blur', `${chrome.newTabToggleBlur}px`);
-            style.setProperty('--axis-nt-toggle-sat', `${chrome.newTabToggleSat}%`);
-            style.setProperty('--axis-nt-ask-bg', chrome.newTabAskBg);
-            style.setProperty('--axis-nt-ask-blur', `${chrome.newTabAskBlur}px`);
-            style.setProperty('--axis-nt-ask-sat', `${chrome.newTabAskSat}%`);
+            style.setProperty('--axis-nt-search-bg', ntChrome.newTabSearchBg);
+            style.setProperty('--axis-nt-search-blur', `${ntChrome.newTabSearchBlur}px`);
+            style.setProperty('--axis-nt-search-sat', `${ntChrome.newTabSearchSat}%`);
+            style.setProperty('--axis-nt-toggle-bg', ntChrome.newTabToggleBg);
+            style.setProperty('--axis-nt-toggle-blur', `${ntChrome.newTabToggleBlur}px`);
+            style.setProperty('--axis-nt-toggle-sat', `${ntChrome.newTabToggleSat}%`);
+            style.setProperty('--axis-nt-ask-bg', ntChrome.newTabAskBg);
+            style.setProperty('--axis-nt-ask-blur', `${ntChrome.newTabAskBlur}px`);
+            style.setProperty('--axis-nt-ask-sat', `${ntChrome.newTabAskSat}%`);
         }
         
         // Re-enable transitions after theme is applied (use RAF to ensure CSS variables are updated first)
@@ -5176,6 +5786,7 @@ class AxisBrowser {
         urlBar.classList.remove(
             'url-bar-internal-shell',
             'url-bar-ntp-chrome',
+            'url-bar-ntp-ai-chrome',
             'settings-page',
             'new-tab-page'
         );
@@ -5209,11 +5820,12 @@ class AxisBrowser {
         return Math.max(0, Math.min(100, v)) / 100;
     }
 
-    getShellChromeStyle() {
+    getShellChromeStyle(opts = {}) {
         const tSlider = this.getShellChromeTransmissionT();
-        // Light mode re-tones the new-tab search/ask/toggle cards; webpages inside webviews
-        // are untouched, this only affects the in-app `#new-tab-page` overlay.
-        const lightUi = this.settings?.uiTheme === 'light' && !this.isIncognitoWindow;
+        // New tab / AI chat surfaces always use dark glass (unaffected by uiTheme).
+        const lightUi = !opts.forceDarkNewTabSurfaces
+            && this.settings?.uiTheme === 'light'
+            && !this.isIncognitoWindow;
         const ntSearchRGB = lightUi ? '244, 245, 247' : '14, 15, 18';
         const ntAskRGB = lightUi ? '248, 249, 251' : '10, 11, 14';
         const ntToggleRGB = lightUi ? '0, 0, 0' : '255, 255, 255';
@@ -5236,15 +5848,15 @@ class AxisBrowser {
                 urlBarTintDefault: 1,
                 urlBarTintDark: 1,
                 urlBarTintLight: 1,
-                newTabSearchBg: `rgba(${ntSearchRGB}, 1)`,
-                newTabSearchBlur: 0,
-                newTabSearchSat: 100,
-                newTabToggleBg: `rgba(${ntToggleRGB}, ${lightUi ? 0.06 : 1})`,
-                newTabToggleBlur: 0,
-                newTabToggleSat: 100,
-                newTabAskBg: `rgba(${ntAskRGB}, 1)`,
-                newTabAskBlur: 0,
-                newTabAskSat: 100,
+                newTabSearchBg: `rgba(${ntSearchRGB}, ${lightUi ? 0.72 : 0.38})`,
+                newTabSearchBlur: 14,
+                newTabSearchSat: 120,
+                newTabToggleBg: `rgba(${ntToggleRGB}, ${lightUi ? 0.06 : 0.08})`,
+                newTabToggleBlur: 12,
+                newTabToggleSat: 120,
+                newTabAskBg: `rgba(${ntAskRGB}, ${lightUi ? 0.78 : 0.34})`,
+                newTabAskBlur: 14,
+                newTabAskSat: 120,
             };
         }
         /** Concave remap: slider mid–high spends more blend weight on the airy endpoint (`AXIS_SHELL_CHROME_TRANSPARENT`). */
@@ -5414,13 +6026,13 @@ class AxisBrowser {
 
     getTabWebpreferencesString() {
         const base =
-            'contextIsolation=false,nodeIntegration=false,sandbox=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes';
+            'contextIsolation=false,nodeIntegration=false,sandbox=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false,spellcheck=yes';
         return this.settings?.javascriptEnabled === false ? `${base},javascript=no` : base;
     }
 
     getSettingsTabWebpreferencesString() {
         // Internal Settings UI must always run JS (even when browsing tabs disable it).
-        return 'contextIsolation=true,nodeIntegration=false,sandbox=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes';
+        return 'contextIsolation=true,nodeIntegration=false,sandbox=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false,spellcheck=yes';
     }
 
     _isSettingsTab(tab) {
@@ -5488,6 +6100,11 @@ class AxisBrowser {
             }
         }
         webview.setAttribute('partition', this.getSessionPartition());
+        try {
+            webview.dataset.axisProfile = String(this.profileId || 'personal')
+                .toLowerCase()
+                .replace(/[^a-z0-9_-]/g, '-');
+        } catch (_) {}
         // Let Electron use its real Chromium version in the UA string;
         // hardcoding an old Chrome version can cause sites to refuse loading.
         webview.setAttribute('autosize', 'true');
@@ -5788,7 +6405,7 @@ class AxisBrowser {
             url: effectiveUrl || this.NEWTAB_URL,
             title: 'New Tab',
             // Use a simple search icon for the default new tab favicon
-            favicon: effectiveUrl ? null : 'data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><g fill=\"none\" stroke=\"%23ffffff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"7\" cy=\"7\" r=\"4.25\"/><path d=\"M10.25 10.25L13 13\"/></g></svg>',
+            favicon: effectiveUrl ? null : this.NTP_DEFAULT_FAVICON,
             customIcon: null,
             customIconType: null,
             pinned: false,
@@ -6032,7 +6649,8 @@ class AxisBrowser {
         });
     }
 
-    switchToTab(rawTabId) {
+    switchToTab(rawTabId, opts = {}) {
+        const fromProfileSwitch = !!opts.fromProfileSwitch;
         this.hideVaultAutofillPanel();
         const tabId = this._normalizeTabMapKey(rawTabId);
         if (tabId == null || !this.tabs.has(tabId)) {
@@ -6069,11 +6687,14 @@ class AxisBrowser {
         const prevCur = this._normalizeTabMapKey(this.currentTab);
         const switchedDifferentTab = prevCur != null && prevCur !== tabId;
 
-        // Save new-tab-page state for the tab we're leaving (so each new tab keeps its own content)
+        // Save new-tab-page state and URL bar chrome for the tab we're leaving
         if (prevCur != null && prevCur !== tabId && this.tabs.has(prevCur)) {
             const prevTab = this.tabs.get(prevCur);
-            if (prevTab && prevTab.url === this.NEWTAB_URL) {
-                this.saveNewTabPageStateToTab(prevCur);
+            if (prevTab) {
+                if (prevTab.url === this.NEWTAB_URL) {
+                    this.saveNewTabPageStateToTab(prevCur);
+                }
+                this._persistUrlBarChromeToTab(prevCur);
             }
         }
 
@@ -6253,7 +6874,14 @@ class AxisBrowser {
                 }
                 
                 this.elements.webview = webview;
-                if (tab.url && tab.url !== 'about:blank' && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://')) {
+                if (
+                    !fromProfileSwitch &&
+                    !this._tabUrlBarRestoredFromCache &&
+                    tab.url &&
+                    tab.url !== 'about:blank' &&
+                    tab.url !== 'axis://settings' &&
+                    !tab.url.startsWith('axis:note://')
+                ) {
                     this.applyCachedTheme(tab.url);
                 }
                 if (tab.isFavoriteTab) {
@@ -6269,25 +6897,48 @@ class AxisBrowser {
                 this.updateNewTabPageVisibility(false);
             }
         }
+
+        if (switchedDifferentTab && !fromProfileSwitch && tab) {
+            this._applyTabChromeImmediate(tab);
+        }
         
         // DEFER non-critical updates to not block tab switching
         requestAnimationFrame(() => {
-            if (switchedDifferentTab) {
+            if (switchedDifferentTab && !fromProfileSwitch && !this._tabUrlBarRestoredFromCache) {
                 this._urlBarInstantThemeTabSwitch = true;
                 this.elements?.webviewUrlBar?.classList.add('url-bar--instant-theme');
             }
             this._nudgeWebviewGuestLayout();
             this._syncGuestWindowResizeEvent();
+            if (tab?.webview && tab.url) {
+                this._nudgeYouTubePlayerIfNeeded(tab.webview, tab.url);
+                setTimeout(() => this._nudgeYouTubePlayerIfNeeded(tab.webview, tab.url), 420);
+            }
             if (activeTab) {
                 this.updateTabFavicon(tabId, activeTab);
             }
             this.updateEmptyState();
             this.updateNavigationButtons();
-            this.updateUrlBar();
+            const skipUrlBarRefresh = this._skipNextUrlBarRefresh;
+            const tabUrlBarRestored = this._tabUrlBarRestoredFromCache;
+            if (skipUrlBarRefresh) {
+                this._skipNextUrlBarRefresh = false;
+            } else if (tab?.webview) {
+                this.updateUrlBar(tab.webview, {
+                    skipExtractTheme: tabUrlBarRestored,
+                    keepInstantTheme: tabUrlBarRestored
+                });
+            } else {
+                this.updateUrlBar(null, {
+                    skipExtractTheme: tabUrlBarRestored,
+                    keepInstantTheme: tabUrlBarRestored
+                });
+            }
+            if (tabUrlBarRestored) {
+                this._tabUrlBarRestoredFromCache = false;
+            }
             this.updateTabTitle();
-            // Update themed URL bar and loading bar to match the tab we switched to
-            if (tab && tab.webview) {
-                this.updateUrlBar(tab.webview);
+            if (!skipUrlBarRefresh && tab && tab.webview) {
                 try {
                     this.isWebviewLoading = tab.webview.isLoading();
                     this.updateRefreshButton(this.isWebviewLoading);
@@ -6331,80 +6982,48 @@ class AxisBrowser {
     setupNewTabPage() {
         const input = document.getElementById('new-tab-input');
         const suggestionsContainer = document.getElementById('new-tab-suggestions');
-        const modeToggle = document.getElementById('new-tab-mode-toggle');
-        const askMessages = document.getElementById('new-tab-ask-messages');
-        const searchWrapper = document.getElementById('new-tab-search-wrapper');
-        if (!input || !suggestionsContainer || !modeToggle) return;
-
-        this.newTabMode = 'search';
-        const newTabPage = document.getElementById('new-tab-page');
-
-        const setMode = (mode) => {
-            this.newTabMode = mode;
-            modeToggle.querySelectorAll('.new-tab-mode-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.mode === mode);
-            });
-            if (newTabPage) {
-                newTabPage.classList.toggle('ask-mode', mode === 'ask');
-            }
-            if (mode === 'search') {
-                input.placeholder = 'Search or Enter URL...';
-                searchWrapper?.classList.remove('hidden');
-                suggestionsContainer.classList.remove('hidden');
-                searchWrapper?.classList.remove('ask-chat');
-                askMessages?.classList.add('hidden');
-                // Refresh suggestions based on current query so they slide back in
-                this.updateNewTabSuggestions(input.value.trim());
-                input.focus();
-            } else {
-                input.placeholder = 'Ask AI a question...';
-                searchWrapper?.classList.remove('hidden');
-                suggestionsContainer.classList.add('hidden');
-                // Keep chat collapsed until the first Ask message is sent
-                searchWrapper?.classList.remove('ask-chat');
-                askMessages?.classList.add('hidden');
-                input.focus();
-            }
-        };
-
-        modeToggle.querySelectorAll('.new-tab-mode-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const mode = btn.dataset.mode;
-                if (mode && mode !== this.newTabMode) {
-                    setMode(mode);
-                }
-            });
-        });
+        if (!input || !suggestionsContainer) return;
 
         const throttledUpdate = this.throttle((value) => {
             this.updateNewTabSuggestions(value);
             this.spotlightSelectedIndex = -1;
+            this.updateNewTabHero();
+            this.updateNewTabSendButtonState();
+            if (value.trim()) this.hideNewTabAskSetup();
         }, 50);
 
-        input.addEventListener('input', (e) => throttledUpdate(e.target.value.trim()));
+        input.addEventListener('input', (e) => {
+            throttledUpdate(e.target.value.trim());
+            this.updateNewTabSendButtonState();
+        });
         input.addEventListener('keydown', (e) => {
-            // Prevent Tab from causing any layout/focus changes on the New Tab page.
-            // We don't insert a tab character; we simply ignore the key.
             if (e.key === 'Tab') {
                 e.preventDefault();
                 e.stopPropagation();
                 return;
             }
 
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                this.triggerNewTabAskFromSearch();
+                return;
+            }
+
             if (e.key === 'Enter') {
                 e.preventDefault();
-                if (this.newTabMode === 'ask') {
-                    this.sendNewTabAskMessage();
+                if (this.isNewTabInChat()) {
+                    void this.sendNewTabAskMessage();
                 } else {
                     const items = suggestionsContainer.querySelectorAll('.spotlight-suggestion-item');
                     if (this.spotlightSelectedIndex >= 0 && items[this.spotlightSelectedIndex]) {
                         items[this.spotlightSelectedIndex].click();
                     } else {
-                        this.performSpotlightSearch();
+                        this.performNewTabSearch();
                     }
                 }
             } else if (e.key === 'Escape') {
                 input.blur();
+                this.hideNewTabAskSetup();
             } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 this.navigateNewTabSuggestions(1, suggestionsContainer);
@@ -6413,6 +7032,53 @@ class AxisBrowser {
                 this.navigateNewTabSuggestions(-1, suggestionsContainer);
             }
         });
+
+        document.getElementById('new-tab-ask-setup-settings')?.addEventListener('click', () => {
+            void window.electronAPI?.openSettingsWindow?.('ai');
+        });
+        document.getElementById('new-tab-ask-setup-groq')?.addEventListener('click', () => {
+            void window.electronAPI?.openExternalUrl?.('https://console.groq.com/keys');
+        });
+
+        document.getElementById('new-tab-send-btn')?.addEventListener('click', () => {
+            if (this.isNewTabInChat()) void this.sendNewTabAskMessage();
+        });
+        this.mountNewTabSearchBarToStart();
+        this.setupNewTabMenuButton();
+        this.applyNewTabCustomization();
+    }
+
+    setupNewTabMenuButton() {
+        document.getElementById('new-tab-menu-btn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            void window.electronAPI?.openSettingsWindow?.('newtab');
+        });
+    }
+
+    applyNewTabCustomization() {
+        const s = this.settings || {};
+        const page = document.getElementById('new-tab-page');
+        const wrapper = document.getElementById('new-tab-search-wrapper');
+
+        wrapper?.classList.toggle('ntp-ai-off', s.ntpAiSearchEnabled === false);
+
+        page?.classList.remove('ntp-bg-frosted', 'ntp-bg-theme');
+        page?.style.removeProperty('--axis-ntp-bg-tint');
+        wrapper?.classList.remove('ntp-gradient-on');
+        wrapper?.style.removeProperty('border-color');
+        wrapper?.style.removeProperty('box-shadow');
+        wrapper?.style.removeProperty('--ntp-accent');
+        wrapper?.style.removeProperty('--ntp-accent-glow');
+
+        this.updateNewTabHero();
+        const input = document.getElementById('new-tab-input');
+        if (input?.value?.trim() && !this.isNewTabInChat()) {
+            void this.updateNewTabSuggestions(input.value.trim());
+        }
+        const curTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (curTab?.url === this.NEWTAB_URL) {
+            this.applyInternalShellUrlBarStyle();
+        }
     }
 
     navigateNewTabSuggestions(direction, container) {
@@ -6425,14 +7091,6 @@ class AxisBrowser {
     async updateNewTabSuggestions(query) {
         const container = document.getElementById('new-tab-suggestions');
         if (!container) return;
-
-        // Do not show suggestions while in Ask mode
-        if (this.newTabMode === 'ask') {
-            container.innerHTML = '';
-            container.classList.remove('loading', 'new-tab-suggestions-closing');
-            this.spotlightSelectedIndex = -1;
-            return;
-        }
 
         if (query.trim().length < 1) {
             if (this._newTabSuggestionsCloseTimer) {
@@ -6461,13 +7119,42 @@ class AxisBrowser {
         container.classList.remove('new-tab-suggestions-closing');
         container.classList.add('loading');
         const suggestions = await this.generateAdvancedSuggestions(query);
-        this.updateNewTabSuggestionsContent(container, suggestions);
+        this.updateNewTabSuggestionsContent(container, suggestions, query);
     }
 
-    updateNewTabSuggestionsContent(container, suggestions) {
+    _appendNewTabActionRows(container, query) {
+        const q = (query || '').trim();
+        if (!q || this.isNewTabInChat()) return;
+        const short = q.length > 52 ? `${q.slice(0, 49)}…` : q;
+        const aiOn = this.settings?.ntpAiSearchEnabled !== false;
+
+        const addRow = (extraClass, iconClass, badge, handler) => {
+            const el = document.createElement('div');
+            el.className = `spotlight-suggestion-item new-tab-action-item ${extraClass}`;
+            el.innerHTML = `
+                <div class="spotlight-suggestion-icon"><i class="fas ${iconClass}" aria-hidden="true"></i></div>
+                <div class="spotlight-suggestion-text new-tab-action-text">${this.escapeHtml(short)}</div>
+                <div class="new-tab-action-badge">${this.escapeHtml(badge)}</div>
+            `;
+            el.addEventListener('click', (e) => {
+                e.preventDefault();
+                handler();
+            });
+            container.appendChild(el);
+        };
+
+        addRow('new-tab-action-search', 'fa-magnifying-glass', 'Search', () => this.performNewTabSearch());
+        if (aiOn) {
+            addRow('new-tab-action-ask', 'fa-message', 'Ask AI', () => this.triggerNewTabAskFromSearch());
+        }
+    }
+
+    updateNewTabSuggestionsContent(container, suggestions, query = '') {
         container.classList.remove('loading', 'new-tab-suggestions-closing');
         container.innerHTML = '';
         this.spotlightSelectedIndex = -1;
+
+        this._appendNewTabActionRows(container, query);
 
         if (!suggestions || suggestions.length === 0) {
             return;
@@ -6502,42 +7189,61 @@ class AxisBrowser {
     }
 
     async sendNewTabAskMessage() {
-        if (this.newTabMode !== 'ask') return;
-
         const input = document.getElementById('new-tab-input');
         const messagesContainer = document.getElementById('new-tab-ask-messages');
-        const wrapper = document.getElementById('new-tab-search-wrapper');
-        if (!input || !messagesContainer || !wrapper) return;
+        if (!input || !messagesContainer) return;
 
         const text = input.value.trim();
         if (!text) return;
 
+        if (!this.hasGroqApiKey()) {
+            this.showNewTabAskSetup();
+            return;
+        }
+
+        this.hideNewTabAskSetup();
+        const suggestionsContainer = document.getElementById('new-tab-suggestions');
+        if (suggestionsContainer) {
+            suggestionsContainer.innerHTML = '';
+            suggestionsContainer.classList.add('new-tab-suggestions-closing');
+        }
+
         input.value = '';
+        this.updateNewTabSendButtonState();
 
-        // Turn the search wrapper into a chat container for this new tab
-        wrapper.classList.add('ask-chat');
-        messagesContainer.classList.remove('hidden');
+        const isFirstMessage = !this.isNewTabInChat();
+        if (isFirstMessage) {
+            await this.beginNewTabAiChatTransition();
+            this.syncNewTabInputChrome();
+        }
 
-        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const userDiv = document.createElement('div');
         userDiv.className = 'new-tab-ask-message user';
         userDiv.innerHTML = `
-            <div class="new-tab-ask-bubble">${this.escapeHtml(text)}</div>
-            <div class="new-tab-ask-time">${this.escapeHtml(time)}</div>
+            <div class="new-tab-ask-avatar user" aria-hidden="true"><i class="fas fa-user"></i></div>
+            <div class="new-tab-ask-body">
+                <div class="new-tab-ask-bubble">${this.escapeHtml(text)}</div>
+            </div>
         `;
         messagesContainer.appendChild(userDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        this._scrollNewTabAskMessagesToBottom();
+        this._persistNewTabChatStateIfNeeded();
 
         const loadingId = Date.now();
         const loadingDiv = document.createElement('div');
         loadingDiv.className = 'new-tab-ask-message assistant';
         loadingDiv.dataset.messageId = String(loadingId);
         loadingDiv.innerHTML = `
-            <div class="new-tab-ask-bubble">Thinking...</div>
-            <div class="new-tab-ask-time">${this.escapeHtml(time)}</div>
+            <div class="new-tab-ask-avatar assistant" aria-hidden="true"><i class="fas fa-message"></i></div>
+            <div class="new-tab-ask-body">
+                <div class="new-tab-ask-bubble new-tab-ask-bubble-loading" aria-live="polite" aria-label="Thinking">
+                    <span class="new-tab-ask-loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                </div>
+            </div>
         `;
         messagesContainer.appendChild(loadingDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        this._scrollNewTabAskMessagesToBottom();
+        this._focusNewTabInput();
 
         try {
             const response = await this.getChatAIResponse(text);
@@ -6545,25 +7251,32 @@ class AxisBrowser {
                 ".new-tab-ask-message.assistant[data-message-id=\"" + loadingId + "\"]"
             );
             if (updated) {
-                const respTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 updated.innerHTML = `
-                    <div class="new-tab-ask-bubble">${this.escapeHtml(response)}</div>
-                    <div class="new-tab-ask-time">${this.escapeHtml(respTime)}</div>
+                    <div class="new-tab-ask-avatar assistant" aria-hidden="true"><i class="fas fa-message"></i></div>
+                    <div class="new-tab-ask-body">
+                        <div class="new-tab-ask-bubble">${this.escapeHtml(response)}</div>
+                    </div>
                 `;
             }
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            this._scrollNewTabAskMessagesToBottom();
+            this._persistNewTabChatStateIfNeeded();
         } catch (error) {
             const updated = messagesContainer.querySelector(
                 ".new-tab-ask-message.assistant[data-message-id=\"" + loadingId + "\"]"
             );
             if (updated) {
-                const errTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 const message = 'Error: ' + (error && error.message ? error.message : 'Something went wrong');
                 updated.innerHTML = `
-                    <div class="new-tab-ask-bubble">${this.escapeHtml(message)}</div>
-                    <div class="new-tab-ask-time">${this.escapeHtml(errTime)}</div>
+                    <div class="new-tab-ask-avatar assistant" aria-hidden="true"><i class="fas fa-message"></i></div>
+                    <div class="new-tab-ask-body">
+                        <div class="new-tab-ask-bubble new-tab-ask-bubble-error">${this.escapeHtml(message)}</div>
+                    </div>
                 `;
             }
+            this._scrollNewTabAskMessagesToBottom();
+            this._persistNewTabChatStateIfNeeded();
+        } finally {
+            this._focusNewTabInput();
         }
     }
 
@@ -6612,25 +7325,14 @@ class AxisBrowser {
     resetNewTabPageState() {
         const input = document.getElementById('new-tab-input');
         const suggestionsContainer = document.getElementById('new-tab-suggestions');
-        const modeToggle = document.getElementById('new-tab-mode-toggle');
-        const newTabPage = document.getElementById('new-tab-page');
         const searchWrapper = document.getElementById('new-tab-search-wrapper');
         const askMessages = document.getElementById('new-tab-ask-messages');
+        const startView = document.getElementById('new-tab-start-view');
+        const chatView = document.getElementById('new-tab-ai-chat-view');
+        const page = document.getElementById('new-tab-page');
         if (input) input.value = '';
-        this.newTabMode = 'search';
         this.spotlightSelectedIndex = -1;
-        if (modeToggle) {
-            modeToggle.querySelectorAll('.new-tab-mode-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.mode === 'search');
-            });
-        }
-        if (newTabPage) {
-            newTabPage.classList.remove('ask-mode');
-        }
-        if (input) input.placeholder = 'Search or Enter URL...';
-        if (searchWrapper) {
-            searchWrapper.classList.remove('hidden', 'ask-chat');
-        }
+        if (searchWrapper) searchWrapper.classList.remove('hidden');
         if (suggestionsContainer) {
             suggestionsContainer.classList.remove('hidden');
             suggestionsContainer.innerHTML = '';
@@ -6640,6 +7342,13 @@ class AxisBrowser {
             askMessages.innerHTML = '';
             askMessages.classList.add('hidden');
         }
+        startView?.classList.remove('hidden');
+        chatView?.classList.add('hidden');
+        page?.classList.remove('ntp-ai-chat-mode', 'ntp-ai-chat-entering', 'ntp-ai-chat-exiting');
+        this.mountNewTabSearchBarToStart();
+        this.setNewTabAiChatChromeVisible(false);
+        this.hideNewTabAskSetup();
+        this.syncNewTabInputChrome();
         this.updateNewTabSuggestions('');
     }
 
@@ -6653,10 +7362,11 @@ class AxisBrowser {
         const askMessagesHtml = askMessages ? askMessages.innerHTML : '';
         tab.newTabPageState = {
             inputValue,
-            mode: this.newTabMode || 'search',
+            inChat: this.isNewTabInChat(),
             askMessagesHtml
         };
         this.tabs.set(tabId, tab);
+        this.applyNewTabTabChrome(tabId);
     }
 
     /** Restore a tab's new-tab-page state into the shared UI. */
@@ -6666,42 +7376,32 @@ class AxisBrowser {
         const state = tab.newTabPageState;
         const input = document.getElementById('new-tab-input');
         const suggestionsContainer = document.getElementById('new-tab-suggestions');
-        const modeToggle = document.getElementById('new-tab-mode-toggle');
-        const newTabPage = document.getElementById('new-tab-page');
-        const searchWrapper = document.getElementById('new-tab-search-wrapper');
         const askMessages = document.getElementById('new-tab-ask-messages');
+        const inChat = state.inChat === true || !!(state.askMessagesHtml && state.askMessagesHtml.trim());
         if (input) input.value = state.inputValue || '';
-        this.newTabMode = state.mode || 'search';
         this.spotlightSelectedIndex = -1;
-        if (modeToggle) {
-            modeToggle.querySelectorAll('.new-tab-mode-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.mode === this.newTabMode);
-            });
-        }
-        if (newTabPage) {
-            newTabPage.classList.toggle('ask-mode', this.newTabMode === 'ask');
-        }
-        if (input) {
-            input.placeholder = this.newTabMode === 'ask' ? 'Ask AI a question...' : 'Search or Enter URL...';
-        }
-        if (searchWrapper) {
-            searchWrapper.classList.remove('hidden');
-            searchWrapper.classList.toggle('ask-chat', this.newTabMode === 'ask' && state.askMessagesHtml && state.askMessagesHtml.trim().length > 0);
-        }
         if (suggestionsContainer) {
-            suggestionsContainer.classList.remove('hidden');
-            suggestionsContainer.classList.remove('loading', 'new-tab-suggestions-closing');
-            if (this.newTabMode === 'search') {
-                this.updateNewTabSuggestions(state.inputValue || '');
-            } else {
+            suggestionsContainer.classList.remove('hidden', 'loading', 'new-tab-suggestions-closing');
+            if (inChat) {
                 suggestionsContainer.innerHTML = '';
-                suggestionsContainer.classList.add('hidden');
+            } else {
+                void this.updateNewTabSuggestions(state.inputValue || '');
             }
         }
         if (askMessages) {
             askMessages.innerHTML = state.askMessagesHtml || '';
-            askMessages.classList.toggle('hidden', !state.askMessagesHtml || state.askMessagesHtml.trim().length === 0);
         }
+        if (inChat) {
+            void this.beginNewTabAiChatTransition({ animate: false });
+            this._focusNewTabInput();
+        } else {
+            this.resetNewTabPageState();
+            if (input) input.value = state.inputValue || '';
+            void this.updateNewTabSuggestions(state.inputValue || '');
+        }
+        this.hideNewTabAskSetup();
+        this.applyNewTabTabChrome(tabId);
+        this.updateUrlBar(null);
     }
 
     updateNewTabPageVisibility(show) {
@@ -6716,6 +7416,13 @@ class AxisBrowser {
                 this.updateExtensionStoreHostBar('');
                 if (this._resetNewTabPageOnShow) {
                     this.resetNewTabPageState();
+                    if (this.currentTab != null) {
+                        const freshTab = this.tabs.get(this.currentTab);
+                        if (freshTab) {
+                            freshTab.newTabPageState = undefined;
+                            this.applyNewTabTabChrome(this.currentTab);
+                        }
+                    }
                     this._resetNewTabPageOnShow = false;
                 } else if (this.currentTab && this.tabs.has(this.currentTab)) {
                     const tab = this.tabs.get(this.currentTab);
@@ -6724,20 +7431,15 @@ class AxisBrowser {
                     }
                 }
                 newTabPage.classList.remove('hidden');
-                /* Transparent sites: hide the webview under the overlay so we see shell theme, not about:blank */
-                if (this.settings?.transparentSites && activeWv && activeTab?.url === this.NEWTAB_URL) {
-                    activeWv.style.opacity = '0';
-                    activeWv.style.visibility = 'hidden';
-                }
+                if (!this.isNewTabInChat()) this.mountNewTabSearchBarToStart();
+                this.updateNewTabHero();
+                this._syncNewTabWebviewUnderlay();
                 requestAnimationFrame(() => {
                     document.getElementById('new-tab-input')?.focus();
                 });
             } else {
                 newTabPage.classList.add('hidden');
-                if (this.settings?.transparentSites && activeWv) {
-                    activeWv.style.opacity = '1';
-                    activeWv.style.visibility = 'visible';
-                }
+                this._syncNewTabWebviewUnderlay();
                 // Restore webview interactivity (was pointer-events: none for overlay)
                 if (this.currentTab) {
                     const tab = this.tabs.get(this.currentTab);
@@ -7221,28 +7923,20 @@ class AxisBrowser {
         
         // Collect unpinned tab IDs (never favorite runtime tabs — they are not "disposable" unpinned)
         const unpinnedTabIds = [];
+        const collectTabId = (el) => {
+            const tabId = this._normalizeTabMapKey(el?.dataset?.tabId);
+            if (tabId == null) return;
+            const tab = this.tabs.get(tabId);
+            if (!tab || tab.pinned || tab.isFavoriteTab) return;
+            if (!unpinnedTabIds.includes(tabId)) unpinnedTabIds.push(tabId);
+        };
+
         for (let i = separatorIndex + 1; i < allElements.length; i++) {
             const el = allElements[i];
             if (el.classList.contains('tab')) {
-                const tabId = parseInt(el.dataset.tabId, 10);
-                if (!isNaN(tabId)) {
-                    const tab = this.tabs.get(tabId);
-                    if (tab && !tab.pinned && !tab.isFavoriteTab) {
-                        unpinnedTabIds.push(tabId);
-                    }
-                }
+                collectTabId(el);
             } else if (el.classList.contains('tab-group')) {
-                // Also get tabs inside tab groups (they're in unpinned section)
-                const tabsInGroup = el.querySelectorAll('.tab');
-                tabsInGroup.forEach(t => {
-                    const tabId = parseInt(t.dataset.tabId, 10);
-                    if (!isNaN(tabId)) {
-                        const tab = this.tabs.get(tabId);
-                        if (tab && !tab.isFavoriteTab) {
-                            unpinnedTabIds.push(tabId);
-                        }
-                    }
-                });
+                el.querySelectorAll('.tab').forEach((t) => collectTabId(t));
             }
         }
         
@@ -7799,6 +8493,35 @@ class AxisBrowser {
         return this.isUrlOnDomain(rawUrl, 'youtube.com') || this.isUrlOnDomain(rawUrl, 'youtu.be');
     }
 
+    /** True for YouTube watch, Shorts, live, embed, and youtu.be links. */
+    isYouTubeWatchUrl(rawUrl) {
+        if (!rawUrl || typeof rawUrl !== 'string') return false;
+        try {
+            const u = new URL(rawUrl);
+            const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+            if (host === 'youtu.be') return u.pathname.length > 1;
+            if (!host.endsWith('youtube.com')) return false;
+            const p = u.pathname;
+            return (
+                p === '/watch' ||
+                p.startsWith('/watch/') ||
+                p.startsWith('/shorts/') ||
+                p.startsWith('/live/') ||
+                p.startsWith('/embed/')
+            );
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /** Reload a stuck YouTube `<video>` after tab switch or guest show/hide. */
+    _nudgeYouTubePlayerIfNeeded(webview, rawUrl) {
+        if (!webview || !this.isYouTubeWatchUrl(rawUrl)) return;
+        try {
+            webview.executeJavaScript(AXIS_YOUTUBE_PLAYER_RECOVERY_JS, true).catch(() => {});
+        } catch (_) {}
+    }
+
     /**
      * Allow navigation for context-menu images only when scheme is safe (blocks `data:text/html`, etc.).
      */
@@ -7833,8 +8556,13 @@ class AxisBrowser {
             return;
         }
         
-        // Check if tab has a custom title (user-renamed)
         const tab = this.tabs.get(this.currentTab);
+        if (tab && tab.url === this.NEWTAB_URL) {
+            this.applyNewTabTabChrome(this.currentTab);
+            return;
+        }
+
+        // Check if tab has a custom title (user-renamed)
         if (tab && tab.customTitle) {
             // Use custom title instead of webview title
             const title = tab.customTitle;
@@ -8014,14 +8742,10 @@ class AxisBrowser {
     }
 
     async openSettingsTab(section = null) {
-        const existingId = this._findSettingsTabId();
-        if (existingId != null) {
-            this.switchToTab(existingId);
-            await this.loadSettingsInWebview(section || null, existingId);
-            if (section) this.focusSettingsSection(existingId, section);
-            return existingId;
-        }
-        return this.createSettingsTab(section);
+        try {
+            await window.electronAPI.openSettingsWindow(section || null);
+        } catch (_) {}
+        return null;
     }
 
     async rebuildSettingsTabWebview(tabId, section = null) {
@@ -8348,6 +9072,7 @@ class AxisBrowser {
                     } else if (activeTab && activeTab.url === this.NEWTAB_URL) {
                         this.applyInternalShellUrlBarStyle();
                     }
+                    this.applyNewTabCustomization();
                 }
                 // Theme mode and autoTheme changes will take effect on next page load
                 
@@ -9382,6 +10107,253 @@ class AxisBrowser {
     showToast(message) {
         // Notifications disabled - do nothing
         return;
+    }
+
+    _cancelExtensionStoreListingUiRetries() {
+        if (this._extensionStoreListingRetryTimers) {
+            this._extensionStoreListingRetryTimers.forEach((id) => clearTimeout(id));
+            this._extensionStoreListingRetryTimers = null;
+        }
+        this._extensionStoreListingRetryGen = (this._extensionStoreListingRetryGen || 0) + 1;
+    }
+
+    _scheduleExtensionStoreListingUiRefresh(currentUrl, webview = null) {
+        this._cancelExtensionStoreListingUiRetries();
+        if (!axisParseStoreListingContext(currentUrl)) return;
+        const gen = this._extensionStoreListingRetryGen;
+        const delays = [400, 1100, 2800];
+        this._extensionStoreListingRetryTimers = delays.map((ms) =>
+            setTimeout(() => {
+                if (gen !== this._extensionStoreListingRetryGen) return;
+                void this.refreshExtensionStoreListingUi(currentUrl, webview);
+            }, ms)
+        );
+    }
+
+    _pushExtensionStoreBarStatusToGuest(webview, payload) {
+        if (!webview || !payload || !payload.token) return;
+        const prev = webview.__axisStoreStatusPushTimers;
+        if (prev) prev.forEach((id) => clearTimeout(id));
+        const delays = [0, 500, 1200, 2600];
+        webview.__axisStoreStatusPushTimers = delays.map((ms) =>
+            setTimeout(() => {
+                try {
+                    axisNotifyExtensionStoreBarStatus(webview, payload);
+                } catch (_) {
+                    /* guest torn down */
+                }
+            }, ms)
+        );
+    }
+
+    _applyExtensionStoreListingInstalledUi(installedExt, ctx) {
+        const el = this.elements;
+        const installed = !!installedExt;
+        const extName = installedExt?.name || 'This extension';
+        const hostBtn = el?.axisStoreInstallHostBtn;
+        const urlBtn = el?.urlBarCwsInstall;
+        const bar = el?.axisStoreInstallHostBar;
+        const badge = el?.axisStoreInstallHostBadge;
+        const openBtn = el?.axisStoreInstallHostOpen;
+        const text = el?.axisStoreInstallHostText;
+
+        if (bar) bar.classList.toggle('axis-store-install-host-bar--installed', installed);
+
+        if (badge) {
+            badge.classList.toggle('hidden', !installed);
+            if (installed) {
+                const ver = installedExt.version ? ` v${installedExt.version}` : '';
+                badge.title = `${extName}${ver} is in Axis`;
+            }
+        }
+        if (openBtn) openBtn.classList.toggle('hidden', !installed);
+
+        if (text && !this._extensionInstallUiActive) {
+            if (installed) {
+                text.textContent = `${extName} is already in Axis. You can install again to fetch a fresh copy.`;
+            } else if (ctx?.amoKey) {
+                text.textContent =
+                    'Add to Firefox does not install in Axis. Use Install in Axis below.';
+            } else {
+                text.textContent =
+                    'Add to Chrome does not install in Axis. Use Install in Axis below.';
+            }
+        }
+
+        const btnState = installed ? 'installed' : 'idle';
+        if (!this._extensionInstallUiActive) {
+            this.setExtensionInstallControlState(hostBtn, btnState);
+            this.setExtensionInstallControlState(urlBtn, btnState);
+        }
+
+        if (urlBtn) {
+            urlBtn.classList.toggle('url-bar-cws-install--installed', installed);
+            urlBtn.title = installed
+                ? `${extName} is installed — click to install again`
+                : ctx?.amoKey
+                  ? 'Install this Firefox add-on in Axis (from this Mozilla page)'
+                  : 'Install this Chrome extension in Axis (same tab — no copy/paste)';
+        }
+    }
+
+    async refreshExtensionStoreListingUi(currentUrl, webview = null) {
+        const ctx = axisParseStoreListingContext(currentUrl);
+        const el = this.elements;
+        if (!ctx) {
+            this._cancelExtensionStoreListingUiRetries();
+            if (el?.axisStoreInstallHostBar) {
+                el.axisStoreInstallHostBar.classList.add('hidden');
+                el.axisStoreInstallHostBar.classList.remove('axis-store-install-host-bar--shown');
+            }
+            if (el?.urlBarCwsInstall) {
+                el.urlBarCwsInstall.classList.remove('url-bar-cws-install--installed');
+            }
+            return null;
+        }
+
+        if (el?.urlBarCwsInstall) {
+            el.urlBarCwsInstall.classList.remove('hidden');
+            el.urlBarCwsInstall.setAttribute('aria-hidden', 'false');
+        }
+
+        if (el?.axisStoreInstallHostBar && !this._extensionInstallUiActive) {
+            const wasHidden = el.axisStoreInstallHostBar.classList.contains('hidden');
+            el.axisStoreInstallHostBar.classList.remove('hidden');
+            if (wasHidden) {
+                el.axisStoreInstallHostBar.classList.remove('axis-store-install-host-bar--shown');
+                void el.axisStoreInstallHostBar.offsetWidth;
+                el.axisStoreInstallHostBar.classList.add('axis-store-install-host-bar--shown');
+            }
+            el.axisStoreInstallHostBar.classList.remove(
+                'axis-store-install-host-bar--busy',
+                'axis-store-install-host-bar--success',
+                'axis-store-install-host-bar--error'
+            );
+        }
+
+        let status = { installed: false, token: ctx.token, name: '', version: '', extensionRecordId: '' };
+        try {
+            if (window.electronAPI?.getStoreListingInstallStatus) {
+                status = await window.electronAPI.getStoreListingInstallStatus(currentUrl);
+            }
+        } catch (_) {
+            /* ignore */
+        }
+        const installedExt = status.installed
+            ? {
+                  name: status.name || '',
+                  version: status.version || '',
+                  id: status.extensionRecordId || '',
+                  storeListingToken: status.token || ctx.token
+              }
+            : null;
+
+        this._storeListingUiContext = ctx;
+        this._storeListingInstalledExt = installedExt;
+        if (!this._extensionInstallUiActive) {
+            this._applyExtensionStoreListingInstalledUi(installedExt, ctx);
+        }
+
+        const wv = webview || this.getActiveWebview();
+        const guestPayload = {
+            token: ctx.token,
+            installed: !!status.installed,
+            name: status.name || '',
+            version: status.version || ''
+        };
+        this._pushExtensionStoreBarStatusToGuest(wv, guestPayload);
+
+        return { ctx, installedExt, status };
+    }
+
+    _touchExtensionStoreListingUiForWebview(webview, url) {
+        if (!url || !axisParseStoreListingContext(url)) return;
+        void this.refreshExtensionStoreListingUi(url, webview);
+        this._scheduleExtensionStoreListingUiRefresh(url, webview);
+    }
+
+    /**
+     * Visual state for Install in Axis controls (`idle` | `installed` | `busy` | `success` | `error`).
+     * @param {HTMLElement|null} btn
+     */
+    setExtensionInstallControlState(btn, state = 'idle') {
+        if (!btn) return;
+        const states = ['installed', 'busy', 'success', 'error'];
+        states.forEach((s) => btn.classList.remove(`axis-ext-install--${s}`));
+        if (state && state !== 'idle') btn.classList.add(`axis-ext-install--${state}`);
+        btn.disabled = state === 'busy';
+        btn.setAttribute('aria-busy', state === 'busy' ? 'true' : 'false');
+
+        if (btn.id === 'axis-store-install-host-btn' || btn.classList.contains('axis-store-install-host-btn')) {
+            const labels = {
+                idle: 'Install in Axis',
+                installed: 'Install again',
+                busy: 'Installing…',
+                success: 'Installed',
+                error: 'Try again'
+            };
+            btn.textContent = labels[state] || labels.idle;
+        }
+
+        const icon = btn.querySelector('i');
+        if (!icon) return;
+        icon.classList.remove(
+            'fa-download',
+            'fa-rotate-right',
+            'fa-spinner',
+            'fa-spin',
+            'fa-check',
+            'fa-exclamation-circle'
+        );
+        if (state === 'busy') {
+            icon.classList.add('fa-spinner', 'fa-spin');
+        } else if (state === 'success') {
+            icon.classList.add('fa-check');
+        } else if (state === 'error') {
+            icon.classList.add('fa-exclamation-circle');
+            btn.classList.add('shake');
+            setTimeout(() => btn.classList.remove('shake'), 520);
+        } else if (state === 'installed') {
+            icon.classList.add('fa-rotate-right');
+        } else {
+            icon.classList.add('fa-download');
+        }
+    }
+
+    /** Host bar above the webview on store listing pages. */
+    setExtensionStoreHostBarState(state = 'idle', message = null) {
+        const bar = this.elements?.axisStoreInstallHostBar;
+        const text = this.elements?.axisStoreInstallHostText;
+        const btn = this.elements?.axisStoreInstallHostBtn;
+        if (!bar) return;
+        bar.classList.remove(
+            'axis-store-install-host-bar--busy',
+            'axis-store-install-host-bar--success',
+            'axis-store-install-host-bar--error'
+        );
+        if (state === 'busy') bar.classList.add('axis-store-install-host-bar--busy');
+        if (state === 'success') bar.classList.add('axis-store-install-host-bar--success');
+        if (state === 'error') bar.classList.add('axis-store-install-host-bar--error');
+        if (message && text) text.textContent = message;
+        const btnState =
+            state === 'idle' && this._storeListingInstalledExt ? 'installed' : state;
+        this.setExtensionInstallControlState(btn, btnState === 'idle' ? 'idle' : btnState);
+    }
+
+    _resetExtensionInstallUiAfterDelay(ms = 2400) {
+        if (this._extensionInstallUiResetTimer) clearTimeout(this._extensionInstallUiResetTimer);
+        this._extensionInstallUiResetTimer = setTimeout(() => {
+            this._extensionInstallUiResetTimer = null;
+            this._extensionInstallUiActive = false;
+            const wv = this.getActiveWebview();
+            let url = '';
+            try {
+                url = wv && typeof wv.getURL === 'function' ? wv.getURL() || '' : '';
+            } catch (_) {
+                url = '';
+            }
+            void this.refreshExtensionStoreListingUi(url);
+        }, ms);
     }
 
     // Premium button interactions
@@ -10941,8 +11913,10 @@ class AxisBrowser {
         responseArea.classList.remove('hidden');
 
         try {
-            // Use Groq API (very fast, generous free tier)
-            const groqApiKey = '';
+            if (!this.hasGroqApiKey()) {
+                throw new Error('Add your free Groq API key in Settings → AI Chat to use this feature.');
+            }
+            const groqApiKey = this.getGroqApiKey();
             
             // Format the prompt with context
             const fullPrompt = `Context: "${context}"\n\nQuestion: ${prompt}\n\nPlease provide a helpful answer based on the context provided.`;
@@ -11018,7 +11992,10 @@ class AxisBrowser {
             }
         } catch (error) {
             console.error('AI API Error:', error);
-            responseContent.textContent = `Error: ${error.message}\n\nPlease try again. If the issue persists, check your API key.`;
+            const hint = this.hasGroqApiKey()
+                ? 'Please try again.'
+                : 'Open Settings → AI Chat to add your free Groq API key.';
+            responseContent.textContent = `Error: ${error.message}\n\n${hint}`;
             responseContent.classList.add('revealing');
             submitBtn.disabled = false;
         }
@@ -11059,6 +12036,73 @@ class AxisBrowser {
     }
 
     // AI Chat Panel Setup
+    getGroqApiKey() {
+        return String(this.settings?.groqApiKey || this.aiChatApiKey || '').trim();
+    }
+
+    hasGroqApiKey() {
+        return this.getGroqApiKey().length > 0;
+    }
+
+    syncGroqApiKeyFromSettings() {
+        this.aiChatApiKey = this.getGroqApiKey();
+        this.updateAIChatSetupState();
+    }
+
+    openAIChatSettings() {
+        void this.openSettingsTab('ai');
+    }
+
+    async openGroqKeySignup() {
+        const url = 'https://console.groq.com/keys';
+        try {
+            if (window.electronAPI?.openExternalUrl) {
+                await window.electronAPI.openExternalUrl(url);
+                return;
+            }
+        } catch (_) {}
+        void this.createNewTab(url);
+    }
+
+    updateAIChatSetupState() {
+        const hasKey = this.hasGroqApiKey();
+        const panel = document.getElementById('ai-chat-panel');
+        const setup = document.getElementById('ai-chat-setup');
+        const chatInput = document.getElementById('ai-chat-input');
+        const chatSend = document.getElementById('ai-chat-send');
+        const chatInputContainer = panel?.querySelector('.ai-chat-input-container');
+        const quoteBar = document.getElementById('ai-chat-quote-bar');
+        const chatMessages = document.getElementById('ai-chat-messages');
+
+        panel?.classList.toggle('ai-chat-needs-key', !hasKey);
+        setup?.classList.toggle('hidden', hasKey);
+        if (chatInput) {
+            chatInput.disabled = !hasKey;
+            chatInput.readOnly = !hasKey;
+            chatInput.setAttribute('aria-disabled', hasKey ? 'false' : 'true');
+            chatInput.tabIndex = hasKey ? 0 : -1;
+            chatInput.placeholder = hasKey
+                ? 'Type your message...'
+                : 'Add your Groq API key in Settings to start chatting';
+            if (!hasKey) chatInput.value = '';
+        }
+        if (chatSend) {
+            chatSend.disabled = !hasKey;
+            chatSend.setAttribute('aria-disabled', hasKey ? 'false' : 'true');
+            chatSend.tabIndex = hasKey ? 0 : -1;
+        }
+        chatInputContainer?.classList.toggle('hidden', !hasKey);
+        if (!hasKey) {
+            quoteBar?.classList.add('hidden');
+            this.clearChatQuote?.();
+        }
+        if (!hasKey && chatMessages) chatMessages.innerHTML = '';
+
+        if (!hasKey) {
+            document.getElementById('new-tab-ask-setup')?.classList.add('hidden');
+        }
+    }
+
     setupAIChat() {
         const chatPanel = document.getElementById('ai-chat-panel');
         const chatClose = document.getElementById('ai-chat-close');
@@ -11081,16 +12125,33 @@ class AxisBrowser {
 
         // Send message on button click
         chatSend.addEventListener('click', () => {
+            if (!this.hasGroqApiKey()) return;
             this.sendChatMessage();
         });
 
+        const blockLockedChatInput = (e) => {
+            if (!this.hasGroqApiKey()) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        };
+
         // Send message on Enter (Shift+Enter for new line)
         chatInput.addEventListener('keydown', (e) => {
+            if (!this.hasGroqApiKey()) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.sendChatMessage();
             }
         });
+
+        chatInput.addEventListener('beforeinput', blockLockedChatInput);
+        chatInput.addEventListener('paste', blockLockedChatInput);
+        chatInput.addEventListener('drop', blockLockedChatInput);
 
         // Close chat on Escape key
         document.addEventListener('keydown', (e) => {
@@ -11108,6 +12169,21 @@ class AxisBrowser {
             this.setupChatPanelResize(resizeHandle, chatPanel);
         }
         this.applyChatPanelWidth(this.getChatPanelWidth());
+
+        document.getElementById('ai-chat-setup-settings')?.addEventListener('click', () => {
+            this.openAIChatSettings();
+        });
+        document.getElementById('ai-chat-setup-groq')?.addEventListener('click', () => {
+            void this.openGroqKeySignup();
+        });
+        document.getElementById('new-tab-ask-setup-settings')?.addEventListener('click', () => {
+            this.openAIChatSettings();
+        });
+        document.getElementById('new-tab-ask-setup-groq')?.addEventListener('click', () => {
+            void this.openGroqKeySignup();
+        });
+
+        this.updateAIChatSetupState();
     }
 
     getChatPanelWidth() {
@@ -11204,9 +12280,10 @@ class AxisBrowser {
             if (contentArea) {
                 contentArea.classList.add('chat-open');
             }
+            this.updateAIChatSetupState();
             // Focus input after open animation finishes
             const chatInput = document.getElementById('ai-chat-input');
-            if (chatInput) {
+            if (chatInput && this.hasGroqApiKey()) {
                 setTimeout(() => chatInput.focus(), 420);
             }
         } else {
@@ -11238,6 +12315,11 @@ class AxisBrowser {
             fullMessage = mainText;
         }
         if (!fullMessage) return;
+
+        if (!this.hasGroqApiKey()) {
+            this.updateAIChatSetupState();
+            return;
+        }
 
         // Clear input (fixed height – no resize)
         chatInput.value = '';
@@ -11368,6 +12450,11 @@ class AxisBrowser {
     }
 
     async getChatAIResponse(userMessage) {
+        if (!this.hasGroqApiKey()) {
+            throw new Error('Add your free Groq API key in Settings → AI Chat to start chatting.');
+        }
+        const apiKey = this.getGroqApiKey();
+
         // Optional: include current page so the AI can read the page
         let pageContext = null;
         try {
@@ -11423,7 +12510,7 @@ class AxisBrowser {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.aiChatApiKey}`
+                        'Authorization': `Bearer ${apiKey}`
                     },
                     body: JSON.stringify({
                         model: model,
@@ -12549,6 +13636,34 @@ class AxisBrowser {
         }
     }
 
+    /** Tab/group nodes parked for inactive profiles (avoids cross-profile DOM collisions). */
+    _axisProfileDomPoolId(profileId) {
+        const id = String(profileId || this.profileId || 'personal')
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '-');
+        return `axis-profile-dom-pool-${id || 'personal'}`;
+    }
+
+    _findTabElementInProfileScope(tabId) {
+        const poolId = this._axisProfileDomPoolId(this.profileId);
+        const sel = `[data-tab-id="${tabId}"]`;
+        return (
+            document.querySelector(`#tabs-container ${sel}`) ||
+            document.getElementById(poolId)?.querySelector(sel) ||
+            null
+        );
+    }
+
+    _findTabGroupElementInProfileScope(groupId) {
+        const poolId = this._axisProfileDomPoolId(this.profileId);
+        const sel = `[data-tab-group-id="${groupId}"]`;
+        return (
+            document.querySelector(`#tabs-container ${sel}`) ||
+            document.getElementById(poolId)?.querySelector(sel) ||
+            null
+        );
+    }
+
     /**
      * Detached tab nodes are not found by document.querySelector; keep moved tabs here until re-parented.
      */
@@ -12577,7 +13692,7 @@ class AxisBrowser {
     }
 
     getOrCreateTabElement(tabId) {
-        const existing = document.querySelector(`[data-tab-id="${tabId}"]`);
+        const existing = this._findTabElementInProfileScope(tabId);
         if (existing) return existing;
         const tab = this.tabs.get(tabId);
         if (!tab) return null;
@@ -12695,11 +13810,11 @@ class AxisBrowser {
         
         // Separator visibility is based on actual DOM content above it
         this.updatePinnedSeparatorVisibility();
-        void this.saveTabGroups();
+        if (!this._suppressTabGroupsAutosave) void this.saveTabGroups();
     }
 
     getOrCreateGroupElement(group) {
-        let el = document.querySelector(`[data-tab-group-id="${group.id}"]`);
+        let el = this._findTabGroupElementInProfileScope(group.id);
         const content = el ? el.querySelector('.tab-group-content') : null;
         const existingTabEls = content ? Array.from(content.querySelectorAll('.tab')) : [];
 
@@ -18522,6 +19637,13 @@ class AxisBrowser {
                 await this.installExtensionFromStoreListingUrl(listingUrl, el.axisStoreInstallHostBtn);
             });
         }
+        if (el.axisStoreInstallHostOpen) {
+            el.axisStoreInstallHostOpen.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void this.openExtensionsMenu();
+            });
+        }
 
         // Copy URL button
         if (el.urlBarCopy) {
@@ -18632,43 +19754,82 @@ class AxisBrowser {
         });
     }
 
+    async _runExtensionStoreInstall(rawInput, opts = {}) {
+        const { webview = null, dismissToken = '', triggerBtn = null } = opts;
+        const wv = webview || this.getActiveWebview();
+        const hostBtn = this.elements?.axisStoreInstallHostBtn;
+        const urlBtn = triggerBtn || this.elements?.urlBarCwsInstall;
+
+        this._extensionInstallUiActive = true;
+        this.setExtensionStoreHostBarState('busy', 'Downloading and installing…');
+        this.setExtensionInstallControlState(hostBtn, 'busy');
+        this.setExtensionInstallControlState(urlBtn, 'busy');
+
+        try {
+            await window.electronAPI.installExtensionFromWebStore(rawInput);
+            const token =
+                dismissToken ||
+                (() => {
+                    const amo = axisParseFirefoxAmoAddonKey(String(rawInput));
+                    if (amo) return `amo:${amo.toLowerCase()}`;
+                    const id = axisParseChromeWebStoreExtensionId(String(rawInput));
+                    return id || '';
+                })();
+            if (token) {
+                try {
+                    wv?.send?.('axis-cws-install-succeeded', token);
+                } catch (_) {
+                    /* guest may be gone */
+                }
+            }
+            this.setExtensionStoreHostBarState(
+                'success',
+                'Extension installed — open it from the puzzle icon in the URL bar.'
+            );
+            this.setExtensionInstallControlState(hostBtn, 'success');
+            this.setExtensionInstallControlState(urlBtn, 'success');
+            if (wv) {
+                this.updateUrlBar(wv);
+                try {
+                    const finishUrl = wv.getURL() || '';
+                    this._touchExtensionStoreListingUiForWebview(wv, finishUrl);
+                } catch (_) {}
+            }
+            this._resetExtensionInstallUiAfterDelay(2800);
+        } catch (e) {
+            const msg = e && e.message ? e.message : 'Could not install this extension.';
+            const token =
+                dismissToken ||
+                (() => {
+                    const amo = axisParseFirefoxAmoAddonKey(String(rawInput));
+                    if (amo) return `amo:${amo.toLowerCase()}`;
+                    const id = axisParseChromeWebStoreExtensionId(String(rawInput));
+                    return id || '';
+                })();
+            if (token) axisNotifyExtensionStoreBarFailed(wv, token, msg);
+            this.setExtensionStoreHostBarState('error', msg);
+            this.setExtensionInstallControlState(hostBtn, 'error');
+            this.setExtensionInstallControlState(urlBtn, 'error');
+            this._resetExtensionInstallUiAfterDelay(5200);
+        }
+    }
+
     async installExtensionFromStoreListingUrl(listingUrl, triggerBtn = null) {
         const cwsId = axisParseChromeWebStoreExtensionId(listingUrl);
         const amoKey = axisParseFirefoxAmoAddonKey(listingUrl);
         if (!cwsId && !amoKey) {
-            this.showNotification('Open an extension page on the Chrome Web Store or Mozilla Add-ons first.', 'info');
             return;
         }
-        const wv = this.getActiveWebview();
-        if (triggerBtn) triggerBtn.disabled = true;
-        try {
-            await window.electronAPI.installExtensionFromWebStore(listingUrl);
-            const dismissToken = amoKey ? `amo:${amoKey.toLowerCase()}` : cwsId;
-            if (dismissToken) axisNotifyExtensionStoreBarDismissed(wv, dismissToken);
-            this.showNotification('Extension installed', 'success');
-        } catch (e) {
-            this.showNotification(
-                e && e.message ? e.message : 'Could not install this extension.',
-                'error'
-            );
-        } finally {
-            if (triggerBtn) triggerBtn.disabled = false;
-        }
+        const dismissToken = amoKey ? `amo:${amoKey.toLowerCase()}` : cwsId;
+        await this._runExtensionStoreInstall(listingUrl, {
+            webview: this.getActiveWebview(),
+            dismissToken,
+            triggerBtn: triggerBtn || this.elements?.axisStoreInstallHostBtn
+        });
     }
 
     updateExtensionStoreHostBar(currentUrl) {
-        const el = this.elements;
-        if (!el?.axisStoreInstallHostBar || !el.axisStoreInstallHostText) return;
-        const cwsId = axisParseChromeWebStoreExtensionId(currentUrl);
-        const amoKey = axisParseFirefoxAmoAddonKey(currentUrl);
-        if (cwsId || amoKey) {
-            el.axisStoreInstallHostText.textContent = amoKey
-                ? 'Add to Firefox does not install in Axis. Use Install in Axis.'
-                : 'Add to Chrome does not install in Axis. Use Install in Axis.';
-            el.axisStoreInstallHostBar.classList.remove('hidden');
-        } else {
-            el.axisStoreInstallHostBar.classList.add('hidden');
-        }
+        void this.refreshExtensionStoreListingUi(currentUrl);
     }
 
     // Update the URL bar display and theme
@@ -18702,6 +19863,7 @@ class AxisBrowser {
                 el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
             }
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
+            this._persistUrlBarChromeToTab(this.currentTab);
             return;
         }
 
@@ -18724,6 +19886,7 @@ class AxisBrowser {
             }
             this.updateExtensionStoreHostBar('');
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
+            this._persistUrlBarChromeToTab(this.currentTab);
             return;
         }
         
@@ -18806,21 +19969,7 @@ class AxisBrowser {
             el.urlBarForward.disabled = !webview || !webview.canGoForward();
         }
 
-        if (el.urlBarCwsInstall) {
-            const cwsId = axisParseChromeWebStoreExtensionId(currentUrl);
-            const amoKey = axisParseFirefoxAmoAddonKey(currentUrl);
-            if (cwsId || amoKey) {
-                el.urlBarCwsInstall.classList.remove('hidden');
-                el.urlBarCwsInstall.setAttribute('aria-hidden', 'false');
-                el.urlBarCwsInstall.title = amoKey
-                    ? 'Install this Firefox add-on in Axis (from this Mozilla page)'
-                    : 'Install this Chrome extension in Axis (same tab — no copy/paste)';
-            } else {
-                el.urlBarCwsInstall.classList.add('hidden');
-                el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
-            }
-        }
-        this.updateExtensionStoreHostBar(currentUrl);
+        void this.refreshExtensionStoreListingUi(currentUrl);
         
         // Update input field with current URL
         if (el.urlBarInput) {
@@ -18889,7 +20038,7 @@ class AxisBrowser {
         // Extract theme color from website
         if (!opts.skipExtractTheme) {
             this._voidGuestTask(this.extractUrlBarTheme(webview));
-        } else {
+        } else if (!opts.keepInstantTheme) {
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         }
     }
@@ -18978,53 +20127,35 @@ class AxisBrowser {
         this.applyChatPanelTheme(urlBar);
     }
 
-    /** New tab + Settings: match `uiTheme` (light/dark), not the user theme color. */
+    /** Frosted strip for new tab / AI chat — always dark, unaffected by uiTheme. */
+    _applyNtpUrlBarStyle(urlBar) {
+        const sc = this.getShellChromeStyle({ forceDarkNewTabSurfaces: true });
+        const useShellGlass = !!this.settings?.transparentSites || sc.t > 0;
+
+        const paintBg = useShellGlass
+            ? sc.newTabSearchBg
+            : 'rgba(14, 15, 18, 0.18)';
+
+        const backdrop = sc.backdropMain !== 'none'
+            ? sc.backdropMain
+            : `blur(${sc.newTabSearchBlur}px) saturate(${sc.newTabSearchSat}%)`;
+
+        urlBar.style.setProperty('backdrop-filter', backdrop);
+        urlBar.style.setProperty('-webkit-backdrop-filter', backdrop);
+        urlBar.style.setProperty('--url-bar-bg', paintBg);
+        urlBar.classList.add('dark-mode');
+        urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.06)');
+        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
+        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+        urlBar.style.setProperty('background', paintBg, 'important');
+    }
+
+    /** New tab + Settings URL bar — always dark frosted chrome, unaffected by `uiTheme`. */
     applyInternalShellUrlBarStyle() {
         const urlBar = this.elements?.webviewUrlBar;
-        if (!urlBar) return;
-
-        const lightUi = this.settings?.uiTheme === 'light' && !this.isIncognitoWindow;
-        let paintBg = lightUi ? '#ffffff' : '#000000';
-
-        if (this.settings?.transparentSites) {
-            const sc = this.getShellChromeStyle();
-            paintBg = sc.newTabSearchBg;
-            urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
-            urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
-            urlBar.style.setProperty('--url-bar-bg', paintBg);
-            if (lightUi) {
-                urlBar.classList.remove('dark-mode');
-                urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.1)');
-                urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
-                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.55)');
-                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.1)');
-            } else {
-                urlBar.classList.add('dark-mode');
-                urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
-                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
-                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
-            }
-        } else {
-            urlBar.style.removeProperty('backdrop-filter');
-            urlBar.style.removeProperty('-webkit-backdrop-filter');
-            if (lightUi) {
-                urlBar.classList.remove('dark-mode');
-                urlBar.style.setProperty('--url-bar-bg', '#ffffff');
-                urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.08)');
-                urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
-                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.55)');
-                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.08)');
-            } else {
-                urlBar.classList.add('dark-mode');
-                urlBar.style.setProperty('--url-bar-bg', '#000000');
-                urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
-                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.55)');
-                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
-            }
-        }
-        urlBar.style.setProperty('background', paintBg, 'important');
+        if (!urlBar || !urlBar.classList.contains('url-bar-internal-shell')) return;
+        this._applyNtpUrlBarStyle(urlBar);
         this.applyChatPanelTheme(urlBar);
     }
 
@@ -19374,6 +20505,7 @@ class AxisBrowser {
                 if (!opts.refine) {
                     this._scheduleUrlBarThemeRefine(webview);
                 }
+                this._persistUrlBarChromeToTab(this.currentTab);
             }
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         } catch (e) {
@@ -20976,6 +22108,10 @@ class AxisBrowser {
             this.showNotification(e?.message || 'Could not fill card', 'error');
         }
     }
+}
+
+if (typeof AxisProfileSwipe !== 'undefined') {
+    AxisProfileSwipe.attach(AxisBrowser.prototype);
 }
 
 // Initialize the browser when DOM is loaded
