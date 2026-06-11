@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
   openSettingsWindow: (tab) => ipcRenderer.invoke('open-settings-window', tab),
   openUrlInBrowser: (url) => ipcRenderer.invoke('open-url-in-browser', url),
+  openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
 
   getHistory: () => ipcRenderer.invoke('get-history'),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
