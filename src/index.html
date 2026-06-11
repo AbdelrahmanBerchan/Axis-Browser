@@ -26,13 +26,13 @@
         <div id="main-area">
             <!-- Left Sidebar -->
             <aside id="sidebar">
+                <div class="sidebar-tabs-topbar" aria-label="Sidebar actions">
+                    <button type="button" id="clear-unpinned-floating" class="clear-unpinned-floating hidden" title="Clear all unpinned tabs">
+                        <span>Clear</span>
+                        <i class="fas fa-arrow-down clear-arrow" aria-hidden="true"></i>
+                    </button>
+                </div>
             <div class="sidebar-section tabs-section">
-                    <div class="sidebar-tabs-topbar" aria-label="Sidebar actions">
-                        <button type="button" id="clear-unpinned-floating" class="clear-unpinned-floating hidden" title="Clear all unpinned tabs">
-                            <span>Clear</span>
-                            <i class="fas fa-arrow-down clear-arrow" aria-hidden="true"></i>
-                        </button>
-                    </div>
                     <section id="favorites-section" class="favorites-section hidden" aria-label="Favorites">
                         <div id="favorites-grid" class="favorites-grid" role="list"></div>
                     </section>
@@ -208,15 +208,24 @@
                                 <span class="zoom-percentage">100%</span>
                             </div>
                         </div>
-                        <div id="axis-store-install-host-bar" class="axis-store-install-host-bar hidden" role="region" aria-label="Axis extension install">
-                            <span id="axis-store-install-host-text" class="axis-store-install-host-text"></span>
-                            <button type="button" id="axis-store-install-host-btn" class="axis-store-install-host-btn">Install in Axis</button>
+                        <div id="axis-store-install-host-bar" class="axis-store-install-host-bar hidden" role="region" aria-label="Axis extension install" aria-live="polite">
+                            <div class="axis-store-install-host-leading">
+                                <span id="axis-store-install-host-badge" class="axis-store-install-host-badge hidden" aria-hidden="true">
+                                    <i class="fas fa-check" aria-hidden="true"></i>
+                                    <span>Installed</span>
+                                </span>
+                                <span id="axis-store-install-host-text" class="axis-store-install-host-text"></span>
+                            </div>
+                            <div class="axis-store-install-host-actions">
+                                <button type="button" id="axis-store-install-host-open" class="axis-store-install-host-open hidden" title="Open extensions menu">Extensions</button>
+                                <button type="button" id="axis-store-install-host-btn" class="axis-store-install-host-btn" aria-busy="false">Install in Axis</button>
+                            </div>
                         </div>
                         <!-- Legacy webview: placed first, z-index:0 in CSS - never blocks dynamic webviews -->
                         <webview id="webview" 
                                  src="data:text/html;charset=utf-8,%3C!DOCTYPE%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Cmeta%20name%3D%22color-scheme%22%20content%3D%22dark%20light%22%3E%3Cstyle%3Ehtml%2Cbody%7Bmargin%3A0%3Bmin-height%3A100%25%3Bbackground%3Atransparent!important%7D%3C%2Fstyle%3E%3C%2Fhead%3E%3Cbody%3E%3C!--axis-empty-guest--%3E%3C%2Fbody%3E%3C%2Fhtml%3E" 
                                  allowpopups 
-                                 webpreferences="contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=true,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes"
+                                 webpreferences="contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false,spellcheck=yes"
                                  partition="persist:main"
                                  autosize="true"
                                  style="opacity:0;visibility:hidden;pointer-events:none;">
@@ -238,20 +247,44 @@
                         <div id="webviews-container"></div>
                         <!-- New Tab Page (replaces spotlight - custom local page when opening new tab) -->
                         <div id="new-tab-page" class="new-tab-page hidden">
-                            <div class="new-tab-page-content">
-                                <div class="new-tab-mode-toggle" id="new-tab-mode-toggle" role="tablist" aria-label="New tab mode">
-                                    <button type="button" class="new-tab-mode-btn active" data-mode="search" role="tab" aria-selected="true">Search</button>
-                                    <button type="button" class="new-tab-mode-btn" data-mode="ask" role="tab" aria-selected="false">Ask</button>
-                                </div>
-                                <div class="new-tab-search-wrapper" id="new-tab-search-wrapper">
-                                    <div class="new-tab-search-bar">
-                                        <i class="fas fa-search new-tab-search-icon" aria-hidden="true"></i>
-                                        <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search or enter a URL" autocomplete="off" aria-label="Search or URL">
+                            <div id="new-tab-start-view" class="new-tab-start-view">
+                                <div class="new-tab-page-content">
+                                    <div class="new-tab-hero" id="new-tab-hero">
+                                        <h1 class="new-tab-greeting" id="new-tab-greeting">Good afternoon.</h1>
+                                        <p class="new-tab-tip" id="new-tab-tip" aria-live="polite"></p>
                                     </div>
-                                    <div class="new-tab-suggestions" id="new-tab-suggestions"></div>
-                                    <div class="new-tab-ask-messages hidden" id="new-tab-ask-messages"></div>
+                                    <div class="new-tab-search-section">
+                                        <div id="new-tab-ask-setup" class="new-tab-ask-setup hidden" role="note">
+                                            <p class="new-tab-ask-setup-title">Add a free Groq API key to use Ask</p>
+                                            <p class="new-tab-ask-setup-desc">Sign up on Groq (free tier), paste your key in Settings, and you can chat here and in the sidebar AI panel.</p>
+                                            <div class="new-tab-ask-setup-actions">
+                                                <button type="button" id="new-tab-ask-setup-settings" class="new-tab-ask-setup-btn">Open AI settings</button>
+                                                <button type="button" id="new-tab-ask-setup-groq" class="new-tab-ask-setup-link">Get free key</button>
+                                            </div>
+                                        </div>
+                                        <div class="new-tab-search-wrapper" id="new-tab-search-wrapper">
+                                            <div class="new-tab-search-bar" id="new-tab-search-bar">
+                                                <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search or Enter URL..." autocomplete="off" aria-label="Search or URL">
+                                                <button type="button" id="new-tab-send-btn" class="new-tab-send-btn is-disabled" disabled aria-label="Send message" title="Send">
+                                                    <i class="fas fa-arrow-up" aria-hidden="true"></i>
+                                                </button>
+                                            </div>
+                                            <div class="new-tab-suggestions" id="new-tab-suggestions"></div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
+                            <div id="new-tab-ai-chat-view" class="new-tab-ai-chat-view hidden" aria-label="AI Chat conversation">
+                                <div class="new-tab-ask-messages hidden" id="new-tab-ask-messages"></div>
+                                <div class="new-tab-ai-composer" id="new-tab-ai-composer">
+                                    <div class="new-tab-ai-composer-stack">
+                                        <div id="new-tab-ai-composer-slot"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="button" id="new-tab-menu-btn" class="new-tab-menu-btn" aria-label="New tab settings" title="New tab settings">
+                                <span class="new-tab-menu-icon" aria-hidden="true"></span>
+                            </button>
                         </div>
                         <!-- Empty State Welcome Message -->
                         <div id="empty-state" class="empty-state">
@@ -277,6 +310,13 @@
                                     <i class="fas fa-times"></i>
                                 </button>
                             </div>
+                            <div id="ai-chat-setup" class="ai-chat-setup hidden">
+                                <div class="ai-chat-setup-icon" aria-hidden="true"><i class="fas fa-message"></i></div>
+                                <h3 class="ai-chat-setup-title">Set up AI chat</h3>
+                                <p class="ai-chat-setup-desc">Add a <strong>free</strong> Groq API key to chat here and use <strong>Ask</strong> on the new tab page. Your key stays on this device in your profile settings.</p>
+                                <button type="button" id="ai-chat-setup-settings" class="ai-chat-setup-btn">Add API key in Settings</button>
+                                <button type="button" id="ai-chat-setup-groq" class="ai-chat-setup-link">Get a free Groq key</button>
+                            </div>
                             <div class="ai-chat-messages" id="ai-chat-messages"></div>
                             <div id="ai-chat-quote-bar" class="ai-chat-quote-bar hidden">
                                 <i class="fas fa-quote-right ai-chat-quote-icon"></i>
@@ -289,10 +329,12 @@
                                 <textarea 
                                     id="ai-chat-input" 
                                     class="ai-chat-input" 
-                                    placeholder="Type your message..."
+                                    placeholder="Add your Groq API key in Settings to start chatting"
                                     rows="1"
+                                    disabled
+                                    aria-disabled="true"
                                 ></textarea>
-                                <button id="ai-chat-send" class="ai-chat-send-btn" title="Send (Enter)">
+                                <button id="ai-chat-send" class="ai-chat-send-btn" title="Send (Enter)" disabled aria-disabled="true">
                                     <i class="fas fa-arrow-up"></i>
                                 </button>
                             </div>
@@ -976,6 +1018,7 @@
     </div>
 
     <script src="axis-profile-icons.js"></script>
+    <script src="axis-profile-swipe.js"></script>
     <script src="renderer.js"></script>
 </body>
 </html>
