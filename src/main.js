@@ -19,6 +19,7 @@ const {
   buildVaultAutofillShowMenuJs,
   buildVaultAutofillFillLoginJs
 } = require('./axis-vault-autofill-inject');
+const axisUpdateCheck = require('./axis-update-check');
 
 /** App branding image (project root). Used for windows, macOS Dock, About panel, and packaged .app icon. */
 const APP_ICON_PATH = path.join(__dirname, '..', 'Axis_logo.png');
@@ -320,7 +321,11 @@ async function deleteAxisProfile(profileId) {
   );
   for (const w of wins) {
     try {
-      w.destroy();
+      w.webContents.send('axis-switch-profile', {
+        profileId: AXIS_DEFAULT_PROFILE_ID,
+        animate: false
+      });
+      await switchProfileInBrowserWindow(w, AXIS_DEFAULT_PROFILE_ID);
     } catch (_) {}
   }
 
@@ -447,7 +452,13 @@ function initializeProfileDefaults(profileId, profileStore) {
     sitePermissionOverrides: {},
     historyItems: [],
     downloadItems: [],
-    noteItems: []
+    noteItems: [],
+    ntpWelcomeEnabled: true,
+    ntpWelcomeWeather: false,
+    ntpWelcomeGreeting: true,
+    ntpWelcomeUpdates: true,
+    ntpWelcomeTips: true,
+    ntpAiSearchEnabled: true
   };
   for (const [key, value] of Object.entries(defaults)) {
     if (s.get(key) === undefined) s.set(key, value);
@@ -535,9 +546,9 @@ function getAxisExtensionPopupGuestWebpreferencesAttr() {
     'enableWebGL=true',
     'enableWebGL2=true',
     'enableGpuRasterization=true',
-    'enableZeroCopy=true',
+    'enableZeroCopy=false',
     'enableHardwareAcceleration=true',
-    'backgroundThrottling=true',
+    'backgroundThrottling=false',
     'offscreen=false',
     'spellcheck=yes'
   ].join(',');
@@ -619,9 +630,33 @@ function makeExtensionRecordId(name) {
   return `${base}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Infer Chrome Web Store / AMO listing token saved on install (backfill for older records). */
+function inferStoreListingTokenForRecord(record) {
+  if (!record || typeof record !== 'object') return '';
+  const existing = String(record.storeListingToken || '').trim();
+  if (existing) return existing;
+  const extId = String(record.extensionId || '').trim().toLowerCase();
+  if (/^[a-p]{32}$/.test(extId)) return extId;
+  return '';
+}
+
+function normalizeStoredAxisExtensions(profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
+  const raw = getProfileStore(pid).get(AXIS_EXTENSIONS_STORE_KEY, []);
+  const list = Array.isArray(raw) ? raw.filter((x) => x && typeof x === 'object') : [];
+  let changed = false;
+  const out = list.map((rec) => {
+    const token = inferStoreListingTokenForRecord(rec);
+    if (!token || token === String(rec.storeListingToken || '').trim()) return rec;
+    changed = true;
+    return { ...rec, storeListingToken: token };
+  });
+  if (changed) setStoredAxisExtensions(pid, out);
+  return out;
+}
+
 function getStoredAxisExtensions(profileId = AXIS_DEFAULT_PROFILE_ID) {
-  const raw = getProfileStore(profileId).get(AXIS_EXTENSIONS_STORE_KEY, []);
-  return Array.isArray(raw) ? raw.filter((x) => x && typeof x === 'object') : [];
+  return normalizeStoredAxisExtensions(profileId);
 }
 
 function setStoredAxisExtensions(profileId, list) {
@@ -656,6 +691,145 @@ async function readAxisExtensionManifest(extensionPath) {
 function getAxisManifestText(value, fallback = '') {
   if (typeof value === 'string' && value.trim()) return value.trim();
   return fallback;
+}
+
+/** Chrome manifest i18n placeholder, e.g. `__MSG_extName__`. */
+const AXIS_MANIFEST_I18N_RE = /^__MSG_([A-Za-z0-9@_]+)__$/;
+
+function parseManifestI18nKey(value) {
+  if (typeof value !== 'string') return null;
+  const m = value.trim().match(AXIS_MANIFEST_I18N_RE);
+  return m ? m[1] : null;
+}
+
+const axisExtensionI18nMessagesCache = new Map();
+
+function lookupI18nMessageEntry(messages, key) {
+  if (!messages || !key) return '';
+  const entry = messages[key];
+  if (!entry) return '';
+  if (typeof entry === 'string') return entry.trim();
+  if (entry && typeof entry.message === 'string') return entry.message.trim();
+  return '';
+}
+
+function normalizeExtensionLocaleTag(tag) {
+  return String(tag || '')
+    .trim()
+    .replace(/-/g, '_')
+    .toLowerCase();
+}
+
+function resolveExtensionLocaleDir(requested, availableDirs) {
+  const want = normalizeExtensionLocaleTag(requested);
+  if (!want) return null;
+  return availableDirs.find((d) => normalizeExtensionLocaleTag(d) === want) || null;
+}
+
+async function loadExtensionI18nMessages(extensionPath, manifest) {
+  const localesRoot = path.join(extensionPath, '_locales');
+  let available = [];
+  try {
+    const entries = await fs.promises.readdir(localesRoot, { withFileTypes: true });
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      const msgPath = path.join(localesRoot, ent.name, 'messages.json');
+      try {
+        await fs.promises.access(msgPath);
+        available.push(ent.name);
+      } catch (_) {
+        /* no messages.json */
+      }
+    }
+  } catch (_) {
+    return null;
+  }
+  if (available.length === 0) return null;
+
+  const tryOrder = [];
+  const def = typeof manifest?.default_locale === 'string' ? manifest.default_locale.trim() : '';
+  if (def) tryOrder.push(def);
+  for (const loc of ['en', 'en_US', 'en_GB', 'en-US', 'en-GB']) {
+    if (!tryOrder.some((x) => normalizeExtensionLocaleTag(x) === normalizeExtensionLocaleTag(loc))) {
+      tryOrder.push(loc);
+    }
+  }
+  for (const loc of available) {
+    if (!tryOrder.some((x) => normalizeExtensionLocaleTag(x) === normalizeExtensionLocaleTag(loc))) {
+      tryOrder.push(loc);
+    }
+  }
+
+  for (const localeTag of tryOrder) {
+    const localeDir = resolveExtensionLocaleDir(localeTag, available);
+    if (!localeDir) continue;
+    try {
+      const text = await fs.promises.readFile(
+        path.join(localesRoot, localeDir, 'messages.json'),
+        'utf8'
+      );
+      const data = JSON.parse(text);
+      if (data && typeof data === 'object') return data;
+    } catch (_) {
+      /* try next locale */
+    }
+  }
+  return null;
+}
+
+async function getExtensionI18nMessages(extensionPath, manifest) {
+  const key = extensionPath || '';
+  if (axisExtensionI18nMessagesCache.has(key)) {
+    return axisExtensionI18nMessagesCache.get(key);
+  }
+  const messages = await loadExtensionI18nMessages(extensionPath, manifest);
+  axisExtensionI18nMessagesCache.set(key, messages);
+  return messages;
+}
+
+async function resolveAxisManifestString(raw, extensionPath, manifest, fallback = '') {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return fallback;
+  const i18nKey = parseManifestI18nKey(text);
+  if (!i18nKey || !extensionPath) return text;
+  const messages = await getExtensionI18nMessages(extensionPath, manifest);
+  let resolved = lookupI18nMessageEntry(messages, i18nKey);
+  if (!resolved && i18nKey.includes('@')) {
+    resolved = lookupI18nMessageEntry(messages, i18nKey.split('@')[0]);
+  }
+  if (resolved) return resolved;
+  if (i18nKey) return fallback;
+  return text;
+}
+
+/** Fix stored/display fields that still contain `__MSG_*__` after install or from older Axis versions. */
+async function hydrateExtensionRecordManifestStrings(record, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  if (!record?.path) return record;
+  const needsName = !!parseManifestI18nKey(record.name);
+  const needsDesc = !!parseManifestI18nKey(record.description);
+  if (!needsName && !needsDesc) return record;
+  try {
+    const manifest = await readAxisExtensionManifest(record.path);
+    let name = record.name;
+    let description = record.description;
+    if (needsName) {
+      name = await resolveAxisManifestString(record.name, record.path, manifest, 'Extension');
+    }
+    if (needsDesc) {
+      description = await resolveAxisManifestString(record.description, record.path, manifest, '');
+    }
+    if (name === record.name && description === record.description) return record;
+    const pid = sanitizeProfileId(profileId);
+    const all = getStoredAxisExtensions(pid);
+    const idx = all.findIndex((x) => x.id === record.id);
+    if (idx >= 0) {
+      all[idx] = { ...all[idx], name, description };
+      setStoredAxisExtensions(pid, all);
+    }
+    return { ...record, name, description };
+  } catch (_) {
+    return record;
+  }
 }
 
 function getAxisExtensionOptionsPage(manifest) {
@@ -959,14 +1133,20 @@ async function fetchXpiBufferForFirefoxAmo(addonKey) {
   return buf;
 }
 
-async function installAxisExtensionFromXpiBuffer(xpiBuffer, profileId = AXIS_DEFAULT_PROFILE_ID) {
+async function installAxisExtensionFromXpiBuffer(
+  xpiBuffer,
+  profileId = AXIS_DEFAULT_PROFILE_ID,
+  storeListingToken = ''
+) {
   const tempRoot = path.join(os.tmpdir(), `axis-ext-xpi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const unpackedDir = path.join(tempRoot, 'unpacked');
   await fs.promises.mkdir(unpackedDir, { recursive: true });
   try {
     const zip = new AdmZip(xpiBuffer);
     zip.extractAllTo(unpackedDir, true);
-    return await commitAxisExtensionInstall(unpackedDir, profileId);
+    return await commitAxisExtensionInstall(unpackedDir, profileId, {
+      storeListingToken
+    });
   } finally {
     await fs.promises.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
   }
@@ -976,6 +1156,7 @@ async function installExtensionFromStoreUrlOrId(rawInput, profileId = AXIS_DEFAU
   const pid = sanitizeProfileId(profileId);
   const s = String(rawInput || '').trim();
   const compact = s.replace(/\s+/g, '');
+  const listingToken = resolveStoreListingTokenForInput(rawInput);
 
   if (/addons\.mozilla\.org/i.test(s)) {
     const mozKey = parseFirefoxAmoAddonKey(rawInput);
@@ -983,21 +1164,21 @@ async function installExtensionFromStoreUrlOrId(rawInput, profileId = AXIS_DEFAU
       throw new Error('Could not read the add-on slug from this Mozilla Add-ons URL.');
     }
     const xpi = await fetchXpiBufferForFirefoxAmo(mozKey);
-    return installAxisExtensionFromXpiBuffer(xpi, pid);
+    return installAxisExtensionFromXpiBuffer(xpi, pid, listingToken || `amo:${mozKey.toLowerCase()}`);
   }
 
   if (/^[a-p]{32}$/i.test(compact)) {
     const crx = await fetchCrxBufferForExtensionId(compact.toLowerCase());
-    return installAxisExtensionFromCrxBuffer(crx, pid);
+    return installAxisExtensionFromCrxBuffer(crx, pid, listingToken || compact.toLowerCase());
   }
 
   const firefoxKey = parseFirefoxAmoAddonKey(rawInput);
   if (firefoxKey) {
     const xpi = await fetchXpiBufferForFirefoxAmo(firefoxKey);
-    return installAxisExtensionFromXpiBuffer(xpi, pid);
+    return installAxisExtensionFromXpiBuffer(xpi, pid, listingToken || `amo:${firefoxKey.toLowerCase()}`);
   }
 
-  return installAxisExtensionFromChromeWebStoreInput(rawInput, pid);
+  return installAxisExtensionFromChromeWebStoreInput(rawInput, pid, listingToken);
 }
 
 /** CRX2 / CRX3: payload after header is a ZIP of the unpacked extension. */
@@ -1059,30 +1240,61 @@ async function fetchCrxBufferForExtensionId(extensionId) {
   return buf;
 }
 
-async function commitAxisExtensionInstall(sourceDir, profileId = AXIS_DEFAULT_PROFILE_ID) {
+/** Chrome Web Store id or `amo:slug` for matching store listing pages to installed add-ons. */
+function resolveStoreListingTokenForInput(rawInput) {
+  const s = String(rawInput || '').trim();
+  if (/addons\.mozilla\.org/i.test(s)) {
+    const mozKey = parseFirefoxAmoAddonKey(rawInput);
+    return mozKey ? `amo:${mozKey.toLowerCase()}` : null;
+  }
+  const compact = s.replace(/\s+/g, '');
+  if (/^[a-p]{32}$/i.test(compact)) return compact.toLowerCase();
+  const firefoxKey = parseFirefoxAmoAddonKey(rawInput);
+  if (firefoxKey) return `amo:${firefoxKey.toLowerCase()}`;
+  const extId = parseChromeWebStoreExtensionId(rawInput);
+  return extId || null;
+}
+
+async function commitAxisExtensionInstall(sourceDir, profileId = AXIS_DEFAULT_PROFILE_ID, opts = {}) {
   const pid = sanitizeProfileId(profileId);
   const manifest = await readAxisExtensionManifest(sourceDir);
+  const displayName = await resolveAxisManifestString(
+    manifest.name,
+    sourceDir,
+    manifest,
+    'Extension'
+  );
+  const displayDescription = await resolveAxisManifestString(
+    manifest.description,
+    sourceDir,
+    manifest,
+    ''
+  );
   await fs.promises.mkdir(getAxisExtensionsDir(), { recursive: true });
-  const id = makeExtensionRecordId(manifest.name);
+  const id = makeExtensionRecordId(displayName);
   const destPath = path.join(getAxisExtensionsDir(), id);
   await fs.promises.cp(sourceDir, destPath, {
     recursive: true,
     errorOnExist: false,
     force: true
   });
+  axisExtensionI18nMessagesCache.set(destPath, await getExtensionI18nMessages(sourceDir, manifest));
+  const storeListingToken =
+    typeof opts.storeListingToken === 'string' ? opts.storeListingToken.trim() : '';
   const record = {
     id,
     extensionId: '',
-    name: getAxisManifestText(manifest.name, 'Extension'),
+    name: displayName,
     version: getAxisManifestText(manifest.version),
-    description: getAxisManifestText(manifest.description),
+    description: displayDescription,
     manifestVersion: manifest.manifest_version,
     enabled: true,
     path: destPath,
     iconUrl: getAxisExtensionIconUrl(destPath, manifest),
     optionsPage: getAxisExtensionOptionsPage(manifest),
     popupPage: getAxisExtensionDefaultPopup(manifest),
-    installedAt: Date.now()
+    installedAt: Date.now(),
+    storeListingToken: storeListingToken || ''
   };
   const all = getStoredAxisExtensions(pid);
   all.push(record);
@@ -1100,7 +1312,11 @@ async function commitAxisExtensionInstall(sourceDir, profileId = AXIS_DEFAULT_PR
   return { extension: loaded, extensions: await listAxisExtensions(pid) };
 }
 
-async function installAxisExtensionFromCrxBuffer(crxBuffer, profileId = AXIS_DEFAULT_PROFILE_ID) {
+async function installAxisExtensionFromCrxBuffer(
+  crxBuffer,
+  profileId = AXIS_DEFAULT_PROFILE_ID,
+  storeListingToken = ''
+) {
   const zipBuf = extractZipPayloadFromCrx(crxBuffer);
   const tempRoot = path.join(os.tmpdir(), `axis-ext-crx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const unpackedDir = path.join(tempRoot, 'unpacked');
@@ -1108,13 +1324,19 @@ async function installAxisExtensionFromCrxBuffer(crxBuffer, profileId = AXIS_DEF
   try {
     const zip = new AdmZip(zipBuf);
     zip.extractAllTo(unpackedDir, true);
-    return await commitAxisExtensionInstall(unpackedDir, profileId);
+    return await commitAxisExtensionInstall(unpackedDir, profileId, {
+      storeListingToken
+    });
   } finally {
     await fs.promises.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function installAxisExtensionFromChromeWebStoreInput(rawInput, profileId = AXIS_DEFAULT_PROFILE_ID) {
+async function installAxisExtensionFromChromeWebStoreInput(
+  rawInput,
+  profileId = AXIS_DEFAULT_PROFILE_ID,
+  storeListingToken = ''
+) {
   const extId = parseChromeWebStoreExtensionId(rawInput);
   if (!extId) {
     throw new Error(
@@ -1122,7 +1344,7 @@ async function installAxisExtensionFromChromeWebStoreInput(rawInput, profileId =
     );
   }
   const crx = await fetchCrxBufferForExtensionId(extId);
-  return installAxisExtensionFromCrxBuffer(crx, profileId);
+  return installAxisExtensionFromCrxBuffer(crx, profileId, storeListingToken || extId);
 }
 
 function toAxisExtensionView(record, profileId = AXIS_DEFAULT_PROFILE_ID) {
@@ -1145,7 +1367,8 @@ function toAxisExtensionView(record, profileId = AXIS_DEFAULT_PROFILE_ID) {
     optionsUrl: activeExtensionId && optionsPath ? `chrome-extension://${activeExtensionId}/${optionsPath}` : '',
     popupUrl: activeExtensionId && popupPath ? `chrome-extension://${activeExtensionId}/${popupPath}` : '',
     installedAt: record.installedAt || 0,
-    manifestVersion: record.manifestVersion || null
+    manifestVersion: record.manifestVersion || null,
+    storeListingToken: record.storeListingToken || ''
   };
 }
 
@@ -1169,9 +1392,19 @@ async function loadAxisExtensionRecord(record, profileId = AXIS_DEFAULT_PROFILE_
     const next = {
       ...record,
       extensionId: ext.id,
-      name: getAxisManifestText(manifest.name, ext.name || record.name),
+      name: await resolveAxisManifestString(
+        manifest.name,
+        record.path,
+        manifest,
+        ext.name || record.name || 'Extension'
+      ),
       version: getAxisManifestText(manifest.version, record.version),
-      description: getAxisManifestText(manifest.description, record.description),
+      description: await resolveAxisManifestString(
+        manifest.description,
+        record.path,
+        manifest,
+        record.description || ''
+      ),
       manifestVersion: manifest.manifest_version,
       optionsPage: getAxisExtensionOptionsPage(manifest),
       popupPage: getAxisExtensionDefaultPopup(manifest),
@@ -1219,9 +1452,13 @@ async function loadStoredAxisExtensionsForProfile(profileId) {
   const pid = sanitizeProfileId(profileId);
   const all = getStoredAxisExtensions(pid);
   for (const record of all) {
+    await hydrateExtensionRecordManifestStrings(record, pid);
+  }
+  for (const record of getStoredAxisExtensions(pid)) {
     if (record.enabled === false) continue;
     await loadAxisExtensionRecord(record, pid);
   }
+  broadcastExtensionsReady(pid);
 }
 
 async function loadAllProfileExtensions() {
@@ -1253,9 +1490,64 @@ async function migrateAxisExtensionPopupPagesIfNeeded(profileId = AXIS_DEFAULT_P
   if (changed) setStoredAxisExtensions(pid, out);
 }
 
-function listAxisExtensions(profileId = AXIS_DEFAULT_PROFILE_ID) {
-  const all = getStoredAxisExtensions(profileId);
-  return all.map((rec) => toAxisExtensionView(rec, profileId));
+async function listAxisExtensions(profileId = AXIS_DEFAULT_PROFILE_ID) {
+  const pid = sanitizeProfileId(profileId);
+  const all = getStoredAxisExtensions(pid);
+  const out = [];
+  for (const rec of all) {
+    const hydrated = await hydrateExtensionRecordManifestStrings(rec, pid);
+    out.push(toAxisExtensionView(hydrated, pid));
+  }
+  return out;
+}
+
+/**
+ * Whether this profile already has an extension from a store listing URL / token.
+ * Reads persisted profile store (works immediately after app restart).
+ */
+async function resolveStoreListingInstallStatus(profileId, rawUrlOrToken) {
+  const pid = sanitizeProfileId(profileId);
+  let token = '';
+  const raw = String(rawUrlOrToken || '').trim();
+  if (/^amo:[a-z0-9._-]+$/i.test(raw)) {
+    token = raw.toLowerCase();
+  } else if (/^[a-p]{32}$/i.test(raw.replace(/\s+/g, ''))) {
+    token = raw.replace(/\s+/g, '').toLowerCase();
+  } else if (raw) {
+    token = resolveStoreListingTokenForInput(raw) || '';
+  }
+  if (!token) {
+    return { installed: false, token: '', name: '', version: '', extensionRecordId: '' };
+  }
+  const cwsId = token.startsWith('amo:') ? null : token;
+  const all = getStoredAxisExtensions(pid);
+  let match = null;
+  for (const rec of all) {
+    const listing = String(rec.storeListingToken || '').trim();
+    if (listing && listing === token) {
+      match = rec;
+      break;
+    }
+    if (cwsId) {
+      const extId = String(rec.extensionId || '').trim().toLowerCase();
+      if (extId && extId === cwsId) {
+        match = rec;
+        break;
+      }
+    }
+  }
+  if (!match) {
+    return { installed: false, token, name: '', version: '', extensionRecordId: '' };
+  }
+  const hydrated = await hydrateExtensionRecordManifestStrings(match, pid);
+  const view = toAxisExtensionView(hydrated, pid);
+  return {
+    installed: true,
+    token,
+    name: view.name || '',
+    version: view.version || '',
+    extensionRecordId: view.id || ''
+  };
 }
 
 async function installAxisExtensionFromFolder(ownerWindow, profileId) {
@@ -1320,7 +1612,7 @@ async function setAxisExtensionEnabled(id, enabled, profileId = AXIS_DEFAULT_PRO
   try {
     createMenu();
   } catch (_) {}
-  return listAxisExtensions(pid);
+  return await listAxisExtensions(pid);
 }
 
 async function removeAxisExtension(id, profileId = AXIS_DEFAULT_PROFILE_ID) {
@@ -1342,7 +1634,7 @@ async function removeAxisExtension(id, profileId = AXIS_DEFAULT_PROFILE_ID) {
   try {
     createMenu();
   } catch (_) {}
-  return listAxisExtensions(pid);
+  return await listAxisExtensions(pid);
 }
 
 async function openAxisExtensionOptions(id, profileId = AXIS_DEFAULT_PROFILE_ID) {
@@ -1483,6 +1775,21 @@ function broadcastSettingsUpdated(profileId = null) {
     try {
       applyVibrancyToWindow(w);
       w.webContents.send('settings-updated', { profileId: winProfile });
+    } catch (_) {
+      /* window gone */
+    }
+  }
+}
+
+/** After extensions load from disk, refresh store listing UI (installed badge) in browser windows. */
+function broadcastExtensionsReady(profileId = null) {
+  const target = profileId != null ? sanitizeProfileId(profileId) : null;
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed() || w.__axisIsIncognito) continue;
+    const winProfile = sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+    if (target && winProfile !== target) continue;
+    try {
+      w.webContents.send('axis-extensions-ready', { profileId: winProfile });
     } catch (_) {
       /* window gone */
     }
@@ -1652,6 +1959,8 @@ function configureAxisSessionInstance(sess) {
 
 // Keep a global reference of the window object
 let mainWindow;
+/** Native Settings popup windows keyed by profile id. */
+const settingsWindowsByProfile = new Map();
 let sessionConfigured = false;
 
 /** One-time session configuration — must only run once per app lifecycle. */
@@ -2317,20 +2626,71 @@ function sendProfileMenuAction(action, payload = {}) {
   win.webContents.send('profile-menu-action', { action, ...payload });
 }
 
-function openOrFocusProfileWindowById(profileId) {
+/**
+ * Switch the given window to another profile in place (same window, no new BrowserWindow).
+ * @param {import('electron').BrowserWindow} win
+ * @param {string} profileId
+ */
+async function switchProfileInBrowserWindow(win, profileId) {
+  if (!win || win.isDestroyed() || win.__axisIsIncognito === true) return false;
   const id = ensureAxisProfile(profileId || AXIS_DEFAULT_PROFILE_ID);
-  let focused = focusExistingProfileWindow(id);
-  if (!focused) {
-    focused = createWindow({ profileId: id });
+  const oldId = sanitizeProfileId(win.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+  if (oldId === id) return true;
+  const prof = listAxisProfiles().find((p) => p.id === id);
+  win.__axisProfileId = id;
+  win.__axisProfileName = prof?.name || id;
+  refreshProfileWindowTitles(id);
+  syncAdBlockerForProfile(id);
+  try {
+    await migrateAxisExtensionPopupPagesIfNeeded(id);
+    await loadStoredAxisExtensionsForProfile(id);
+  } catch (e) {
+    console.error('switchProfileInBrowserWindow extensions:', e);
   }
-  if (focused && !focused.isDestroyed()) {
+  try {
+    createMenu();
+  } catch (_) {}
+  return true;
+}
+
+function openOrFocusProfileWindowById(profileId, senderWebContents = null) {
+  const id = ensureAxisProfile(profileId || AXIS_DEFAULT_PROFILE_ID);
+  let win = null;
+  if (senderWebContents && !senderWebContents.isDestroyed()) {
+    win = BrowserWindow.fromWebContents(senderWebContents);
+  }
+  if (!win || win.isDestroyed() || win.__axisIsIncognito === true) {
+    win = BrowserWindow.getFocusedWindow();
+  }
+  const normalWins = BrowserWindow.getAllWindows().filter(
+    (w) => w && !w.isDestroyed() && w.__axisIsIncognito !== true
+  );
+  if (!win || win.isDestroyed() || win.__axisIsIncognito === true) {
+    win = normalWins[0] || null;
+  }
+  if (win && !win.isDestroyed()) {
+    const cur = sanitizeProfileId(win.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+    if (cur !== id) {
+      try {
+        win.webContents.send('axis-switch-profile', { profileId: id, animate: true });
+      } catch (_) {}
+    }
     try {
-      if (focused.isMinimized()) focused.restore();
-      focused.show();
-      focused.focus();
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    } catch (_) {}
+    return win;
+  }
+  const created = createWindow({ profileId: id });
+  if (created && !created.isDestroyed()) {
+    try {
+      if (created.isMinimized()) created.restore();
+      created.show();
+      created.focus();
     } catch (_) {}
   }
-  return focused;
+  return created;
 }
 
 function truncateProfileMenuLabel(name, max = 52) {
@@ -2435,7 +2795,6 @@ const unregisterShortcuts = () => {
 
   app.commandLine.appendSwitch('ignore-gpu-blocklist');
   app.commandLine.appendSwitch('enable-gpu-rasterization');
-  app.commandLine.appendSwitch('enable-zero-copy');
   app.commandLine.appendSwitch('enable-oop-rasterization');
   app.commandLine.appendSwitch('enable-accelerated-2d-canvas');
   app.commandLine.appendSwitch('enable-partial-raster');
@@ -2648,24 +3007,158 @@ function createWindow(options = {}) {
   return win;
 }
 
-/** Open Settings as an in-browser tab (`axis://settings`) in the main shell. */
-function openSettingsInBrowserTab(section = null) {
+/** Resolve profile for a Settings popup (explicit hint, focused window, or main). */
+function resolveProfileIdForSettings(profileIdHint = null) {
+  if (profileIdHint != null && typeof profileIdHint === 'string') {
+    return sanitizeProfileId(profileIdHint);
+  }
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed() && focused.__axisIsIncognito !== true) {
+    return sanitizeProfileId(focused.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+  }
   let win = mainWindow;
   if (!win || win.isDestroyed()) {
-    createWindow();
-    win = mainWindow;
+    win = BrowserWindow.getAllWindows().find(
+      (w) => !w.isDestroyed() && w.__axisIsIncognito !== true
+    );
   }
-  if (!win || win.isDestroyed()) {
-    const fallback = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
-    if (!fallback) return;
-    win = fallback;
+  if (win && !win.isDestroyed()) {
+    return sanitizeProfileId(win.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
   }
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
-  try {
-    win.webContents.send('open-settings-tab', section || null);
-  } catch (_) {}
+  return AXIS_DEFAULT_PROFILE_ID;
+}
+
+function getSettingsWindowLoadUrl(profileId, section = null) {
+  const filePath = path.join(__dirname, 'settings.html');
+  const u = pathToFileURL(filePath);
+  u.searchParams.set('profile', sanitizeProfileId(profileId));
+  const safeSection = sanitizeSettingsSectionId(section);
+  if (safeSection) u.hash = safeSection;
+  return u.href;
+}
+
+/** Open Settings in a native frosted popup window (one per profile). */
+function openSettingsWindow(section = null, profileIdHint = null) {
+  const profileId = resolveProfileIdForSettings(profileIdHint);
+  const safeSection = sanitizeSettingsSectionId(section);
+
+  let existing = settingsWindowsByProfile.get(profileId);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+    if (safeSection) {
+      try {
+        existing.webContents.send('switch-settings-tab', safeSection);
+      } catch (_) {}
+    }
+    return existing;
+  }
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    const anyBrowser = BrowserWindow.getAllWindows().find(
+      (w) => !w.isDestroyed() && w.__axisIsIncognito !== true && !w.__axisIsSettingsWindow
+    );
+    if (!anyBrowser) createWindow();
+  }
+
+  const isDarwin = process.platform === 'darwin';
+  const win = new BrowserWindow({
+    width: 860,
+    height: 800,
+    minWidth: 680,
+    minHeight: 520,
+    maxWidth: 1100,
+    title: 'Settings',
+    icon: APP_ICON_PATH,
+    resizable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    closable: true,
+    show: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    ...(isDarwin
+      ? {
+          titleBarStyle: 'hiddenInset',
+          frame: false,
+          vibrancy: 'under-window',
+          visualEffectState: 'active',
+          ...AXIS_MACOS_BROWSER_WINDOW_SHAPE
+        }
+      : process.platform === 'win32'
+        ? { frame: false, backgroundMaterial: 'acrylic' }
+        : { frame: false }),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'settings-preload.js'),
+      partition: getProfilePartition(profileId),
+      backgroundThrottling: true,
+      spellcheck: false,
+      webSecurity: true
+    }
+  });
+
+  win.__axisIsSettingsWindow = true;
+  win.__axisIsIncognito = false;
+  win.__axisProfileId = profileId;
+
+  if (isDarwin) {
+    win.__axisSidebarRight = false;
+    attachMacTrafficLightResize(win);
+  }
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      const lowerUrl = url.toLowerCase();
+      if (
+        lowerUrl.startsWith('javascript:') ||
+        lowerUrl.startsWith('data:') ||
+        lowerUrl.startsWith('vbscript:') ||
+        lowerUrl.startsWith('file:')
+      ) {
+        return { action: 'deny' };
+      }
+      openUrlInAxisBrowser(url);
+      return { action: 'deny' };
+    }
+    return { action: 'deny' };
+  });
+
+  win.once('ready-to-show', () => {
+    if (isDarwin && !win.isDestroyed()) {
+      positionMacTrafficLights(win, false);
+      setImmediate(() => {
+        if (!win.isDestroyed()) positionMacTrafficLights(win, false);
+      });
+    }
+    if (process.platform === 'win32' && !win.isDestroyed()) {
+      try {
+        win.setBackgroundMaterial('acrylic');
+      } catch (_) {}
+    }
+    applyVibrancyToWindow(win);
+    win.show();
+    win.focus();
+    if (isDarwin) win.setWindowButtonVisibility(true);
+  });
+
+  win.on('closed', () => {
+    if (settingsWindowsByProfile.get(profileId) === win) {
+      settingsWindowsByProfile.delete(profileId);
+    }
+  });
+
+  settingsWindowsByProfile.set(profileId, win);
+  win.loadURL(getSettingsWindowLoadUrl(profileId, safeSection));
+  return win;
+}
+
+/** Open Settings (native popup). Kept for menu handlers. */
+function openSettingsInBrowserTab(section = null) {
+  openSettingsWindow(section);
 }
 
 function menuAccel(key) {
@@ -2824,7 +3317,7 @@ function axisNativeImageForExtensionMenu(iconUrl) {
 /** macOS menu bar (and other platforms): Extensions → installed items, store links, Settings. */
 function buildExtensionsSubmenu() {
   const activeProfileId = getActiveProfileId();
-  const exts = listAxisExtensions(activeProfileId);
+  const exts = getStoredAxisExtensions(activeProfileId);
   /** @type {import('electron').MenuItemConstructorOptions[]} */
   const items = [];
   if (!exts.length) {
@@ -2844,7 +3337,7 @@ function buildExtensionsSubmenu() {
         click: async () => {
           try {
             const pid = getActiveProfileId();
-            const v = listAxisExtensions(pid).find((x) => x.id === extId);
+            const v = getStoredAxisExtensions(pid).find((x) => x.id === extId);
             if (!v) return;
             if (v.enabled === false) return;
             const win = getActiveAxisWindow();
@@ -2942,6 +3435,7 @@ function createMenu() {
             void showMacAboutDialog();
           }
         },
+        axisUpdateCheck.getCheckForUpdatesMenuItem(),
         { type: 'separator' },
         {
           label: 'Settings…',
@@ -3244,6 +3738,8 @@ function createMenu() {
   ];
 
   const helpSubmenu = [
+    axisUpdateCheck.getCheckForUpdatesMenuItem(),
+    { type: 'separator' },
     {
       label: 'Visit Website',
       click: () => openUrlInAxisBrowser('https://abdelrahmanberchan.github.io/axis.github.io/')
@@ -3482,6 +3978,14 @@ function warmUpMainProcessNativePaths() {
 
 // App event handlers
 app.whenReady().then(async () => {
+  axisUpdateCheck.install({
+    getParentWindow: () => {
+      const focused = BrowserWindow.getFocusedWindow();
+      if (focused && !focused.isDestroyed()) return focused;
+      if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
+      return null;
+    }
+  });
   app.on('web-contents-created', (_event, contents) => {
     contents.setMaxListeners(0);
 
@@ -3938,12 +4442,22 @@ ipcMain.handle('axis-vault-fill-candidates', (event, payload) => {
 
 // IPC handlers
 ipcMain.handle('open-settings-window', (event, tab) => {
-  openSettingsInBrowserTab(tab || null);
+  openSettingsWindow(tab || null, getProfileIdForEvent(event));
+  return true;
+});
+
+ipcMain.handle('axis-close-settings-window', (event) => {
+  const win = getWindowFromSender(event?.sender);
+  if (win && win.__axisIsSettingsWindow && !win.isDestroyed()) {
+    win.close();
+  }
   return true;
 });
 
 const AXIS_SETTINGS_SECTION_IDS = new Set([
   'customization',
+  'newtab',
+  'ai',
   'history',
   'shortcuts',
   'permissions',
@@ -4088,22 +4602,43 @@ ipcMain.handle('set-setting', (event, key, value) => {
   return true;
 });
 
+function applyAxisSessionFlushPayload(event, payload) {
+  if (!payload || payload.incognito) return;
+  const s = getSettingsStoreForEvent(event);
+  if (payload.tabGroups != null) s.set('tabGroups', payload.tabGroups);
+  if (payload.pinnedTabs != null) s.set('pinnedTabs', payload.pinnedTabs);
+}
+
 /** Synchronous session flush before window teardown (tab groups, pinned tabs). */
 ipcMain.on('axis-flush-session-sync', (event, payload) => {
-  if (!payload || payload.incognito) return;
   try {
-    const s = getSettingsStoreForEvent(event);
-    if (payload.tabGroups != null) s.set('tabGroups', payload.tabGroups);
-    if (payload.pinnedTabs != null) s.set('pinnedTabs', payload.pinnedTabs);
+    applyAxisSessionFlushPayload(event, payload);
   } catch (e) {
     console.error('axis-flush-session-sync failed:', e);
+  }
+});
+
+/** Async flush during in-window profile switch (avoids blocking the renderer). */
+ipcMain.handle('axis-flush-session-async', async (event, payload) => {
+  try {
+    applyAxisSessionFlushPayload(event, payload);
+    return true;
+  } catch (e) {
+    console.error('axis-flush-session-async failed:', e);
+    return false;
   }
 });
 
 ipcMain.handle('get-extensions', async (event) => {
   const pid = getProfileIdForEvent(event);
   await migrateAxisExtensionPopupPagesIfNeeded(pid);
-  return listAxisExtensions(pid);
+  return await listAxisExtensions(pid);
+});
+
+ipcMain.handle('get-store-listing-install-status', async (event, rawUrl) => {
+  const pid = getProfileIdForEvent(event);
+  await migrateAxisExtensionPopupPagesIfNeeded(pid);
+  return await resolveStoreListingInstallStatus(pid, rawUrl);
 });
 
 ipcMain.handle('install-extension', async (event) => {
@@ -4435,6 +4970,35 @@ ipcMain.handle('open-or-focus-personal-window', () => {
   return true;
 });
 
+ipcMain.handle('check-for-updates', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return axisUpdateCheck.checkForUpdates({
+    parentWindow: win && !win.isDestroyed() ? win : undefined
+  });
+});
+
+ipcMain.handle('open-external-url', async (_event, url) => {
+  if (typeof url !== 'string' || !/^https:\/\//i.test(url.trim())) return false;
+  try {
+    await shell.openExternal(url.trim());
+    return true;
+  } catch (e) {
+    console.error('open-external-url failed:', e);
+    return false;
+  }
+});
+
+ipcMain.handle('get-profile-bootstrap', (_event, profileId) => {
+  const id = sanitizeProfileId(profileId || AXIS_DEFAULT_PROFILE_ID);
+  const store = getProfileStore(id);
+  return {
+    settings: { ...store.store },
+    pinnedTabs: store.get('pinnedTabs', []),
+    tabGroups: store.get('tabGroups', []),
+    favorites: store.get('favorites', [])
+  };
+});
+
 ipcMain.handle('get-profiles', () => {
   return listAxisProfiles();
 });
@@ -4486,9 +5050,20 @@ ipcMain.handle('delete-profile', async (_event, payload) => {
   }
 });
 
-ipcMain.handle('open-or-focus-profile-window', (_event, profileId) => {
-  openOrFocusProfileWindowById(profileId);
+ipcMain.handle('open-or-focus-profile-window', (event, profileId) => {
+  openOrFocusProfileWindowById(profileId, event?.sender);
   return true;
+});
+
+ipcMain.handle('switch-profile-in-window', async (event, profileId) => {
+  const win = getWindowFromSender(event?.sender);
+  if (!win || win.isDestroyed() || win.__axisIsIncognito === true) {
+    return { ok: false };
+  }
+  const fromProfileId = sanitizeProfileId(win.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+  const id = ensureAxisProfile(profileId || AXIS_DEFAULT_PROFILE_ID);
+  const ok = await switchProfileInBrowserWindow(win, id);
+  return { ok: !!ok, profileId: id, fromProfileId };
 });
 
 ipcMain.handle('open-url-in-new-window', (event, url) => {
