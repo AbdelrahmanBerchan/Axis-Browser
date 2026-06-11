@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
   /** Sync write before quit — avoids losing tab groups when async setSetting does not finish. */
   flushSessionSync: (payload) => ipcRenderer.sendSync('axis-flush-session-sync', payload),
+  flushSessionAsync: (payload) => ipcRenderer.invoke('axis-flush-session-async', payload),
   getSitePermissionOverrides: () => ipcRenderer.invoke('get-site-permission-overrides'),
   setSitePermissionOverrides: (obj) => ipcRenderer.invoke('set-site-permission-overrides', obj),
   sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
@@ -19,8 +20,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSettingsTabLoadUrl: (section) => ipcRenderer.invoke('get-settings-tab-load-url', section),
   getSettingsWebviewPreloadPath: () => ipcRenderer.invoke('get-settings-webview-preload-path'),
   openUrlInBrowser: (url) => ipcRenderer.invoke('open-url-in-browser', url),
+  openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   printPage: (webContentsId) => ipcRenderer.invoke('print-page', webContentsId),
   getExtensions: () => ipcRenderer.invoke('get-extensions'),
+  getStoreListingInstallStatus: (rawUrl) =>
+    ipcRenderer.invoke('get-store-listing-install-status', rawUrl),
   installExtension: () => ipcRenderer.invoke('install-extension'),
   installExtensionFromWebStore: (rawInput) =>
     ipcRenderer.invoke('install-extension-from-web-store', rawInput),
@@ -77,6 +81,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onOpenSettingsTab: (callback) => ipcRenderer.on('open-settings-tab', (event, section) => callback(section)),
   onSettingsUpdated: (callback) =>
     ipcRenderer.on('settings-updated', (_event, data) => callback(data)),
+  onExtensionsReady: (callback) =>
+    ipcRenderer.on('axis-extensions-ready', (_event, data) => callback(data)),
   onProfilesUpdated: (callback) => ipcRenderer.on('profiles-updated', () => callback()),
   onProfileMenuAction: (callback) =>
     ipcRenderer.on('profile-menu-action', (_event, payload) => callback(payload)),
@@ -91,6 +97,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openOrFocusIncognitoWindow: () => ipcRenderer.invoke('open-or-focus-incognito-window'),
   openOrFocusPersonalWindow: () => ipcRenderer.invoke('open-or-focus-personal-window'),
   getProfiles: () => ipcRenderer.invoke('get-profiles'),
+  getProfileBootstrap: (profileId) => ipcRenderer.invoke('get-profile-bootstrap', profileId),
   createProfile: (payload) => ipcRenderer.invoke('create-profile', payload),
   updateProfile: (payload) => ipcRenderer.invoke('update-profile', payload),
   reorderProfiles: (orderedIds) => ipcRenderer.invoke('reorder-profiles', orderedIds),
@@ -100,6 +107,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       typeof profileId === 'object' ? profileId : { id: profileId }
     ),
   openOrFocusProfileWindow: (profileId) => ipcRenderer.invoke('open-or-focus-profile-window', profileId),
+  switchProfileInWindow: (profileId) => ipcRenderer.invoke('switch-profile-in-window', profileId),
+  onAxisSwitchProfile: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('axis-switch-profile', handler);
+    return () => ipcRenderer.removeListener('axis-switch-profile', handler);
+  },
   openUrlInNewWindow: (url) => ipcRenderer.invoke('open-url-in-new-window', url),
   
   // Sidebar favorites
