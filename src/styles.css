@@ -126,8 +126,8 @@ body.incognito-window {
  * Light-mode OVERLAYS (:root[data-ui-theme="light"]) — driven by the `uiTheme` setting.
  *
  * SCOPE: only secondary / overlay surfaces are flipped — popups, menus, Cmd+F modal,
- * security panel, AI chat sidebar panel, new-tab-page inner cards, zoom indicator,
- * context menus, notes / history / downloads / bookmark panels.
+ * security panel, zoom indicator, context menus, notes / history / downloads /
+ * bookmark panels. Settings, new tab, and AI chat always stay dark.
  *
  * The MAIN SHELL (tabs, sidebar, url bar strip, nav buttons, background gradient) is
  * deliberately UNTOUCHED in both modes. The user's theme color drives those surfaces
@@ -148,7 +148,6 @@ body.incognito-window {
 :root[data-ui-theme="light"] .downloads-panel,
 :root[data-ui-theme="light"] .history-panel,
 :root[data-ui-theme="light"] .notes-panel,
-:root[data-ui-theme="light"] .ai-chat-panel,
 :root[data-ui-theme="light"] .spotlight-overlay,
 :root[data-ui-theme="light"] .spotlight-input,
 :root[data-ui-theme="light"] .bookmark-popup,
@@ -156,8 +155,7 @@ body.incognito-window {
 :root[data-ui-theme="light"] .nav-menu,
 :root[data-ui-theme="light"] .context-menu,
 :root[data-ui-theme="light"] .find-bar,
-:root[data-ui-theme="light"] .tab-preview-box,
-:root[data-ui-theme="light"] .settings-panel {
+:root[data-ui-theme="light"] .tab-preview-box {
     background: rgba(248, 248, 250, 0.95) !important;
     backdrop-filter: blur(24px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
@@ -181,9 +179,7 @@ body.incognito-window {
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08) !important;
 }
 
-/* Text flip ONLY inside those overlay surfaces + the in-app new-tab-page / empty state.
- * Shell classes (.tab, .sidebar, .nav-btn, .url-bar) are deliberately absent so they
- * keep their dark-mode text color on the theme-colored shell. */
+/* Text flip ONLY inside overlay surfaces + empty state. New tab and AI chat stay dark. */
 :root[data-ui-theme="light"] .nav-menu,
 :root[data-ui-theme="light"] .nav-menu *,
 :root[data-ui-theme="light"] .downloads-popup,
@@ -206,23 +202,12 @@ body.incognito-window {
 :root[data-ui-theme="light"] .empty-state-title,
 :root[data-ui-theme="light"] .empty-state-subtitle,
 :root[data-ui-theme="light"] .empty-state-btn,
-:root[data-ui-theme="light"] .empty-state-icon,
-:root[data-ui-theme="light"] .new-tab-page,
-:root[data-ui-theme="light"] .new-tab-page-content,
-:root[data-ui-theme="light"] .new-tab-input,
-:root[data-ui-theme="light"] .new-tab-search-icon,
-:root[data-ui-theme="light"] .new-tab-mode-btn,
-:root[data-ui-theme="light"] .new-tab-suggestions,
-:root[data-ui-theme="light"] .new-tab-suggestion,
-:root[data-ui-theme="light"] .new-tab-ask-messages {
+:root[data-ui-theme="light"] .empty-state-icon {
     color: #1a1a1a !important;
 }
 
-/* Placeholder flip only inside overlay / new-tab surfaces — shell inputs are
+/* Placeholder flip only inside overlay surfaces — shell inputs are
  * themed and inherit --url-bar-text-muted. */
-:root[data-ui-theme="light"] .new-tab-input::placeholder,
-:root[data-ui-theme="light"] .new-tab-ask-input::placeholder,
-:root[data-ui-theme="light"] .ai-chat-input::placeholder,
 :root[data-ui-theme="light"] #search-input::placeholder,
 :root[data-ui-theme="light"] .spotlight-input::placeholder,
 :root[data-ui-theme="light"] .notes-search input::placeholder,
@@ -232,243 +217,10 @@ body.incognito-window {
     opacity: 1;
 }
 
-/* Border flip for overlay chrome only. */
+/* Border flip for overlay chrome only (not AI chat — stays dark). */
 :root[data-ui-theme="light"] [class*="-popup"]:not([class*="color-picker"]),
-:root[data-ui-theme="light"] [class*="-panel"]:not([class*="color-picker"]) {
+:root[data-ui-theme="light"] [class*="-panel"]:not([class*="color-picker"]):not(.ai-chat-panel):not(.settings-panel) {
     border-color: rgba(0, 0, 0, 0.08) !important;
-}
-
-/*
- * New-tab-page light surfaces. `.new-tab-page` is a div inside `#app` (NOT a
- * webview), so overriding its hardcoded `background:#000` / `#0a0a0a` + the
- * rgba-white overlays in the search card, mode toggle, and suggestions card
- * lands cleanly without touching any webpage content.
- */
-/*
- * `.new-tab-page` default is `background: #000`. In light mode we need an actual
- * light surface (not `transparent`) — otherwise the shell's theme-colored bg
- * shows through and the page looks dark. We keep the surface neutral and light
- * so the page doesn't inherit the theme color (which would be "theme affecting
- * the new tab page") and so the inner search / ask cards read correctly.
- */
-:root[data-ui-theme="light"] #new-tab-page.new-tab-page {
-    background: transparent !important;
-}
-
-/*
- * When the new-tab-page or Settings tab is LIGHT, the internal-page top bar
- * sitting above it also has to flip — never reuse overlay class `new-tab-page` on `#webview-url-bar`.
- */
-:root[data-ui-theme="light"] .webview-url-bar.url-bar-internal-shell {
-    --url-bar-bg: #ffffff !important;
-    --url-bar-border: rgba(0, 0, 0, 0.08) !important;
-    --url-bar-text: rgba(0, 0, 0, 0.9) !important;
-    --url-bar-text-muted: rgba(0, 0, 0, 0.55) !important;
-    --url-bar-btn-hover: rgba(0, 0, 0, 0.08) !important;
-    background: #ffffff !important;
-}
-:root[data-ui-theme="light"] body.transparent-sites-mode .webview-url-bar.url-bar-internal-shell {
-    --url-bar-bg: var(--axis-nt-search-bg, rgba(244, 245, 247, 0.96)) !important;
-    --url-bar-border: rgba(0, 0, 0, 0.08) !important;
-    --url-bar-text: rgba(0, 0, 0, 0.9) !important;
-    --url-bar-text-muted: rgba(0, 0, 0, 0.55) !important;
-    --url-bar-btn-hover: rgba(0, 0, 0, 0.08) !important;
-}
-:root[data-ui-theme="light"] .new-tab-search-wrapper {
-    background: var(--axis-nt-search-bg, rgba(244, 245, 247, 0.96)) !important;
-    border: 1px solid rgba(0, 0, 0, 0.08) !important;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06),
-                inset 0 1px 0 rgba(0, 0, 0, 0.02) !important;
-}
-:root[data-ui-theme="light"] .new-tab-search-wrapper:hover {
-    border-color: rgba(0, 0, 0, 0.14) !important;
-}
-:root[data-ui-theme="light"] .new-tab-search-wrapper:focus-within {
-    border-color: rgba(0, 0, 0, 0.22) !important;
-    box-shadow: 0 4px 28px rgba(0, 0, 0, 0.08),
-                0 0 0 1px rgba(0, 0, 0, 0.08),
-                inset 0 1px 0 rgba(0, 0, 0, 0.03) !important;
-}
-:root[data-ui-theme="light"] .new-tab-search-icon {
-    color: rgba(0, 0, 0, 0.42) !important;
-}
-:root[data-ui-theme="light"] .new-tab-search-wrapper:focus-within .new-tab-search-icon {
-    color: rgba(0, 0, 0, 0.62) !important;
-}
-:root[data-ui-theme="light"] .new-tab-input {
-    color: rgba(0, 0, 0, 0.96) !important;
-}
-:root[data-ui-theme="light"] .new-tab-input::placeholder {
-    color: rgba(0, 0, 0, 0.42) !important;
-}
-:root[data-ui-theme="light"] .new-tab-mode-toggle {
-    background: var(--axis-nt-toggle-bg, rgba(0, 0, 0, 0.05)) !important;
-    border-color: rgba(0, 0, 0, 0.08) !important;
-}
-:root[data-ui-theme="light"] .new-tab-mode-btn {
-    color: rgba(0, 0, 0, 0.6) !important;
-}
-:root[data-ui-theme="light"] .new-tab-mode-btn.active {
-    background: rgba(0, 0, 0, 0.08) !important;
-    color: rgba(0, 0, 0, 0.96) !important;
-}
-:root[data-ui-theme="light"] .new-tab-suggestions {
-    border-top-color: rgba(0, 0, 0, 0.08) !important;
-}
-:root[data-ui-theme="light"] .new-tab-search-wrapper.ask-chat {
-    background: var(--axis-nt-ask-bg, rgba(248, 249, 251, 0.97)) !important;
-}
-
-/*
- * New-tab "Ask" chat bubbles, input, timestamps, send button. Hardcoded
- * rgba(255,255,255,…) on `.new-tab-ask-bubble` / `.new-tab-ask-input` /
- * `.new-tab-ask-time` / `.new-tab-ask-input-row` — all flipped to black-alpha
- * for light mode so user + assistant messages and the composer are readable.
- */
-:root[data-ui-theme="light"] .new-tab-ask-messages {
-    color: rgba(0, 0, 0, 0.96) !important;
-}
-:root[data-ui-theme="light"] .new-tab-ask-bubble {
-    background: rgba(0, 0, 0, 0.06) !important;
-    color: rgba(0, 0, 0, 0.96) !important;
-    border-color: rgba(0, 0, 0, 0.08) !important;
-}
-:root[data-ui-theme="light"] .new-tab-ask-message.user .new-tab-ask-bubble {
-    background: rgba(0, 0, 0, 0.12) !important;
-    color: rgba(0, 0, 0, 0.96) !important;
-}
-:root[data-ui-theme="light"] .new-tab-ask-time {
-    color: rgba(0, 0, 0, 0.5) !important;
-}
-:root[data-ui-theme="light"] .new-tab-ask-input-row {
-    border-top-color: rgba(0, 0, 0, 0.08) !important;
-    background: rgba(0, 0, 0, 0.04) !important;
-}
-:root[data-ui-theme="light"] .new-tab-ask-input {
-    border-color: rgba(0, 0, 0, 0.16) !important;
-    color: rgba(0, 0, 0, 0.96) !important;
-    background: transparent !important;
-}
-:root[data-ui-theme="light"] .new-tab-ask-input::placeholder {
-    color: rgba(0, 0, 0, 0.5) !important;
-}
-:root[data-ui-theme="light"] .new-tab-ask-send-btn {
-    background: rgba(0, 0, 0, 0.16) !important;
-    color: rgba(255, 255, 255, 0.95) !important;
-}
-:root[data-ui-theme="light"] .new-tab-ask-send-btn:hover {
-    background: rgba(0, 0, 0, 0.24) !important;
-}
-:root[data-ui-theme="light"] .new-tab-suggestions .spotlight-suggestion-item {
-    color: rgba(0, 0, 0, 0.9) !important;
-}
-:root[data-ui-theme="light"] .new-tab-suggestions .spotlight-suggestion-text,
-:root[data-ui-theme="light"] .new-tab-suggestions .spotlight-suggestion-action,
-:root[data-ui-theme="light"] .new-tab-suggestions .spotlight-suggestion-icon {
-    color: rgba(0, 0, 0, 0.9) !important;
-}
-
-/*
- * AI chat sidebar panel. Everything inside is painted in rgba(255,255,255,…)
- * with `--chat-panel-bg: #000`, `--chat-panel-text`, `--chat-panel-border`,
- * `--chat-panel-text-muted`. Redefine those custom properties on the panel
- * itself + override hardcoded inline rgba-white colors on the hot path.
- */
-:root[data-ui-theme="light"] .ai-chat-panel {
-    --chat-panel-bg: rgba(248, 248, 250, 0.96) !important;
-    --chat-panel-text: rgba(0, 0, 0, 0.96) !important;
-    --chat-panel-text-muted: rgba(0, 0, 0, 0.55) !important;
-    --chat-panel-border: rgba(0, 0, 0, 0.08) !important;
-    background: rgba(248, 248, 250, 0.96) !important;
-    border-left-color: rgba(0, 0, 0, 0.08) !important;
-    box-shadow: -16px 0 56px rgba(0, 0, 0, 0.08),
-                -4px 0 24px rgba(0, 0, 0, 0.04) !important;
-    color: rgba(0, 0, 0, 0.96) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-panel *,
-:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-message-content,
-:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-message-body,
-:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-quote-text,
-:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-message-time,
-:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-quote-icon,
-:root[data-ui-theme="light"] .ai-chat-panel .ai-chat-input {
-    color: rgba(0, 0, 0, 0.92) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-message.user .ai-chat-message-content {
-    background: rgba(0, 0, 0, 0.12) !important;
-    border-color: rgba(0, 0, 0, 0.08) !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-message.assistant .ai-chat-message-content {
-    background: rgba(0, 0, 0, 0.05) !important;
-    border-color: rgba(0, 0, 0, 0.06) !important;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-message-quote {
-    background: rgba(0, 0, 0, 0.06) !important;
-    border-left-color: rgba(0, 0, 0, 0.25) !important;
-    color: rgba(0, 0, 0, 0.82) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-message-loading {
-    background: rgba(0, 0, 0, 0.05) !important;
-    border-color: rgba(0, 0, 0, 0.08) !important;
-    color: rgba(0, 0, 0, 0.7) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-message-loading i {
-    color: rgba(0, 0, 0, 0.5) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-quote-bar {
-    background: rgba(0, 0, 0, 0.04) !important;
-    border-top-color: rgba(0, 0, 0, 0.05) !important;
-    border-bottom-color: rgba(0, 0, 0, 0.05) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-quote-dismiss {
-    color: rgba(0, 0, 0, 0.55) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-quote-dismiss:hover {
-    background: rgba(0, 0, 0, 0.08) !important;
-    color: rgba(0, 0, 0, 0.9) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-input-container {
-    background: rgba(0, 0, 0, 0.04) !important;
-    border-top-color: rgba(0, 0, 0, 0.05) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-input {
-    background: rgba(0, 0, 0, 0.05) !important;
-    border-color: rgba(0, 0, 0, 0.08) !important;
-    color: rgba(0, 0, 0, 0.95) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-input::placeholder {
-    color: rgba(0, 0, 0, 0.42) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-input:focus {
-    background: rgba(0, 0, 0, 0.06) !important;
-    border-color: rgba(0, 0, 0, 0.14) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-send-btn {
-    background: rgba(0, 0, 0, 0.08) !important;
-    border-color: rgba(0, 0, 0, 0.1) !important;
-    color: rgba(0, 0, 0, 0.85) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-send-btn:hover {
-    background: rgba(0, 0, 0, 0.14) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-close-btn {
-    color: rgba(0, 0, 0, 0.5) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-close-btn:hover {
-    background: rgba(0, 0, 0, 0.08) !important;
-    color: rgba(0, 0, 0, 0.9) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-messages::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.16) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-messages::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.24) !important;
-}
-:root[data-ui-theme="light"] .ai-chat-resize-handle:hover::after,
-:root[data-ui-theme="light"] .ai-chat-resize-handle:active::after {
-    background: rgba(0, 0, 0, 0.22) !important;
 }
 
 /*
@@ -615,79 +367,6 @@ body.incognito-window {
 :root[data-ui-theme="light"] .downloads-panel .downloads-header,
 :root[data-ui-theme="light"] .notes-header {
     border-bottom-color: rgba(0, 0, 0, 0.1) !important;
-}
-
-/*
- * Settings panel (in-app modal opened from the gear icon). The outer
- * `.settings-panel` bg already flips via the overlay glass rule above; all the
- * inner content — sidebar tabs, active tab, headers, labels, section titles,
- * close button, scrollbars, input / select / toggle surrounds — was painted in
- * hardcoded `rgba(255,255,255,…)` / `#2a2a2a` / `#1a1a1a`. We flip every text
- * node and the common surface / border / hover patterns so the whole modal
- * reads as light. Elements with `.color-preview` / inline `--theme-color` /
- * `--accent-color` / the gradient preview strips are deliberately untouched so
- * the actual theme color swatches still paint the user's picked color.
- */
-:root[data-ui-theme="light"] .settings-panel,
-:root[data-ui-theme="light"] .settings-panel *:not(.color-preview):not([style*="--theme-color"]):not([style*="--accent-color"]):not([style*="--primary-gradient"]):not([style*="--gradient-color"]) {
-    color: rgba(0, 0, 0, 0.9) !important;
-}
-:root[data-ui-theme="light"] .settings-header,
-:root[data-ui-theme="light"] .settings-tabs {
-    background: rgba(0, 0, 0, 0.03) !important;
-    border-bottom-color: rgba(0, 0, 0, 0.08) !important;
-}
-:root[data-ui-theme="light"] .settings-tab {
-    color: rgba(0, 0, 0, 0.55) !important;
-    border-bottom-color: transparent !important;
-}
-:root[data-ui-theme="light"] .settings-tab:hover {
-    color: rgba(0, 0, 0, 0.85) !important;
-    background: rgba(0, 0, 0, 0.04) !important;
-}
-:root[data-ui-theme="light"] .settings-tab.active {
-    color: rgba(0, 0, 0, 0.95) !important;
-    background: rgba(0, 0, 0, 0.06) !important;
-    border-bottom-color: rgba(0, 0, 0, 0.25) !important;
-}
-:root[data-ui-theme="light"] .settings-tab-content::-webkit-scrollbar-thumb,
-:root[data-ui-theme="light"] .settings-content::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.18) !important;
-}
-:root[data-ui-theme="light"] .settings-tab-content::-webkit-scrollbar-thumb:hover,
-:root[data-ui-theme="light"] .settings-content::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.28) !important;
-}
-:root[data-ui-theme="light"] .close-settings {
-    background: rgba(0, 0, 0, 0.04) !important;
-    color: rgba(0, 0, 0, 0.6) !important;
-    border-color: rgba(0, 0, 0, 0.08) !important;
-}
-:root[data-ui-theme="light"] .close-settings:hover {
-    background: rgba(0, 0, 0, 0.08) !important;
-    color: rgba(0, 0, 0, 0.95) !important;
-    border-color: rgba(0, 0, 0, 0.14) !important;
-}
-:root[data-ui-theme="light"] .settings-panel input[type="text"],
-:root[data-ui-theme="light"] .settings-panel input[type="search"],
-:root[data-ui-theme="light"] .settings-panel input[type="url"],
-:root[data-ui-theme="light"] .settings-panel input[type="number"],
-:root[data-ui-theme="light"] .settings-panel select,
-:root[data-ui-theme="light"] .settings-panel textarea {
-    background: rgba(0, 0, 0, 0.04) !important;
-    border-color: rgba(0, 0, 0, 0.1) !important;
-    color: rgba(0, 0, 0, 0.95) !important;
-}
-:root[data-ui-theme="light"] .settings-panel input::placeholder,
-:root[data-ui-theme="light"] .settings-panel textarea::placeholder {
-    color: rgba(0, 0, 0, 0.5) !important;
-}
-:root[data-ui-theme="light"] .settings-panel button:not(.color-preview):not(.close-settings):not(.settings-tab) {
-    background: rgba(0, 0, 0, 0.04) !important;
-    border-color: rgba(0, 0, 0, 0.08) !important;
-}
-:root[data-ui-theme="light"] .settings-panel button:not(.color-preview):not(.close-settings):not(.settings-tab):hover {
-    background: rgba(0, 0, 0, 0.08) !important;
 }
 
 /* Reset and base styles - Optimized */
@@ -1107,6 +786,7 @@ body.theme-switching *::after {
     height: 60px;
     -webkit-app-region: drag;
     z-index: 1;
+    pointer-events: none;
 }
 
 /* Override global .hidden (display:none) so width can animate */
@@ -1323,6 +1003,90 @@ body.resizing .ai-chat-resize-handle {
     align-items: stretch;
     gap: 4px;
     overflow: visible;
+}
+
+/* Profile switch: compositor-only slide inside clipped stage; footer + page stay put. */
+#sidebar.is-profile-swiping,
+#sidebar.axis-sidebar-profile-switching {
+    user-select: none;
+}
+
+#sidebar-profile-swipe-stage.axis-sidebar-drag-active .sidebar-profile-pane {
+    pointer-events: auto;
+}
+
+#sidebar > .sidebar-section.sidebar-footer {
+    flex-shrink: 0;
+    transform: none !important;
+}
+
+#sidebar-profile-swipe-stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-app-region: no-drag;
+    position: relative;
+    isolation: isolate;
+}
+
+.sidebar-profile-swipe-track {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-profile-pane {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    backface-visibility: hidden;
+    transform: translate3d(0, 0, 0);
+    -webkit-backface-visibility: hidden;
+    -webkit-transform: translate3d(0, 0, 0);
+}
+
+.sidebar-profile-pane.axis-sidebar-dragging {
+    transition: none;
+    will-change: transform;
+}
+
+.sidebar-profile-pane.axis-sidebar-animating {
+    will-change: transform;
+}
+
+.sidebar-profile-pane .tabs-section {
+    flex: 1;
+    min-height: 0;
+}
+
+.axis-profile-dom-pool {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+webview.axis-profile-webview-suspended {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+#webview.axis-profile-webview-suspended {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+.axis-profile-sidebar-park {
+    display: none !important;
 }
 
 .sidebar-media-dock {
@@ -2172,8 +1936,8 @@ body.resizing .ai-chat-resize-handle {
     z-index: 1001;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 10px;
+    justify-content: space-between;
+    gap: 12px;
     padding: 9px 12px;
     border-radius: 10px;
     background: linear-gradient(180deg, #6d3cff 0%, #5327cf 100%);
@@ -2182,16 +1946,179 @@ body.resizing .ai-chat-resize-handle {
     box-shadow: 0 6px 14px rgba(0, 0, 0, 0.28);
     pointer-events: auto;
     -webkit-app-region: no-drag;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+    transition:
+        opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+        background 0.4s ease,
+        box-shadow 0.4s ease;
+}
+
+.axis-store-install-host-bar:not(.hidden).axis-store-install-host-bar--shown {
+    opacity: 1;
+    transform: translateY(0) scale(1);
 }
 
 .axis-store-install-host-bar.hidden {
     display: none !important;
 }
 
+.axis-store-install-host-bar--busy {
+    background: linear-gradient(180deg, #7b52ff 0%, #5a35e0 100%);
+    box-shadow: 0 6px 18px rgba(83, 39, 207, 0.42);
+}
+
+.axis-store-install-host-bar--busy::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    width: 38%;
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 0 2px 2px 0;
+    animation: axis-store-install-progress 1.15s ease-in-out infinite;
+}
+
+.axis-store-install-host-bar--success {
+    background: linear-gradient(180deg, #2a9d5c 0%, #1d7a47 100%);
+    box-shadow: 0 6px 16px rgba(29, 122, 71, 0.38);
+    animation: axis-store-install-success-pulse 0.55s ease;
+}
+
+.axis-store-install-host-bar--error {
+    background: linear-gradient(180deg, #c94a4a 0%, #a33232 100%);
+    box-shadow: 0 6px 16px rgba(163, 50, 50, 0.38);
+    animation: axis-store-install-shake 0.48s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.axis-store-install-host-bar--installed {
+    background: linear-gradient(180deg, #2f6fad 0%, #245f9a 100%);
+    box-shadow: 0 6px 16px rgba(36, 95, 154, 0.34);
+}
+
+.axis-store-install-host-leading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+
+.axis-store-install-host-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.axis-store-install-host-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.32);
+    flex-shrink: 0;
+    animation: axis-store-install-badge-in 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.axis-store-install-host-badge.hidden {
+    display: none !important;
+}
+
+.axis-store-install-host-badge i {
+    font-size: 10px;
+}
+
+@keyframes axis-store-install-badge-in {
+    from {
+        opacity: 0;
+        transform: scale(0.86);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.axis-store-install-host-open {
+    border: 1px solid rgba(255, 255, 255, 0.38);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.axis-store-install-host-open:hover {
+    background: rgba(255, 255, 255, 0.22);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.axis-store-install-host-open.hidden {
+    display: none !important;
+}
+
+@keyframes axis-store-install-progress {
+    0% {
+        left: 0;
+        width: 12%;
+    }
+    50% {
+        left: 32%;
+        width: 42%;
+    }
+    100% {
+        left: 88%;
+        width: 12%;
+    }
+}
+
+@keyframes axis-store-install-success-pulse {
+    0% {
+        transform: translateY(0) scale(1);
+    }
+    40% {
+        transform: translateY(0) scale(1.02);
+    }
+    100% {
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes axis-store-install-shake {
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+    20%,
+    60% {
+        transform: translateX(-4px);
+    }
+    40%,
+    80% {
+        transform: translateX(4px);
+    }
+}
+
 .axis-store-install-host-text {
     font-size: 12px;
     line-height: 1.35;
     color: rgba(255, 255, 255, 0.94);
+    transition: color 0.25s ease;
+    min-width: 0;
 }
 
 .axis-store-install-host-btn {
@@ -2204,10 +2131,76 @@ body.resizing .ai-chat-resize-handle {
     font-size: 12px;
     font-weight: 700;
     cursor: pointer;
+    flex-shrink: 0;
+    transition:
+        background 0.25s ease,
+        color 0.25s ease,
+        transform 0.12s ease,
+        opacity 0.25s ease;
 }
 
-.axis-store-install-host-btn:hover {
+.axis-store-install-host-btn:hover:not(:disabled) {
     background: #ffffff;
+}
+
+.axis-store-install-host-btn:active:not(:disabled) {
+    transform: scale(0.97);
+}
+
+.axis-store-install-host-btn:disabled {
+    cursor: default;
+    opacity: 0.92;
+}
+
+.axis-store-install-host-btn.axis-ext-install--busy {
+    cursor: wait;
+}
+
+.axis-store-install-host-btn.axis-ext-install--success {
+    background: #e8f8ec;
+    color: #0d5c2a;
+}
+
+.axis-store-install-host-btn.axis-ext-install--error {
+    background: #fff4f4;
+    color: #9b1c1c;
+}
+
+.url-bar-cws-install.axis-ext-install--busy {
+    color: #007aff;
+    pointer-events: none;
+}
+
+.webview-url-bar.dark-mode .url-bar-cws-install.axis-ext-install--busy {
+    color: #0a84ff;
+}
+
+.url-bar-cws-install.axis-ext-install--success {
+    color: #2e9b55;
+}
+
+.url-bar-cws-install.axis-ext-install--error {
+    color: #d64545;
+}
+
+.url-bar-cws-install.axis-ext-install--installed {
+    color: #2e9b55;
+}
+
+.url-bar-cws-install.url-bar-cws-install--installed::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #34c759;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.url-bar-cws-install {
+    position: relative;
 }
 
 .url-bar-icons {
@@ -2314,16 +2307,21 @@ body.resizing .ai-chat-resize-handle {
     align-items: center;
     justify-content: flex-end;
     gap: 6px;
-    z-index: 40;
+    z-index: 50;
     pointer-events: none;
     -webkit-app-region: no-drag;
+}
+
+#sidebar > .sidebar-tabs-topbar {
+    z-index: 100;
 }
 
 .sidebar-tabs-topbar > * {
     pointer-events: auto;
 }
 
-#sidebar.sidebar-right .sidebar-tabs-topbar {
+#sidebar.sidebar-right .sidebar-tabs-topbar,
+#sidebar.sidebar-right > .sidebar-tabs-topbar {
     right: auto;
     left: 12px;
     justify-content: flex-start;
@@ -2405,7 +2403,7 @@ body.resizing .ai-chat-resize-handle {
     line-height: 1;
     cursor: pointer;
     opacity: 0;
-    pointer-events: none;
+    pointer-events: auto;
     -webkit-app-region: no-drag;
     transition: opacity 0.16s ease, color 0.18s ease, background-color 0.16s ease, transform 0.12s ease;
 }
@@ -2416,7 +2414,6 @@ body.resizing .ai-chat-resize-handle {
 
 #sidebar:hover .clear-unpinned-floating:not(.hidden) {
     opacity: 1;
-    pointer-events: auto;
 }
 
 .clear-unpinned-floating:hover {
@@ -6729,65 +6726,218 @@ body.light-theme .shortcut-desc {
     bottom: 0;
     z-index: 50;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #000000;
+    flex-direction: column;
+    align-items: stretch;
+    background: transparent;
     -webkit-app-region: no-drag;
-    overflow-y: auto;
-    padding: 40px;
+    overflow: hidden;
+    padding: 0;
+}
+.webview-container:has(.webview-url-bar.hidden) #new-tab-page.new-tab-page {
+    top: 0;
 }
 #new-tab-page.new-tab-page.hidden {
     display: none;
 }
-.new-tab-page-content {
+.new-tab-start-view {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
     width: 100%;
-    max-width: 560px;
+    overflow-y: auto;
+    padding: 48px 32px 88px;
+    transition: opacity 0.38s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.new-tab-start-view.hidden {
+    display: none;
+}
+#new-tab-page.ntp-ai-chat-entering .new-tab-start-view {
+    opacity: 0;
+    transform: translateY(-24px) scale(0.98);
+    pointer-events: none;
+}
+#new-tab-page.ntp-ai-chat-exiting .new-tab-start-view:not(.hidden) {
+    opacity: 1;
+    transform: translateY(0);
+}
+.new-tab-ai-chat-view {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    display: none;
+    flex-direction: column;
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 0.4s ease 0.05s, transform 0.42s cubic-bezier(0.4, 0, 0.2, 1) 0.05s;
+}
+.new-tab-ai-chat-view.hidden {
+    display: none;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ai-chat-view,
+#new-tab-page.ntp-ai-chat-entering .new-tab-ai-chat-view {
+    display: flex;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ai-chat-view:not(.hidden),
+#new-tab-page.ntp-ai-chat-entering .new-tab-ai-chat-view:not(.hidden) {
+    opacity: 1;
+    transform: translateY(0);
+}
+#new-tab-page.ntp-ai-chat-entering .new-tab-start-view {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    padding: 48px 32px 88px;
+}
+#new-tab-page.ntp-ai-chat-entering .new-tab-ai-chat-view {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+}
+#new-tab-page.ntp-ai-chat-exiting .new-tab-ai-chat-view:not(.hidden) {
+    opacity: 0;
+    transform: translateY(12px);
+    transition-delay: 0s;
+}
+.new-tab-ai-composer {
+    flex-shrink: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 20px max(22px, env(safe-area-inset-bottom, 22px));
+    background: linear-gradient(180deg, transparent 0%, rgba(8, 8, 10, 0.35) 40%, rgba(8, 8, 10, 0.65) 100%);
+    -webkit-app-region: no-drag;
+}
+.new-tab-ai-composer-stack {
+    width: 100%;
+    max-width: 42rem;
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
-    align-items: stretch;
+    box-sizing: border-box;
 }
-.new-tab-mode-toggle {
-    display: inline-flex;
-    align-self: flex-start;
-    padding: 2px;
-    margin-bottom: 14px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+.new-tab-search-bar.new-tab-ai-composer-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    margin: 0;
+    min-height: 52px;
+    height: auto;
+    padding: 6px 6px 6px 18px;
+    border-radius: 26px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(20, 20, 24, 0.88);
+    backdrop-filter: blur(22px) saturate(1.15);
+    -webkit-backdrop-filter: blur(22px) saturate(1.15);
+    box-shadow: 0 10px 36px rgba(0, 0, 0, 0.28),
+                inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    box-sizing: border-box;
 }
-.new-tab-mode-btn {
-    border: none;
-    border-radius: 999px;
-    padding: 4px 12px;
-    font-size: 12px;
-    font-weight: 500;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.6);
+.new-tab-search-bar.new-tab-ai-composer-bar:focus-within {
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.32),
+                inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+.new-tab-send-btn {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 50%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 14px;
     cursor: pointer;
-    transition: background 0.16s ease, color 0.16s ease;
+    transition: background 0.15s ease, transform 0.12s ease, opacity 0.15s ease, border-color 0.15s ease;
 }
-.new-tab-mode-btn.active {
-    background: rgba(255, 255, 255, 0.16);
+.new-tab-search-bar.new-tab-ai-composer-bar .new-tab-send-btn {
+    display: inline-flex;
+}
+.new-tab-send-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.22);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+.new-tab-send-btn:active:not(:disabled) {
+    transform: scale(0.92);
+}
+.new-tab-send-btn.is-disabled,
+.new-tab-send-btn:disabled {
+    opacity: 0.42;
+    cursor: default;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-menu-btn {
+    display: none;
+}
+.new-tab-page-content {
+    width: 100%;
+    max-width: 620px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.new-tab-hero {
+    width: 100%;
+    margin-bottom: 28px;
+    text-align: center;
+    transition: opacity 0.28s ease, transform 0.28s ease;
+}
+.new-tab-hero.hidden {
+    display: none;
+}
+.new-tab-search-section {
+    width: 100%;
+    text-align: left;
+}
+.new-tab-page.ntp-in-chat .new-tab-hero,
+.new-tab-page.has-query .new-tab-hero {
+    opacity: 0.72;
+    transform: translateY(-4px);
+}
+.new-tab-greeting {
+    margin: 0 0 10px;
+    font-size: clamp(26px, 4vw, 34px);
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
     color: rgba(255, 255, 255, 0.96);
+    text-shadow: 0 1px 24px rgba(0, 0, 0, 0.35);
+}
+.new-tab-tip {
+    margin: 0;
+    min-height: 1.35em;
+    font-size: 15px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.72);
+    text-shadow: 0 1px 16px rgba(0, 0, 0, 0.3);
+    transition: opacity 0.2s ease;
+}
+.new-tab-page.has-query .new-tab-tip {
+    opacity: 0.55;
 }
 .new-tab-search-wrapper {
     width: 100%;
-    background: #0a0a0a;
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 14px;
+    background: var(--axis-nt-search-bg, rgba(14, 15, 18, 0.42));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 18px;
     overflow: hidden;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5),
-                inset 0 1px 0 rgba(255, 255, 255, 0.02);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    backdrop-filter: blur(var(--axis-nt-search-blur, 18px)) saturate(var(--axis-nt-search-sat, 130%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-search-blur, 18px)) saturate(var(--axis-nt-search-sat, 130%));
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22),
+                inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition: border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
 }
 .new-tab-search-wrapper:hover {
-    border-color: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.14);
 }
 .new-tab-search-wrapper:focus-within {
     border-color: rgba(255, 255, 255, 0.2);
-    box-shadow: 0 4px 28px rgba(0, 0, 0, 0.5),
-                0 0 0 1px rgba(255, 255, 255, 0.06),
-                inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28),
+                inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 .new-tab-search-bar {
     display: flex;
@@ -6795,20 +6945,12 @@ body.light-theme .shortcut-desc {
     width: 100%;
     min-height: 56px;
     height: 56px;
-    padding: 0 20px;
+    padding: 0 16px 0 22px;
+    gap: 8px;
     background: transparent;
     border: none;
     border-radius: 0;
-}
-.new-tab-search-icon {
-    color: rgba(255, 255, 255, 0.42);
-    font-size: 15px;
-    margin-right: 12px;
     flex-shrink: 0;
-    transition: color 0.15s ease;
-}
-.new-tab-search-wrapper:focus-within .new-tab-search-icon {
-    color: rgba(255, 255, 255, 0.58);
 }
 .new-tab-input {
     flex: 1;
@@ -6820,15 +6962,87 @@ body.light-theme .shortcut-desc {
     color: rgba(255, 255, 255, 0.96);
     font-size: 16px;
     font-family: inherit;
-    letter-spacing: 0.015em;
+    letter-spacing: 0.01em;
+    text-align: left;
 }
 .new-tab-input::placeholder {
-    color: rgba(255, 255, 255, 0.38);
+    color: rgba(255, 255, 255, 0.42);
+}
+.new-tab-suggestions .new-tab-action-item {
+    border-bottom: none;
+}
+.new-tab-suggestions .new-tab-action-item + .spotlight-suggestion-item:not(.new-tab-action-item) {
+    position: relative;
+    margin-top: 4px;
+    padding-top: 10px;
+}
+.new-tab-suggestions .new-tab-action-item + .spotlight-suggestion-item:not(.new-tab-action-item)::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20px;
+    right: 20px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.09), transparent);
+    pointer-events: none;
+}
+.new-tab-suggestions .new-tab-action-item .spotlight-suggestion-icon {
+    color: rgba(255, 255, 255, 0.82);
+}
+.new-tab-suggestions .new-tab-action-text {
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.94);
+}
+.new-tab-action-badge {
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.72);
+}
+.new-tab-menu-btn {
+    position: absolute;
+    right: 22px;
+    bottom: 22px;
+    width: 44px;
+    height: 44px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    background: var(--axis-nt-toggle-bg, rgba(255, 255, 255, 0.08));
+    backdrop-filter: blur(var(--axis-nt-toggle-blur, 14px)) saturate(var(--axis-nt-toggle-sat, 125%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-toggle-blur, 14px)) saturate(var(--axis-nt-toggle-sat, 125%));
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+    -webkit-app-region: no-drag;
+}
+.new-tab-menu-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+.new-tab-menu-btn:active {
+    transform: scale(0.96);
+}
+.new-tab-menu-icon {
+    display: block;
+    width: 16px;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.88);
+    border-radius: 1px;
+    box-shadow: 0 -5px 0 rgba(255, 255, 255, 0.88), 0 5px 0 rgba(255, 255, 255, 0.88);
 }
 .new-tab-suggestions {
     max-height: 280px;
     overflow-y: auto;
     padding: 6px 0 10px;
+    text-align: left;
     border-top: 1px solid rgba(255, 255, 255, 0.06);
     transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
                 opacity 0.25s ease,
@@ -6849,11 +7063,18 @@ body.light-theme .shortcut-desc {
 .new-tab-suggestions .spotlight-suggestion-item {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     margin: 2px 12px;
     border-radius: 8px;
     padding: 10px 12px;
     gap: 12px;
+    text-align: left;
     transition: background 0.1s ease;
+}
+.new-tab-suggestions .spotlight-suggestion-text {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
 }
 .new-tab-suggestions .spotlight-suggestion-item:hover,
 .new-tab-suggestions .spotlight-suggestion-item.active {
@@ -6863,20 +7084,130 @@ body.light-theme .shortcut-desc {
     background: rgba(255, 255, 255, 0.09);
 }
 
-/* New Tab - Ask mode chat */
-.new-tab-search-wrapper.ask-chat {
-    min-height: 260px;
-}
+/* New Tab - AI chat (full page) */
 .new-tab-ask-messages {
-    padding: 12px 16px 14px;
-    display: none;
-    flex-direction: column;
-    gap: 12px;
-    max-height: 500px;
-    overflow-y: auto;
-}
-.new-tab-search-wrapper.ask-chat .new-tab-ask-messages {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 44px 20px 10px;
     display: flex;
+    flex-direction: column;
+    gap: 0;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+}
+.new-tab-ask-messages.hidden {
+    display: none;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ask-message {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    max-width: 42rem;
+    margin: 0 auto;
+    padding: 12px 4px;
+    font-size: 15px;
+    line-height: 1.65;
+    animation: ntpMessageIn 0.32s cubic-bezier(0.23, 1, 0.32, 1);
+    box-sizing: border-box;
+}
+@keyframes ntpMessageIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ask-message.user {
+    justify-content: flex-end;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ask-message.user .new-tab-ask-avatar {
+    display: none;
+}
+.new-tab-ask-avatar {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    margin-top: 2px;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+}
+.new-tab-ask-avatar.assistant {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.72);
+}
+.new-tab-ask-body {
+    flex: 1;
+    min-width: 0;
+    max-width: 85%;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ask-message.user .new-tab-ask-body {
+    flex: 0 1 auto;
+    max-width: 78%;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ask-bubble {
+    max-width: 100%;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.94);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ask-message.user .new-tab-ask-bubble {
+    padding: 10px 16px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.11);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ask-message.assistant .new-tab-ask-bubble {
+    padding: 1px 0 0;
+    line-height: 1.72;
+    font-size: 15px;
+}
+.new-tab-ask-bubble-loading {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 2px 0 !important;
+    color: rgba(255, 255, 255, 0.55);
+}
+.new-tab-ask-loading-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.new-tab-ask-loading-dots span {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.45);
+    animation: ntpAskDotPulse 1.2s ease-in-out infinite;
+}
+.new-tab-ask-loading-dots span:nth-child(2) {
+    animation-delay: 0.15s;
+}
+.new-tab-ask-loading-dots span:nth-child(3) {
+    animation-delay: 0.3s;
+}
+@keyframes ntpAskDotPulse {
+    0%, 80%, 100% { opacity: 0.35; transform: scale(0.92); }
+    40% { opacity: 1; transform: scale(1); }
+}
+.new-tab-ask-bubble-error {
+    color: rgba(255, 255, 255, 0.72) !important;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ask-message.assistant .new-tab-ask-body {
+    max-width: 100%;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ask-time {
+    display: none;
 }
 .new-tab-suggestions .spotlight-suggestion-icon {
     width: 26px;
@@ -6894,6 +7225,8 @@ body.light-theme .shortcut-desc {
 .new-tab-suggestions .spotlight-suggestion-action {
     font-size: 12px;
     padding: 5px 12px;
+    margin-left: auto;
+    flex-shrink: 0;
 }
 .new-tab-suggestions::-webkit-scrollbar {
     width: 6px;
@@ -6909,20 +7242,6 @@ body.light-theme .shortcut-desc {
     background: rgba(255, 255, 255, 0.16);
 }
 
-.new-tab-search-wrapper.ask-chat {
-    min-height: 260px;
-}
-.new-tab-ask-messages {
-    flex: 1;
-    padding: 12px 16px 14px;
-    display: none;
-    flex-direction: column;
-    gap: 12px;
-    overflow-y: auto;
-}
-.new-tab-search-wrapper.ask-chat .new-tab-ask-messages {
-    display: flex;
-}
 .new-tab-ask-messages::-webkit-scrollbar {
     width: 6px;
 }
@@ -6965,7 +7284,9 @@ body.light-theme .shortcut-desc {
     gap: 10px;
     padding: 10px 12px 12px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--axis-nt-ask-bg, rgba(10, 11, 14, 0.28));
+    backdrop-filter: blur(var(--axis-nt-ask-blur, 14px)) saturate(var(--axis-nt-ask-sat, 120%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-ask-blur, 14px)) saturate(var(--axis-nt-ask-sat, 120%));
 }
 .new-tab-ask-input {
     flex: 1;
@@ -11113,6 +11434,154 @@ body.light-theme .color-option.selected {
     background: transparent;
 }
 
+.ai-chat-panel.ai-chat-needs-key .ai-chat-messages:not(:empty) {
+    padding-top: 8px;
+}
+
+.ai-chat-setup {
+    flex-shrink: 0;
+    margin: 8px 16px 0;
+    padding: 20px 18px 18px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    text-align: center;
+    pointer-events: auto;
+    -webkit-app-region: no-drag;
+}
+
+.ai-chat-setup-icon {
+    font-size: 22px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 10px;
+}
+
+.ai-chat-setup-title {
+    margin: 0 0 8px;
+    font-size: 15px;
+    font-weight: 650;
+    color: rgba(255, 255, 255, 0.94);
+}
+
+.ai-chat-setup-desc {
+    margin: 0 0 14px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.58);
+}
+
+.ai-chat-setup-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.96);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.16s ease, transform 0.12s ease;
+}
+
+.ai-chat-setup-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.ai-chat-setup-link {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.52);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.ai-chat-setup-link:hover {
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.ai-chat-panel.ai-chat-needs-key .ai-chat-input-container {
+    display: none;
+}
+
+.ai-chat-panel.ai-chat-needs-key .ai-chat-quote-bar {
+    display: none !important;
+}
+
+.new-tab-search-wrapper.new-tab-ask-locked .new-tab-search-bar {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.new-tab-search-wrapper.new-tab-ask-locked .new-tab-input {
+    cursor: not-allowed;
+}
+
+.new-tab-ask-setup {
+    width: min(100%, 560px);
+    margin: 0 auto 14px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--axis-nt-search-bg, rgba(14, 15, 18, 0.38));
+    backdrop-filter: blur(var(--axis-nt-search-blur, 16px)) saturate(var(--axis-nt-search-sat, 125%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-search-blur, 16px)) saturate(var(--axis-nt-search-sat, 125%));
+    text-align: center;
+    box-sizing: border-box;
+}
+
+.new-tab-ask-setup-title {
+    margin: 0 0 6px;
+    font-size: 14px;
+    font-weight: 650;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.new-tab-ask-setup-desc {
+    margin: 0 0 12px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.58);
+}
+
+.new-tab-ask-setup-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+}
+
+.new-tab-ask-setup-btn {
+    min-height: 32px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.new-tab-ask-setup-link {
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
 .ai-chat-messages::-webkit-scrollbar {
     width: 6px;
 }
@@ -11473,8 +11942,27 @@ body.light-theme .color-option.selected {
     display: none;
 }
 
-/* Internal pages (new tab, Settings): black top bar in dark uiTheme only. */
-:root[data-ui-theme="dark"] body:not(.transparent-sites-mode) .webview-url-bar.url-bar-internal-shell {
+/* New tab + AI chat: frosted top bar that blends with the start page (not solid chrome). */
+.webview-url-bar.url-bar-ntp-chrome {
+    border-radius: 0;
+    border-bottom: 1px solid var(--url-bar-border, rgba(255, 255, 255, 0.06));
+    backdrop-filter: blur(var(--axis-nt-search-blur, 18px)) saturate(var(--axis-nt-search-sat, 130%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-search-blur, 18px)) saturate(var(--axis-nt-search-sat, 130%));
+}
+.webview-url-bar.url-bar-ntp-chrome .url-bar-center {
+    visibility: hidden;
+    pointer-events: none;
+    flex: 0 0 0;
+    width: 0;
+    min-width: 0;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+    border: none;
+}
+
+/* Internal pages (Settings): black top bar in dark uiTheme only — NTP uses frosted bar above. */
+:root[data-ui-theme="dark"] body:not(.transparent-sites-mode) .webview-url-bar.url-bar-internal-shell:not(.url-bar-ntp-chrome) {
     --url-bar-bg: #000000;
     --url-bar-border: rgba(255, 255, 255, 0.1);
     --url-bar-text: rgba(255, 255, 255, 0.96);
@@ -11485,7 +11973,7 @@ body.light-theme .color-option.selected {
     background: #000000 !important;
 }
 
-:root[data-ui-theme="dark"] body.transparent-sites-mode .webview-url-bar.url-bar-internal-shell {
+:root[data-ui-theme="dark"] body.transparent-sites-mode .webview-url-bar.url-bar-internal-shell:not(.url-bar-ntp-chrome) {
     --url-bar-bg: var(--axis-nt-search-bg, rgba(14, 15, 18, 0.1));
     --url-bar-border: rgba(255, 255, 255, 0.1);
     --url-bar-text: rgba(255, 255, 255, 0.96);
@@ -11513,37 +12001,6 @@ body.light-theme .color-option.selected {
 body.transparent-sites-mode .webview-url-bar {
     backdrop-filter: blur(var(--axis-ts-urlbar-blur, 26px)) saturate(var(--axis-ts-urlbar-sat, 148%));
     -webkit-backdrop-filter: blur(var(--axis-ts-urlbar-blur, 26px)) saturate(var(--axis-ts-urlbar-sat, 148%));
-}
-
-/* Glass mode: NTP canvas is transparent so shell / theme shows through (cards below keep frosted vars). */
-body.transparent-sites-mode .new-tab-page {
-    background: transparent !important;
-}
-body.transparent-sites-mode .new-tab-search-wrapper {
-    background: var(--axis-nt-search-bg, rgba(14, 15, 18, 0.10)) !important;
-    backdrop-filter: blur(var(--axis-nt-search-blur, 10px)) saturate(var(--axis-nt-search-sat, 118%));
-    -webkit-backdrop-filter: blur(var(--axis-nt-search-blur, 10px)) saturate(var(--axis-nt-search-sat, 118%));
-    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.12),
-                inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-body.transparent-sites-mode .new-tab-search-wrapper:hover {
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.26),
-                inset 0 1px 0 rgba(255, 255, 255, 0.07);
-}
-body.transparent-sites-mode .new-tab-search-wrapper:focus-within {
-    box-shadow: 0 8px 36px rgba(0, 0, 0, 0.3),
-                0 0 0 1px rgba(255, 255, 255, 0.1),
-                inset 0 1px 0 rgba(255, 255, 255, 0.07);
-}
-body.transparent-sites-mode .new-tab-mode-toggle {
-    background: var(--axis-nt-toggle-bg, rgba(255, 255, 255, 0.06)) !important;
-    backdrop-filter: blur(var(--axis-nt-toggle-blur, 12px)) saturate(var(--axis-nt-toggle-sat, 125%));
-    -webkit-backdrop-filter: blur(var(--axis-nt-toggle-blur, 12px)) saturate(var(--axis-nt-toggle-sat, 125%));
-}
-body.transparent-sites-mode .new-tab-ask-input-row {
-    background: var(--axis-nt-ask-bg, rgba(10, 11, 14, 0.18)) !important;
-    backdrop-filter: blur(var(--axis-nt-ask-blur, 12px)) saturate(var(--axis-nt-ask-sat, 120%));
-    -webkit-backdrop-filter: blur(var(--axis-nt-ask-blur, 12px)) saturate(var(--axis-nt-ask-sat, 120%));
 }
 
 /* Left section - navigation buttons */
@@ -12357,17 +12814,42 @@ html.platform-darwin #main-area.sidebar-right .webview-url-bar {
 #profile-delete-modal[data-ui-theme="light"] .vault-save-modal__btn--danger:hover {
     background: rgba(198, 40, 40, 0.12);
 }
-#profile-create-modal[data-ui-theme="dark"] .vault-save-modal__btn--primary,
-#profile-delete-modal[data-ui-theme="dark"] .vault-save-modal__btn {
+#profile-create-modal[data-ui-theme="dark"] .vault-save-modal__btn:not(.vault-save-modal__btn--primary),
+#profile-delete-modal[data-ui-theme="dark"] .vault-save-modal__btn:not(.vault-save-modal__btn--danger) {
     background: rgba(255, 255, 255, 0.08);
     border-color: rgba(255, 255, 255, 0.14);
     color: #f5f5f7;
 }
-#profile-create-modal[data-ui-theme="light"] .vault-save-modal__btn,
-#profile-delete-modal[data-ui-theme="light"] .vault-save-modal__btn {
+#profile-create-modal[data-ui-theme="light"] .vault-save-modal__btn:not(.vault-save-modal__btn--primary),
+#profile-delete-modal[data-ui-theme="light"] .vault-save-modal__btn:not(.vault-save-modal__btn--danger) {
     background: rgba(0, 0, 0, 0.04);
     border-color: rgba(0, 0, 0, 0.12);
     color: #1d1d1f;
+}
+#profile-create-modal[data-ui-theme="dark"] .vault-save-modal__btn:not(.vault-save-modal__btn--primary):hover,
+#profile-delete-modal[data-ui-theme="dark"] .vault-save-modal__btn:not(.vault-save-modal__btn--danger):hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+#profile-create-modal[data-ui-theme="light"] .vault-save-modal__btn:not(.vault-save-modal__btn--primary):hover,
+#profile-delete-modal[data-ui-theme="light"] .vault-save-modal__btn:not(.vault-save-modal__btn--danger):hover {
+    background: rgba(0, 0, 0, 0.07);
+}
+#profile-create-modal[data-ui-theme="dark"] .vault-save-modal__btn--primary {
+    background: #f5f5f7;
+    border-color: #f5f5f7;
+    color: #1d1d1f;
+}
+#profile-create-modal[data-ui-theme="light"] .vault-save-modal__btn--primary {
+    background: #1d1d1f;
+    border-color: #1d1d1f;
+    color: #ffffff;
+}
+#profile-create-modal[data-ui-theme="dark"] .vault-save-modal__btn--primary:hover {
+    background: #ffffff;
+}
+#profile-create-modal[data-ui-theme="light"] .vault-save-modal__btn--primary:hover {
+    background: #000000;
+    border-color: #000000;
 }
 .vault-save-modal__actions {
     display: flex;
