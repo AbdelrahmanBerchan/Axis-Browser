@@ -192,15 +192,18 @@ const AXIS_SHELL_CHROME_OPAQUE = {
     urlBarTintDefault: 0.38,
     urlBarTintDark: 0.34,
     urlBarTintLight: 0.26,
-    newTabSearchAlpha: 0.46,
-    newTabSearchBlur: 16,
-    newTabSearchSat: 130,
+    newTabPageAlpha: 0.44,
+    newTabPageBlur: 32,
+    newTabPageSat: 148,
+    newTabSearchAlpha: 0.58,
+    newTabSearchBlur: 26,
+    newTabSearchSat: 148,
     newTabToggleAlpha: 0.22,
     newTabToggleBlur: 18,
     newTabToggleSat: 132,
-    newTabAskAlpha: 0.52,
-    newTabAskBlur: 18,
-    newTabAskSat: 130,
+    newTabAskAlpha: 0.64,
+    newTabAskBlur: 28,
+    newTabAskSat: 148,
 };
 const AXIS_SHELL_CHROME_TRANSPARENT = {
     glassAlpha: 0.0045,
@@ -216,15 +219,18 @@ const AXIS_SHELL_CHROME_TRANSPARENT = {
     urlBarTintDefault: 0.028,
     urlBarTintDark: 0.025,
     urlBarTintLight: 0.018,
-    newTabSearchAlpha: 0.022,
-    newTabSearchBlur: 4,
-    newTabSearchSat: 108,
+    newTabPageAlpha: 0.028,
+    newTabPageBlur: 8,
+    newTabPageSat: 118,
+    newTabSearchAlpha: 0.028,
+    newTabSearchBlur: 6,
+    newTabSearchSat: 112,
     newTabToggleAlpha: 0.014,
     newTabToggleBlur: 6,
     newTabToggleSat: 112,
-    newTabAskAlpha: 0.04,
-    newTabAskBlur: 6,
-    newTabAskSat: 110,
+    newTabAskAlpha: 0.05,
+    newTabAskBlur: 8,
+    newTabAskSat: 114,
 };
 
 /** Extension id from a Chrome Web Store listing URL (must match main-process `parseChromeWebStoreExtensionId`). */
@@ -1092,6 +1098,7 @@ class AxisBrowser {
         if (ntpOpen) {
             wv.style.opacity = '0';
             wv.style.visibility = 'hidden';
+            this._clearWebviewCanvasColor();
         } else {
             wv.style.opacity = '1';
             wv.style.visibility = 'visible';
@@ -1104,45 +1111,32 @@ class AxisBrowser {
         return active?.name || (this.profileId === 'personal' ? 'Personal' : this.profileId);
     }
 
-    getTimeGreeting() {
+    getNewTabGreetingName() {
+        const raw = String(this.settings?.ntpGreetingName ?? '').trim();
+        return raw || 'User';
+    }
+
+    getTimeGreeting(name) {
+        const greetingName = name ?? this.getNewTabGreetingName();
+        if (typeof window !== 'undefined' && window.AXIS_NTP_GREETINGS?.getTimeGreeting) {
+            return window.AXIS_NTP_GREETINGS.getTimeGreeting(new Date(), greetingName);
+        }
         const h = new Date().getHours();
-        if (h < 12) return 'Good morning';
-        if (h < 17) return 'Good afternoon';
-        if (h < 22) return 'Good evening';
-        return 'Good night';
+        if (h < 12) return `Good Morning, ${greetingName}.`;
+        if (h < 17) return `Good Afternoon, ${greetingName}.`;
+        if (h < 22) return `Good Evening, ${greetingName}`;
+        return 'Good night.';
     }
 
     updateNewTabHero() {
         const greetingEl = document.getElementById('new-tab-greeting');
-        const tipEl = document.getElementById('new-tab-tip');
         const newTabPage = document.getElementById('new-tab-page');
         const input = document.getElementById('new-tab-input');
         if (!greetingEl) return;
-        const name = this.getActiveProfileDisplayName();
-        greetingEl.textContent = `${this.getTimeGreeting()}, ${name}.`;
+        const name = this.getNewTabGreetingName();
+        greetingEl.textContent = this.getTimeGreeting(name);
         const s = this.settings || {};
         const welcomeOn = s.ntpWelcomeEnabled !== false;
-        const tipsOn = welcomeOn && s.ntpWelcomeTips !== false;
-        const aiOn = s.ntpAiSearchEnabled !== false;
-        const tips = [];
-        if (tipsOn) {
-            tips.push('Search the web or paste a link to open a site.');
-            if (aiOn && !this.hasGroqApiKey()) {
-                tips.push('Add a Groq API key in Settings to ask AI from the start tab.');
-            }
-            if (s.ntpWelcomeUpdates !== false) {
-                tips.push('Use Help → Check for Updates when you want the latest Axis build.');
-            }
-        }
-        if (tipEl) {
-            if (tips.length) {
-                tipEl.textContent = tips[Math.floor(Date.now() / 45000) % tips.length];
-                tipEl.style.display = '';
-            } else {
-                tipEl.textContent = '';
-                tipEl.style.display = 'none';
-            }
-        }
         const greetingOn = welcomeOn && s.ntpWelcomeGreeting !== false;
         const hero = document.getElementById('new-tab-hero');
         hero?.classList.toggle('hidden', !welcomeOn);
@@ -1199,6 +1193,7 @@ class AxisBrowser {
         if (!animate) {
             this._finishNewTabAiChatLayout();
             page.classList.add('ntp-ai-chat-mode');
+            this._applyNewTabPageChrome();
             this.syncNewTabInputChrome();
             if (this.currentTab != null) {
                 this.applyNewTabTabChrome(this.currentTab);
@@ -1220,6 +1215,7 @@ class AxisBrowser {
             requestAnimationFrame(() => requestAnimationFrame(resolve));
         });
         page.classList.add('ntp-ai-chat-mode');
+        this._applyNewTabPageChrome();
         this.syncNewTabInputChrome();
         await new Promise((resolve) => setTimeout(resolve, 420));
         page.classList.remove('ntp-ai-chat-entering');
@@ -1651,6 +1647,7 @@ class AxisBrowser {
         
         // AI chat panel
         this.setupAIChat();
+        this.setupAiChatMarkdownLinks();
 
         // Settings - use cached elements
         el.closeSettings?.addEventListener('click', () => this.toggleSettings());
@@ -2009,6 +2006,11 @@ class AxisBrowser {
                 case 'copy-url':
                     this.copyCurrentUrl();
                     break;
+                case 'update-saved-link':
+                    if (this.currentTab != null) {
+                        void this.updateTabSavedLink(this.currentTab);
+                    }
+                    break;
                 case 'copy-url-markdown':
                     void this.copyCurrentUrlAsMarkdown();
                     break;
@@ -2169,6 +2171,13 @@ class AxisBrowser {
                     this.contextMenuFavoriteId = null;
                     break;
                 }
+                case 'update-saved-link': {
+                    const fav = findFav();
+                    const rt = fav ? this._normalizeTabMapKey(fav.runtimeTabId) : null;
+                    if (rt != null) void this.updateTabSavedLink(rt);
+                    this.contextMenuFavoriteId = null;
+                    break;
+                }
                 case 'rename': {
                     const fav = findFav();
                     if (fav) {
@@ -2282,6 +2291,11 @@ class AxisBrowser {
                 case 'add-to-favorites':
                     if (this.contextMenuTabId) {
                         this.addTabToFavorites(this.contextMenuTabId);
+                    }
+                    break;
+                case 'update-saved-link':
+                    if (this.contextMenuTabId) {
+                        void this.updateTabSavedLink(this.contextMenuTabId);
                     }
                     break;
                 case 'add-to-tab-group':
@@ -3913,9 +3927,6 @@ class AxisBrowser {
         
         webview.__eventHandlers = {};
         
-        webview.style.transform = 'translateZ(0)';
-        webview.style.backfaceVisibility = 'hidden';
-        
         const isActiveTab = () => this.currentTab === tabId;
         const getTab = () => this.tabs.get(tabId);
         const clearLoadingTimeout = () => {
@@ -4731,15 +4742,6 @@ class AxisBrowser {
     }
 
     setupPerformanceOptimizations() {
-        // Lightweight hardware acceleration hints only
-        const webview = document.getElementById('webview');
-        if (webview) {
-            webview.style.willChange = 'transform, opacity';
-            webview.style.transform = 'translateZ(0)';
-            webview.style.backfaceVisibility = 'hidden';
-            webview.style.perspective = '1000px';
-        }
-        
         // Disable DNS prefetch and resource preloading entirely - they hurt Speedometer benchmarks
         // by causing unnecessary network and DOM work during benchmark execution
     }
@@ -5750,20 +5752,12 @@ class AxisBrowser {
             }
         }
 
-        // Transparent-sites UI (URL bar / new tab) reads these from :root — match #app shell blur/sat
+        // New tab / AI chat glass (fixed tint — not tied to Window transparency)
+        this._applyNewTabSurfaceChromeVars();
+        this._applyNewTabPageChrome();
         if (!forceOpaqueBlack) {
-            const ntChrome = this.getShellChromeStyle({ forceDarkNewTabSurfaces: true });
             style.setProperty('--axis-ts-urlbar-blur', `${chrome.blurMain}px`);
             style.setProperty('--axis-ts-urlbar-sat', `${chrome.satMain}%`);
-            style.setProperty('--axis-nt-search-bg', ntChrome.newTabSearchBg);
-            style.setProperty('--axis-nt-search-blur', `${ntChrome.newTabSearchBlur}px`);
-            style.setProperty('--axis-nt-search-sat', `${ntChrome.newTabSearchSat}%`);
-            style.setProperty('--axis-nt-toggle-bg', ntChrome.newTabToggleBg);
-            style.setProperty('--axis-nt-toggle-blur', `${ntChrome.newTabToggleBlur}px`);
-            style.setProperty('--axis-nt-toggle-sat', `${ntChrome.newTabToggleSat}%`);
-            style.setProperty('--axis-nt-ask-bg', ntChrome.newTabAskBg);
-            style.setProperty('--axis-nt-ask-blur', `${ntChrome.newTabAskBlur}px`);
-            style.setProperty('--axis-nt-ask-sat', `${ntChrome.newTabAskSat}%`);
         }
         
         // Re-enable transitions after theme is applied (use RAF to ensure CSS variables are updated first)
@@ -5820,6 +5814,130 @@ class AxisBrowser {
         return Math.max(0, Math.min(100, v)) / 100;
     }
 
+    /**
+     * New tab + AI chat page glass — fixed moderate tint/blur, not tied to Window transparency.
+     * (URL bar still follows shell chrome; these are the full-page and panel backgrounds.)
+     */
+    getNewTabSurfaceChromeStyle() {
+        return {
+            pageBg: 'rgba(10, 11, 14, 0.20)',
+            pageBlur: 32,
+            pageSat: 155,
+            searchBg: 'rgba(12, 13, 17, 0.26)',
+            searchBlur: 28,
+            searchSat: 155,
+            toggleBg: 'rgba(255, 255, 255, 0.1)',
+            toggleBlur: 20,
+            toggleSat: 145,
+            askBg: 'rgba(10, 11, 14, 0.24)',
+            askBlur: 28,
+            askSat: 152,
+            aiPanelBg: 'rgba(9, 10, 13, 0.72)',
+            aiPanelBlur: 44,
+            aiPanelSat: 155,
+        };
+    }
+
+    _applyNewTabSurfaceChromeVars() {
+        const sc = this.getNewTabSurfaceChromeStyle();
+        const style = document.documentElement.style;
+        style.setProperty('--axis-nt-page-bg', sc.pageBg);
+        style.setProperty('--axis-nt-page-blur', `${sc.pageBlur}px`);
+        style.setProperty('--axis-nt-page-sat', `${sc.pageSat}%`);
+        style.setProperty('--axis-nt-search-bg', sc.searchBg);
+        style.setProperty('--axis-nt-search-blur', `${sc.searchBlur}px`);
+        style.setProperty('--axis-nt-search-sat', `${sc.searchSat}%`);
+        style.setProperty('--axis-nt-toggle-bg', sc.toggleBg);
+        style.setProperty('--axis-nt-toggle-blur', `${sc.toggleBlur}px`);
+        style.setProperty('--axis-nt-toggle-sat', `${sc.toggleSat}%`);
+        style.setProperty('--axis-nt-ask-bg', sc.askBg);
+        style.setProperty('--axis-nt-ask-blur', `${sc.askBlur}px`);
+        style.setProperty('--axis-nt-ask-sat', `${sc.askSat}%`);
+    }
+
+    /** Paint full new-tab / in-tab AI chat background (one frosted layer on #new-tab-page). */
+    _applyNewTabPageChrome() {
+        this._applyNewTabSurfaceChromeVars();
+        const page = document.getElementById('new-tab-page');
+        if (page) {
+            page.style.removeProperty('background');
+            page.style.removeProperty('backdrop-filter');
+            page.style.removeProperty('-webkit-backdrop-filter');
+        }
+        for (const id of ['new-tab-ai-chat-view', 'new-tab-start-view']) {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            el.style.removeProperty('background');
+            el.style.removeProperty('backdrop-filter');
+            el.style.removeProperty('-webkit-backdrop-filter');
+        }
+        this._applyAiChatPanelChrome();
+        const urlBar = this.elements?.webviewUrlBar;
+        if (urlBar?.classList.contains('url-bar-ntp-chrome')) {
+            this._applyNtpUrlBarStyle(urlBar);
+        }
+    }
+
+    _applyAiChatPanelChrome() {
+        const sc = this.getNewTabSurfaceChromeStyle();
+        const root = document.documentElement.style;
+        root.setProperty('--chat-panel-bg', sc.aiPanelBg);
+        root.setProperty('--chat-panel-blur', `${sc.aiPanelBlur}px`);
+        root.setProperty('--chat-panel-sat', `${sc.aiPanelSat}%`);
+        const panel = document.getElementById('ai-chat-panel');
+        if (panel) {
+            panel.style.removeProperty('background');
+            panel.style.removeProperty('backdrop-filter');
+            panel.style.removeProperty('-webkit-backdrop-filter');
+        }
+    }
+
+    /** One body class drives panel fill / overscan — keeps idle, NTP, AI chat, and sites consistent. */
+    _syncWebPanelVisualState() {
+        const body = document.body;
+        body.classList.remove('panel-ntp', 'panel-site', 'panel-idle');
+
+        if (body.classList.contains('chrome-no-tabs')) {
+            this._clearWebviewCanvasColor();
+            return;
+        }
+
+        const ntp = document.getElementById('new-tab-page');
+        if (ntp && !ntp.classList.contains('hidden')) {
+            body.classList.add('panel-ntp');
+            this._clearWebviewCanvasColor();
+            return;
+        }
+
+        const tab =
+            this.currentTab != null && this.tabs.has(this.currentTab)
+                ? this.tabs.get(this.currentTab)
+                : null;
+        if (!tab) {
+            body.classList.add('panel-idle');
+            this._clearWebviewCanvasColor();
+            return;
+        }
+
+        const u = String(tab.url || '');
+        const isRealSite =
+            u &&
+            u !== 'about:blank' &&
+            u !== this.NEWTAB_URL &&
+            u !== 'axis://settings' &&
+            !u.startsWith('axis:note://') &&
+            !tab.isSettings &&
+            !/^axis:/i.test(u);
+        const guestActive = tab.webview && !tab.webview.classList.contains('inactive');
+
+        if (isRealSite && guestActive) {
+            body.classList.add('panel-site');
+        } else {
+            body.classList.add('panel-idle');
+            if (!isRealSite) this._clearWebviewCanvasColor();
+        }
+    }
+
     getShellChromeStyle(opts = {}) {
         const tSlider = this.getShellChromeTransmissionT();
         // New tab / AI chat surfaces always use dark glass (unaffected by uiTheme).
@@ -5848,15 +5966,18 @@ class AxisBrowser {
                 urlBarTintDefault: 1,
                 urlBarTintDark: 1,
                 urlBarTintLight: 1,
-                newTabSearchBg: `rgba(${ntSearchRGB}, ${lightUi ? 0.72 : 0.38})`,
-                newTabSearchBlur: 14,
-                newTabSearchSat: 120,
+                newTabPageBg: `rgba(8, 9, 12, ${lightUi ? 0.52 : 0.48})`,
+                newTabPageBlur: 28,
+                newTabPageSat: 140,
+                newTabSearchBg: `rgba(${ntSearchRGB}, ${lightUi ? 0.72 : 0.5})`,
+                newTabSearchBlur: 22,
+                newTabSearchSat: 140,
                 newTabToggleBg: `rgba(${ntToggleRGB}, ${lightUi ? 0.06 : 0.08})`,
                 newTabToggleBlur: 12,
                 newTabToggleSat: 120,
-                newTabAskBg: `rgba(${ntAskRGB}, ${lightUi ? 0.78 : 0.34})`,
-                newTabAskBlur: 14,
-                newTabAskSat: 120,
+                newTabAskBg: `rgba(${ntAskRGB}, ${lightUi ? 0.78 : 0.46})`,
+                newTabAskBlur: 24,
+                newTabAskSat: 140,
             };
         }
         /** Concave remap: slider mid–high spends more blend weight on the airy endpoint (`AXIS_SHELL_CHROME_TRANSPARENT`). */
@@ -5878,6 +5999,10 @@ class AxisBrowser {
         const urlBarTintDefault = L(o.urlBarTintDefault, tr.urlBarTintDefault);
         const urlBarTintDark = L(o.urlBarTintDark, tr.urlBarTintDark);
         const urlBarTintLight = L(o.urlBarTintLight, tr.urlBarTintLight);
+        const ntP = L(o.newTabPageAlpha, tr.newTabPageAlpha);
+        const newTabPageBg = `rgba(8, 9, 12, ${ntP.toFixed(3)})`;
+        const newTabPageBlur = Math.round(L(o.newTabPageBlur, tr.newTabPageBlur));
+        const newTabPageSat = Math.round(L(o.newTabPageSat, tr.newTabPageSat));
         const ntS = L(o.newTabSearchAlpha, tr.newTabSearchAlpha);
         const newTabSearchBg = `rgba(${ntSearchRGB}, ${ntS.toFixed(3)})`;
         // In dark mode the toggle uses white overlay; in light mode flip to a black overlay
@@ -5908,6 +6033,9 @@ class AxisBrowser {
             urlBarTintDefault,
             urlBarTintDark,
             urlBarTintLight,
+            newTabPageBg,
+            newTabPageBlur,
+            newTabPageSat,
             newTabSearchBg,
             newTabSearchBlur,
             newTabSearchSat,
@@ -6116,8 +6244,6 @@ class AxisBrowser {
             bottom: 0;
             width: 100%;
             height: 100%;
-            transform: translateZ(0);
-            backface-visibility: hidden;
             opacity: 0;
             visibility: hidden;
             pointer-events: none;
@@ -6189,9 +6315,64 @@ class AxisBrowser {
         this._nudgeWebviewGuestLayout();
     }
 
+    _hasVisibleWebGuest() {
+        const tab = this.currentTab != null && this.tabs.has(this.currentTab)
+            ? this.tabs.get(this.currentTab)
+            : null;
+        if (!tab?.webview || tab.webview.classList.contains('inactive')) return false;
+        const u = String(tab.url || '');
+        if (!u || u === this.NEWTAB_URL || u === 'axis://settings' || u.startsWith('axis:note://')) {
+            return false;
+        }
+        if (/^axis:/i.test(u)) return false;
+        return true;
+    }
+
+    _scheduleWebviewHostBoundsLiveSync() {
+        this._webviewHostBoundsLastLiveAt = performance.now();
+        if (!this._webviewHostBoundsTracking) {
+            this._webviewHostBoundsTracking = true;
+            document.body.classList.add('host-resizing');
+        }
+        this._armWebviewHostBoundsIdleFallback();
+    }
+
+    _armWebviewHostBoundsIdleFallback() {
+        if (this._webviewHostBoundsIdleTimer != null) {
+            clearTimeout(this._webviewHostBoundsIdleTimer);
+        }
+        this._webviewHostBoundsIdleTimer = setTimeout(() => {
+            this._webviewHostBoundsIdleTimer = null;
+            if (!this._webviewHostBoundsTracking) return;
+            if (performance.now() - (this._webviewHostBoundsLastLiveAt || 0) < 160) {
+                this._armWebviewHostBoundsIdleFallback();
+                return;
+            }
+            this._finishWebviewHostBoundsTracking();
+        }, 160);
+    }
+
+    _finishWebviewHostBoundsTracking() {
+        if (this._webviewHostBoundsIdleTimer != null) {
+            clearTimeout(this._webviewHostBoundsIdleTimer);
+            this._webviewHostBoundsIdleTimer = null;
+        }
+        if (!this._webviewHostBoundsTracking) return;
+        this._webviewHostBoundsTracking = false;
+        document.body.classList.remove('host-resizing');
+
+        if (!this._hasVisibleWebGuest()) return;
+
+        this._nudgeWebviewGuestLayout();
+        requestAnimationFrame(() => {
+            this._nudgeWebviewGuestLayout();
+            this._syncGuestWindowResizeEvent();
+            this._maybeRebindStaleGuestLayout();
+        });
+    }
+
     /**
-     * Cheap layout poke so Electron’s guest embedding matches settled host bounds (post-resize /
-     * tab switch only — not during active edge drag; we avoid that workload entirely there).
+     * Cheap layout poke so Electron’s guest embedding matches settled host bounds.
      */
     _nudgeWebviewGuestLayout() {
         const container = document.getElementById('webviews-container');
@@ -6206,10 +6387,6 @@ class AxisBrowser {
         const active = this.getActiveWebview();
         if (active) {
             try {
-                if (containerRect && containerRect.width > 0 && containerRect.height > 0) {
-                    active.style.width = `${Math.round(containerRect.width)}px`;
-                    active.style.height = `${Math.round(containerRect.height)}px`;
-                }
                 void active.offsetWidth;
                 void active.offsetHeight;
                 void active.getBoundingClientRect();
@@ -6318,40 +6495,26 @@ class AxisBrowser {
     }
 
     /**
-     * Guest `<webview>` sizing is handled by Chromium (`autosize`). We only poke layout + fire
-     * `resize` in the page **after** resizing settles — doing it during every frame of a window
-     * drag was the main source of jank (forced layout + IPC into the guest repeatedly).
-     *
-     * `ResizeObserver` on `#webviews-container` covers **sidebar width** drags (no `window` resize),
-     * debounced to the same idle handler as `window.resize`.
+     * Guest `<webview>` resize is handled by Chromium (`autosize`). During drags we only
+     * disable shell transitions (`host-resizing`); JS must not rewrite guest bounds each frame.
+     * After the drag ends we rebind the guest once so real sites catch up.
      */
     setupWebviewGuestResizeSync() {
-        const IDLE_MS = 120;
-        /** @type {ReturnType<typeof setTimeout> | null} */
-        let idleFlushTimer = null;
-
-        const deferredGuestSync = () => {
-            this._nudgeWebviewGuestLayout();
-            this._syncGuestWindowResizeEvent();
-        };
-
-        const scheduleIdleFlush = () => {
-            if (idleFlushTimer != null) clearTimeout(idleFlushTimer);
-            idleFlushTimer = setTimeout(() => {
-                idleFlushTimer = null;
-                deferredGuestSync();
-            }, IDLE_MS);
-        };
+        const onHostBoundsChange = () => this._scheduleWebviewHostBoundsLiveSync();
 
         const container = document.getElementById('webviews-container');
         try {
             if (typeof ResizeObserver !== 'undefined' && container) {
-                const ro = new ResizeObserver(() => scheduleIdleFlush());
-                ro.observe(container);
+                new ResizeObserver(onHostBoundsChange).observe(container);
             }
         } catch (_) {}
-        window.addEventListener('resize', scheduleIdleFlush, { passive: true });
-        queueMicrotask(deferredGuestSync);
+        window.addEventListener('resize', onHostBoundsChange, { passive: true });
+        window.electronAPI?.onHostResizeLive?.(() => this._scheduleWebviewHostBoundsLiveSync());
+        window.electronAPI?.onHostResizeSettled?.(() => this._finishWebviewHostBoundsTracking());
+        queueMicrotask(() => {
+            this._nudgeWebviewGuestLayout();
+            this._syncGuestWindowResizeEvent();
+        });
     }
 
     getActiveWebview() {
@@ -6825,7 +6988,8 @@ class AxisBrowser {
                         this.loadNoteInWebview(noteId);
                     }
                 } else if (tab.url && tab.url !== 'about:blank' && tab.url !== '') {
-                    const sanitizedTabUrl = this.sanitizeUrl(tab.url);
+                    const loadTarget = (tab.pinned && tab.savedLinkUrl) ? tab.savedLinkUrl : tab.url;
+                    const sanitizedTabUrl = this.sanitizeUrl(loadTarget);
                     const webviewHasContent = currentSrc && currentSrc !== 'about:blank' && currentSrc.trim() !== '';
                     if (!webviewHasContent) {
                         webview.src = sanitizedTabUrl || 'https://www.google.com';
@@ -6896,6 +7060,7 @@ class AxisBrowser {
             } else {
                 this.updateNewTabPageVisibility(false);
             }
+            this._syncWebPanelVisualState();
         }
 
         if (switchedDifferentTab && !fromProfileSwitch && tab) {
@@ -7046,6 +7211,16 @@ class AxisBrowser {
         this.mountNewTabSearchBarToStart();
         this.setupNewTabMenuButton();
         this.applyNewTabCustomization();
+
+        if (this._ntpGreetingClockInterval) clearInterval(this._ntpGreetingClockInterval);
+        this._ntpGreetingLastHour = new Date().getHours();
+        this._ntpGreetingClockInterval = setInterval(() => {
+            const h = new Date().getHours();
+            if (h === this._ntpGreetingLastHour) return;
+            this._ntpGreetingLastHour = h;
+            const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+            if (tab?.url === this.NEWTAB_URL) this.updateNewTabHero();
+        }, 60000);
     }
 
     setupNewTabMenuButton() {
@@ -7070,6 +7245,8 @@ class AxisBrowser {
         wrapper?.style.removeProperty('--ntp-accent');
         wrapper?.style.removeProperty('--ntp-accent-glow');
 
+        this._applyNewTabSurfaceChromeVars();
+        this._applyNewTabPageChrome();
         this.updateNewTabHero();
         const input = document.getElementById('new-tab-input');
         if (input?.value?.trim() && !this.isNewTabInChat()) {
@@ -7227,6 +7404,13 @@ class AxisBrowser {
         `;
         messagesContainer.appendChild(userDiv);
         this._scrollNewTabAskMessagesToBottom();
+
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (tab) {
+            if (!Array.isArray(tab.newTabAskHistory)) tab.newTabAskHistory = [];
+            tab.newTabAskHistory.push({ role: 'user', content: text });
+            this.tabs.set(this.currentTab, tab);
+        }
         this._persistNewTabChatStateIfNeeded();
 
         const loadingId = Date.now();
@@ -7246,7 +7430,8 @@ class AxisBrowser {
         this._focusNewTabInput();
 
         try {
-            const response = await this.getChatAIResponse(text);
+            const history = tab ? tab.newTabAskHistory : this._getNewTabAskHistoryForTab(this.currentTab);
+            const response = await this.getChatAIResponse(text, { history });
             const updated = messagesContainer.querySelector(
                 ".new-tab-ask-message.assistant[data-message-id=\"" + loadingId + "\"]"
             );
@@ -7254,9 +7439,13 @@ class AxisBrowser {
                 updated.innerHTML = `
                     <div class="new-tab-ask-avatar assistant" aria-hidden="true"><i class="fas fa-message"></i></div>
                     <div class="new-tab-ask-body">
-                        <div class="new-tab-ask-bubble">${this.escapeHtml(response)}</div>
+                        <div class="new-tab-ask-bubble">${this.formatAiChatMarkdown(response)}</div>
                     </div>
                 `;
+            }
+            if (tab) {
+                tab.newTabAskHistory.push({ role: 'assistant', content: response });
+                this.tabs.set(this.currentTab, tab);
             }
             this._scrollNewTabAskMessagesToBottom();
             this._persistNewTabChatStateIfNeeded();
@@ -7360,13 +7549,52 @@ class AxisBrowser {
         const askMessages = document.getElementById('new-tab-ask-messages');
         const inputValue = input ? input.value : '';
         const askMessagesHtml = askMessages ? askMessages.innerHTML : '';
+        const askMessageHistory = Array.isArray(tab.newTabAskHistory) && tab.newTabAskHistory.length
+            ? tab.newTabAskHistory.map((m) => ({ role: m.role, content: m.content }))
+            : this._extractNewTabAskHistoryFromDom();
+        tab.newTabAskHistory = askMessageHistory;
         tab.newTabPageState = {
             inputValue,
             inChat: this.isNewTabInChat(),
-            askMessagesHtml
+            askMessagesHtml,
+            askMessageHistory
         };
         this.tabs.set(tabId, tab);
         this.applyNewTabTabChrome(tabId);
+    }
+
+    /** Snapshot new-tab state for close/undo (persists AI chat history when tab is closed). */
+    _captureNewTabPageStateForUndo(tab, tabId, isCurrentTab) {
+        if (!tab || tab.url !== this.NEWTAB_URL) return undefined;
+        if (isCurrentTab) this.saveNewTabPageStateToTab(tabId);
+        const st = tab.newTabPageState;
+        if (!st) return undefined;
+        return {
+            inputValue: st.inputValue || '',
+            inChat: !!st.inChat,
+            askMessagesHtml: st.askMessagesHtml || '',
+            askMessageHistory: Array.isArray(st.askMessageHistory) ? st.askMessageHistory : []
+        };
+    }
+
+    _applyRecoveredTabState(tabId, closedData) {
+        const tab = this.tabs.get(tabId);
+        if (!tab || !closedData) return;
+        tab.title = closedData.title;
+        if (closedData.customTitle) tab.customTitle = closedData.customTitle;
+        if (closedData.newTabPageState) {
+            tab.newTabPageState = closedData.newTabPageState;
+            this.tabs.set(tabId, tab);
+            if (tab.url === this.NEWTAB_URL) {
+                this.restoreNewTabPageStateFromTab(tabId);
+                return;
+            }
+        }
+        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+        if (tabElement) {
+            const titleEl = tabElement.querySelector('.tab-title');
+            if (titleEl) titleEl.textContent = closedData.customTitle || closedData.title;
+        }
     }
 
     /** Restore a tab's new-tab-page state into the shared UI. */
@@ -7391,6 +7619,12 @@ class AxisBrowser {
         if (askMessages) {
             askMessages.innerHTML = state.askMessagesHtml || '';
         }
+        if (Array.isArray(state.askMessageHistory) && state.askMessageHistory.length) {
+            tab.newTabAskHistory = state.askMessageHistory.map((m) => ({ role: m.role, content: m.content }));
+        } else {
+            tab.newTabAskHistory = this._extractNewTabAskHistoryFromDom();
+        }
+        this.tabs.set(tabId, tab);
         if (inChat) {
             void this.beginNewTabAiChatTransition({ animate: false });
             this._focusNewTabInput();
@@ -7420,6 +7654,7 @@ class AxisBrowser {
                         const freshTab = this.tabs.get(this.currentTab);
                         if (freshTab) {
                             freshTab.newTabPageState = undefined;
+                            freshTab.newTabAskHistory = undefined;
                             this.applyNewTabTabChrome(this.currentTab);
                         }
                     }
@@ -7433,13 +7668,17 @@ class AxisBrowser {
                 newTabPage.classList.remove('hidden');
                 if (!this.isNewTabInChat()) this.mountNewTabSearchBarToStart();
                 this.updateNewTabHero();
+                this._applyNewTabSurfaceChromeVars();
+                this._applyNewTabPageChrome();
                 this._syncNewTabWebviewUnderlay();
+                this._syncWebPanelVisualState();
                 requestAnimationFrame(() => {
                     document.getElementById('new-tab-input')?.focus();
                 });
             } else {
                 newTabPage.classList.add('hidden');
                 this._syncNewTabWebviewUnderlay();
+                this._syncWebPanelVisualState();
                 // Restore webview interactivity (was pointer-events: none for overlay)
                 if (this.currentTab) {
                     const tab = this.tabs.get(this.currentTab);
@@ -7517,14 +7756,6 @@ class AxisBrowser {
                 this.applyCustomTheme(colors);
             }
             
-            // Clear container chrome fill so shell theme shows through the dimmed webview frame
-            const webviewContainer = document.querySelector('.webview-container');
-            if (webviewContainer) {
-                webviewContainer.style.setProperty('background', 'transparent', 'important');
-                webviewContainer.style.setProperty('backdrop-filter', 'none', 'important');
-                webviewContainer.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
-            }
-            
             /* No tabs: hide every guest fully — webview area must paint nothing. */
             const webviews = document.querySelectorAll('webview');
             webviews.forEach(wv => {
@@ -7534,17 +7765,24 @@ class AxisBrowser {
                 wv.style.setProperty('background', 'transparent', 'important');
                 wv.classList.add('inactive');
             });
-            
-            const webviewsContainer = document.getElementById('webviews-container');
-            if (webviewsContainer) {
-                webviewsContainer.style.setProperty('background', 'transparent', 'important');
-            }
+
             this._lastEmptyStateHadOpenTabs = false;
         } else {
             document.body.classList.remove('chrome-no-tabs');
             // Hide empty state
             emptyState.classList.add('hidden');
             if (emptyContent) emptyContent.classList.add('hidden');
+
+            const webviewContainer = document.querySelector('.webview-container');
+            if (webviewContainer) {
+                webviewContainer.style.removeProperty('background');
+                webviewContainer.style.removeProperty('backdrop-filter');
+                webviewContainer.style.removeProperty('-webkit-backdrop-filter');
+            }
+            const webviewsContainer = document.getElementById('webviews-container');
+            if (webviewsContainer) {
+                webviewsContainer.style.removeProperty('background');
+            }
 
             // Reapply full shell theme only when leaving the empty (no-tab) state — not on every tab switch
             // (applyCustomThemeFromSettings is expensive and was causing visible lag / compositor hitches).
@@ -7578,6 +7816,7 @@ class AxisBrowser {
 
         // Update chat button visibility
         this.updateChatButtonVisibility();
+        this._syncWebPanelVisualState();
     }
 
     updateChatButtonVisibility() {
@@ -7855,11 +8094,13 @@ class AxisBrowser {
         this._removeTabIdFromAllTabGroups(tid, true);
         // Store closed tab for recovery (only if it's not a new tab)
         if (tab && tab.url && tab.url !== 'about:blank') {
+            const newTabPageState = this._captureNewTabPageStateForUndo(tab, tid, cur === tid);
             this.closedTabs.unshift({
                 id: tid,
                 title: tab.title || 'Untitled',
                 url: tab.url,
                 customTitle: tab.customTitle,
+                newTabPageState,
                 timestamp: Date.now()
             });
             // Push to undo stack so Cmd+Z can revert close
@@ -7869,7 +8110,8 @@ class AxisBrowser {
                     url: tab.url,
                     title: tab.title || 'Untitled',
                     customTitle: tab.customTitle,
-                    tabGroupId: tabGroupIdForUndo
+                    tabGroupId: tabGroupIdForUndo,
+                    newTabPageState
                 }
             });
             if (this.tabUndoStack.length > 15) this.tabUndoStack = this.tabUndoStack.slice(-15);
@@ -7972,13 +8214,7 @@ class AxisBrowser {
             const newTabId = this.createNewTab(urlToLoad);
             const tab = this.tabs.get(newTabId);
             if (tab) {
-                tab.title = data.title;
-                if (data.customTitle) tab.customTitle = data.customTitle;
-                const tabElement = document.querySelector(`[data-tab-id="${newTabId}"]`);
-                if (tabElement) {
-                    const titleEl = tabElement.querySelector('.tab-title');
-                    if (titleEl) titleEl.textContent = data.customTitle || data.title;
-                }
+                this._applyRecoveredTabState(newTabId, data);
                 if (data.tabGroupId && this.tabGroups.has(data.tabGroupId)) {
                     this.addTabToTabGroup(newTabId, data.tabGroupId, true);
                 }
@@ -8010,13 +8246,7 @@ class AxisBrowser {
         const tab = this.tabs.get(newTabId);
         
         if (tab) {
-            tab.title = closedTab.title;
-            if (closedTab.customTitle) tab.customTitle = closedTab.customTitle;
-            const tabElement = document.querySelector(`[data-tab-id="${newTabId}"]`);
-            if (tabElement) {
-                const titleElement = tabElement.querySelector('.tab-title');
-                if (titleElement) titleElement.textContent = closedTab.customTitle || closedTab.title;
-            }
+            this._applyRecoveredTabState(newTabId, closedTab);
             this.showNotification(`Recovered: ${closedTab.title}`, 'success');
         }
     }
@@ -10638,6 +10868,12 @@ class AxisBrowser {
         
         // Update tab data
         tab.pinned = isPinned;
+        if (isPinned) {
+            const norm = this.normalizeFavoriteUrl(this._getTabLivePageUrl(tab));
+            if (norm) tab.savedLinkUrl = norm;
+        } else {
+            tab.savedLinkUrl = null;
+        }
         this.tabs.set(tabId, tab);
         
         // Update visual state
@@ -10674,6 +10910,7 @@ class AxisBrowser {
         const tabs = allChildren.filter(el => 
             el.classList.contains('tab') && 
             el.id !== 'tabs-separator' &&
+            !el.classList.contains('tab-favorite-host') &&
             !el.closest('.tab-group') // Exclude tabs inside tab groups
         );
 
@@ -10773,6 +11010,13 @@ class AxisBrowser {
         });
     }
     
+    /** Sidebar tab/group nodes that affect pinned vs unpinned layout (not hidden favorite hosts). */
+    _isPinnedUnpinnedSidebarTabNode(el) {
+        if (!el?.classList) return false;
+        if (el.classList.contains('tab-favorite-host')) return false;
+        return el.classList.contains('tab') || el.classList.contains('tab-group');
+    }
+
     // Recompute whether the pinned/unpinned separator should be visible based on current DOM
     updatePinnedSeparatorVisibility() {
         const tabsContainer = this.elements.tabsContainer;
@@ -10786,7 +11030,7 @@ class AxisBrowser {
             separator.style.display = 'none';
             const hasUnpinnedDom = children
                 .slice(Math.max(0, sepIndex + 1))
-                .some(el => el.classList.contains('tab') || el.classList.contains('tab-group'));
+                .some((el) => this._isPinnedUnpinnedSidebarTabNode(el));
             if (floatingClear) {
                 floatingClear.classList.toggle('hidden', !hasUnpinnedDom);
             }
@@ -10795,10 +11039,10 @@ class AxisBrowser {
         
         const hasPinnedDom = children
             .slice(0, sepIndex)
-            .some(el => el.classList.contains('tab') || el.classList.contains('tab-group'));
+            .some((el) => this._isPinnedUnpinnedSidebarTabNode(el));
         const hasUnpinnedDom = children
             .slice(sepIndex + 1)
-            .some(el => el.classList.contains('tab') || el.classList.contains('tab-group'));
+            .some((el) => this._isPinnedUnpinnedSidebarTabNode(el));
         
         separator.style.display = hasPinnedDom ? 'block' : 'none';
         if (floatingClear) {
@@ -10819,9 +11063,117 @@ class AxisBrowser {
         }
     }
 
-    isFavoriteUrl(url) {
-        const normalized = this.normalizeFavoriteUrl(url);
-        return !!normalized && this.favorites.some((fav) => this.normalizeFavoriteUrl(fav.url) === normalized);
+    _getTabLivePageUrl(tab) {
+        if (!tab) return '';
+        try {
+            if (tab.webview && typeof tab.webview.getURL === 'function') {
+                const live = tab.webview.getURL();
+                if (live && live !== 'about:blank') return live;
+            }
+        } catch (_) {}
+        return tab.url || '';
+    }
+
+    _pageLinksDiffer(savedUrl, currentUrl) {
+        const saved = this.normalizeFavoriteUrl(savedUrl) || String(savedUrl || '').trim();
+        const current = this.normalizeFavoriteUrl(currentUrl) || String(currentUrl || '').trim();
+        return !!(saved && current && saved !== current);
+    }
+
+    _getTabSavedLinkInfo(tab) {
+        if (!tab) return null;
+        const currentUrl = this._getTabLivePageUrl(tab);
+        const currentNorm = this.normalizeFavoriteUrl(currentUrl);
+        if (!currentNorm) return null;
+
+        if (tab.isFavoriteTab && tab.favoriteId) {
+            const fav = this.favorites.find((f) => f.id === tab.favoriteId);
+            if (!fav) return null;
+            if (!this._pageLinksDiffer(fav.url, currentUrl)) return null;
+            return { kind: 'favorite', savedUrl: fav.url, currentUrl, currentNorm };
+        }
+        if (tab.pinned) {
+            const savedUrl = tab.savedLinkUrl || tab.url;
+            if (!this._pageLinksDiffer(savedUrl, currentUrl)) return null;
+            return { kind: 'pinned', savedUrl, currentUrl, currentNorm };
+        }
+        return null;
+    }
+
+    _getFavoriteSavedLinkInfo(favorite) {
+        if (!favorite) return null;
+        const rt = this._normalizeTabMapKey(favorite.runtimeTabId);
+        if (rt == null || !this.tabs.has(rt)) return null;
+        return this._getTabSavedLinkInfo(this.tabs.get(rt));
+    }
+
+    async updateTabSavedLink(tabId) {
+        const tid = this._normalizeTabMapKey(tabId);
+        if (tid == null) return;
+        const tab = this.tabs.get(tid);
+        const info = this._getTabSavedLinkInfo(tab);
+        if (!info) return;
+
+        const url = info.currentNorm;
+        let title = tab.customTitle || tab.title || '';
+        try {
+            if (tab.webview && typeof tab.webview.getTitle === 'function') {
+                title = tab.webview.getTitle() || title;
+            }
+        } catch (_) {}
+        let favicon = tab.favicon || null;
+        if (!favicon) {
+            try {
+                favicon = `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=64`;
+            } catch (_) {
+                favicon = null;
+            }
+        }
+
+        if (info.kind === 'favorite') {
+            const fav = this.favorites.find((f) => f.id === tab.favoriteId);
+            if (!fav) return;
+            fav.url = url;
+            fav.title = title || new URL(url).hostname.replace(/^www\./, '');
+            fav.favicon = favicon;
+            tab.url = url;
+            tab.title = fav.title;
+            tab.favicon = favicon;
+            tab.history = [url];
+            tab.historyIndex = 0;
+            tab.canGoBack = false;
+            tab.canGoForward = false;
+            this.tabs.set(tid, tab);
+            this.saveFavorites();
+            this.renderFavorites();
+            this.showNotification('Favorite link updated', 'success');
+            return;
+        }
+
+        tab.savedLinkUrl = url;
+        tab.url = url;
+        if (!tab.customTitle) tab.title = title;
+        tab.favicon = favicon;
+        tab.history = [url];
+        tab.historyIndex = 0;
+        tab.canGoBack = false;
+        tab.canGoForward = false;
+        this.tabs.set(tid, tab);
+        const tabElement = document.querySelector(`[data-tab-id="${tid}"]`);
+        if (tabElement) {
+            if (!tab.customTitle) {
+                const titleEl = tabElement.querySelector('.tab-title');
+                if (titleEl) titleEl.textContent = title;
+            }
+            this.updateTabFavicon(tid, tabElement);
+            this.updateTabTooltip(tid);
+        }
+        if (tab.tabGroupId) {
+            void this.saveTabGroups();
+        } else {
+            await this.savePinnedTabs();
+        }
+        this.showNotification('Pinned link updated', 'success');
     }
 
     getFavoriteIconHtml(favorite) {
@@ -10885,7 +11237,6 @@ class AxisBrowser {
             return;
         }
         const raw = Array.isArray(this.settings?.favorites) ? this.settings.favorites : [];
-        const seen = new Set();
         this.favorites = raw
             .slice()
             .sort((a, b) => (a.order || 0) - (b.order || 0))
@@ -10898,11 +11249,7 @@ class AxisBrowser {
                 customIconType: fav.customIconType || null,
                 order: idx
             }))
-            .filter((fav) => {
-                if (!fav.url || seen.has(fav.url)) return false;
-                seen.add(fav.url);
-                return true;
-            });
+            .filter((fav) => !!fav.url);
         this.renderFavorites();
     }
 
@@ -10920,10 +11267,6 @@ class AxisBrowser {
         const normalized = this.normalizeFavoriteUrl(url);
         if (!normalized) {
             this.showNotification('Only website tabs can be added to Favorites', 'info');
-            return;
-        }
-        if (this.isFavoriteUrl(normalized)) {
-            this.showNotification('Already in Favorites', 'info');
             return;
         }
         let title = tab.customTitle || tab.title || '';
@@ -11123,7 +11466,7 @@ class AxisBrowser {
             if (tab && tab.pinned && !tab.isFavoriteTab && !tab.tabGroupId) {
                 pinnedTabs.push({
                     id: tabId,
-                    url: tab.url,
+                    url: tab.savedLinkUrl || tab.url,
                     title: tab.title,
                     favicon: tab.favicon || null,
                     customIcon: tab.customIcon || null,
@@ -11199,6 +11542,7 @@ class AxisBrowser {
                     history: pinnedData.url ? [pinnedData.url] : [],
                     historyIndex: pinnedData.url ? 0 : -1,
                     pinned: true,
+                    savedLinkUrl: pinnedData.url || null,
                     webview: null // No webview initially - tab is closed
                 });
                 
@@ -12113,6 +12457,8 @@ class AxisBrowser {
         
         if (!chatPanel || !chatClose || !chatInput || !chatSend || !chatMessages) return;
 
+        this._applyAiChatPanelChrome();
+
         // Close chat panel
         chatClose.addEventListener('click', () => {
             this.toggleAIChat();
@@ -12202,8 +12548,6 @@ class AxisBrowser {
         let startX = 0;
         let startWidth = 0;
         let animationFrame = null;
-        let lastUpdateTime = 0;
-        const throttleMs = 8;
 
         const startResize = (e) => {
             if (isResizing) return;
@@ -12211,7 +12555,7 @@ class AxisBrowser {
             startX = e.clientX;
             const container = document.querySelector('.webview-container');
             const current = container ? parseFloat(container.style.getPropertyValue('--chat-panel-width')) : NaN;
-            startWidth = Number.isFinite(current) ? current : 400;
+            startWidth = Number.isFinite(current) ? current : this.getChatPanelWidth();
 
             document.body.classList.add('resizing');
             document.body.style.cursor = 'col-resize';
@@ -12223,27 +12567,29 @@ class AxisBrowser {
 
         const doResize = (e) => {
             if (!isResizing) return;
-            const now = performance.now();
-            if (now - lastUpdateTime < throttleMs) return;
-            lastUpdateTime = now;
-
             if (animationFrame) cancelAnimationFrame(animationFrame);
             animationFrame = requestAnimationFrame(() => {
+                animationFrame = null;
                 const deltaX = startX - e.clientX;
-                const newWidth = Math.min(Math.max(startWidth + deltaX, 280), Math.floor(window.innerWidth * 0.9));
+                const newWidth = Math.min(
+                    Math.max(startWidth + deltaX, 280),
+                    Math.floor(window.innerWidth * 0.9)
+                );
                 this.applyChatPanelWidth(newWidth);
+                chatPanel.style.width = `${newWidth}px`;
+                this._scheduleWebviewHostBoundsLiveSync();
             });
         };
 
         const stopResize = (e) => {
             if (!isResizing) return;
             isResizing = false;
-            lastUpdateTime = 0;
             if (animationFrame) {
                 cancelAnimationFrame(animationFrame);
                 animationFrame = null;
             }
             chatPanel.style.transition = '';
+            chatPanel.style.width = '';
             document.body.classList.remove('resizing');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
@@ -12252,6 +12598,8 @@ class AxisBrowser {
             const w = container ? parseFloat(container.style.getPropertyValue('--chat-panel-width')) : 400;
             const width = Number.isFinite(w) ? w : 400;
             localStorage.setItem('axis-chat-panel-width', String(Math.round(width)));
+
+            this._finishWebviewHostBoundsTracking();
 
             if (e) {
                 e.preventDefault();
@@ -12267,6 +12615,23 @@ class AxisBrowser {
         handle.addEventListener('contextmenu', (e) => e.preventDefault());
     }
 
+    setupAiChatMarkdownLinks() {
+        if (this._aiChatMarkdownLinksBound) return;
+        this._aiChatMarkdownLinksBound = true;
+        document.addEventListener('click', (e) => {
+            const link = e.target.closest?.('.axis-ai-md-link');
+            if (!link) return;
+            const href = link.getAttribute('href');
+            if (!href) return;
+            e.preventDefault();
+            if (window.electronAPI?.openExternalUrl) {
+                void window.electronAPI.openExternalUrl(href);
+            } else if (window.electronAPI?.openUrlInBrowser) {
+                void window.electronAPI.openUrlInBrowser(href);
+            }
+        });
+    }
+
     toggleAIChat() {
         const chatPanel = document.getElementById('ai-chat-panel');
         const contentArea = document.getElementById('content-area');
@@ -12280,6 +12645,7 @@ class AxisBrowser {
             if (contentArea) {
                 contentArea.classList.add('chat-open');
             }
+            this._applyAiChatPanelChrome();
             this.updateAIChatSetupState();
             // Focus input after open animation finishes
             const chatInput = document.getElementById('ai-chat-input');
@@ -12369,6 +12735,10 @@ class AxisBrowser {
                         ${bodyDisplay ? `<div class="ai-chat-message-body">${bodyDisplay}</div>` : ''}
                     </div>
                 `;
+            } else if (role === 'assistant') {
+                contentHtml = `
+                    <div class="ai-chat-message-content">${this.formatAiChatMarkdown(content)}</div>
+                `;
             } else {
                 contentHtml = `
                     <div class="ai-chat-message-content">${this.escapeHtml(content)}</div>
@@ -12380,13 +12750,15 @@ class AxisBrowser {
         chatMessages.appendChild(messageDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
-        // Store message (full content for API/history)
-        this.aiChatMessages.push({
-            id: messageId,
-            role,
-            content,
-            timestamp: new Date().toISOString()
-        });
+        // Store message (full content for API/history) — skip loading placeholders
+        if (!isLoading) {
+            this.aiChatMessages.push({
+                id: messageId,
+                role,
+                content,
+                timestamp: new Date().toISOString()
+            });
+        }
 
         return messageId;
     }
@@ -12399,17 +12771,27 @@ class AxisBrowser {
         if (!messageDiv) return;
 
         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const bodyHtml = content.startsWith('Error:')
+            ? this.escapeHtml(content)
+            : this.formatAiChatMarkdown(content);
         messageDiv.innerHTML = `
-            <div class="ai-chat-message-content">${this.escapeHtml(content)}</div>
+            <div class="ai-chat-message-content">${bodyHtml}</div>
             <div class="ai-chat-message-time">${time}</div>
         `;
         messageDiv.classList.remove('assistant');
         messageDiv.classList.add('assistant');
 
-        // Update stored message
+        // Update stored message (or append if this was a loading placeholder)
         const messageIndex = this.aiChatMessages.findIndex(m => m.id === messageId);
         if (messageIndex !== -1) {
             this.aiChatMessages[messageIndex].content = content;
+        } else {
+            this.aiChatMessages.push({
+                id: messageId,
+                role: 'assistant',
+                content,
+                timestamp: new Date().toISOString()
+            });
         }
 
         chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -12449,7 +12831,44 @@ class AxisBrowser {
         }
     }
 
-    async getChatAIResponse(userMessage) {
+    /** Build prior turns for Groq — drops loading placeholders and the current user line (re-added once). */
+    _getChatHistoryForApi(rawHistory, userMessage) {
+        const msgs = (Array.isArray(rawHistory) ? rawHistory : [])
+            .filter((m) => (m.role === 'user' || m.role === 'assistant') && String(m.content || '').trim());
+        while (msgs.length && msgs[msgs.length - 1].role === 'assistant' && !String(msgs[msgs.length - 1].content || '').trim()) {
+            msgs.pop();
+        }
+        if (msgs.length && msgs[msgs.length - 1].role === 'user' && msgs[msgs.length - 1].content === userMessage) {
+            msgs.pop();
+        }
+        return msgs.slice(-20);
+    }
+
+    /** Read new-tab Ask conversation from the DOM (fallback when structured history is missing). */
+    _extractNewTabAskHistoryFromDom() {
+        const container = document.getElementById('new-tab-ask-messages');
+        if (!container) return [];
+        const out = [];
+        container.querySelectorAll('.new-tab-ask-message').forEach((el) => {
+            if (el.querySelector('.new-tab-ask-bubble-loading')) return;
+            const bubble = el.querySelector('.new-tab-ask-bubble');
+            const text = bubble?.textContent?.trim();
+            if (!text) return;
+            const role = el.classList.contains('user') ? 'user' : 'assistant';
+            out.push({ role, content: text });
+        });
+        return out;
+    }
+
+    _getNewTabAskHistoryForTab(tabId) {
+        const tab = tabId != null ? this.tabs.get(tabId) : null;
+        if (Array.isArray(tab?.newTabAskHistory) && tab.newTabAskHistory.length) {
+            return tab.newTabAskHistory;
+        }
+        return this._extractNewTabAskHistoryFromDom();
+    }
+
+    async getChatAIResponse(userMessage, options = {}) {
         if (!this.hasGroqApiKey()) {
             throw new Error('Add your free Groq API key in Settings → AI Chat to start chatting.');
         }
@@ -12461,35 +12880,30 @@ class AxisBrowser {
             pageContext = await this.getPageContextForAI();
         } catch (e) {}
 
-        const systemContent = 'You are a helpful AI assistant. Provide clear, concise, and helpful responses.';
+        const systemContent = 'You are a helpful AI assistant. Provide clear, helpful responses. Use Markdown when it improves readability (headings, lists, bold, inline code, and fenced code blocks).';
         const systemWithPage = pageContext && (pageContext.title || pageContext.text)
             ? systemContent + '\n\nThe user is viewing a web page. Use the following to answer questions about the page when relevant.\n\nPage title: ' + (pageContext.title || '(none)') + '\nURL: ' + (pageContext.url || '') + '\n\nPage content (excerpt):\n' + (pageContext.text || '(no text content)')
             : systemContent;
 
-        // Build conversation history
+        const rawHistory = options.history != null
+            ? options.history
+            : this.aiChatMessages;
+        const priorTurns = this._getChatHistoryForApi(rawHistory, userMessage);
+
         const messages = [
             {
                 role: 'system',
                 content: systemWithPage
+            },
+            ...priorTurns.map((msg) => ({
+                role: msg.role,
+                content: msg.content
+            })),
+            {
+                role: 'user',
+                content: userMessage
             }
         ];
-
-        // Add recent conversation history (last 10 messages for context)
-        const recentMessages = this.aiChatMessages.slice(-10);
-        for (const msg of recentMessages) {
-            if (msg.role === 'user' || msg.role === 'assistant') {
-                messages.push({
-                    role: msg.role,
-                    content: msg.content
-                });
-            }
-        }
-
-        // Add current user message
-        messages.push({
-            role: 'user',
-            content: userMessage
-        });
 
         // Try multiple models in order of preference
         const modelsToTry = [
@@ -12545,6 +12959,119 @@ class AxisBrowser {
         }
 
         return aiResponse.trim();
+    }
+
+    /** Render assistant Markdown (headings, lists, code, links) as safe HTML for chat bubbles. */
+    formatAiChatMarkdown(raw) {
+        if (raw == null || raw === '') return '';
+        const lines = String(raw).replace(/\r\n/g, '\n').split('\n');
+        const out = [];
+        let i = 0;
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed.startsWith('```')) {
+                i++;
+                const codeLines = [];
+                while (i < lines.length && !lines[i].trim().startsWith('```')) {
+                    codeLines.push(lines[i]);
+                    i++;
+                }
+                if (i < lines.length) i++;
+                out.push(
+                    `<pre class="axis-ai-md-pre"><code>${this.escapeHtml(codeLines.join('\n').replace(/\n$/, ''))}</code></pre>`
+                );
+                continue;
+            }
+
+            if (/^[-*]\s+/.test(line)) {
+                const items = [];
+                while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
+                    items.push(this._formatAiChatInline(lines[i].replace(/^[-*]\s+/, '')));
+                    i++;
+                }
+                out.push(`<ul class="axis-ai-md-list">${items.map((li) => `<li>${li}</li>`).join('')}</ul>`);
+                continue;
+            }
+
+            if (/^\d+\.\s+/.test(line)) {
+                const items = [];
+                while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
+                    items.push(this._formatAiChatInline(lines[i].replace(/^\d+\.\s+/, '')));
+                    i++;
+                }
+                out.push(`<ol class="axis-ai-md-list">${items.map((li) => `<li>${li}</li>`).join('')}</ol>`);
+                continue;
+            }
+
+            const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+            if (heading) {
+                const level = heading[1].length;
+                out.push(`<h${level} class="axis-ai-md-h">${this._formatAiChatInline(heading[2])}</h${level}>`);
+                i++;
+                continue;
+            }
+
+            if (/^(\*{3,}|-{3,}|_{3,})$/.test(trimmed)) {
+                out.push('<hr class="axis-ai-md-hr">');
+                i++;
+                continue;
+            }
+
+            if (/^>\s?/.test(line)) {
+                const quoteLines = [];
+                while (i < lines.length && /^>\s?/.test(lines[i])) {
+                    quoteLines.push(lines[i].replace(/^>\s?/, ''));
+                    i++;
+                }
+                out.push(`<blockquote class="axis-ai-md-quote">${this._formatAiChatInline(quoteLines.join('\n'))}</blockquote>`);
+                continue;
+            }
+
+            if (!trimmed) {
+                i++;
+                continue;
+            }
+
+            const paraLines = [];
+            while (
+                i < lines.length
+                && lines[i].trim()
+                && !lines[i].trim().startsWith('```')
+                && !/^[-*]\s+/.test(lines[i])
+                && !/^\d+\.\s+/.test(lines[i])
+                && !/^#{1,4}\s+/.test(lines[i].trim())
+                && !/^>\s?/.test(lines[i])
+                && !/^(\*{3,}|-{3,}|_{3,})$/.test(lines[i].trim())
+            ) {
+                paraLines.push(lines[i]);
+                i++;
+            }
+            if (paraLines.length) {
+                out.push(`<p class="axis-ai-md-p">${this._formatAiChatInline(paraLines.join('\n'))}</p>`);
+            }
+        }
+
+        return `<div class="axis-ai-md">${out.join('')}</div>`;
+    }
+
+    _formatAiChatInline(text) {
+        let s = this.escapeHtml(text);
+        s = s.replace(/`([^`\n]+)`/g, '<code class="axis-ai-md-code">$1</code>');
+        s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+        s = s.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
+        s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+        s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
+        s = s.replace(
+            /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+            (_, label, url) => {
+                const safeUrl = url.replace(/"/g, '&quot;');
+                return `<a class="axis-ai-md-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+            }
+        );
+        return s.replace(/\n/g, '<br>');
     }
 
     escapeHtml(text) {
@@ -14133,21 +14660,16 @@ class AxisBrowser {
         const tabGroupsList = Array.from(this.tabGroups.values())
             .sort((a, b) => (a.order || 0) - (b.order || 0))
             .map(g => ({ id: g.id, name: g.name || `Tab Group ${g.id}` }));
-        let tabUrlForFavorite = tab?.url || '';
-        try {
-            if (tab?.webview && typeof tab.webview.getURL === 'function') {
-                const currentUrl = tab.webview.getURL();
-                if (currentUrl && currentUrl !== 'about:blank') tabUrlForFavorite = currentUrl;
-            }
-        } catch (_) {}
+        const savedLinkInfo = this._getTabSavedLinkInfo(tab);
         const tabInfo = {
             isPinned: tab?.pinned || false,
             isMuted: tab?.isMuted || false,
             tabGroups: tabGroupsList,
             tabGroupId: tab?.tabGroupId != null ? tab.tabGroupId : undefined,
             isIncognito: this.isIncognitoWindow,
-            isFavorite: this.isFavoriteUrl(tabUrlForFavorite),
-            hasCustomIcon: !!(tab?.customIcon && String(tab.customIcon).trim())
+            hasCustomIcon: !!(tab?.customIcon && String(tab.customIcon).trim()),
+            canUpdateSavedLink: !!savedLinkInfo,
+            savedLinkKind: savedLinkInfo?.kind || ''
         };
         this.contextMenuTabId = tabId;
         await window.electronAPI.showTabContextMenu(e.clientX, e.clientY, tabInfo);
@@ -14162,11 +14684,15 @@ class AxisBrowser {
         this.hideTabGroupContextMenu();
         this.contextMenuFavoriteId = favorite.id;
         const hasCustomIcon = !!(favorite.customIcon && String(favorite.customIcon).trim());
+        const savedLinkInfo = this._getFavoriteSavedLinkInfo(favorite);
         if (!window.electronAPI?.showFavoriteContextMenu) {
             this.contextMenuFavoriteId = null;
             return;
         }
-        await window.electronAPI.showFavoriteContextMenu(e.clientX, e.clientY, { hasCustomIcon });
+        await window.electronAPI.showFavoriteContextMenu(e.clientX, e.clientY, {
+            hasCustomIcon,
+            canUpdateSavedLink: !!savedLinkInfo
+        });
     }
 
     hideTabContextMenu() {
@@ -14456,6 +14982,13 @@ class AxisBrowser {
             speechEnabled,
             guestWebContentsId
         };
+        const savedLinkInfo = this.currentTab != null
+            ? this._getTabSavedLinkInfo(this.tabs.get(this.currentTab))
+            : null;
+        if (savedLinkInfo) {
+            contextInfo.canUpdateSavedLink = true;
+            contextInfo.savedLinkKind = savedLinkInfo.kind;
+        }
         
         await window.electronAPI.showWebpageContextMenu(e.clientX, e.clientY, contextInfo);
     }
@@ -16195,7 +16728,8 @@ class AxisBrowser {
         
         const closedTab = this.closedTabs[0];
         if (closedTab && closedTab.url) {
-            this.createNewTab(closedTab.url);
+            const newTabId = this.createNewTab(closedTab.url);
+            this._applyRecoveredTabState(newTabId, closedTab);
             this.closedTabs.shift(); // Remove from closed tabs
             this.showNotification('Reopened tab', 'success');
         }
@@ -16469,6 +17003,7 @@ class AxisBrowser {
                 sidebar.style.transition = 'none';
                 sidebar.style.width = clampedWidth + 'px';
                 syncSidebarResizeHandleLayout();
+                this._scheduleWebviewHostBoundsLiveSync();
             });
         };
 
@@ -16491,6 +17026,8 @@ class AxisBrowser {
             document.body.classList.remove('resizing');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
+
+            this._finishWebviewHostBoundsTracking();
             
             // Prevent event bubbling
             if (e) {
@@ -20125,30 +20662,24 @@ class AxisBrowser {
             urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.1)');
         }
         this.applyChatPanelTheme(urlBar);
+        if (!this.settings?.transparentSites) {
+            this._syncWebPanelVisualState();
+            this._syncWebviewCanvasColor(this.settings?.themeColor || '#1a1a1a');
+        }
     }
 
-    /** Frosted strip for new tab / AI chat — always dark, unaffected by uiTheme. */
+    /** NTP / AI chat top bar: transparent — single frosted layer is #new-tab-page beneath (z-index 50). */
     _applyNtpUrlBarStyle(urlBar) {
-        const sc = this.getShellChromeStyle({ forceDarkNewTabSurfaces: true });
-        const useShellGlass = !!this.settings?.transparentSites || sc.t > 0;
-
-        const paintBg = useShellGlass
-            ? sc.newTabSearchBg
-            : 'rgba(14, 15, 18, 0.18)';
-
-        const backdrop = sc.backdropMain !== 'none'
-            ? sc.backdropMain
-            : `blur(${sc.newTabSearchBlur}px) saturate(${sc.newTabSearchSat}%)`;
-
-        urlBar.style.setProperty('backdrop-filter', backdrop);
-        urlBar.style.setProperty('-webkit-backdrop-filter', backdrop);
-        urlBar.style.setProperty('--url-bar-bg', paintBg);
+        this._clearWebviewCanvasColor();
+        urlBar.style.setProperty('background', 'transparent', 'important');
+        urlBar.style.setProperty('--url-bar-bg', 'transparent');
+        urlBar.style.removeProperty('backdrop-filter');
+        urlBar.style.removeProperty('-webkit-backdrop-filter');
         urlBar.classList.add('dark-mode');
-        urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.06)');
+        urlBar.style.setProperty('--url-bar-border', 'transparent');
         urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
         urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
         urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
-        urlBar.style.setProperty('background', paintBg, 'important');
     }
 
     /** New tab + Settings URL bar — always dark frosted chrome, unaffected by `uiTheme`. */
@@ -20443,6 +20974,9 @@ class AxisBrowser {
                 const gg = Math.max(0, Math.min(255, Math.round(g)));
                 const bb = Math.max(0, Math.min(255, Math.round(b)));
                 const pageHex = `#${[rr, gg, bb].map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+                const canvasHex = isDefaultOrError ? '#121212' : pageHex;
+                this._syncWebPanelVisualState();
+                this._syncWebviewCanvasColor(canvasHex);
 
                 if (this.settings?.transparentSites) {
                     const sc = this.getShellChromeStyle();
@@ -20530,20 +21064,44 @@ class AxisBrowser {
                 urlBar.style.removeProperty('backdrop-filter');
                 urlBar.style.removeProperty('-webkit-backdrop-filter');
                 urlBar.style.setProperty('--url-bar-bg', 'rgba(250, 250, 250, 0.95)');
+                this._syncWebviewCanvasColor('#fafafa');
                 this.applyChatPanelTheme(urlBar);
             }
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         }
     }
 
-    /** AI chat panel is always black chrome with light text (not tied to page / URL bar theming). */
+    /** AI chat panel — dark frosted glass, independent of page / URL bar theming. */
     applyChatPanelTheme(urlBar) {
+        const sc = this.getNewTabSurfaceChromeStyle();
         const container = urlBar && urlBar.closest ? urlBar.closest('.webview-container') : null;
+        if (container) {
+            container.style.setProperty('--chat-panel-bg', sc.aiPanelBg);
+            container.style.setProperty('--chat-panel-border', 'rgba(255, 255, 255, 0.1)');
+            container.style.setProperty('--chat-panel-text', 'rgba(255, 255, 255, 0.96)');
+            container.style.setProperty('--chat-panel-text-muted', 'rgba(255, 255, 255, 0.55)');
+        }
+        this._applyAiChatPanelChrome();
+    }
+
+    /** Match guest + panel fill to page tint so rounded corners do not flash white. */
+    _syncWebviewCanvasColor(color) {
+        const container = document.querySelector('.webview-container');
         if (!container) return;
-        container.style.setProperty('--chat-panel-bg', '#000000');
-        container.style.setProperty('--chat-panel-border', 'rgba(255, 255, 255, 0.1)');
-        container.style.setProperty('--chat-panel-text', 'rgba(255, 255, 255, 0.96)');
-        container.style.setProperty('--chat-panel-text-muted', 'rgba(255, 255, 255, 0.55)');
+        if (
+            !color ||
+            this.settings?.transparentSites ||
+            document.body.classList.contains('transparent-sites-mode') ||
+            !document.body.classList.contains('panel-site')
+        ) {
+            container.style.removeProperty('--axis-webview-canvas');
+            return;
+        }
+        container.style.setProperty('--axis-webview-canvas', color);
+    }
+
+    _clearWebviewCanvasColor() {
+        this._syncWebviewCanvasColor(null);
     }
     
     // Native Picture-in-Picture functionality using browser API
