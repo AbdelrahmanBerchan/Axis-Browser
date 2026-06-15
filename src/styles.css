@@ -96,13 +96,10 @@ html, body {
     /* URL bar + webview stack + #content-area lift shadow: same right-edge radius so nothing looks squared when the guest is transparent. */
     --axis-content-panel-radius: 6px;
     /*
-     * Web panel elevation behind `#content-area::after`: symmetric `0 0` blurs only (no
-     * fake key light). Layers cap around ~44px so depth hugs the bezel — chunky contact ring,
-     * short penumbra, not a foggy halo out to triple-digit blur.
+     * Web panel elevation behind `#content-area::after`: blur-only penumbra — no 1px contact
+     * ring (it painted harsh vertical strokes on the left/right panel walls).
      */
     --axis-webview-elevation-shadow:
-        0 0 0 1px rgba(0, 0, 0, 0.078),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.055),
         0 0 5px rgba(0, 0, 0, 0.22),
         0 0 12px rgba(0, 0, 0, 0.13),
         0 0 24px rgba(0, 0, 0, 0.072),
@@ -978,6 +975,36 @@ body.resizing * {
 body.resizing #sidebar-resize-handle,
 body.resizing .ai-chat-resize-handle {
     pointer-events: auto !important;
+}
+
+/* Edge drags must track the pointer instantly — no 0.42s slide on webview/url bar. */
+body.resizing .webview-container .webview-url-bar,
+body.resizing .webview-container #webviews-container,
+body.resizing .webview-container #webview,
+body.resizing .webview-container #axis-nav-gesture-layer,
+body.resizing .webview-container #new-tab-page,
+body.resizing .webview-container #empty-state,
+body.resizing .webview-container .axis-store-install-host-bar,
+body.host-resizing .webview-container .webview-url-bar,
+body.host-resizing .webview-container #webviews-container,
+body.host-resizing .webview-container #webview,
+body.host-resizing .webview-container #axis-nav-gesture-layer,
+body.host-resizing .webview-container #new-tab-page,
+body.host-resizing .webview-container #empty-state,
+body.host-resizing .webview-container .axis-store-install-host-bar {
+    transition: none !important;
+}
+
+/* During host drags: CSS-only — no JS size overrides (those fight the guest embed). */
+body.host-resizing #webviews-container {
+    transition: none !important;
+}
+
+body.host-resizing #webviews-container webview:not(.inactive) {
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
 }
 
 /* Sidebar hover functionality temporarily disabled */
@@ -4042,7 +4069,7 @@ body.incognito-window #webviews-container {
 }
 
 .webview-container {
-    --chat-panel-bg: rgba(22, 22, 22, 0.98);
+    --chat-panel-bg: rgba(9, 10, 13, 0.72);
     --chat-panel-border: rgba(255, 255, 255, 0.06);
     --chat-panel-text: rgba(255, 255, 255, 0.95);
     --chat-panel-text-muted: rgba(255, 255, 255, 0.5);
@@ -4056,7 +4083,6 @@ body.incognito-window #webviews-container {
     background: transparent;
     border-radius: var(--axis-content-panel-radius); /* All corners — matches shadow and window chrome */
     margin: 0;
-    margin-left: -1px; /* Bring webview closer to sidebar */
     box-shadow: none;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -4064,25 +4090,8 @@ body.incognito-window #webviews-container {
     flex-shrink: 1;
     isolation: isolate;
     z-index: 1;
-    /* Performance optimizations */
-    transform: translateZ(0);
-    will-change: transform;
-    backface-visibility: hidden;
-    /* GPU acceleration */
-    -webkit-transform: translateZ(0);
-    -webkit-backface-visibility: hidden;
-}
-
-.webview-container::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    pointer-events: none;
-    border-radius: var(--axis-content-panel-radius);
-    overflow: hidden;
+    /* Single authoritative clip — child layers stay square so corners never shift by mode. */
+    clip-path: inset(0 round var(--axis-content-panel-radius));
 }
 
 #webview {
@@ -4095,7 +4104,7 @@ body.incognito-window #webviews-container {
     flex-shrink: 1;
     position: relative;
     /* Below URL bar: bottom-left + bottom-right; when bar is hidden, :has(.hidden) rounds all corners. */
-    border-radius: 0 0 var(--axis-content-panel-radius) var(--axis-content-panel-radius);
+    border-radius: 0;
     max-width: 100%;
     max-height: 100%;
     outline: none;
@@ -4103,16 +4112,6 @@ body.incognito-window #webviews-container {
     box-shadow: none;
     z-index: 0; /* Behind webviews-container (z-index: 2) - never blocks dynamic webviews */
     pointer-events: none !important;
-    /* Performance optimizations */
-    transform: translateZ(0);
-    will-change: transform;
-    backface-visibility: hidden;
-    /* GPU acceleration */
-    -webkit-transform: translateZ(0);
-    -webkit-backface-visibility: hidden;
-    /* Hardware acceleration */
-    -webkit-perspective: 1000px;
-    perspective: 1000px;
     /* Hidden by default - shown when tab is active */
     opacity: 0;
     visibility: hidden;
@@ -4123,40 +4122,69 @@ webview {
     background: transparent !important;
     position: relative;
     transition: none;
-}
-
-/* Normal browsing needs an opaque browser canvas behind pages whose root is transparent. */
-body:not(.transparent-sites-mode) #webviews-container webview:not(.inactive) {
-    background: #ffffff !important;
+    display: flex !important;
+    width: 100%;
+    height: 100%;
 }
 
 /*
- * Active guest only: bleed 1px past the clip rect on the right so the panel elevation
- * inset ring (#content-area::after) cannot peek through as a hairline beside page content.
- * Inactive guests keep their existing geometry — no change when hidden/idle.
+ * ── Web panel visual states (body.panel-* set by _syncWebPanelVisualState) ──
+ * One elevation (#content-area::after), one clip (.webview-container). Layers below
+ * stay transparent unless a state explicitly fills them.
  */
+body.chrome-no-tabs .webview-container,
+body.panel-idle .webview-container,
+body.panel-ntp .webview-container {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+body.chrome-no-tabs #webviews-container,
+body.panel-idle #webviews-container,
+body.panel-ntp #webviews-container {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+}
+
+/* Real site (opaque mode): page-tinted canvas behind guest for rounded-corner fill. */
+body.panel-site:not(.transparent-sites-mode) .webview-container {
+    background: var(--axis-webview-canvas, #121212);
+}
+
+body.panel-site:not(.transparent-sites-mode) #webviews-container {
+    background: var(--axis-webview-canvas, #121212);
+}
+
+body.panel-site:not(.transparent-sites-mode) #webviews-container webview:not(.inactive) {
+    background: var(--axis-webview-canvas, #121212) !important;
+}
+
+body.panel-site.transparent-sites-mode .webview-container,
+body.panel-site.transparent-sites-mode #webviews-container,
+body.panel-site.transparent-sites-mode #webviews-container webview:not(.inactive) {
+    background: transparent !important;
+}
+
+/* Active guest: one geometry for every mode (NTP, AI chat, website) — container does the only clip. */
 #webviews-container webview:not(.inactive) {
-    right: -1px !important;
-    width: calc(100% + 1px) !important;
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
     max-width: none !important;
+    border-radius: 0 !important;
 }
 
-/* Drop the 1px contact/inset rings while a page is showing — they read as a vertical seam on the right. */
-#content-area:has(#webviews-container webview:not(.inactive))::after {
-    box-shadow:
-        0 0 5px rgba(0, 0, 0, 0.22),
-        0 0 12px rgba(0, 0, 0, 0.13),
-        0 0 24px rgba(0, 0, 0, 0.072),
-        0 0 44px rgba(0, 0, 0, 0.034);
-}
-
-/* Match #webviews-container corner radius so transparent guests don’t look squared vs shadow. */
+/* Guest stays square; .webview-container overflow + clip-path does the rounding. */
 #webviews-container webview {
-    border-radius: 0 0 var(--axis-content-panel-radius) var(--axis-content-panel-radius);
+    border-radius: 0 !important;
 }
 
 .webview-container:has(.webview-url-bar.hidden) #webviews-container webview {
-    border-radius: var(--axis-content-panel-radius);
+    border-radius: 0 !important;
 }
 
 #webviews-container webview.inactive {
@@ -4238,11 +4266,10 @@ body.transparent-sites-mode.chrome-no-tabs #webviews-container webview.inactive:
     justify-content: center;
     z-index: 2;
     background: transparent;
-    border-radius: var(--axis-content-panel-radius);
     animation: emptyStateFadeIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
     pointer-events: auto;
     overflow: hidden;
-    isolation: isolate;
+    border-radius: 0;
 }
 
 .empty-state.hidden {
@@ -6728,10 +6755,14 @@ body.light-theme .shortcut-desc {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    background: transparent;
+    border-radius: 0;
+    background: var(--axis-nt-page-bg, rgba(10, 11, 14, 0.20));
+    backdrop-filter: blur(var(--axis-nt-page-blur, 32px)) saturate(var(--axis-nt-page-sat, 155%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-page-blur, 32px)) saturate(var(--axis-nt-page-sat, 155%));
     -webkit-app-region: no-drag;
     overflow: hidden;
     padding: 0;
+    transition: right 0.42s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .webview-container:has(.webview-url-bar.hidden) #new-tab-page.new-tab-page {
     top: 0;
@@ -6748,6 +6779,7 @@ body.light-theme .shortcut-desc {
     width: 100%;
     overflow-y: auto;
     padding: 48px 32px 88px;
+    background: transparent;
     transition: opacity 0.38s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .new-tab-start-view.hidden {
@@ -6770,6 +6802,7 @@ body.light-theme .shortcut-desc {
     flex-direction: column;
     opacity: 0;
     transform: translateY(16px);
+    background: transparent;
     transition: opacity 0.4s ease 0.05s, transform 0.42s cubic-bezier(0.4, 0, 0.2, 1) 0.05s;
 }
 .new-tab-ai-chat-view.hidden {
@@ -6805,7 +6838,7 @@ body.light-theme .shortcut-desc {
     width: 100%;
     box-sizing: border-box;
     padding: 8px 20px max(22px, env(safe-area-inset-bottom, 22px));
-    background: linear-gradient(180deg, transparent 0%, rgba(8, 8, 10, 0.35) 40%, rgba(8, 8, 10, 0.65) 100%);
+    background: linear-gradient(180deg, transparent 0%, rgba(6, 6, 8, 0.28) 35%, rgba(6, 6, 8, 0.52) 100%);
     -webkit-app-region: no-drag;
 }
 .new-tab-ai-composer-stack {
@@ -6827,9 +6860,9 @@ body.light-theme .shortcut-desc {
     padding: 6px 6px 6px 18px;
     border-radius: 26px;
     border: 1px solid rgba(255, 255, 255, 0.14);
-    background: rgba(20, 20, 24, 0.88);
-    backdrop-filter: blur(22px) saturate(1.15);
-    -webkit-backdrop-filter: blur(22px) saturate(1.15);
+    background: var(--axis-nt-ask-bg, rgba(10, 11, 14, 0.24));
+    backdrop-filter: blur(var(--axis-nt-ask-blur, 28px)) saturate(var(--axis-nt-ask-sat, 148%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-ask-blur, 28px)) saturate(var(--axis-nt-ask-sat, 148%));
     box-shadow: 0 10px 36px rgba(0, 0, 0, 0.28),
                 inset 0 1px 0 rgba(255, 255, 255, 0.06);
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -6899,7 +6932,7 @@ body.light-theme .shortcut-desc {
     transform: translateY(-4px);
 }
 .new-tab-greeting {
-    margin: 0 0 10px;
+    margin: 0;
     font-size: clamp(26px, 4vw, 34px);
     font-weight: 300;
     letter-spacing: -0.02em;
@@ -6907,26 +6940,14 @@ body.light-theme .shortcut-desc {
     color: rgba(255, 255, 255, 0.96);
     text-shadow: 0 1px 24px rgba(0, 0, 0, 0.35);
 }
-.new-tab-tip {
-    margin: 0;
-    min-height: 1.35em;
-    font-size: 15px;
-    font-weight: 400;
-    color: rgba(255, 255, 255, 0.72);
-    text-shadow: 0 1px 16px rgba(0, 0, 0, 0.3);
-    transition: opacity 0.2s ease;
-}
-.new-tab-page.has-query .new-tab-tip {
-    opacity: 0.55;
-}
 .new-tab-search-wrapper {
     width: 100%;
-    background: var(--axis-nt-search-bg, rgba(14, 15, 18, 0.42));
+    background: var(--axis-nt-search-bg, rgba(12, 13, 17, 0.26));
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 18px;
     overflow: hidden;
-    backdrop-filter: blur(var(--axis-nt-search-blur, 18px)) saturate(var(--axis-nt-search-sat, 130%));
-    -webkit-backdrop-filter: blur(var(--axis-nt-search-blur, 18px)) saturate(var(--axis-nt-search-sat, 130%));
+    backdrop-filter: blur(var(--axis-nt-search-blur, 28px)) saturate(var(--axis-nt-search-sat, 155%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-search-blur, 28px)) saturate(var(--axis-nt-search-sat, 155%));
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22),
                 inset 0 1px 0 rgba(255, 255, 255, 0.06);
     transition: border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
@@ -7007,12 +7028,12 @@ body.light-theme .shortcut-desc {
 }
 .new-tab-menu-btn {
     position: absolute;
-    right: 22px;
+    left: 22px;
     bottom: 22px;
-    width: 44px;
-    height: 44px;
+    width: 34px;
+    height: 34px;
     border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 12px;
+    border-radius: 9px;
     background: var(--axis-nt-toggle-bg, rgba(255, 255, 255, 0.08));
     backdrop-filter: blur(var(--axis-nt-toggle-blur, 14px)) saturate(var(--axis-nt-toggle-sat, 125%));
     -webkit-backdrop-filter: blur(var(--axis-nt-toggle-blur, 14px)) saturate(var(--axis-nt-toggle-sat, 125%));
@@ -7032,11 +7053,11 @@ body.light-theme .shortcut-desc {
 }
 .new-tab-menu-icon {
     display: block;
-    width: 16px;
+    width: 13px;
     height: 2px;
     background: rgba(255, 255, 255, 0.88);
     border-radius: 1px;
-    box-shadow: 0 -5px 0 rgba(255, 255, 255, 0.88), 0 5px 0 rgba(255, 255, 255, 0.88);
+    box-shadow: 0 -4px 0 rgba(255, 255, 255, 0.88), 0 4px 0 rgba(255, 255, 255, 0.88);
 }
 .new-tab-suggestions {
     max-height: 280px;
@@ -7157,7 +7178,6 @@ body.light-theme .shortcut-desc {
     border: none;
     background: transparent;
     color: rgba(255, 255, 255, 0.94);
-    white-space: pre-wrap;
     word-wrap: break-word;
 }
 #new-tab-page.ntp-ai-chat-mode .new-tab-ask-message.user .new-tab-ask-bubble {
@@ -7165,11 +7185,13 @@ body.light-theme .shortcut-desc {
     border-radius: 18px;
     background: rgba(255, 255, 255, 0.11);
     border: 1px solid rgba(255, 255, 255, 0.08);
+    white-space: pre-wrap;
 }
 #new-tab-page.ntp-ai-chat-mode .new-tab-ask-message.assistant .new-tab-ask-bubble {
     padding: 1px 0 0;
     line-height: 1.72;
     font-size: 15px;
+    white-space: normal;
 }
 .new-tab-ask-bubble-loading {
     display: inline-flex;
@@ -7284,9 +7306,9 @@ body.light-theme .shortcut-desc {
     gap: 10px;
     padding: 10px 12px 12px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    background: var(--axis-nt-ask-bg, rgba(10, 11, 14, 0.28));
-    backdrop-filter: blur(var(--axis-nt-ask-blur, 14px)) saturate(var(--axis-nt-ask-sat, 120%));
-    -webkit-backdrop-filter: blur(var(--axis-nt-ask-blur, 14px)) saturate(var(--axis-nt-ask-sat, 120%));
+    background: var(--axis-nt-ask-bg, rgba(10, 11, 14, 0.24));
+    backdrop-filter: blur(var(--axis-nt-ask-blur, 28px)) saturate(var(--axis-nt-ask-sat, 148%));
+    -webkit-backdrop-filter: blur(var(--axis-nt-ask-blur, 28px)) saturate(var(--axis-nt-ask-sat, 148%));
 }
 .new-tab-ask-input {
     flex: 1;
@@ -9027,20 +9049,8 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 }
 
 #webviews-container {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    /* Idle webview area paints nothing — no frosted well, no inset shadow. Active guests
-       paint their own content on top; if nothing is loaded, the shell shows through. */
-    background: transparent;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    box-shadow: none;
-    overflow: hidden; /* Clip webview content to rounded corners */
-    border-radius: 0 0 var(--axis-content-panel-radius) var(--axis-content-panel-radius);
-    z-index: 2; /* Always above legacy #webview (z-index: 0) so dynamic webviews receive clicks */
+    /* Layout + stacking — see also block at “Adjust webviews container” (~12559). */
+    z-index: 2;
 }
 
 /* ── Axis nav gestures: webview slides (no fade) + black edge pill / white arrow ── */
@@ -9054,12 +9064,11 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     z-index: 4;
     pointer-events: none;
     overflow: hidden;
-    border-radius: 0 0 var(--axis-content-panel-radius) var(--axis-content-panel-radius);
+    border-radius: 0;
 }
 
 .webview-container:has(.webview-url-bar.hidden) #axis-nav-gesture-layer {
     top: 0;
-    border-radius: var(--axis-content-panel-radius);
 }
 
 #main-area.sidebar-right #axis-nav-gesture-layer {
@@ -11295,7 +11304,7 @@ body.light-theme .color-option.selected {
     }
 }
 
-/* AI Chat Panel - always solid black */
+/* AI Chat Panel — dark frosted glass */
 .ai-chat-panel {
     position: absolute;
     right: 0;
@@ -11304,10 +11313,12 @@ body.light-theme .color-option.selected {
     width: var(--chat-panel-width, 400px);
     min-width: 280px;
     max-width: 90%;
-    --chat-panel-bg: #000000;
-    background: #000000;
-    backdrop-filter: blur(40px) saturate(100%);
-    -webkit-backdrop-filter: blur(40px) saturate(100%);
+    --chat-panel-bg: rgba(9, 10, 13, 0.72);
+    --chat-panel-blur: 44px;
+    --chat-panel-sat: 155%;
+    background: var(--chat-panel-bg);
+    backdrop-filter: blur(var(--chat-panel-blur)) saturate(var(--chat-panel-sat));
+    -webkit-backdrop-filter: blur(var(--chat-panel-blur)) saturate(var(--chat-panel-sat));
     border-left: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.06));
     z-index: 1000;
     display: flex;
@@ -11315,8 +11326,7 @@ body.light-theme .color-option.selected {
     transform: translate3d(100%, 0, 0);
     transition: transform 0.42s cubic-bezier(0.32, 0.72, 0, 1),
                 opacity 0.38s cubic-bezier(0.32, 0.72, 0, 1);
-    box-shadow: -16px 0 56px rgba(0, 0, 0, 0.5),
-                -4px 0 24px rgba(0, 0, 0, 0.25);
+    box-shadow: -6px 0 24px rgba(0, 0, 0, 0.22);
     opacity: 0;
     pointer-events: none;
     -webkit-app-region: no-drag;
@@ -11682,6 +11692,11 @@ body.light-theme .color-option.selected {
     color: var(--chat-panel-text, rgba(255, 255, 255, 0.92));
     border: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.06));
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+    white-space: normal;
+}
+
+.ai-chat-message.assistant .ai-chat-message-content:not(:has(.axis-ai-md)) {
+    white-space: pre-wrap;
 }
 
 .ai-chat-message.assistant .ai-chat-message-content:hover {
@@ -11712,6 +11727,105 @@ body.light-theme .color-option.selected {
 .ai-chat-message-loading i {
     animation: spin 1s linear infinite;
     color: rgba(255, 255, 255, 0.5);
+}
+
+/* AI response Markdown — new tab Ask + sidebar chat */
+.axis-ai-md {
+    display: block;
+    width: 100%;
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+}
+.axis-ai-md > *:first-child {
+    margin-top: 0;
+}
+.axis-ai-md > *:last-child {
+    margin-bottom: 0;
+}
+.axis-ai-md-p {
+    margin: 0 0 0.65em;
+    line-height: 1.65;
+}
+.axis-ai-md-p:last-child {
+    margin-bottom: 0;
+}
+.axis-ai-md-h {
+    margin: 0.85em 0 0.4em;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+}
+.axis-ai-md-h:first-child {
+    margin-top: 0;
+}
+h1.axis-ai-md-h { font-size: 1.15em; }
+h2.axis-ai-md-h { font-size: 1.08em; }
+h3.axis-ai-md-h,
+h4.axis-ai-md-h { font-size: 1em; }
+.axis-ai-md-list {
+    margin: 0.35em 0 0.75em;
+    padding-left: 1.35em;
+    line-height: 1.6;
+}
+.axis-ai-md-list li {
+    margin: 0.2em 0;
+}
+.axis-ai-md-list li::marker {
+    color: rgba(255, 255, 255, 0.45);
+}
+.axis-ai-md-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.88em;
+    padding: 0.12em 0.38em;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.axis-ai-md-pre {
+    margin: 0.55em 0 0.75em;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    overflow-x: auto;
+    line-height: 1.5;
+    font-size: 0.86em;
+}
+.axis-ai-md-pre code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    white-space: pre;
+    color: rgba(255, 255, 255, 0.92);
+}
+.axis-ai-md-quote {
+    margin: 0.5em 0 0.75em;
+    padding: 8px 12px;
+    border-left: 3px solid rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 0 6px 6px 0;
+    color: rgba(255, 255, 255, 0.82);
+    line-height: 1.55;
+}
+.axis-ai-md-hr {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    margin: 0.75em 0;
+}
+.axis-ai-md-link {
+    color: rgba(255, 255, 255, 0.92);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.axis-ai-md-link:hover {
+    color: #ffffff;
+}
+.axis-ai-md strong {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.98);
+}
+.axis-ai-md em {
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.88);
 }
 
 @keyframes spin {
@@ -11872,9 +11986,13 @@ body.light-theme .color-option.selected {
 #content-area.chat-open .webview-container {
     --chat-panel-width: 400px;
 }
+#content-area.chat-open .webview-container .webview-url-bar,
 #content-area.chat-open .webview-container #webviews-container,
 #content-area.chat-open .webview-container #webview,
-#content-area.chat-open .webview-container #axis-nav-gesture-layer {
+#content-area.chat-open .webview-container #axis-nav-gesture-layer,
+#content-area.chat-open .webview-container #new-tab-page,
+#content-area.chat-open .webview-container #empty-state,
+#content-area.chat-open .webview-container .axis-store-install-host-bar {
     right: var(--chat-panel-width, 400px);
 }
 
@@ -11889,9 +12007,13 @@ body.light-theme .color-option.selected {
         display: none;
     }
     
+    #content-area.chat-open .webview-container .webview-url-bar,
     #content-area.chat-open .webview-container #webviews-container,
     #content-area.chat-open .webview-container #webview,
-    #content-area.chat-open .webview-container #axis-nav-gesture-layer {
+    #content-area.chat-open .webview-container #axis-nav-gesture-layer,
+    #content-area.chat-open .webview-container #new-tab-page,
+    #content-area.chat-open .webview-container #empty-state,
+    #content-area.chat-open .webview-container .axis-store-install-host-bar {
         right: 0 !important;
     }
     
@@ -11918,7 +12040,8 @@ body.light-theme .color-option.selected {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     border-bottom: 1px solid var(--url-bar-border, transparent);
-    transition: background 0.4s ease, border-color 0.4s ease, opacity 0.3s ease, transform 0.3s ease;
+    transition: background 0.4s ease, border-color 0.4s ease, opacity 0.3s ease, transform 0.3s ease,
+                right 0.42s cubic-bezier(0.32, 0.72, 0, 1);
     border-radius: var(--axis-content-panel-radius) var(--axis-content-panel-radius) 0 0;
     overflow: visible;
 }
@@ -11942,23 +12065,43 @@ body.light-theme .color-option.selected {
     display: none;
 }
 
-/* New tab + AI chat: frosted top bar that blends with the start page (not solid chrome). */
+/* New tab + AI chat: transparent fill — same bar geometry as website tabs (padding, radius, borders). */
 .webview-url-bar.url-bar-ntp-chrome {
-    border-radius: 0;
-    border-bottom: 1px solid var(--url-bar-border, rgba(255, 255, 255, 0.06));
-    backdrop-filter: blur(var(--axis-nt-search-blur, 18px)) saturate(var(--axis-nt-search-sat, 130%));
-    -webkit-backdrop-filter: blur(var(--axis-nt-search-blur, 18px)) saturate(var(--axis-nt-search-sat, 130%));
+    justify-content: flex-start;
+    border-radius: var(--axis-content-panel-radius) var(--axis-content-panel-radius) 0 0;
+    border-bottom: 1px solid transparent;
+    --url-bar-bg: transparent;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
 }
+.webview-url-bar.url-bar-ntp-chrome.dark-mode {
+    --url-bar-bg: transparent;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+/* Keep center in the flex row (same margins/size as website tabs) but hide its contents. */
 .webview-url-bar.url-bar-ntp-chrome .url-bar-center {
-    visibility: hidden;
+    flex: 1;
+    display: flex;
+    visibility: visible;
     pointer-events: none;
-    flex: 0 0 0;
-    width: 0;
     min-width: 0;
+    width: auto;
+    margin-left: 6px;
+    margin-right: 6px;
     padding: 0;
-    margin: 0;
+    height: 28px;
     overflow: hidden;
     border: none;
+    background: transparent;
+    box-shadow: none;
+}
+.webview-url-bar.url-bar-ntp-chrome .url-bar-center .url-bar-field,
+.webview-url-bar.url-bar-ntp-chrome .url-bar-center .url-bar-actions,
+.webview-url-bar.url-bar-ntp-chrome .url-bar-center .loading-bar {
+    display: none !important;
 }
 
 /* Internal pages (Settings): black top bar in dark uiTheme only — NTP uses frosted bar above. */
@@ -11997,8 +12140,8 @@ body.light-theme .color-option.selected {
     --url-bar-btn-hover: rgba(0, 0, 0, 0.06);
 }
 
-/* Transparent sites mode: frosted URL bar — blur/sat match #app (JS sets vars from shell main glass) */
-body.transparent-sites-mode .webview-url-bar {
+/* Transparent sites mode: frosted URL bar — NTP/AI chat bar keeps page glass */
+body.transparent-sites-mode .webview-url-bar:not(.url-bar-ntp-chrome) {
     backdrop-filter: blur(var(--axis-ts-urlbar-blur, 26px)) saturate(var(--axis-ts-urlbar-sat, 148%));
     -webkit-backdrop-filter: blur(var(--axis-ts-urlbar-blur, 26px)) saturate(var(--axis-ts-urlbar-sat, 148%));
 }
@@ -12408,8 +12551,8 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
     bottom: 0;
     transition: top 0.3s ease,
                 right 0.42s cubic-bezier(0.32, 0.72, 0, 1); /* sync with chat panel slide */
-    overflow: hidden; /* Clip webview content to rounded corners */
-    border-radius: 0 0 var(--axis-content-panel-radius) var(--axis-content-panel-radius);
+    overflow: hidden;
+    border-radius: 0;
     /* Webview area paints nothing when idle — no glass, no white. */
     background: transparent;
     backdrop-filter: none;
@@ -12420,7 +12563,6 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
 
 .webview-container:has(.webview-url-bar.hidden) #webviews-container {
     top: 0;
-    border-radius: var(--axis-content-panel-radius);
 }
 
 /* Also adjust main webview */
@@ -12436,7 +12578,7 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
 
 .webview-container:has(.webview-url-bar.hidden) #webview {
     top: 0;
-    border-radius: var(--axis-content-panel-radius);
+    border-radius: 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -12468,7 +12610,7 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
 
 #main-area.sidebar-right .webview-container {
     margin-left: 0;
-    margin-right: -1px;
+    margin-right: 0;
     border-radius: 0 !important;
     overflow: hidden !important;
 }
