@@ -77,6 +77,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('axis-host-nav-gesture', handler);
     return () => ipcRenderer.removeListener('axis-host-nav-gesture', handler);
   },
+  onHostResizeLive: (callback) => ipcRenderer.on('axis-host-resize-live', () => callback()),
+  onHostResizeSettled: (callback) => ipcRenderer.on('axis-host-resize-settled', () => callback()),
   onOpenUrlInBrowser: (callback) => ipcRenderer.on('open-url-in-browser', (event, url) => callback(url)),
   onOpenSettingsTab: (callback) => ipcRenderer.on('open-settings-tab', (event, section) => callback(section)),
   onSettingsUpdated: (callback) =>
