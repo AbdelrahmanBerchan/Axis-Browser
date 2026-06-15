@@ -456,9 +456,8 @@ function initializeProfileDefaults(profileId, profileStore) {
     ntpWelcomeEnabled: true,
     ntpWelcomeWeather: false,
     ntpWelcomeGreeting: true,
-    ntpWelcomeUpdates: true,
-    ntpWelcomeTips: true,
-    ntpAiSearchEnabled: true
+    ntpAiSearchEnabled: true,
+    ntpGreetingName: 'User'
   };
   for (const [key, value] of Object.entries(defaults)) {
     if (s.get(key) === undefined) s.set(key, value);
@@ -1736,6 +1735,27 @@ async function openAxisExtensionPopup(id, profileId = AXIS_DEFAULT_PROFILE_ID, o
   return true;
 }
 
+/** Open toolbar popup when available, otherwise options — shared by macOS menu and in-app UI. */
+async function openAxisExtensionPopupOrOptions(id, profileId = AXIS_DEFAULT_PROFILE_ID, ownerWindow) {
+  const pid = sanitizeProfileId(profileId);
+  const record = getStoredAxisExtensions(pid).find((x) => x.id === id);
+  if (!record) throw new Error('Extension not found');
+  if (record.enabled === false) throw new Error('Enable this extension before opening it.');
+  let view = toAxisExtensionView(record, pid);
+  if (record.enabled !== false && !view.loaded) {
+    view = await loadAxisExtensionRecord(record, pid);
+  }
+  if (view.popupUrl) {
+    await openAxisExtensionPopup(id, pid, ownerWindow);
+    return true;
+  }
+  if (view.optionsUrl) {
+    await openAxisExtensionOptions(id, pid);
+    return true;
+  }
+  throw new Error('This extension does not provide a toolbar popup or options page.');
+}
+
 function normalizePermissionOrigin(url) {
   if (!url || typeof url !== 'string') return null;
   try {
@@ -2502,6 +2522,20 @@ function attachMacTrafficLightResize(browserWindow) {
   browserWindow.on('leave-full-screen', schedule);
 }
 
+/** Tell the shell to sync guest webview bounds on every frame while the OS window is dragging. */
+function attachWebviewHostResizeSignals(browserWindow) {
+  if (!browserWindow) return;
+  const send = (channel) => {
+    if (browserWindow.isDestroyed()) return;
+    try {
+      browserWindow.webContents.send(channel);
+    } catch (_) {}
+  };
+  browserWindow.on('will-resize', () => send('axis-host-resize-live'));
+  browserWindow.on('resize', () => send('axis-host-resize-live'));
+  browserWindow.on('resized', () => send('axis-host-resize-settled'));
+}
+
 // ========== Keyboard Shortcuts (Global Functions) ==========
 
 // Default keyboard shortcuts
@@ -2906,7 +2940,7 @@ function createWindow(options = {}) {
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       offscreen: false,
       experimentalFeatures: true,
       v8CacheOptions: 'code',
@@ -2932,6 +2966,7 @@ function createWindow(options = {}) {
     win.__axisSidebarRight = false;
     attachMacTrafficLightResize(win);
   }
+  attachWebviewHostResizeSignals(win);
   win.__axisIsIncognito = false;
   win.__axisProfileId = profileId;
   win.__axisProfileName = profileName;
@@ -3095,7 +3130,7 @@ function openSettingsWindow(section = null, profileIdHint = null) {
       contextIsolation: true,
       preload: path.join(__dirname, 'settings-preload.js'),
       partition: getProfilePartition(profileId),
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       spellcheck: false,
       webSecurity: true
     }
@@ -3223,7 +3258,7 @@ function openUrlInNewBrowserWindow(url) {
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       offscreen: false,
       experimentalFeatures: true,
       v8CacheOptions: 'code',
@@ -3337,24 +3372,8 @@ function buildExtensionsSubmenu() {
         click: async () => {
           try {
             const pid = getActiveProfileId();
-            const v = getStoredAxisExtensions(pid).find((x) => x.id === extId);
-            if (!v) return;
-            if (v.enabled === false) return;
             const win = getActiveAxisWindow();
-            if (v.popupUrl) {
-              await openAxisExtensionPopup(extId, pid, win || undefined);
-              return;
-            }
-            if (v.optionsUrl) {
-              await openAxisExtensionOptions(extId, pid);
-              return;
-            }
-            void dialog.showMessageBox(win && !win.isDestroyed() ? win : BrowserWindow.getFocusedWindow() || undefined, {
-              type: 'info',
-              title: v.name || 'Extension',
-              message: 'This extension has no toolbar popup or options page.',
-              buttons: ['OK']
-            });
+            await openAxisExtensionPopupOrOptions(extId, pid, win || undefined);
           } catch (e) {
             const msg = e && e.message ? e.message : String(e);
             const win = getActiveAxisWindow();
@@ -3799,7 +3818,7 @@ function createIncognitoWindow(initialUrl = null) {
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       offscreen: false,
       experimentalFeatures: true,
       enableBlinkFeatures: 'CSSColorSchemeUARendering',
@@ -3829,6 +3848,7 @@ function createIncognitoWindow(initialUrl = null) {
     incognitoWindow.__axisSidebarRight = false;
     attachMacTrafficLightResize(incognitoWindow);
   }
+  attachWebviewHostResizeSignals(incognitoWindow);
 
   if (initialUrl && isSafeHttpUrl(initialUrl)) {
     incognitoWindow.webContents.once('did-finish-load', () => {
@@ -5453,6 +5473,19 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
   template.push({ type: 'separator' });
 
   // --- Page
+  if (ctx.canUpdateSavedLink) {
+    const updateLabel = ctx.savedLinkKind === 'favorite'
+      ? 'Update Favorite to This Page'
+      : 'Update Pinned Link to This Page';
+    template.push({
+      label: updateLabel,
+      click: () => {
+        event.sender.send('webpage-context-menu-action', 'update-saved-link');
+      }
+    });
+    template.push({ type: 'separator' });
+  }
+
   template.push({
     label: 'Copy Page URL',
     click: () => {
@@ -5648,10 +5681,20 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
   );
   if (!info.isIncognito) {
     template.push({
-      label: info.isFavorite ? 'Already in Favorites' : 'Add to Favorites',
-      enabled: !info.isFavorite,
+      label: 'Add to Favorites',
       click: () => {
         event.sender.send('tab-context-menu-action', 'add-to-favorites');
+      }
+    });
+  }
+  if (info.canUpdateSavedLink) {
+    const updateLabel = info.savedLinkKind === 'favorite'
+      ? 'Update Favorite to This Page'
+      : 'Update Pinned Link to This Page';
+    template.push({
+      label: updateLabel,
+      click: () => {
+        event.sender.send('tab-context-menu-action', 'update-saved-link');
       }
     });
   }
@@ -5728,7 +5771,17 @@ ipcMain.handle('show-favorite-context-menu', async (event, _x, _y, info) => {
       click: () => {
         event.sender.send('favorite-context-menu-action', 'copy-link');
       }
-    },
+    }
+  ];
+  if (meta.canUpdateSavedLink) {
+    template.push({
+      label: 'Update Link to Current Page',
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'update-saved-link');
+      }
+    });
+  }
+  template.push(
     {
       label: 'Rename…',
       click: () => {
@@ -5756,7 +5809,7 @@ ipcMain.handle('show-favorite-context-menu', async (event, _x, _y, info) => {
         event.sender.send('favorite-context-menu-action', 'remove');
       }
     }
-  ];
+  );
   const menu = Menu.buildFromTemplate(template);
   const window = BrowserWindow.fromWebContents(event.sender);
   menu.popup({ window });
