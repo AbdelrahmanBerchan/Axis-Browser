@@ -1928,30 +1928,25 @@
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title">Show welcome</div>
-                            <div class="row-desc">Greeting and tips above the search box</div>
+                            <div class="row-desc">Greeting above the search box</div>
                         </div>
                         <input type="checkbox" id="ntp-welcome-enabled">
                     </div>
                     <div class="row ntp-nested-rows" id="ntp-welcome-greeting-row">
                         <div class="row-label">
                             <div class="row-title">Greeting</div>
-                            <div class="row-desc">“Good morning” style line</div>
+                            <div class="row-desc">Time-of-day line above the search box — changes through the day</div>
                         </div>
                         <input type="checkbox" id="ntp-welcome-greeting">
                     </div>
-                    <div class="row ntp-nested-rows" id="ntp-welcome-tips-row">
+                    <div class="row ntp-nested-rows" id="ntp-greeting-name-row">
                         <div class="row-label">
-                            <div class="row-title">Tips</div>
-                            <div class="row-desc">Short hints under the greeting</div>
+                            <div class="row-title">Your name</div>
+                            <div class="row-desc">Used in the greeting — defaults to User until you change it</div>
                         </div>
-                        <input type="checkbox" id="ntp-welcome-tips">
-                    </div>
-                    <div class="row ntp-nested-rows" id="ntp-welcome-updates-row">
-                        <div class="row-label">
-                            <div class="row-title">Update reminders</div>
-                            <div class="row-desc">Let you know when a newer version is available</div>
+                        <div class="row-controls">
+                            <input type="text" id="ntp-greeting-name" placeholder="User" autocomplete="name" spellcheck="false" maxlength="64">
                         </div>
-                        <input type="checkbox" id="ntp-welcome-updates">
                     </div>
                     <div class="row">
                         <div class="row-label">
@@ -2117,9 +2112,8 @@
                     key === 'groqApiKey' ||
                     key === 'ntpWelcomeEnabled' ||
                     key === 'ntpWelcomeGreeting' ||
-                    key === 'ntpWelcomeUpdates' ||
-                    key === 'ntpWelcomeTips' ||
-                    key === 'ntpAiSearchEnabled'
+                    key === 'ntpAiSearchEnabled' ||
+                    key === 'ntpGreetingName'
                 ) {
                     window.electronAPI.sendSettingsUpdated();
                 }
@@ -2252,15 +2246,17 @@
             };
             setNtpCheck('ntp-welcome-enabled', settings.ntpWelcomeEnabled !== false);
             setNtpCheck('ntp-welcome-greeting', settings.ntpWelcomeGreeting !== false);
-            setNtpCheck('ntp-welcome-updates', settings.ntpWelcomeUpdates !== false);
-            setNtpCheck('ntp-welcome-tips', settings.ntpWelcomeTips !== false);
             setNtpCheck('ntp-ai-search', settings.ntpAiSearchEnabled !== false);
+            const ntpGreetingNameInput = document.getElementById('ntp-greeting-name');
+            if (ntpGreetingNameInput) {
+                const storedName = String(settings.ntpGreetingName ?? '').trim();
+                ntpGreetingNameInput.value = storedName === 'User' ? '' : storedName;
+            }
 
             function syncNtpSettingsNestedState() {
                 const welcomeOn = document.getElementById('ntp-welcome-enabled')?.checked !== false;
                 document.getElementById('ntp-welcome-greeting-row')?.classList.toggle('visible', welcomeOn);
-                document.getElementById('ntp-welcome-tips-row')?.classList.toggle('visible', welcomeOn);
-                document.getElementById('ntp-welcome-updates-row')?.classList.toggle('visible', welcomeOn);
+                document.getElementById('ntp-greeting-name-row')?.classList.toggle('visible', welcomeOn);
             }
             syncNtpSettingsNestedState();
             
@@ -2728,8 +2724,14 @@
                 saveSetting('ntpWelcomeEnabled', e.target.checked, false);
             });
             document.getElementById('ntp-welcome-greeting')?.addEventListener('change', e => saveSetting('ntpWelcomeGreeting', e.target.checked, false));
-            document.getElementById('ntp-welcome-tips')?.addEventListener('change', e => saveSetting('ntpWelcomeTips', e.target.checked, false));
-            document.getElementById('ntp-welcome-updates')?.addEventListener('change', e => saveSetting('ntpWelcomeUpdates', e.target.checked, false));
+            function saveNtpGreetingName() {
+                const el = document.getElementById('ntp-greeting-name');
+                if (!el) return;
+                const trimmed = String(el.value || '').trim().slice(0, 64);
+                saveSetting('ntpGreetingName', trimmed || 'User', false);
+            }
+            document.getElementById('ntp-greeting-name')?.addEventListener('change', saveNtpGreetingName);
+            document.getElementById('ntp-greeting-name')?.addEventListener('blur', saveNtpGreetingName);
             document.getElementById('ntp-ai-search')?.addEventListener('change', e => saveSetting('ntpAiSearchEnabled', e.target.checked, false));
             document.getElementById('transparent-sites').addEventListener('change', e => {
                 saveSetting('transparentSites', e.target.checked, true);
