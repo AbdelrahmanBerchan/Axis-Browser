@@ -4140,6 +4140,16 @@ body.panel-ntp .webview-container {
     -webkit-backdrop-filter: none !important;
 }
 
+body.chrome-no-tabs .webview-container,
+body.panel-idle .webview-container {
+    box-shadow: var(--axis-webview-idle-well-inset);
+}
+
+body.panel-site .webview-container,
+body.panel-ntp .webview-container {
+    box-shadow: none;
+}
+
 body.chrome-no-tabs #webviews-container,
 body.panel-idle #webviews-container,
 body.panel-ntp #webviews-container {
