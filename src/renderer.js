@@ -714,7 +714,7 @@ class AxisBrowser {
 
         // Load pinned tabs and tab groups (skip in incognito – start fresh)
         if (!this.isIncognitoWindow) {
-            this.loadFavorites();
+            await this.loadFavorites();
             await this.loadPinnedTabs();
             await this.loadTabGroups();
         }
@@ -7050,7 +7050,6 @@ class AxisBrowser {
                     this.applyCachedTheme(tab.url);
                 }
                 if (tab.isFavoriteTab) {
-                    this.renderFavorites();
                     requestAnimationFrame(() => this._forceGuestLayoutSync());
                 }
             }
@@ -7062,6 +7061,14 @@ class AxisBrowser {
                 this.updateNewTabPageVisibility(false);
             }
             this._syncWebPanelVisualState();
+        }
+
+        const prevWasFavorite =
+            prevCur != null && !!this.tabs.get(prevCur)?.isFavoriteTab;
+        const nowFavorite = !!tab?.isFavoriteTab;
+
+        if (prevWasFavorite || nowFavorite) {
+            this._syncFavoriteTabsUi();
         }
 
         if (switchedDifferentTab && !fromProfileSwitch && tab) {
@@ -7826,7 +7833,7 @@ class AxisBrowser {
     }
 
     switchToTabByIndex(index) {
-        const tabElements = document.querySelectorAll('.tab');
+        const tabElements = document.querySelectorAll('.tab:not(.tab-favorite-host)');
         if (index >= 0 && index < tabElements.length) {
             const tabElement = tabElements[index];
                 const tabId = parseInt(tabElement.dataset.tabId, 10);
@@ -7836,7 +7843,7 @@ class AxisBrowser {
 
     /** Cycle active tab by DOM order (sidebar / tab groups). */
     switchToAdjacentTab(delta) {
-        const tabElements = Array.from(document.querySelectorAll('.tab'));
+        const tabElements = Array.from(document.querySelectorAll('.tab:not(.tab-favorite-host)'));
         if (tabElements.length === 0) return;
         const ids = tabElements.map((el) => parseInt(el.dataset.tabId, 10));
         let idx = ids.indexOf(this.currentTab);
@@ -7865,7 +7872,7 @@ class AxisBrowser {
     _findNeighborTabToActivate(closedTabId) {
         const closed = this._normalizeTabMapKey(closedTabId);
         if (closed == null) return null;
-        const ids = Array.from(document.querySelectorAll('.tab'))
+        const ids = Array.from(document.querySelectorAll('.tab:not(.tab-favorite-host)'))
             .map((el) => this._normalizeTabMapKey(el.dataset.tabId))
             .filter((n) => n != null);
         const i = ids.indexOf(closed);
@@ -7926,7 +7933,7 @@ class AxisBrowser {
             return;
         }
 
-        const domIds = Array.from(document.querySelectorAll('.tab'))
+        const domIds = Array.from(document.querySelectorAll('.tab:not(.tab-favorite-host)'))
             .map((el) => this._normalizeTabMapKey(el.dataset.tabId))
             .filter((id) => id != null);
         for (let i = domIds.length - 1; i >= 0; i--) {
@@ -11200,46 +11207,9 @@ class AxisBrowser {
         }
     }
 
-    saveFavorites() {
-        if (this.isIncognitoWindow) return;
-        const prevById = new Map(this.favorites.map((f) => [f.id, f]));
-        const compact = this.favorites
-            .map((fav, order) => ({
-                id: fav.id || `fav-${Date.now()}-${order}`,
-                url: this.normalizeFavoriteUrl(fav.url),
-                title: String(fav.title || 'Favorite').trim() || 'Favorite',
-                favicon: fav.favicon || null,
-                customIcon: fav.customIcon || null,
-                customIconType: fav.customIconType || null,
-                order
-            }))
-            .filter((fav) => !!fav.url);
-        this.saveSetting(
-            'favorites',
-            compact.map(({ id, url, title, favicon, customIcon, customIconType, order }) => ({
-                id,
-                url,
-                title,
-                favicon,
-                customIcon,
-                customIconType,
-                order
-            }))
-        );
-        this.favorites = compact.map((row) => {
-            const prev = prevById.get(row.id);
-            return prev ? { ...row, runtimeTabId: prev.runtimeTabId } : { ...row };
-        });
-    }
-
-    loadFavorites() {
-        if (this.isIncognitoWindow) {
-            this.favorites = [];
-            this.renderFavorites();
-            return;
-        }
-        const raw = Array.isArray(this.settings?.favorites) ? this.settings.favorites : [];
-        this.favorites = raw
+    _mapFavoritesFromStore(raw) {
+        const list = Array.isArray(raw) ? raw : [];
+        return list
             .slice()
             .sort((a, b) => (a.order || 0) - (b.order || 0))
             .map((fav, idx) => ({
@@ -11252,10 +11222,74 @@ class AxisBrowser {
                 order: idx
             }))
             .filter((fav) => !!fav.url);
-        this.renderFavorites();
     }
 
-    addTabToFavorites(tabId) {
+    async reloadFavoritesForProfile(profileId) {
+        const pid = String(profileId || this.profileId || 'personal')
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '-') || 'personal';
+        if (this.isIncognitoWindow) {
+            this.favorites = [];
+            this.renderFavorites();
+            return;
+        }
+        let raw = [];
+        try {
+            raw = await window.electronAPI.getFavorites(pid);
+        } catch (_) {
+            raw = Array.isArray(this.settings?.favorites) ? this.settings.favorites : [];
+        }
+        if (!Array.isArray(raw)) raw = [];
+        if (this.settings) this.settings.favorites = raw;
+        else this.settings = { favorites: raw };
+        if (pid === String(this.profileId || '').toLowerCase()) {
+            this.favorites = this._mapFavoritesFromStore(raw);
+            this._relinkFavoriteRuntimeTabs();
+            this.renderFavorites();
+        }
+    }
+
+    async saveFavorites(forProfileId) {
+        if (this.isIncognitoWindow) return;
+        const pid = String(forProfileId || this.profileId || 'personal')
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '-') || 'personal';
+        const prevById = new Map(this.favorites.map((f) => [f.id, f]));
+        const compact = this.favorites
+            .map((fav, order) => ({
+                id: fav.id || `fav-${Date.now()}-${order}`,
+                url: this.normalizeFavoriteUrl(fav.url),
+                title: String(fav.title || 'Favorite').trim() || 'Favorite',
+                favicon: fav.favicon || null,
+                customIcon: fav.customIcon || null,
+                customIconType: fav.customIconType || null,
+                order
+            }))
+            .filter((fav) => !!fav.url);
+        const payload = compact.map(({ id, url, title, favicon, customIcon, customIconType, order }) => ({
+            id,
+            url,
+            title,
+            favicon,
+            customIcon,
+            customIconType,
+            order
+        }));
+        await window.electronAPI.setFavorites(payload, pid);
+        if (pid === String(this.profileId || '').toLowerCase()) {
+            this.favorites = compact.map((row) => {
+                const prev = prevById.get(row.id);
+                return prev ? { ...row, runtimeTabId: prev.runtimeTabId } : { ...row };
+            });
+            if (this.settings) this.settings.favorites = payload;
+        }
+    }
+
+    async loadFavorites() {
+        await this.reloadFavoritesForProfile(this.profileId);
+    }
+
+    async addTabToFavorites(tabId) {
         if (this.isIncognitoWindow) return;
         const tab = this.tabs.get(this._normalizeTabMapKey(tabId));
         if (!tab) return;
@@ -11294,7 +11328,57 @@ class AxisBrowser {
             customIconType: tab.customIconType || null,
             order: this.favorites.length
         });
-        this.saveFavorites();
+        await this.saveFavorites();
+        this.renderFavorites();
+    }
+
+    _relinkFavoriteRuntimeTabs() {
+        if (this.isIncognitoWindow) return;
+        const linked = new Set();
+        for (const favorite of this.favorites) {
+            const tabId = this._resolveFavoriteRuntimeTabId(favorite);
+            if (tabId != null) linked.add(tabId);
+        }
+        for (const [id, tab] of this.tabs) {
+            if (!tab?.isFavoriteTab || !tab.favoriteId) continue;
+            const fav = this.favorites.find((f) => f.id === tab.favoriteId);
+            if (fav) {
+                fav.runtimeTabId = id;
+                linked.add(id);
+            }
+        }
+        for (const favorite of this.favorites) {
+            const tid = this._normalizeTabMapKey(favorite.runtimeTabId);
+            if (tid != null && !linked.has(tid)) {
+                favorite.runtimeTabId = null;
+            }
+        }
+    }
+
+    _resolveFavoriteRuntimeTabId(favorite) {
+        if (!favorite?.id) return null;
+        let tabId = this._normalizeTabMapKey(favorite.runtimeTabId);
+        if (tabId != null) {
+            const t = this.tabs.get(tabId);
+            if (t?.isFavoriteTab && t.favoriteId === favorite.id) return tabId;
+        }
+        for (const [id, tab] of this.tabs) {
+            if (tab?.isFavoriteTab && tab.favoriteId === favorite.id) {
+                favorite.runtimeTabId = id;
+                return id;
+            }
+        }
+        favorite.runtimeTabId = null;
+        return null;
+    }
+
+    _syncFavoriteTabsUi() {
+        if (this.isIncognitoWindow) return;
+        const hasFavoriteRuntime =
+            this.favorites.some((f) => this._normalizeTabMapKey(f.runtimeTabId) != null) ||
+            Array.from(this.tabs.values()).some((t) => t?.isFavoriteTab);
+        if (!hasFavoriteRuntime) return;
+        this._relinkFavoriteRuntimeTabs();
         this.renderFavorites();
     }
 
@@ -11328,21 +11412,26 @@ class AxisBrowser {
 
     navigateFavorite(favorite) {
         if (!favorite) return;
-        let tabId = this._normalizeTabMapKey(favorite.runtimeTabId);
-        if (tabId != null && !this.tabs.has(tabId)) {
-            favorite.runtimeTabId = null;
-            tabId = null;
-        }
+        this._relinkFavoriteRuntimeTabs();
+        let tabId = this._resolveFavoriteRuntimeTabId(favorite);
         if (tabId == null) {
             tabId = this.createFavoriteRuntimeTab(favorite);
         }
         if (tabId == null) return;
         this._ensureFavoriteTabHostElement(tabId);
+        const tab = this.tabs.get(tabId);
+        if (tab && !tab.webview) {
+            const reclaimed = this._findTabWebviewInContainer(tabId);
+            if (reclaimed) {
+                tab.webview = reclaimed;
+                this.tabs.set(tabId, tab);
+            }
+        }
         this.switchToTab(tabId);
         this.renderFavorites();
     }
 
-    removeFavorite(favoriteId) {
+    async removeFavorite(favoriteId) {
         const before = this.favorites.length;
         const favorite = this.favorites.find((fav) => fav.id === favoriteId);
         const runtimeTabId = this._normalizeTabMapKey(favorite?.runtimeTabId);
@@ -11351,7 +11440,7 @@ class AxisBrowser {
         if (runtimeTabId != null && this.tabs.has(runtimeTabId)) {
             this.closeTab(runtimeTabId);
         }
-        this.saveFavorites();
+        await this.saveFavorites();
         this.renderFavorites();
     }
 
@@ -11424,7 +11513,7 @@ class AxisBrowser {
         if (!this._favoriteDrag) return;
         e.preventDefault();
         this._favoriteDrag.droppedInside = true;
-        this.persistFavoriteDomOrder();
+        void this.persistFavoriteDomOrder();
     }
 
     onFavoriteDragEnd(e, favoriteId) {
@@ -11435,13 +11524,13 @@ class AxisBrowser {
         const droppedInside = this._favoriteDrag?.droppedInside || droppedInFavorites;
         this._favoriteDrag = null;
         if (!droppedInside) {
-            this.removeFavorite(favoriteId);
+            void this.removeFavorite(favoriteId);
             return;
         }
-        this.persistFavoriteDomOrder();
+        void this.persistFavoriteDomOrder();
     }
 
-    persistFavoriteDomOrder() {
+    async persistFavoriteDomOrder() {
         const grid = this.elements?.favoritesGrid;
         if (!grid) return;
         const order = Array.from(grid.querySelectorAll('.favorite-item'))
@@ -11449,7 +11538,7 @@ class AxisBrowser {
             .filter(Boolean);
         const byId = new Map(this.favorites.map((fav) => [fav.id, fav]));
         this.favorites = order.map((id, idx) => ({ ...byId.get(id), order: idx })).filter((fav) => fav && fav.id);
-        this.saveFavorites();
+        await this.saveFavorites();
         this.renderFavorites();
     }
     
