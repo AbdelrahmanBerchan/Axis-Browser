@@ -4507,6 +4507,12 @@ function getWindowFromSender(webContents) {
 
 function getProfileIdForEvent(event) {
   const sender = event?.sender;
+  // In-window profile switching updates `win.__axisProfileId` but the shell keeps the
+  // default `persist:main` session — always prefer the window's active profile first.
+  const win = getWindowFromSender(sender);
+  if (win && !win.isDestroyed() && win.__axisIsIncognito !== true && win.__axisProfileId) {
+    return sanitizeProfileId(win.__axisProfileId);
+  }
   if (sender && !sender.isDestroyed()) {
     try {
       const part =
@@ -4518,10 +4524,7 @@ function getProfileIdForEvent(event) {
       }
     } catch (_) {}
   }
-  const win = getWindowFromSender(sender);
-  return win && win.__axisIsIncognito !== true
-    ? sanitizeProfileId(win.__axisProfileId)
-    : AXIS_DEFAULT_PROFILE_ID;
+  return AXIS_DEFAULT_PROFILE_ID;
 }
 
 function getSettingsStoreForEvent(event) {
@@ -4609,6 +4612,40 @@ ipcMain.handle('set-site-permission-overrides', (event, obj) => {
   s.set('sitePermissionOverrides', cleaned);
   broadcastSettingsUpdated(pid);
   return cleaned;
+});
+
+function normalizeFavoritesStoreList(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((fav, order) => {
+      const url = typeof fav?.url === 'string' ? fav.url.trim() : '';
+      if (!url) return null;
+      return {
+        id: typeof fav?.id === 'string' && fav.id.trim() ? fav.id.trim() : `fav-${Date.now()}-${order}`,
+        url,
+        title:
+          typeof fav?.title === 'string' && fav.title.trim() ? fav.title.trim().slice(0, 200) : 'Favorite',
+        favicon: fav?.favicon || null,
+        customIcon: fav?.customIcon || null,
+        customIconType: fav?.customIconType || null,
+        order: typeof fav?.order === 'number' ? fav.order : order
+      };
+    })
+    .filter(Boolean);
+}
+
+ipcMain.handle('get-favorites', (_event, profileId) => {
+  const pid = sanitizeProfileId(profileId || AXIS_DEFAULT_PROFILE_ID);
+  const raw = getProfileStore(pid).get('favorites', []);
+  return Array.isArray(raw) ? raw : [];
+});
+
+ipcMain.handle('set-favorites', (_event, items, profileId) => {
+  const pid = sanitizeProfileId(profileId);
+  if (!profileId) return { ok: false, error: 'profileId required' };
+  getProfileStore(pid).set('favorites', normalizeFavoritesStoreList(items));
+  broadcastSettingsUpdated(pid);
+  return { ok: true };
 });
 
 ipcMain.handle('set-setting', (event, key, value) => {
