@@ -112,7 +112,8 @@ function googleIds(){return["viewport","cnt","gsr","main","center_col","rcnt","r
 function applyGoogle(){googleIds().forEach(function(id){try{var el=document.getElementById(id);if(el){setStyle(el,"background-color",T);setStyle(el,"background-image","none");}}catch(e){}});try{var main=document.querySelector('[role="main"]');if(main){setStyle(main,"background-color",T);setStyle(main,"background-image","none");}}catch(e){}}
 function sweepLargeOpaqueLayers(){var b=document.body;if(!b)return;var sk={IMG:1,VIDEO:1,AUDIO:1,CANVAS:1,IFRAME:1,SVG:1,PICTURE:1,OBJECT:1,EMBED:1,STYLE:1,SCRIPT:1,LINK:1,META:1,NOSCRIPT:1,TEMPLATE:1,INPUT:1,TEXTAREA:1,SELECT:1,BUTTON:1,OPTION:1,LABEL:1};var n=0,mx=6500,vh=window.innerHeight||800,vw=window.innerWidth||1200,vA=Math.max(1,vh*vw);if(typeof NodeFilter==="undefined")return;var w=document.createTreeWalker(b,NodeFilter.SHOW_ELEMENT,null),el;while((el=w.nextNode())&&n<mx){n++;var t=el.tagName;if(sk[t])continue;if(t&&t.indexOf("-")>0){var q=t.toLowerCase();if(q.slice(0,4)==="ytd-"||q.slice(0,3)==="yt-")continue;}try{if(el.closest('[aria-modal="true"],[role="dialog"],dialog,[data-radix-portal],.modal,.Modal,[class*="modal_root"]'))continue;if(el.closest("#movie_player,#player,#player-container,#player-api,ytd-player,.html5-video-player,.html5-video-container,#ytd-player"))continue;}catch(e){}try{var cs=getComputedStyle(el);if(cs.display==="none"||cs.visibility==="hidden"||(cs.position==="fixed"&&parseFloat(cs.opacity||"1")<0.04))continue;var bg=cs.backgroundColor;if(!bg||bg==="transparent"||bg==="rgba(0, 0, 0, 0)")continue;var a=1;if(bg.indexOf("rgba")===0){var i=bg.lastIndexOf(",");if(i>0){var tail=bg.slice(i+1,-1).trim();var pv=parseFloat(tail);if(!isNaN(pv))a=pv;}}if(a<0.12)continue;var r=el.getBoundingClientRect();if(r.width<24||r.height<22)continue;var f=r.width*r.height/vA,tl=r.height>Math.min(340,vh*0.38),tb=r.width>vw*0.86&&r.height>90;if(f<0.032&&!tl&&!tb)continue;setStyle(el,"background-color",T);var bi=cs.backgroundImage;if(bi&&bi!=="none"&&bi.indexOf("url(")<0&&(bi.indexOf("gradient")>=0||bi.indexOf("linear-gradient")>=0))setStyle(el,"background-image","none");}catch(e2){}}}
 function scheduleSweep(){if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}var go=function(){st.idle=null;st.sweepTO=null;var now=Date.now();if(now-(st.lastSweep||0)<900)return;st.lastSweep=now;try{sweepLargeOpaqueLayers();}catch(e){}};if(window.requestIdleCallback)st.idle=window.requestIdleCallback(go,{timeout:1200});else st.sweepTO=setTimeout(go,320);}
-function run(){var host=(String(location.hostname||"")).toLowerCase();var isYt=host.indexOf("youtube.com")>=0||host==="youtu.be";var isGo=host.indexOf("google.")>=0;if(isYt&&!isYtWatch())applyYt();if(isGo)applyGoogle();try{setStyle(document.documentElement,"background-color",T);if(document.body){setStyle(document.body,"background-color",T);setStyle(document.body,"background-image","none");}}catch(e){}scheduleSweep();}
+function hostOnDomain(h,d){return h===d||h.length>d.length&&h.slice(-(d.length+1))==="."+d;}
+function run(){var host=(String(location.hostname||"")).toLowerCase();var isYt=hostOnDomain(host,"youtube.com")||host==="youtu.be";var isGo=hostOnDomain(host,"google.com")||host.endsWith(".google.com");if(isYt&&!isYtWatch())applyYt();if(isGo)applyGoogle();try{setStyle(document.documentElement,"background-color",T);if(document.body){setStyle(document.body,"background-color",T);setStyle(document.body,"background-image","none");}}catch(e){}scheduleSweep();}
 run();
 if(!st.mo&&document.body){st.mo=new MutationObserver(function(){clearTimeout(st.t);st.t=setTimeout(run,480);});st.mo.observe(document.body,{childList:true,subtree:true});}else if(!st.mo){run();}
 }catch(e){}
@@ -8728,9 +8729,10 @@ class AxisBrowser {
         if (!rawUrl || typeof rawUrl !== 'string') return false;
         try {
             const u = new URL(rawUrl);
-            const host = u.hostname.replace(/^www\./i, '').toLowerCase();
-            if (host === 'youtu.be') return u.pathname.length > 1;
-            if (!host.endsWith('youtube.com')) return false;
+            if (this.isUrlOnDomain(rawUrl, 'youtu.be')) {
+                return u.pathname.length > 1;
+            }
+            if (!this.isUrlOnDomain(rawUrl, 'youtube.com')) return false;
             const p = u.pathname;
             return (
                 p === '/watch' ||
