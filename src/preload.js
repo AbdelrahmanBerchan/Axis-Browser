@@ -118,8 +118,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openUrlInNewWindow: (url) => ipcRenderer.invoke('open-url-in-new-window', url),
   
   // Sidebar favorites
-  getFavorites: () => ipcRenderer.invoke('get-favorites'),
-  setFavorites: (items) => ipcRenderer.invoke('set-favorites', items),
+  getFavorites: (profileId) => ipcRenderer.invoke('get-favorites', profileId),
+  setFavorites: (items, profileId) => ipcRenderer.invoke('set-favorites', items, profileId),
   fetchFaviconBytes: (url) => ipcRenderer.invoke('axis-fetch-favicon-bytes', url),
   showFavoriteContextMenu: (x, y, info) => ipcRenderer.invoke('show-favorite-context-menu', x, y, info),
   onFavoriteContextMenuAction: (callback) =>
