@@ -352,7 +352,8 @@
       this.tabs = state.tabs || new Map();
       this.tabGroups = state.tabGroups || new Map();
       this.currentTab = state.currentTab ?? null;
-      this.favorites = Array.isArray(state.favorites) ? state.favorites : [];
+      // Favorites always reload from the profile store — never from runtime cache.
+      this.favorites = [];
       this.settings = state.settings ? { ...state.settings } : {};
       this.windowProfileIcon = state.windowProfileIcon ?? this.windowProfileIcon;
       this._sidebarMediaDock = state.sidebarMediaDock || null;
@@ -409,6 +410,7 @@
 
     async _flushCurrentProfileToStore() {
       if (this.isIncognitoWindow) return;
+      const outgoingProfileId = sanitizeProfileId(this.profileId);
       try {
         const payload = this.flushSessionStatePayload?.();
         if (payload && window.electronAPI?.flushSessionAsync) {
@@ -418,7 +420,7 @@
         }
         await this.savePinnedTabs?.();
         await this.saveTabGroups?.();
-        this.saveFavorites?.();
+        await this.saveFavorites?.(outgoingProfileId);
       } catch (e) {
         console.error('flush profile store', e);
       }
@@ -528,6 +530,7 @@
         this.settings = { ...boot.settings };
         if (Array.isArray(boot.pinnedTabs)) this.settings.pinnedTabs = boot.pinnedTabs;
         if (Array.isArray(boot.tabGroups)) this.settings.tabGroups = boot.tabGroups;
+        if (Array.isArray(boot.favorites)) this.settings.favorites = boot.favorites;
       } else {
         await this.loadSettings?.();
       }
@@ -535,7 +538,7 @@
         await this.refreshShortcutCache?.();
       }
       this._lastJavascriptEnabled = this.settings?.javascriptEnabled !== false;
-      this.loadFavorites?.();
+      await this.loadFavorites?.();
       await this.loadPinnedTabs?.();
       await this.loadTabGroups?.();
 
@@ -821,7 +824,9 @@
         ) {
           return true;
         }
-        if (target.closest('.tab, .tab-group, .favorites-grid, #sidebar-new-tab-btn')) return true;
+        // Allow swipe gestures to start on tabs and favorites so profile swipe works
+        // while interacting with the main sidebar content. Still ignore direct form
+        // controls and primary plus menu buttons.
         if (target.closest('#sidebar-plus-btn, #sidebar-plus-menu')) return true;
         if (target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return true;
         return false;
@@ -1056,7 +1061,7 @@
 
       try {
         this._snapshotRunningProfile();
-        const flushPromise = this._flushCurrentProfileToStore();
+        await this._flushCurrentProfileToStore();
 
         await window.electronAPI.switchProfileInWindow(id);
 
@@ -1075,6 +1080,8 @@
         }
 
         this._commitProfileWebview(id);
+        await this.reloadFavoritesForProfile?.(id);
+
         this.syncProfileSwitcherState?.();
 
         if (wantAnimate) {
@@ -1085,7 +1092,6 @@
           this.setupTabDragDrop();
         }
 
-        void flushPromise;
         void this._applyProfileChromeAfterSwitch?.();
         if (!activated && !this.isIncognitoWindow && this.settings?.transparentSites) {
           void this.applyTransparentSitesToAllWebviews?.();
