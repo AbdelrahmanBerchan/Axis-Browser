@@ -102,6 +102,158 @@
             overflow-x: hidden;
         }
                 html.axis-dark .sidebar { background: rgba(30,30,30,0.95); border-right-color: rgba(255,255,255,0.08); }
+        .settings-profile-switch {
+            position: relative;
+            margin: 0 8px 10px;
+            flex-shrink: 0;
+        }
+        .settings-profile-switch.is-hidden {
+            display: none;
+        }
+        .settings-profile-switch.is-switching .settings-profile-trigger {
+            opacity: 0.65;
+            pointer-events: none;
+        }
+        .settings-profile-trigger {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 6px 10px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: inherit;
+            font: inherit;
+            font-size: 12.5px;
+            text-align: left;
+            cursor: pointer;
+            transition: background 0.12s ease;
+        }
+        .settings-profile-trigger:hover {
+            background: rgba(0,0,0,0.05);
+        }
+        html.axis-dark .settings-profile-trigger:hover {
+            background: rgba(255,255,255,0.08);
+        }
+        .settings-profile-trigger[aria-expanded="true"] {
+            background: rgba(0,0,0,0.06);
+        }
+        html.axis-dark .settings-profile-trigger[aria-expanded="true"] {
+            background: rgba(255,255,255,0.1);
+        }
+        .settings-profile-trigger-text {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            line-height: 1.2;
+        }
+        .settings-profile-trigger-label {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            color: #86868b;
+        }
+        html.axis-dark .settings-profile-trigger-label { color: #98989d; }
+        .settings-profile-trigger-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+        .settings-profile-chevron {
+            flex-shrink: 0;
+            width: 12px;
+            height: 12px;
+            opacity: 0.45;
+            transition: transform 0.15s ease;
+        }
+        .settings-profile-trigger[aria-expanded="true"] .settings-profile-chevron {
+            transform: rotate(180deg);
+        }
+        .settings-profile-menu {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            z-index: 40;
+            padding: 4px;
+            border-radius: 10px;
+            background: #fff;
+            border: 1px solid rgba(0,0,0,0.1);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+            max-height: 220px;
+            overflow-y: auto;
+        }
+        html.axis-dark .settings-profile-menu {
+            background: #2c2c2e;
+            border-color: rgba(255,255,255,0.12);
+            box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+        }
+        .settings-profile-menu.hidden {
+            display: none;
+        }
+        .settings-profile-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+        .settings-profile-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 6px 8px;
+            border: none;
+            border-radius: 7px;
+            background: transparent;
+            color: inherit;
+            font: inherit;
+            font-size: 13px;
+            text-align: left;
+            cursor: pointer;
+            transition: background 0.12s ease;
+        }
+        .settings-profile-row:hover {
+            background: rgba(0,0,0,0.06);
+        }
+        html.axis-dark .settings-profile-row:hover {
+            background: rgba(255,255,255,0.08);
+        }
+        .settings-profile-row.is-active {
+            font-weight: 600;
+        }
+        .settings-profile-avatar {
+            flex-shrink: 0;
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: inherit;
+            opacity: 0.88;
+            line-height: 1;
+        }
+        .settings-profile-avatar svg {
+            width: 14px;
+            height: 14px;
+            display: block;
+        }
+        .settings-profile-name {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .settings-profile-check {
+            flex-shrink: 0;
+            font-size: 11px;
+            font-weight: 700;
+            opacity: 0.7;
+        }
         .sidebar-item {
             display: flex;
             align-items: center;
@@ -312,26 +464,272 @@
                 html.axis-dark button.destructive { color: #ff453a; }
         
         .row-controls { display: flex; gap: 12px; align-items: center; }
+        .ai-settings-subpanel {
+            border-top: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        html.axis-dark .ai-settings-subpanel {
+            border-top-color: rgba(255, 255, 255, 0.06);
+        }
+        #ai-features-details.hidden { display: none !important; }
         .ai-settings-intro {
-            padding: 0 4px 10px;
-            font-size: 13px;
+            padding: 14px 20px;
+            font-size: 12px;
             line-height: 1.55;
-            opacity: 0.9;
+            color: #86868b;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        html.axis-dark .ai-settings-intro {
+            color: #98989d;
+            border-bottom-color: rgba(255, 255, 255, 0.06);
         }
         .ai-settings-intro p { margin: 0; }
-        .ai-settings-key-row { align-items: flex-start; }
-        .ai-settings-key-controls {
+        .ai-key-block {
+            display: flex;
             flex-direction: column;
-            align-items: stretch;
-            min-width: min(100%, 340px);
-            gap: 8px;
         }
-        .groq-api-key-input {
+        .ai-providers-list {
+            display: flex;
+            flex-direction: column;
+        }
+        .ai-providers-empty {
+            padding: 14px 18px;
+            font-size: 12px;
+            line-height: 1.45;
+            color: #86868b;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        html.axis-dark .ai-providers-empty {
+            color: #98989d;
+            border-bottom-color: rgba(255, 255, 255, 0.06);
+        }
+        .ai-providers-empty.hidden { display: none !important; }
+        .ai-key-entry {
+            padding: 13px 18px 14px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        html.axis-dark .ai-key-entry {
+            border-bottom-color: rgba(255, 255, 255, 0.06);
+        }
+        .ai-key-entry.is-active {
+            background: rgba(52, 199, 89, 0.04);
+        }
+        html.axis-dark .ai-key-entry.is-active {
+            background: rgba(48, 209, 88, 0.07);
+        }
+        .ai-key-entry.is-editing {
+            background: rgba(0, 122, 255, 0.05);
+        }
+        html.axis-dark .ai-key-entry.is-editing {
+            background: rgba(10, 132, 255, 0.1);
+        }
+        .ai-key-entry-main {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            margin-bottom: 9px;
+        }
+        .ai-key-entry-label {
+            flex: 1;
+            min-width: 0;
+        }
+        .ai-key-entry-label .row-title {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ai-key-entry-label .row-desc {
+            margin-top: 1px;
+        }
+        .ai-key-active-status {
+            color: #248a3d;
+            font-weight: 600;
+        }
+        html.axis-dark .ai-key-active-status { color: #30d158; }
+        .ai-key-entry-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .ai-key-entry-actions button {
+            font-size: 12px;
+            padding: 3px 9px;
+            border-radius: 6px;
+        }
+        .ai-key-entry-actions button.secondary {
+            opacity: 1;
+            background: transparent;
+            border-color: transparent;
+        }
+        html.axis-dark .ai-key-entry-actions button.secondary {
+            background: transparent;
+            border-color: transparent;
+        }
+        .ai-key-entry-actions button.secondary:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+        html.axis-dark .ai-key-entry-actions button.secondary:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .ai-key-entry-actions button.destructive {
+            background: transparent;
+            border-color: transparent;
+        }
+        .ai-key-entry-actions button.destructive:hover {
+            background: rgba(255, 59, 48, 0.1);
+        }
+        .ai-key-mask-row {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+        .ai-key-mask-display {
+            flex: 1;
+            min-width: 0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 11px;
+            line-height: 1.4;
+            padding: 7px 10px;
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.035);
+            border: 1px solid rgba(0, 0, 0, 0.07);
+            letter-spacing: 0.01em;
+            word-break: break-all;
+            color: #1d1d1f;
+        }
+        input.ai-key-mask-display,
+        input.ai-provider-key-input,
+        .ai-provider-type-select,
+        .ai-provider-label-input {
             width: 100%;
-            min-width: 200px;
+            box-sizing: border-box;
+        }
+        input.ai-key-mask-display[readonly] {
+            cursor: default;
+        }
+        html.axis-dark .ai-key-mask-display {
+            background: rgba(0, 0, 0, 0.18);
+            border-color: rgba(255, 255, 255, 0.09);
+            color: rgba(255, 255, 255, 0.9);
+        }
+        .ai-key-mask-row .vault-icon-btn {
+            flex-shrink: 0;
+            align-self: stretch;
+            min-height: 34px;
+            width: 34px;
+            border-radius: 6px;
+        }
+        .ai-key-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 11px 18px 12px;
+            border-top: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        html.axis-dark .ai-key-toolbar {
+            border-top-color: rgba(255, 255, 255, 0.06);
+        }
+        .ai-key-toolbar .ai-key-toast {
+            flex: 1;
+            text-align: right;
+        }
+        .ai-key-add-block .ai-key-toast {
+            text-align: left;
+            margin-top: 2px;
+        }
+        .ai-key-toolbar.hidden { display: none !important; }
+        .ai-key-add-block.hidden { display: none !important; }
+        .ai-key-add-block {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 14px 18px 16px;
+            border-top: 1px solid rgba(0, 0, 0, 0.06);
+            background: rgba(0, 0, 0, 0.015);
+        }
+        html.axis-dark .ai-key-add-block {
+            border-top-color: rgba(255, 255, 255, 0.06);
+            background: rgba(255, 255, 255, 0.025);
+        }
+        .ai-key-add-block.is-editing {
+            background: rgba(0, 122, 255, 0.04);
+        }
+        html.axis-dark .ai-key-add-block.is-editing {
+            background: rgba(10, 132, 255, 0.08);
+        }
+        #ai-provider-cancel-btn.hidden { display: none !important; }
+        .ai-key-form-head .row-desc {
+            margin-top: 3px;
+        }
+        .ai-key-form-fields {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .ai-key-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .ai-key-field-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #86868b;
+        }
+        html.axis-dark .ai-key-field-label { color: #98989d; }
+        .ai-provider-type-select,
+        .ai-provider-label-input,
+        .ai-provider-key-input {
+            min-width: 0;
+            font-size: 13px;
+            padding: 6px 10px;
+            border-radius: 6px;
+        }
+        .ai-provider-key-input {
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
             font-size: 12px;
         }
+        .ai-key-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 12px;
+            padding-top: 2px;
+        }
+        .ai-key-actions .ai-key-link-btn {
+            font-size: 12px;
+            padding: 6px 2px;
+            border: none;
+            background: transparent;
+            color: #0066cc;
+        }
+        html.axis-dark .ai-key-actions .ai-key-link-btn { color: #64b5ff; }
+        .ai-key-actions .ai-key-link-btn:hover {
+            text-decoration: underline;
+            background: transparent;
+        }
+        html.axis-dark .ai-key-actions .ai-key-link-btn:hover { background: transparent; }
+        .ai-key-toast {
+            font-size: 11px;
+            margin: 0;
+            color: #86868b;
+        }
+        .ai-key-toast:empty { display: none; }
+        html.axis-dark .ai-key-toast { color: #98989d; }
+        .ai-key-toast.error { color: #ff3b30; }
+        html.axis-dark .ai-key-toast.error { color: #ff453a; }
+        .ai-key-equipped.hidden,
+        #groq-cancel-replace-btn.hidden { display: none !important; }
+        .groq-api-key-input { width: 100%; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+        .groq-key-mask-row { display: flex; gap: 8px; align-items: stretch; }
+        .groq-key-mask-row .ai-key-mask-display { flex: 1; min-width: 0; }
+        .groq-key-mask-row .vault-icon-btn { flex-shrink: 0; align-self: stretch; min-height: 36px; width: 36px; }
+        .groq-key-toast { font-size: 11px; min-height: 1.2em; margin: 0; color: #86868b; }
+        html.axis-dark .groq-key-toast { color: #98989d; }
+        .groq-key-toast.error { color: #ff3b30; }
+        html.axis-dark .groq-key-toast.error { color: #ff453a; }
         button.secondary { opacity: 0.88; }
         .shortcut-input {
             font-family: 'SF Mono', Monaco, monospace;
@@ -544,8 +942,10 @@
         .vault-editor.hidden { display: none !important; }
         .vault-editor h3 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
         #vault-editor-login-fields,
-        #vault-editor-card-fields { display: flex; flex-direction: column; gap: 8px; }
-        #vault-editor-card-fields.hidden { display: none !important; }
+        #vault-editor-card-fields,
+        #vault-editor-address-fields { display: flex; flex-direction: column; gap: 8px; }
+        #vault-editor-card-fields.hidden,
+        #vault-editor-address-fields.hidden { display: none !important; }
         .vault-field-label { font-size: 11px; font-weight: 600; color: #86868b; margin-top: 4px; }
         html.axis-dark .vault-field-label { color: #98989d; }
         .vault-form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
@@ -565,6 +965,167 @@
         .extensions-section {
             margin-bottom: 20px;
         }
+        .extensions-section:last-of-type { margin-bottom: 0; }
+
+        /* Profiles settings */
+        .profiles-pane-lead {
+            color: var(--settings-muted, #98989d);
+            line-height: 1.5;
+            margin-bottom: 16px;
+            max-width: 640px;
+        }
+        .profiles-overview-wrap {
+            overflow-x: auto;
+            margin-bottom: 14px;
+        }
+        .profiles-overview-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .profiles-overview-table th,
+        .profiles-overview-table td {
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        html:not(.axis-dark) .profiles-overview-table th,
+        html:not(.axis-dark) .profiles-overview-table td {
+            border-bottom-color: rgba(0, 0, 0, 0.08);
+        }
+        .profiles-overview-table th {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: var(--settings-muted, #98989d);
+        }
+        .profiles-overview-table td.num {
+            font-variant-numeric: tabular-nums;
+            color: var(--settings-muted, #98989d);
+        }
+        .profiles-overview-table tr.active td:first-child {
+            font-weight: 600;
+        }
+        .profiles-badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: rgba(90, 160, 255, 0.18);
+            color: #8cb8ff;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+        html:not(.axis-dark) .profiles-badge {
+            background: rgba(0, 102, 204, 0.12);
+            color: #0066cc;
+        }
+        .profiles-backup-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            gap: 10px;
+            margin-top: 4px;
+        }
+        .profiles-backup-row label {
+            display: block;
+            font-size: 12px;
+            color: var(--settings-muted, #98989d);
+            margin-bottom: 6px;
+        }
+        .profiles-backup-row select {
+            min-width: 180px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(0, 0, 0, 0.2);
+            color: inherit;
+            font: inherit;
+        }
+        html:not(.axis-dark) .profiles-backup-row select {
+            border-color: rgba(0, 0, 0, 0.12);
+            background: #fff;
+        }
+        .profiles-backup-actions button,
+        .profiles-import-actions button {
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.06);
+            color: inherit;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        html:not(.axis-dark) .profiles-backup-actions button,
+        html:not(.axis-dark) .profiles-import-actions button {
+            border-color: rgba(0, 0, 0, 0.12);
+            background: rgba(0, 0, 0, 0.04);
+        }
+        .profiles-backup-actions button:hover,
+        .profiles-import-actions button:hover {
+            background: rgba(255, 255, 255, 0.12);
+        }
+        html:not(.axis-dark) .profiles-backup-actions button:hover,
+        html:not(.axis-dark) .profiles-import-actions button:hover {
+            background: rgba(0, 0, 0, 0.08);
+        }
+        .profiles-backup-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .profiles-import-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .profiles-import-grid label {
+            display: block;
+            font-size: 12px;
+            color: var(--settings-muted, #98989d);
+            margin-bottom: 6px;
+        }
+        .profiles-import-grid select,
+        .profiles-import-grid input[type="text"] {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(0, 0, 0, 0.2);
+            color: inherit;
+            font: inherit;
+        }
+        html:not(.axis-dark) .profiles-import-grid select,
+        html:not(.axis-dark) .profiles-import-grid input[type="text"] {
+            border-color: rgba(0, 0, 0, 0.12);
+            background: #fff;
+        }
+        .profiles-import-options {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin: 12px 0;
+        }
+        .profiles-import-options label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+        .profiles-import-preview,
+        .profiles-status {
+            font-size: 12px;
+            color: var(--settings-muted, #98989d);
+            min-height: 18px;
+            margin-top: 8px;
+        }
+        .profiles-status.ok { color: #6dd58c; }
+        .profiles-status.err { color: #ff8f8f; }
+        #profiles-startup-profile-row.hidden { display: none; }
+
         .extensions-section:last-of-type { margin-bottom: 0; }
         .extensions-section-label {
             font-size: 11px;
@@ -708,9 +1269,28 @@
                 html.axis-dark .shortcuts-subheading { color: #98989d; }
         .shortcut-row.shortcut-row-disabled .shortcut-input { opacity: 0.55; pointer-events: none; }
         .gradient-rows { display: none; }
-        .gradient-rows.visible { display: flex; flex-direction: column; }
-        .ntp-nested-rows { display: none; }
-        .ntp-nested-rows.visible { display: flex; flex-direction: column; }
+        .gradient-rows.visible { display: flex; }
+        .unpinned-custom-row { display: none !important; }
+        .unpinned-custom-row.visible { display: flex !important; }
+        .ntp-welcome-subgroup {
+            display: none;
+            background: rgba(0, 0, 0, 0.025);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        html.axis-dark .ntp-welcome-subgroup {
+            background: rgba(255, 255, 255, 0.035);
+            border-bottom-color: rgba(255, 255, 255, 0.06);
+        }
+        .ntp-welcome-subgroup.visible { display: block; }
+        .ntp-welcome-subgroup .row {
+            padding-left: 34px;
+            min-height: 48px;
+        }
+        .ntp-welcome-subgroup .row:last-child { border-bottom: none; }
+        #ntp-greeting-name {
+            width: 180px;
+            max-width: min(220px, 42vw);
+        }
         .ntp-settings-intro {
             padding: 14px 18px;
             font-size: 12px;
@@ -723,6 +1303,23 @@
             border-bottom-color: rgba(255,255,255,0.06);
         }
         .ntp-settings-intro p { margin: 0; }
+        .ntp-widget-deal-fields {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 220px;
+        }
+        .ntp-widget-deal-fields input {
+            width: 100%;
+        }
+        #ntp-widgets-active-list .row-controls input[type="text"],
+        #ntp-widgets-active-list .row-controls input[type="url"],
+        #ntp-widgets-active-list .row-controls input[type="date"],
+        #ntp-widgets-active-list .row-controls input[type="number"],
+        #ntp-widgets-active-list .row-controls select {
+            width: 200px;
+            max-width: min(220px, 38vw);
+        }
         .settings-search-wrap {
             margin-bottom: 16px;
         }
@@ -919,6 +1516,52 @@
             --settings-muted-2: #6f6f6f;
             --settings-focus: rgba(255, 255, 255, 0.20);
             --settings-shadow: none;
+        }
+        /* Light mode: flat warm mist on dark settings chrome (solid fills only). */
+        html.axis-dark.settings-light-tint:not(.settings-native-window) {
+            --settings-bg: #363330;
+            --settings-sidebar-bg: #2e2c2a;
+            --settings-card-bg: #3e3b38;
+            --settings-control-bg: #464340;
+            --settings-hover-bg: #4e4b48;
+            --settings-card-border: #524f4c;
+            --settings-row-border: #484542;
+        }
+        html.axis-dark.settings-light-tint:not(.settings-native-window) body,
+        html.axis-dark.settings-light-tint:not(.settings-native-window) .main,
+        html.axis-dark.settings-light-tint:not(.settings-native-window) .sidebar {
+            background-image: none !important;
+        }
+        html.axis-dark.settings-light-tint:not(.settings-native-window) body,
+        html.axis-dark.settings-light-tint:not(.settings-native-window) .main {
+            background-color: var(--settings-bg) !important;
+        }
+        html.axis-dark.settings-light-tint:not(.settings-native-window) .sidebar {
+            background-color: var(--settings-sidebar-bg) !important;
+        }
+        html.axis-dark.settings-light-tint:not(.settings-native-window) .group-content {
+            background-color: var(--settings-card-bg) !important;
+            border-color: var(--settings-card-border) !important;
+            box-shadow: none;
+        }
+        html.settings-native-window.axis-dark.settings-light-tint .sidebar {
+            background: var(--settings-native-sidebar-bg, rgba(42, 40, 38, 0.94)) !important;
+            background-image: none !important;
+            border-right-color: rgba(255, 253, 250, 0.12) !important;
+            backdrop-filter: blur(var(--settings-native-sidebar-blur, 26px)) saturate(var(--settings-native-sidebar-sat, 118%)) !important;
+            -webkit-backdrop-filter: blur(var(--settings-native-sidebar-blur, 26px)) saturate(var(--settings-native-sidebar-sat, 118%)) !important;
+        }
+        html.settings-native-window.axis-dark.settings-light-tint .group-content {
+            background: var(--settings-native-card-bg, rgba(48, 46, 44, 0.96)) !important;
+            background-image: none !important;
+            border-color: rgba(255, 253, 250, 0.11) !important;
+            backdrop-filter: blur(var(--settings-native-card-blur, 22px)) saturate(var(--settings-native-card-sat, 118%)) !important;
+            -webkit-backdrop-filter: blur(var(--settings-native-card-blur, 22px)) saturate(var(--settings-native-card-sat, 118%)) !important;
+            box-shadow: var(--settings-native-card-shadow, 0 4px 22px rgba(0, 0, 0, 0.2)) !important;
+        }
+        html.settings-native-window.axis-dark.settings-light-tint .settings-search {
+            background: var(--settings-native-search-bg, rgba(54, 52, 50, 0.96)) !important;
+            border-color: rgba(255, 253, 250, 0.14) !important;
         }
         body,
         html.axis-dark body,
@@ -1268,9 +1911,9 @@
             flex-shrink: 0;
             padding: 48px 10px 16px;
             border-right: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(28, 28, 30, 0.35);
-            backdrop-filter: blur(20px) saturate(1.2);
-            -webkit-backdrop-filter: blur(20px) saturate(1.2);
+            background: var(--settings-native-sidebar-bg, rgba(28, 28, 30, 0.35));
+            backdrop-filter: blur(var(--settings-native-sidebar-blur, 20px)) saturate(var(--settings-native-sidebar-sat, 120%));
+            -webkit-backdrop-filter: blur(var(--settings-native-sidebar-blur, 20px)) saturate(var(--settings-native-sidebar-sat, 120%));
             overflow-y: auto;
             overflow-x: hidden;
             -webkit-app-region: no-drag;
@@ -1404,11 +2047,11 @@
         }
         html.settings-native-window .group-content,
         html.settings-native-window.axis-dark .group-content {
-            background: rgba(36, 36, 38, 0.48);
-            backdrop-filter: blur(16px) saturate(1.2);
-            -webkit-backdrop-filter: blur(16px) saturate(1.2);
+            background: var(--settings-native-card-bg, rgba(36, 36, 38, 0.48));
+            backdrop-filter: blur(var(--settings-native-card-blur, 16px)) saturate(var(--settings-native-card-sat, 120%));
+            -webkit-backdrop-filter: blur(var(--settings-native-card-blur, 16px)) saturate(var(--settings-native-card-sat, 120%));
             border: 1px solid rgba(255, 255, 255, 0.09);
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+            box-shadow: var(--settings-native-card-shadow, 0 4px 20px rgba(0, 0, 0, 0.18));
             border-radius: 12px;
         }
         html.settings-native-window:not(.axis-dark) .group-content {
@@ -1427,10 +2070,10 @@
             margin-bottom: 18px;
         }
         html.settings-native-window .settings-search {
-            background: rgba(255, 255, 255, 0.06);
+            background: var(--settings-native-search-bg, rgba(255, 255, 255, 0.06));
             border-color: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(var(--settings-native-search-blur, 10px));
+            -webkit-backdrop-filter: blur(var(--settings-native-search-blur, 10px));
         }
         html.settings-native-window:not(.axis-dark) .settings-search {
             background: rgba(255, 255, 255, 0.72);
@@ -1452,8 +2095,96 @@
             background: rgba(255, 255, 255, 0.85);
             border-color: rgba(0, 0, 0, 0.12);
         }
+        /* Native Settings at window transparency 0 — solid shell (vibrancy/acrylic is off). */
+        html.settings-native-window.settings-opaque-shell {
+            background: #000000 !important;
+            background-color: #000000 !important;
+        }
+        html.settings-native-window.settings-opaque-shell,
+        html.settings-native-window.settings-opaque-shell body {
+            --settings-bg: #000000;
+            --settings-sidebar-bg: #050505;
+        }
+        html.settings-native-window.settings-opaque-shell.axis-dark.settings-light-tint,
+        html.settings-native-window.settings-opaque-shell.axis-dark.settings-light-tint body {
+            --settings-bg: #363330;
+            --settings-sidebar-bg: #2e2c2a;
+        }
+        html.settings-native-window.settings-opaque-shell body,
+        html.settings-native-window.settings-opaque-shell .main {
+            background: var(--settings-bg) !important;
+            background-color: var(--settings-bg) !important;
+        }
+        html.settings-native-window.settings-opaque-shell .sidebar {
+            background: var(--settings-sidebar-bg) !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+        }
+        html.settings-native-window.settings-opaque-shell .group-content,
+        html.settings-native-window.settings-opaque-shell.axis-dark .group-content,
+        html.settings-native-window.settings-opaque-shell.axis-dark.settings-light-tint .group-content {
+            background: var(--settings-card-bg, #0d0d0d) !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            box-shadow: none;
+        }
+        html.settings-native-window.settings-opaque-shell .settings-search,
+        html.settings-native-window.settings-opaque-shell.axis-dark.settings-light-tint .settings-search {
+            background: var(--settings-control-bg, #151515) !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+        }
     </style>
     <script>
+        /** Match main browser shell: 0 = opaque, 100 = sharp see-through. Same curve as `getShellChromeStyle`. */
+        function axisApplyNativeWindowChromeTransparency(n, isLightTint) {
+            const root = document.documentElement;
+            if (!root.classList.contains('settings-native-window')) return;
+            const v = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 50;
+            const opaque = v <= 0;
+            root.classList.toggle('settings-opaque-shell', opaque);
+            const nativeVarKeys = [
+                '--settings-native-sidebar-bg',
+                '--settings-native-sidebar-blur',
+                '--settings-native-sidebar-sat',
+                '--settings-native-card-bg',
+                '--settings-native-card-blur',
+                '--settings-native-card-sat',
+                '--settings-native-card-shadow',
+                '--settings-native-search-bg',
+                '--settings-native-search-blur',
+            ];
+            if (opaque) {
+                nativeVarKeys.forEach((k) => root.style.removeProperty(k));
+                return;
+            }
+            const t = v / 100;
+            const lerp = (a, b) => a + (b - a) * t;
+            const lerpPx = (a, b) => `${Math.round(a + (b - a) * t)}px`;
+            const alpha = (x) => lerp(x[0], x[1]).toFixed(3);
+            if (isLightTint) {
+                root.style.setProperty('--settings-native-sidebar-bg', `rgba(42, 40, 38, ${alpha([0.88, 0.14])})`);
+                root.style.setProperty('--settings-native-card-bg', `rgba(48, 46, 44, ${alpha([0.88, 0.14])})`);
+                root.style.setProperty('--settings-native-search-bg', `rgba(54, 52, 50, ${alpha([0.88, 0.14])})`);
+                root.style.setProperty('--settings-native-sidebar-blur', lerpPx(26, 0));
+                root.style.setProperty('--settings-native-card-blur', lerpPx(22, 0));
+                root.style.setProperty('--settings-native-search-blur', lerpPx(12, 0));
+                root.style.setProperty('--settings-native-sidebar-sat', `${Math.round(lerp(118, 100))}%`);
+                root.style.setProperty('--settings-native-card-sat', `${Math.round(lerp(118, 100))}%`);
+            } else {
+                root.style.setProperty('--settings-native-sidebar-bg', `rgba(28, 28, 30, ${alpha([0.88, 0.14])})`);
+                root.style.setProperty('--settings-native-card-bg', `rgba(36, 36, 38, ${alpha([0.88, 0.14])})`);
+                root.style.setProperty('--settings-native-search-bg', `rgba(255, 255, 255, ${alpha([0.12, 0.08])})`);
+                root.style.setProperty('--settings-native-sidebar-blur', lerpPx(24, 0));
+                root.style.setProperty('--settings-native-card-blur', lerpPx(20, 0));
+                root.style.setProperty('--settings-native-search-blur', lerpPx(10, 0));
+                root.style.setProperty('--settings-native-sidebar-sat', `${Math.round(lerp(120, 100))}%`);
+                root.style.setProperty('--settings-native-card-sat', `${Math.round(lerp(120, 100))}%`);
+            }
+            const shadowA = lerp(0.18, 0.02).toFixed(3);
+            root.style.setProperty('--settings-native-card-shadow', `0 4px 20px rgba(0, 0, 0, ${shadowA})`);
+        }
+
         // Settings always renders in dark chrome. `uiTheme` in General only affects the main browser.
         (function applyInitialAxisTheme() {
             try {
@@ -1466,6 +2197,19 @@
             const setFromValue = () => {
                 const isDark = true;
                 document.documentElement.classList.add('axis-dark');
+                let uiTheme = 'dark';
+                try {
+                    const boot = window.electronAPI?.getSettingsWindowBootstrap?.();
+                    if (boot?.effectiveUiTheme === 'light') uiTheme = 'light';
+                    else if (boot?.effectiveUiTheme === 'dark') uiTheme = 'dark';
+                    else if (boot?.uiTheme === 'light') uiTheme = 'light';
+                } catch (_) {}
+                document.documentElement.classList.toggle('settings-light-tint', uiTheme === 'light');
+                try {
+                    const wclRaw = Number(boot?.windowChromeLight);
+                    const wcl = Number.isFinite(wclRaw) ? wclRaw : 50;
+                    axisApplyNativeWindowChromeTransparency(wcl, uiTheme === 'light');
+                } catch (_) {}
                 try {
                     if (window.electronAPI && window.electronAPI.platform === 'darwin') {
                         document.documentElement.classList.add('macos');
@@ -1493,6 +2237,19 @@
     <div class="settings-content-row">
     <nav class="sidebar">
         <h1 class="native-sidebar-title">Settings</h1>
+        <div class="settings-profile-switch is-hidden" id="settings-profile-switch">
+            <button type="button" id="settings-profile-trigger" class="settings-profile-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="settings-profile-menu">
+                <span id="settings-profile-trigger-avatar" class="settings-profile-avatar" aria-hidden="true"></span>
+                <span class="settings-profile-trigger-text">
+                    <span class="settings-profile-trigger-label">Editing profile</span>
+                    <span id="settings-profile-trigger-name" class="settings-profile-trigger-name">Personal</span>
+                </span>
+                <svg class="settings-profile-chevron" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div id="settings-profile-menu" class="settings-profile-menu hidden" role="listbox" aria-label="Choose which profile to edit">
+                <div class="settings-profile-list" id="settings-profile-list"></div>
+            </div>
+        </div>
         <div class="sidebar-item active" data-section="customization">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
             <span>General</span>
@@ -1521,9 +2278,13 @@
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-2 .9-2 2v3.8h1.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"/></svg>
             <span>Extensions</span>
         </div>
+        <div class="sidebar-item" data-section="profiles">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.87 0-7 2.13-7 4.75V21h14v-2.25C19 16.13 15.87 14 12 14z"/></svg>
+            <span>Profiles</span>
+        </div>
         <div class="sidebar-item" data-section="vault">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
-            <span>Passwords &amp; cards</span>
+            <span>Passwords, cards &amp; addresses</span>
         </div>
     </nav>
     
@@ -1541,7 +2302,7 @@
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title">Sidebar Position</div>
-                            <div class="row-desc">Choose where the sidebar appears</div>
+                            <div class="row-desc">Choose where the sidebar appears — the same side is used for every profile in this window.</div>
                         </div>
                         <select id="sidebar-position">
                             <option value="left">Left</option>
@@ -1570,6 +2331,13 @@
                     </div>
                     <div class="row">
                         <div class="row-label">
+                            <div class="row-title">Link preview</div>
+                            <div class="row-desc">Shows the destination URL at the bottom of the page when you hover a link.</div>
+                        </div>
+                        <input type="checkbox" id="link-preview">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
                             <div class="row-title">HTTPS-only mode</div>
                             <div class="row-desc">Ask before loading sites that use HTTP (not HTTPS). Localhost is always allowed.</div>
                         </div>
@@ -1578,7 +2346,7 @@
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title">Ad blocker</div>
-                            <div class="row-desc">Block ads and known trackers with filter lists (same as the shield in the URL bar). Reload a tab if a page was open before you changed this.</div>
+                            <div class="row-desc">Block ads and trackers. Use the shield in the URL bar to turn blocking off everywhere or on just the current site.</div>
                         </div>
                         <input type="checkbox" id="ad-blocker-enabled">
                     </div>
@@ -1592,14 +2360,48 @@
                 </div>
             </div>
             <div class="group">
+                <div class="group-title">Tabs</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Clear unpinned tabs</div>
+                            <div class="row-desc">When unpinned tabs and tab groups are removed automatically. Pinned tabs and groups are never cleared.</div>
+                        </div>
+                        <select id="unpinned-clear-mode">
+                            <option value="app-close">When the app closes</option>
+                            <option value="profile-switch">When switching profiles</option>
+                            <option value="30m">Every 30 minutes</option>
+                            <option value="1h">Every hour</option>
+                            <option value="6h">Every 6 hours</option>
+                            <option value="12h">Every 12 hours</option>
+                            <option value="24h">Every day</option>
+                            <option value="7d">Every week</option>
+                            <option value="custom">Custom interval</option>
+                            <option value="never">Never</option>
+                        </select>
+                    </div>
+                    <div class="row unpinned-custom-row" id="unpinned-clear-custom-row">
+                        <div class="row-label">
+                            <div class="row-title">Custom interval</div>
+                            <div class="row-desc">How long to keep unpinned tabs before clearing (1 minute to 7 days)</div>
+                        </div>
+                        <div class="row-controls">
+                            <input type="number" id="unpinned-clear-custom-minutes" min="1" max="10080" step="1" value="60">
+                            <span class="row-desc" style="margin-left:8px;white-space:nowrap">minutes</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="group">
                 <div class="group-title">Theme</div>
                 <div class="group-content">
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title">Appearance</div>
-                            <div class="row-desc">Light or dark mode for the Axis UI (tabs, sidebar, popups). Does not change this Settings window, the new tab page, or AI chat — those stay dark.</div>
+                            <div class="row-desc">Light, dark, or match your Mac or PC system setting for the Axis UI (tabs, sidebar, popups). Does not change this Settings window, the new tab page, or AI chat — those stay dark.</div>
                         </div>
                         <select id="ui-theme">
+                            <option value="system">System</option>
                             <option value="dark">Dark</option>
                             <option value="light">Light</option>
                         </select>
@@ -1646,6 +2448,13 @@
                             <div class="row-desc">Clears common page shell backgrounds so the browser glass shows through; other tabs stay fully hidden so they do not bleed into the active page.</div>
                         </div>
                         <input type="checkbox" id="transparent-sites">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Site theme color <span class="axis-beta-label">BETA</span></div>
+                            <div class="row-desc">Lets Axis adapt the browser theme color to the current website. Turn it off anytime to use your saved theme color again.</div>
+                        </div>
+                        <input type="checkbox" id="site-theme-color">
                     </div>
                     <div class="row">
                         <div class="row-label">
@@ -1721,7 +2530,7 @@
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title">Sound</div>
-                            <div class="row-desc">Each style uses soft noise and filters</div>
+                            <div class="row-desc">Soft background bed generated on your device — no downloads</div>
                         </div>
                         <select id="ambient-audio-preset">
                             <option value="rain">Rain</option>
@@ -1735,7 +2544,7 @@
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title">Volume</div>
-                            <div class="row-desc">Calibrated for subtle background levels; higher values stay controlled</div>
+                            <div class="row-desc">Background level — changes apply right away</div>
                         </div>
                         <div class="ambient-volume-wrap">
                             <input type="range" id="ambient-audio-volume" min="0" max="100" step="1" value="48">
@@ -1821,11 +2630,125 @@
             </div>
         </div>
         
+        <div class="pane" id="profiles-pane">
+            <div class="group">
+                <div class="group-title">Startup</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">When Axis opens</div>
+                            <div class="row-desc">Which profile loads when you launch the app</div>
+                        </div>
+                        <select id="profiles-startup-mode">
+                            <option value="resume">Resume last profile</option>
+                            <option value="personal">Always Personal</option>
+                            <option value="fixed">Always a specific profile</option>
+                        </select>
+                    </div>
+                    <div class="row hidden" id="profiles-startup-profile-row">
+                        <div class="row-label">
+                            <div class="row-title">Startup profile</div>
+                            <div class="row-desc">Used when Axis opens with the option above</div>
+                        </div>
+                        <select id="profiles-startup-profile"></select>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">New windows</div>
+                            <div class="row-desc">Which profile opens when you choose New Window from the menu</div>
+                        </div>
+                        <select id="profiles-new-window-mode">
+                            <option value="same">Same profile as the current window</option>
+                            <option value="personal">Always Personal</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="group">
+                <div class="group-title">Overview</div>
+                <p class="profiles-pane-lead">
+                    Each profile keeps its own tabs, favorites, history, extensions, and passwords. Switch profiles, add new ones, rename, or delete from the profile menu at the bottom of the sidebar.
+                </p>
+                <div class="profiles-overview-wrap">
+                    <table class="profiles-overview-table" id="profiles-overview-table">
+                        <thead>
+                            <tr>
+                                <th>Profile</th>
+                                <th>Favorites</th>
+                                <th>History</th>
+                                <th>Pinned</th>
+                                <th>Extensions</th>
+                                <th>Storage</th>
+                            </tr>
+                        </thead>
+                        <tbody id="profiles-overview-body">
+                            <tr><td colspan="6">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="profiles-backup-row">
+                    <div>
+                        <label for="profiles-export-select">Export backup</label>
+                        <select id="profiles-export-select"></select>
+                    </div>
+                    <div class="profiles-backup-actions">
+                        <button type="button" id="profiles-export-btn">Export…</button>
+                        <button type="button" id="profiles-import-backup-btn">Import backup…</button>
+                    </div>
+                </div>
+                <div class="profiles-status" id="profiles-backup-status"></div>
+            </div>
+
+            <div class="group">
+                <div class="group-title">Import from another browser</div>
+                <p class="profiles-pane-lead">
+                    Bring open tabs, pinned tabs, tab groups, bookmark folders, favorites, saved passwords, payment cards, addresses, extensions, site permissions, and recent history into a new Axis profile. Chrome, Edge, Brave, Firefox, Arc, and other Chromium browsers are detected automatically when installed on this computer. Quit the source browser before importing for the most reliable results.
+                </p>
+                <div class="profiles-import-grid">
+                    <div>
+                        <label for="profiles-import-browser">Browser</label>
+                        <select id="profiles-import-browser">
+                            <option value="">Detecting browsers…</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="profiles-import-source">Their profile</label>
+                        <select id="profiles-import-source" disabled>
+                            <option value="">Choose a browser first</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="profiles-import-name">New Axis profile name</label>
+                        <input type="text" id="profiles-import-name" maxlength="48" placeholder="Imported profile" autocomplete="off">
+                    </div>
+                </div>
+                <div class="profiles-import-options">
+                    <label><input type="checkbox" id="profiles-import-session" checked> Import open tabs, pinned tabs, and tab groups from last session</label>
+                    <label><input type="checkbox" id="profiles-import-folders" checked> Import bookmark folders as tab groups</label>
+                    <label><input type="checkbox" id="profiles-import-bookmarks" checked> Import remaining bookmarks into Favorites</label>
+                    <label><input type="checkbox" id="profiles-import-pinned" checked> Import bookmark bar links as pinned tabs</label>
+                    <label><input type="checkbox" id="profiles-import-history" checked> Import browsing history</label>
+                    <label><input type="checkbox" id="profiles-import-passwords" checked> Import saved passwords</label>
+                    <label><input type="checkbox" id="profiles-import-cards" checked> Import saved payment cards</label>
+                    <label><input type="checkbox" id="profiles-import-addresses" checked> Import saved addresses</label>
+                    <label><input type="checkbox" id="profiles-import-permissions" checked> Import site permissions (camera, mic, location, notifications)</label>
+                    <label><input type="checkbox" id="profiles-import-extensions" checked> Import extensions (re-download from the store when possible)</label>
+                </div>
+                <div class="profiles-import-actions">
+                    <button type="button" id="profiles-import-run">Import profile</button>
+                    <button type="button" id="profiles-import-folder">Choose profile folder…</button>
+                </div>
+                <div class="profiles-import-preview" id="profiles-import-preview"></div>
+                <div class="profiles-status" id="profiles-import-status"></div>
+            </div>
+        </div>
+
         <div class="pane" id="vault-pane">
             <div class="group">
                 <div class="vault-pane-header">
                     <div>
-                        <h2>Passwords &amp; cards</h2>
+                        <h2>Passwords, cards &amp; addresses</h2>
                         <p>Saved locally on this Mac. Not synced.</p>
                     </div>
                     <label class="vault-autofill-row">
@@ -1837,6 +2760,7 @@
                 <div class="vault-segmented" role="tablist">
                     <button type="button" class="vault-segment active" data-vault-subtab="passwords" role="tab" aria-selected="true">Passwords</button>
                     <button type="button" class="vault-segment" data-vault-subtab="cards" role="tab" aria-selected="false">Cards</button>
+                    <button type="button" class="vault-segment" data-vault-subtab="addresses" role="tab" aria-selected="false">Addresses</button>
                 </div>
                 <div id="vault-passwords-panel" class="vault-subpanel">
                     <div class="vault-list-toolbar">
@@ -1862,6 +2786,19 @@
                             <span>Actions</span>
                         </div>
                         <div id="vault-cards-list"></div>
+                    </div>
+                </div>
+                <div id="vault-addresses-panel" class="vault-subpanel hidden">
+                    <div class="vault-list-toolbar">
+                        <span class="vault-list-count" id="vault-address-count">0 addresses</span>
+                        <button type="button" id="vault-add-address-btn">+ Add address</button>
+                    </div>
+                    <div class="vault-table">
+                        <div class="vault-table-head">
+                            <span>Address</span>
+                            <span>Actions</span>
+                        </div>
+                        <div id="vault-addresses-list"></div>
                     </div>
                 </div>
                 <div id="vault-editor" class="vault-editor hidden">
@@ -1909,6 +2846,44 @@
                             <label class="vault-field-label" for="vault-edit-billing-zip">Billing ZIP (optional)</label>
                             <input type="text" id="vault-edit-billing-zip" placeholder="ZIP / postal code" autocomplete="postal-code">
                         </div>
+                        <div id="vault-editor-address-fields" class="hidden">
+                            <label class="vault-field-label" for="vault-edit-address-label">Label (optional)</label>
+                            <input type="text" id="vault-edit-address-label" placeholder="e.g. Home, Work" autocomplete="off">
+                            <label class="vault-field-label" for="vault-edit-address-name">Full name</label>
+                            <input type="text" id="vault-edit-address-name" placeholder="Full name" autocomplete="name">
+                            <label class="vault-field-label" for="vault-edit-address-org">Company (optional)</label>
+                            <input type="text" id="vault-edit-address-org" placeholder="Company or organization" autocomplete="organization">
+                            <label class="vault-field-label" for="vault-edit-address-line1">Street address</label>
+                            <input type="text" id="vault-edit-address-line1" placeholder="Street address" autocomplete="street-address">
+                            <label class="vault-field-label" for="vault-edit-address-line2">Apt, suite, etc. (optional)</label>
+                            <input type="text" id="vault-edit-address-line2" placeholder="Apartment, suite, unit" autocomplete="address-line2">
+                            <div class="vault-form-row">
+                                <div class="vault-field-stack">
+                                    <label class="vault-field-label" for="vault-edit-address-city">City</label>
+                                    <input type="text" id="vault-edit-address-city" placeholder="City" autocomplete="address-level2">
+                                </div>
+                                <div class="vault-field-stack">
+                                    <label class="vault-field-label" for="vault-edit-address-state">State / province</label>
+                                    <input type="text" id="vault-edit-address-state" placeholder="State" autocomplete="address-level1">
+                                </div>
+                                <div class="vault-field-stack">
+                                    <label class="vault-field-label" for="vault-edit-address-postal">ZIP / postal</label>
+                                    <input type="text" id="vault-edit-address-postal" placeholder="ZIP" autocomplete="postal-code">
+                                </div>
+                            </div>
+                            <label class="vault-field-label" for="vault-edit-address-country">Country (optional)</label>
+                            <input type="text" id="vault-edit-address-country" placeholder="Country" autocomplete="country-name">
+                            <div class="vault-form-row">
+                                <div class="vault-field-stack">
+                                    <label class="vault-field-label" for="vault-edit-address-phone">Phone (optional)</label>
+                                    <input type="tel" id="vault-edit-address-phone" placeholder="Phone" autocomplete="tel">
+                                </div>
+                                <div class="vault-field-stack">
+                                    <label class="vault-field-label" for="vault-edit-address-email">Email (optional)</label>
+                                    <input type="email" id="vault-edit-address-email" placeholder="Email" autocomplete="email">
+                                </div>
+                            </div>
+                        </div>
                         <div class="vault-form-row">
                             <button type="button" id="vault-editor-save">Save</button>
                             <button type="button" id="vault-editor-cancel">Cancel</button>
@@ -1932,20 +2907,22 @@
                         </div>
                         <input type="checkbox" id="ntp-welcome-enabled">
                     </div>
-                    <div class="row ntp-nested-rows" id="ntp-welcome-greeting-row">
-                        <div class="row-label">
-                            <div class="row-title">Greeting</div>
-                            <div class="row-desc">Time-of-day line above the search box — changes through the day</div>
+                    <div class="ntp-welcome-subgroup" id="ntp-welcome-subgroup">
+                        <div class="row">
+                            <div class="row-label">
+                                <div class="row-title">Greeting</div>
+                                <div class="row-desc">Time-of-day line above the search box — changes through the day</div>
+                            </div>
+                            <input type="checkbox" id="ntp-welcome-greeting">
                         </div>
-                        <input type="checkbox" id="ntp-welcome-greeting">
-                    </div>
-                    <div class="row ntp-nested-rows" id="ntp-greeting-name-row">
-                        <div class="row-label">
-                            <div class="row-title">Your name</div>
-                            <div class="row-desc">Used in the greeting — defaults to User until you change it</div>
-                        </div>
-                        <div class="row-controls">
-                            <input type="text" id="ntp-greeting-name" placeholder="User" autocomplete="name" spellcheck="false" maxlength="64">
+                        <div class="row">
+                            <div class="row-label">
+                                <div class="row-title">Your name</div>
+                                <div class="row-desc">Used in the greeting — defaults to User until you change it</div>
+                            </div>
+                            <div class="row-controls">
+                                <input type="text" id="ntp-greeting-name" placeholder="User" autocomplete="name" spellcheck="false" maxlength="64">
+                            </div>
                         </div>
                     </div>
                     <div class="row">
@@ -1957,38 +2934,93 @@
                     </div>
                 </div>
             </div>
-        </div>
-
-        <div class="pane" id="ai-pane">
             <div class="group">
-                <div class="group-title">AI Chat</div>
+                <div class="group-title">Widgets</div>
                 <div class="group-content">
-                    <div class="ai-settings-intro">
-                        <p>Axis uses <strong>Groq</strong> for fast replies in the sidebar chat and the new tab <strong>Ask</strong> mode. Groq has a <strong>free tier</strong> — create an account, copy an API key, and paste it below. Your key is saved in this profile on your device only.</p>
-                    </div>
-                    <div class="row ai-settings-key-row">
+                    <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Groq API key</div>
-                            <div class="row-desc" id="groq-api-key-status">Not set — AI chat is off until you add a key.</div>
+                            <div class="row-title">Show widgets</div>
+                            <div class="row-desc">Tiles below search — use <strong>Edit</strong> on a new tab to add or arrange them</div>
                         </div>
-                        <div class="row-controls ai-settings-key-controls">
-                            <input type="password" id="groq-api-key" class="groq-api-key-input" placeholder="Paste key (gsk_…)" autocomplete="off" spellcheck="false">
-                            <button type="button" id="groq-get-key-btn">Get free key</button>
-                            <button type="button" id="groq-clear-key-btn" class="secondary hidden">Remove key</button>
+                        <input type="checkbox" id="ntp-widgets-enabled">
+                    </div>
+                    <div class="ntp-welcome-subgroup" id="ntp-widgets-subgroup">
+                        <div id="ntp-widgets-active-list"></div>
+                        <div class="row">
+                            <div class="row-label">
+                                <div class="row-title">Clear all widgets</div>
+                                <div class="row-desc">Remove every tile from your layout</div>
+                            </div>
+                            <button type="button" id="ntp-widgets-reset-layout">Clear</button>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
+        <div class="pane" id="ai-pane">
+            <div class="group">
+                <div class="group-title">AI Chat</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Show AI features</div>
+                            <div class="row-desc">Turn off to hide Ask on selected text, the chat sidebar, and Ask AI in the new tab search box</div>
+                        </div>
+                        <input type="checkbox" id="ai-features-enabled">
+                    </div>
+                    <div id="ai-features-details">
+                    <div class="ai-settings-subpanel">
+                        <div class="ai-settings-intro">
+                            <p>Connect an AI provider for sidebar chat and new tab <strong>Ask</strong>. Keys stay on this profile on your device only.</p>
+                        </div>
+                        <div class="ai-key-block">
+                            <div id="ai-providers-empty" class="ai-providers-empty hidden">No API keys saved yet. Add one below to use chat and Ask.</div>
+                            <div id="ai-providers-list" class="ai-providers-list"></div>
+                            <div class="ai-key-toolbar" id="ai-key-toolbar">
+                                <button type="button" id="ai-provider-open-add-btn">Add API key</button>
+                                <p id="ai-providers-toast" class="ai-key-toast" aria-live="polite"></p>
+                            </div>
+                            <div class="ai-key-add-block hidden" id="ai-key-add-block">
+                                <div class="ai-key-form-head">
+                                    <div class="row-title" id="ai-key-form-title">Add API key</div>
+                                    <div class="row-desc">Groq, OpenAI, Gemini, OpenRouter, and Mistral are supported.</div>
+                                </div>
+                                <div class="ai-key-form-fields">
+                                    <label class="ai-key-field">
+                                        <span class="ai-key-field-label">Provider</span>
+                                        <select id="ai-provider-type" class="ai-provider-type-select" aria-label="Provider"></select>
+                                    </label>
+                                    <label class="ai-key-field">
+                                        <span class="ai-key-field-label">Label</span>
+                                        <input type="text" id="ai-provider-label" class="ai-provider-label-input" placeholder="Optional, e.g. Work" autocomplete="off" spellcheck="false">
+                                    </label>
+                                    <label class="ai-key-field">
+                                        <span class="ai-key-field-label">API key</span>
+                                        <input type="password" id="ai-provider-key" class="ai-provider-key-input" placeholder="Paste API key" autocomplete="off" spellcheck="false">
+                                    </label>
+                                </div>
+                                <div class="ai-key-actions">
+                                    <button type="button" id="ai-provider-add-btn">Save key</button>
+                                    <button type="button" id="ai-provider-cancel-btn" class="secondary hidden">Cancel</button>
+                                    <button type="button" id="ai-provider-get-key-btn" class="ai-key-link-btn">Get a key</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <div class="pane" id="history-pane">
             <div class="group">
                 <div class="group-title">Browsing History</div>
                 <div class="group-content">
-                    <div class="history-toolbar">
-                        <input type="search" id="history-search" placeholder="Search history...">
-                        <button id="clear-history" class="destructive">Clear All</button>
-                    </div>
+                <div class="history-toolbar">
+                    <input type="search" id="history-search" placeholder="Search history...">
+                    <button id="clear-history" class="destructive">Clear All</button>
+                </div>
                     <div class="history-list" id="history-list"></div>
                 </div>
             </div>
@@ -2008,6 +3040,66 @@
   </div>
   </div>
     
+    <script src="axis-profile-icons.js"></script>
+    <script>
+        (function paintSettingsProfileSwitcherSync() {
+            function escapeHtml(str) {
+                if (!str) return '';
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+            function avatarMarkup(iconId) {
+                return window.AXIS_PROFILE_ICONS?.profileIconSvgMarkup?.(iconId) || '';
+            }
+            function paint(ctx) {
+                const profiles = Array.isArray(ctx?.profiles) ? ctx.profiles : [];
+                const activeId =
+                    ctx?.profileId ||
+                    new URLSearchParams(location.search).get('profile') ||
+                    'personal';
+                const wrap = document.getElementById('settings-profile-switch');
+                if (!wrap) return;
+                if (profiles.length < 2) {
+                    wrap.classList.add('is-hidden');
+                    return;
+                }
+                wrap.classList.remove('is-hidden');
+                const active = profiles.find((p) => p.id === activeId) || profiles[0];
+                const nameEl = document.getElementById('settings-profile-trigger-name');
+                const avatarEl = document.getElementById('settings-profile-trigger-avatar');
+                const list = document.getElementById('settings-profile-list');
+                if (nameEl) nameEl.textContent = active?.name || active?.id || 'Profile';
+                if (avatarEl) avatarEl.innerHTML = avatarMarkup(active?.icon);
+                if (!list) return;
+                list.innerHTML = profiles
+                    .map((p) => {
+                        const isActive = p.id === activeId;
+                        return `<button type="button" class="settings-profile-row${
+                            isActive ? ' is-active' : ''
+                        }" data-profile-id="${escapeHtml(p.id)}" role="option" aria-selected="${
+                            isActive ? 'true' : 'false'
+                        }">
+                            <span class="settings-profile-avatar" aria-hidden="true">${avatarMarkup(p.icon)}</span>
+                            <span class="settings-profile-name">${escapeHtml(p.name || p.id)}</span>
+                            ${
+                                isActive
+                                    ? '<span class="settings-profile-check" aria-hidden="true">✓</span>'
+                                    : ''
+                            }
+                        </button>`;
+                    })
+                    .join('');
+            }
+            try {
+                const ctx = window.electronAPI?.getSettingsProfileBootstrap?.();
+                if (ctx) paint(ctx);
+            } catch (_) {}
+            window.__axisPaintSettingsProfileSwitcher = paint;
+        })();
+    </script>
+    <script src="axis-ntp-widgets.js"></script>
+    <script src="axis-ai-providers.js"></script>
     <script>
         (async function() {
             async function waitForElectronAPI(timeoutMs = 5000) {
@@ -2028,14 +3120,139 @@
                 return;
             }
 
-            const THEME_KEYS = ['themeColor', 'gradientColor', 'gradientEnabled', 'gradientDirection', 'transparentSites', 'windowChromeLight', 'uiTheme'];
+            let settingsEditingProfileId = 'personal';
+            let settingsProfileMenuOpen = false;
+
+            function escapeHtml(str) {
+                if (!str) return '';
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            function settingsProfileAvatarMarkup(iconId) {
+                return window.AXIS_PROFILE_ICONS?.profileIconSvgMarkup?.(iconId) || '';
+            }
+
+            function closeSettingsProfileMenu() {
+                const menu = document.getElementById('settings-profile-menu');
+                const trigger = document.getElementById('settings-profile-trigger');
+                menu?.classList.add('hidden');
+                trigger?.setAttribute('aria-expanded', 'false');
+                settingsProfileMenuOpen = false;
+            }
+
+            function openSettingsProfileMenu() {
+                const menu = document.getElementById('settings-profile-menu');
+                const trigger = document.getElementById('settings-profile-trigger');
+                menu?.classList.remove('hidden');
+                trigger?.setAttribute('aria-expanded', 'true');
+                settingsProfileMenuOpen = true;
+            }
+
+            function toggleSettingsProfileMenu() {
+                if (settingsProfileMenuOpen) closeSettingsProfileMenu();
+                else openSettingsProfileMenu();
+            }
+
+            function updateSettingsProfileTrigger(profiles, activeId) {
+                const wrap = document.getElementById('settings-profile-switch');
+                const rows = Array.isArray(profiles) ? profiles : [];
+                if (!wrap) return;
+                if (rows.length < 2) {
+                    wrap.classList.add('is-hidden');
+                    closeSettingsProfileMenu();
+                    return;
+                }
+                wrap.classList.remove('is-hidden');
+                const active = rows.find((p) => p.id === activeId) || rows[0];
+                const nameEl = document.getElementById('settings-profile-trigger-name');
+                const avatarEl = document.getElementById('settings-profile-trigger-avatar');
+                if (nameEl) nameEl.textContent = active?.name || active?.id || 'Profile';
+                if (avatarEl) avatarEl.innerHTML = settingsProfileAvatarMarkup(active?.icon);
+            }
+
+            function wireSettingsProfileListHandlers() {
+                const list = document.getElementById('settings-profile-list');
+                if (!list) return;
+                list.querySelectorAll('.settings-profile-row').forEach((btn) => {
+                    btn.addEventListener('click', () => {
+                        const id = btn.dataset.profileId;
+                        if (id === settingsEditingProfileId) {
+                            closeSettingsProfileMenu();
+                            return;
+                        }
+                        if (id) void reloadSettingsForEditingProfile(id);
+                    });
+                });
+            }
+
+            function renderSettingsProfileList(profiles, activeId) {
+                const list = document.getElementById('settings-profile-list');
+                if (!list) return;
+                updateSettingsProfileTrigger(profiles, activeId);
+                const rows = Array.isArray(profiles) ? profiles : [];
+                if (!rows.length) {
+                    list.innerHTML =
+                        '<div style="padding:6px 8px;font-size:12px;color:#86868b;">No profiles</div>';
+                    return;
+                }
+                list.innerHTML = rows
+                    .map((p) => {
+                        const active = p.id === activeId;
+                        const avatarMarkup = settingsProfileAvatarMarkup(p.icon);
+                        return `<button type="button" class="settings-profile-row${
+                            active ? ' is-active' : ''
+                        }" data-profile-id="${escapeHtml(p.id)}" role="option" aria-selected="${
+                            active ? 'true' : 'false'
+                        }">
+                            <span class="settings-profile-avatar" aria-hidden="true">${avatarMarkup}</span>
+                            <span class="settings-profile-name">${escapeHtml(p.name || p.id)}</span>
+                            ${active ? '<span class="settings-profile-check" aria-hidden="true">✓</span>' : ''}
+                        </button>`;
+                    })
+                    .join('');
+                wireSettingsProfileListHandlers();
+            }
+
+            function bootstrapSettingsEditingProfileSwitcher() {
+                const urlProfile = new URLSearchParams(location.search).get('profile');
+                let ctx = { profileId: urlProfile || 'personal', profiles: [] };
+                try {
+                    ctx = window.electronAPI?.getSettingsProfileBootstrap?.() || ctx;
+                } catch (_) {}
+                settingsEditingProfileId = ctx.profileId || urlProfile || 'personal';
+                if (typeof window.__axisPaintSettingsProfileSwitcher === 'function') {
+                    window.__axisPaintSettingsProfileSwitcher(ctx);
+                }
+                renderSettingsProfileList(ctx.profiles || [], settingsEditingProfileId);
+            }
+
+            bootstrapSettingsEditingProfileSwitcher();
+
+            document.getElementById('settings-profile-trigger')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleSettingsProfileMenu();
+            });
+            document.addEventListener('click', (e) => {
+                if (!settingsProfileMenuOpen) return;
+                if (e.target.closest('#settings-profile-switch')) return;
+                closeSettingsProfileMenu();
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && settingsProfileMenuOpen) closeSettingsProfileMenu();
+            });
+
+            const THEME_KEYS = ['themeColor', 'gradientColor', 'gradientEnabled', 'gradientDirection', 'transparentSites', 'siteThemeColor', 'windowChromeLight', 'uiTheme'];
             const SHORTCUT_ACTIONS = [
                 { action: 'spotlight-search', label: 'New Tab' },
                 { action: 'close-tab', label: 'Close Tab' },
                 { action: 'new-tab', label: 'New Window' },
                 { action: 'next-tab', label: 'Show Next Tab' },
                 { action: 'previous-tab', label: 'Show Previous Tab' },
-                { action: 'recover-tab', label: 'Recover Tab' },
+                { action: 'next-profile', label: 'Switch to Next Profile' },
+                { action: 'previous-profile', label: 'Switch to Previous Profile' },
+                { action: 'recover-tab', label: 'Undo' },
                 { action: 'refresh', label: 'Refresh' },
                 { action: 'focus-url', label: 'Focus URL Bar' },
                 { action: 'duplicate-tab', label: 'Duplicate Tab' },
@@ -2062,11 +3279,12 @@
                 }))
             ];
             
-            function escapeHtml(str) {
-                if (!str) return '';
-                const div = document.createElement('div');
-                div.textContent = str;
-                return div.innerHTML;
+            const VAULT_EYE_SVG =
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+
+            function mountVaultEyeButton(btn) {
+                if (!btn) return;
+                btn.innerHTML = VAULT_EYE_SVG;
             }
             
             function formatTimeAgo(timestamp) {
@@ -2109,11 +3327,17 @@
                     key === 'ambientMuteWhenTabAudio' ||
                     key === 'ambientAudioPreset' ||
                     key === 'ambientAudioVolume' ||
+                    key === 'aiProviders' ||
+                    key === 'activeAiProviderId' ||
                     key === 'groqApiKey' ||
+                    key === 'aiFeaturesEnabled' ||
                     key === 'ntpWelcomeEnabled' ||
                     key === 'ntpWelcomeGreeting' ||
                     key === 'ntpAiSearchEnabled' ||
-                    key === 'ntpGreetingName'
+                    key === 'ntpGreetingName' ||
+                    key === 'unpinnedClearMode' ||
+                    key === 'unpinnedClearCustomMinutes' ||
+                    key === 'linkPreview'
                 ) {
                     window.electronAPI.sendSettingsUpdated();
                 }
@@ -2130,13 +3354,52 @@
             } catch (e) { console.error(e); }
             
             // Populate form
-            document.getElementById('ui-theme').value = settings.uiTheme === 'light' ? 'light' : 'dark';
+            document.getElementById('ui-theme').value =
+                settings.uiTheme === 'light' || settings.uiTheme === 'system' ? settings.uiTheme : 'dark';
+            async function resolveEffectiveUiTheme() {
+                const pref = settings?.uiTheme;
+                if (pref === 'light') return 'light';
+                if (pref === 'dark') return 'dark';
+                if (pref === 'system') {
+                    try {
+                        const t = await window.electronAPI?.getSystemUiTheme?.();
+                        return t === 'light' ? 'light' : 'dark';
+                    } catch (_) {}
+                }
+                return 'dark';
+            }
+            async function syncSettingsLightTint() {
+                const isLight = (await resolveEffectiveUiTheme()) === 'light';
+                document.documentElement.classList.toggle('settings-light-tint', isLight);
+                syncNativeWindowChromeTransparency();
+            }
+            function syncNativeWindowChromeTransparency() {
+                if (!document.documentElement.classList.contains('settings-native-window')) return;
+                const raw = Number(settings?.windowChromeLight);
+                const isLight = document.documentElement.classList.contains('settings-light-tint');
+                axisApplyNativeWindowChromeTransparency(raw, isLight);
+            }
+            syncSettingsLightTint();
+            window.electronAPI?.onSystemUiThemeChanged?.(() => {
+                if (settings?.uiTheme === 'system') void syncSettingsLightTint();
+            });
             document.getElementById('sidebar-position').value = settings.sidebarPosition || 'left';
             document.getElementById('search-engine').value = settings.searchEngine || 'google';
             document.getElementById('always-show-full-url').checked = !!settings.alwaysShowFullUrl;
             document.getElementById('https-only-mode').checked = !!settings.httpsOnlyMode;
             document.getElementById('ad-blocker-enabled').checked = settings.adBlockerEnabled !== false;
             document.getElementById('javascript-enabled').checked = settings.javascriptEnabled !== false;
+            const unpinnedClearMode = settings.unpinnedClearMode || 'app-close';
+            document.getElementById('unpinned-clear-mode').value = unpinnedClearMode;
+            const unpinnedCustomMins = Math.min(10080, Math.max(1, Number(settings.unpinnedClearCustomMinutes) || 60));
+            document.getElementById('unpinned-clear-custom-minutes').value = String(unpinnedCustomMins);
+            function syncUnpinnedClearCustomRow() {
+                const row = document.getElementById('unpinned-clear-custom-row');
+                const modeEl = document.getElementById('unpinned-clear-mode');
+                if (!row || !modeEl) return;
+                row.classList.toggle('visible', modeEl.value === 'custom');
+            }
+            syncUnpinnedClearCustomRow();
             document.getElementById('speech-enabled').checked = settings.speechEnabled !== false;
             document.getElementById('speech-rate').value = String(settings.speechRate || 1);
             document.getElementById('speech-pitch').value = String(settings.speechPitch || 1);
@@ -2187,26 +3450,353 @@
             document.getElementById('gradient-enabled').checked = settings.gradientEnabled || false;
             document.getElementById('gradient-direction').value = settings.gradientDirection || '135deg';
             document.getElementById('transparent-sites').checked = !!settings.transparentSites;
+            document.getElementById('site-theme-color').checked = !!settings.siteThemeColor;
+            document.getElementById('link-preview').checked = settings.linkPreview !== false;
 
-            const groqKeyInput = document.getElementById('groq-api-key');
-            const groqKeyStatus = document.getElementById('groq-api-key-status');
-            const groqClearBtn = document.getElementById('groq-clear-key-btn');
-            function updateGroqKeyStatus() {
-                const has = !!(settings.groqApiKey && String(settings.groqApiKey).trim());
-                if (groqKeyStatus) {
-                    groqKeyStatus.textContent = has
-                        ? 'Key saved on this profile. AI chat and Ask are ready to use.'
-                        : 'Not set — add a free Groq key to use AI chat and Ask on the new tab page.';
-                }
-                if (groqClearBtn) groqClearBtn.classList.toggle('hidden', !has);
-                if (groqKeyInput) {
-                    groqKeyInput.value = '';
-                    groqKeyInput.placeholder = has
-                        ? 'Enter a new key to replace the saved one'
-                        : 'Paste key (gsk_…)';
+            function ensureAiProvidersFromSettings() {
+                const norm = AxisAiProviders.normalizeSettings(settings);
+                settings.aiProviders = norm.aiProviders;
+                settings.activeAiProviderId = norm.activeAiProviderId;
+            }
+            ensureAiProvidersFromSettings();
+
+            async function persistAiProviders() {
+                ensureAiProvidersFromSettings();
+                await saveSetting('aiProviders', settings.aiProviders, false);
+                await saveSetting('activeAiProviderId', settings.activeAiProviderId || '', false);
+            }
+
+            async function migrateLegacyGroqKeyIfNeeded() {
+                if (Array.isArray(settings.aiProviders) && settings.aiProviders.length) return;
+                ensureAiProvidersFromSettings();
+                if (!settings.aiProviders.length) return;
+                await persistAiProviders();
+            }
+            void migrateLegacyGroqKeyIfNeeded();
+
+            const aiProvidersList = document.getElementById('ai-providers-list');
+            const aiProvidersEmpty = document.getElementById('ai-providers-empty');
+            const aiProvidersToast = document.getElementById('ai-providers-toast');
+            const aiProviderType = document.getElementById('ai-provider-type');
+            const aiProviderLabel = document.getElementById('ai-provider-label');
+            const aiProviderKey = document.getElementById('ai-provider-key');
+            const aiProviderAddBtn = document.getElementById('ai-provider-add-btn');
+            const aiProviderCancelBtn = document.getElementById('ai-provider-cancel-btn');
+            const aiProviderOpenAddBtn = document.getElementById('ai-provider-open-add-btn');
+            const aiProviderGetKeyBtn = document.getElementById('ai-provider-get-key-btn');
+            const aiKeyAddBlock = document.getElementById('ai-key-add-block');
+            const aiKeyToolbar = document.getElementById('ai-key-toolbar');
+            const aiKeyFormTitle = document.getElementById('ai-key-form-title');
+            const aiProviderRevealState = new Map();
+            let aiProviderEditingId = null;
+
+            function aiProvidersToastMsg(message, isError) {
+                if (!aiProvidersToast) return;
+                aiProvidersToast.textContent = message || '';
+                aiProvidersToast.classList.toggle('error', !!isError);
+            }
+
+            function populateAiProviderTypeSelect() {
+                if (!aiProviderType) return;
+                aiProviderType.innerHTML = '';
+                AxisAiProviders.listProviderDefs().forEach((def) => {
+                    const opt = document.createElement('option');
+                    opt.value = def.id;
+                    opt.textContent = def.freeTier ? `${def.name} (Free)` : def.name;
+                    aiProviderType.appendChild(opt);
+                });
+            }
+            populateAiProviderTypeSelect();
+
+            function syncAiProviderAddForm() {
+                const def = AxisAiProviders.getProviderDef(aiProviderType?.value || 'groq');
+                if (aiProviderKey && def?.keyPlaceholder) {
+                    aiProviderKey.placeholder = `Paste key (${def.keyPlaceholder})`;
                 }
             }
-            updateGroqKeyStatus();
+            syncAiProviderAddForm();
+            aiProviderType?.addEventListener('change', syncAiProviderAddForm);
+
+            function syncAiProviderKeyInputType() {
+                if (!aiProviderKey) return;
+                aiProviderKey.type = aiProviderEditingId ? 'text' : 'password';
+            }
+
+            function setAiProviderFormOpen(open) {
+                aiKeyAddBlock?.classList.toggle('hidden', !open);
+                aiKeyToolbar?.classList.toggle('hidden', !!open);
+                if (aiProvidersToast) {
+                    if (open) {
+                        aiKeyAddBlock?.appendChild(aiProvidersToast);
+                    } else {
+                        aiKeyToolbar?.appendChild(aiProvidersToast);
+                    }
+                }
+            }
+
+            function resetAiProviderForm({ closeForm = true } = {}) {
+                aiProviderEditingId = null;
+                aiKeyAddBlock?.classList.remove('is-editing');
+                if (aiKeyFormTitle) aiKeyFormTitle.textContent = 'Add API key';
+                if (aiProviderAddBtn) aiProviderAddBtn.textContent = 'Save key';
+                aiProviderCancelBtn?.classList.add('hidden');
+                if (aiProviderType) aiProviderType.value = 'groq';
+                if (aiProviderLabel) aiProviderLabel.value = '';
+                if (aiProviderKey) aiProviderKey.value = '';
+                syncAiProviderKeyInputType();
+                syncAiProviderAddForm();
+                aiProvidersToastMsg('');
+                if (closeForm) setAiProviderFormOpen(false);
+            }
+
+            function openAiProviderAddForm() {
+                resetAiProviderForm({ closeForm: false });
+                aiProviderCancelBtn?.classList.remove('hidden');
+                setAiProviderFormOpen(true);
+                aiProviderKey?.focus();
+            }
+
+            aiProviderOpenAddBtn?.addEventListener('click', () => openAiProviderAddForm());
+
+            async function startEditAiProvider(entry) {
+                if (!entry) return;
+                aiProvidersToastMsg('Waiting for authentication…');
+                try {
+                    const ok = await window.electronAPI.vaultVerifyDevice('Edit API key');
+                    if (!ok) {
+                        aiProvidersToastMsg('Authentication cancelled', true);
+                        return;
+                    }
+                    aiProviderEditingId = entry.id;
+                    aiKeyAddBlock?.classList.add('is-editing');
+                    if (aiKeyFormTitle) aiKeyFormTitle.textContent = 'Edit API key';
+                    if (aiProviderAddBtn) aiProviderAddBtn.textContent = 'Save changes';
+                    aiProviderCancelBtn?.classList.remove('hidden');
+                    setAiProviderFormOpen(true);
+                    if (aiProviderType) aiProviderType.value = entry.provider || 'groq';
+                    if (aiProviderLabel) aiProviderLabel.value = entry.label || '';
+                    if (aiProviderKey) aiProviderKey.value = entry.apiKey || '';
+                    syncAiProviderKeyInputType();
+                    syncAiProviderAddForm();
+                    renderAiProvidersList();
+                    aiProvidersToastMsg('');
+                    aiKeyAddBlock?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    aiProviderKey?.focus();
+                } catch (e) {
+                    aiProvidersToastMsg(e?.message || 'Could not verify identity', true);
+                }
+            }
+
+            aiProviderCancelBtn?.addEventListener('click', () => {
+                resetAiProviderForm();
+                renderAiProvidersList();
+            });
+
+            async function revealProviderKey(entry) {
+                if (!entry?.apiKey) return;
+                const state = aiProviderRevealState.get(entry.id);
+                if (state?.revealed) {
+                    aiProviderRevealState.set(entry.id, { revealed: false });
+                    renderAiProvidersList();
+                    return;
+                }
+                aiProvidersToastMsg('Waiting for authentication…');
+                try {
+                    const ok = await window.electronAPI.vaultVerifyDevice('Show API key');
+                    if (!ok) {
+                        aiProvidersToastMsg('Authentication cancelled', true);
+                        return;
+                    }
+                    aiProviderRevealState.set(entry.id, { revealed: true });
+                    aiProvidersToastMsg('');
+                    renderAiProvidersList();
+                } catch (e) {
+                    aiProvidersToastMsg(e?.message || 'Could not verify identity', true);
+                }
+            }
+
+            function renderAiProvidersList() {
+                ensureAiProvidersFromSettings();
+                if (!aiProvidersList) return;
+                aiProvidersList.innerHTML = '';
+                const list = settings.aiProviders || [];
+                aiProvidersEmpty?.classList.toggle('hidden', list.length > 0);
+
+                list.forEach((entry) => {
+                    const isActive = entry.id === settings.activeAiProviderId;
+                    const isEditing = entry.id === aiProviderEditingId;
+
+                    const entryEl = document.createElement('div');
+                    entryEl.className =
+                        'ai-key-entry' +
+                        (isActive ? ' is-active' : '') +
+                        (isEditing ? ' is-editing' : '');
+                    entryEl.dataset.providerId = entry.id;
+
+                    const main = document.createElement('div');
+                    main.className = 'ai-key-entry-main';
+
+                    const labelWrap = document.createElement('div');
+                    labelWrap.className = 'ai-key-entry-label';
+
+                    const title = document.createElement('div');
+                    title.className = 'row-title';
+                    title.textContent = AxisAiProviders.displayName(entry);
+                    labelWrap.appendChild(title);
+
+                    if (isActive) {
+                        const status = document.createElement('div');
+                        status.className = 'row-desc ai-key-active-status';
+                        status.textContent = 'Active';
+                        labelWrap.appendChild(status);
+                    }
+
+                    const actions = document.createElement('div');
+                    actions.className = 'ai-key-entry-actions';
+
+                    if (!isActive) {
+                        const useBtn = document.createElement('button');
+                        useBtn.type = 'button';
+                        useBtn.className = 'secondary';
+                        useBtn.textContent = 'Use';
+                        useBtn.addEventListener('click', async () => {
+                            settings.activeAiProviderId = entry.id;
+                            await persistAiProviders();
+                            renderAiProvidersList();
+                        });
+                        actions.appendChild(useBtn);
+                    }
+
+                    if (!isEditing) {
+                        const editBtn = document.createElement('button');
+                        editBtn.type = 'button';
+                        editBtn.className = 'secondary';
+                        editBtn.textContent = 'Edit';
+                        editBtn.addEventListener('click', () => void startEditAiProvider(entry));
+                        actions.appendChild(editBtn);
+                    }
+
+                    const removeBtn = document.createElement('button');
+                    removeBtn.type = 'button';
+                    removeBtn.className = 'destructive';
+                    removeBtn.textContent = 'Remove';
+                    removeBtn.addEventListener('click', async () => {
+                        settings.aiProviders = (settings.aiProviders || []).filter((p) => p.id !== entry.id);
+                        if (settings.activeAiProviderId === entry.id) {
+                            settings.activeAiProviderId = settings.aiProviders[0]?.id || null;
+                        }
+                        if (aiProviderEditingId === entry.id) {
+                            resetAiProviderForm();
+                        }
+                        aiProviderRevealState.delete(entry.id);
+                        await persistAiProviders();
+                        renderAiProvidersList();
+                    });
+                    actions.appendChild(removeBtn);
+
+                    main.appendChild(labelWrap);
+                    main.appendChild(actions);
+
+                    const maskRow = document.createElement('div');
+                    maskRow.className = 'ai-key-mask-row';
+                    const isRevealed = !!aiProviderRevealState.get(entry.id)?.revealed;
+                    let keyDisplayEl;
+                    if (isRevealed) {
+                        keyDisplayEl = document.createElement('input');
+                        keyDisplayEl.type = 'text';
+                        keyDisplayEl.readOnly = true;
+                        keyDisplayEl.className = 'ai-key-mask-display';
+                        keyDisplayEl.value = String(entry.apiKey).trim();
+                        keyDisplayEl.setAttribute('aria-label', 'Saved API key (visible)');
+                    } else {
+                        keyDisplayEl = document.createElement('div');
+                        keyDisplayEl.className = 'ai-key-mask-display';
+                        keyDisplayEl.textContent = AxisAiProviders.maskApiKey(entry.apiKey, entry.provider);
+                        keyDisplayEl.setAttribute('aria-label', 'Saved API key (hidden)');
+                    }
+                    const eyeBtn = document.createElement('button');
+                    eyeBtn.type = 'button';
+                    eyeBtn.className = 'vault-icon-btn';
+                    eyeBtn.title = isRevealed ? 'Hide key' : 'Show key';
+                    eyeBtn.setAttribute('aria-label', isRevealed ? 'Hide key' : 'Show key');
+                    eyeBtn.setAttribute('aria-pressed', isRevealed ? 'true' : 'false');
+                    mountVaultEyeButton(eyeBtn);
+                    eyeBtn.addEventListener('click', () => void revealProviderKey(entry));
+                    maskRow.appendChild(keyDisplayEl);
+                    maskRow.appendChild(eyeBtn);
+
+                    entryEl.appendChild(main);
+                    entryEl.appendChild(maskRow);
+                    aiProvidersList.appendChild(entryEl);
+                });
+            }
+            renderAiProvidersList();
+
+            aiProviderAddBtn?.addEventListener('click', async () => {
+                const provider = aiProviderType?.value || 'groq';
+                const apiKey = String(aiProviderKey?.value || '').trim();
+                const label = String(aiProviderLabel?.value || '').trim();
+                if (!apiKey) {
+                    aiProvidersToastMsg('Paste an API key first', true);
+                    return;
+                }
+
+                if (aiProviderEditingId) {
+                    const idx = (settings.aiProviders || []).findIndex((p) => p.id === aiProviderEditingId);
+                    if (idx === -1) {
+                        resetAiProviderForm();
+                        renderAiProvidersList();
+                        return;
+                    }
+                    const existing = settings.aiProviders[idx];
+                    const entry = AxisAiProviders.sanitizeEntry({
+                        id: aiProviderEditingId,
+                        provider,
+                        label,
+                        apiKey,
+                        model: existing?.model || ''
+                    });
+                    if (!entry) {
+                        aiProvidersToastMsg('Could not save those changes', true);
+                        return;
+                    }
+                    settings.aiProviders[idx] = entry;
+                    await persistAiProviders();
+                    resetAiProviderForm();
+                    renderAiProvidersList();
+                    aiProvidersToastMsg('API key updated');
+                    return;
+                }
+
+                const entry = AxisAiProviders.sanitizeEntry({
+                    id: AxisAiProviders.createProviderId(),
+                    provider,
+                    label,
+                    apiKey
+                });
+                if (!entry) {
+                    aiProvidersToastMsg('Could not save that key', true);
+                    return;
+                }
+                if (!Array.isArray(settings.aiProviders)) settings.aiProviders = [];
+                settings.aiProviders.push(entry);
+                settings.activeAiProviderId = entry.id;
+                if (aiProviderKey) aiProviderKey.value = '';
+                if (aiProviderLabel) aiProviderLabel.value = '';
+                await persistAiProviders();
+                renderAiProvidersList();
+                aiProvidersToastMsg('API key saved');
+            });
+
+            aiProviderGetKeyBtn?.addEventListener('click', () => {
+                const def = AxisAiProviders.getProviderDef(aiProviderType?.value || 'groq');
+                const url = def?.signupUrl || 'https://console.groq.com/keys';
+                if (window.electronAPI?.openExternalUrl) {
+                    window.electronAPI.openExternalUrl(url);
+                } else if (window.electronAPI?.openUrlInBrowser) {
+                    window.electronAPI.openUrlInBrowser(url);
+                }
+            });
 
             const wclRaw = Number(settings.windowChromeLight);
             const wclVal = Math.max(0, Math.min(100, Number.isFinite(wclRaw) ? wclRaw : 50));
@@ -2220,6 +3810,7 @@
                 return String(v);
             }
             wclLabel.textContent = formatWindowChromeLightLabel(wclVal);
+            syncNativeWindowChromeTransparency();
 
             const AMBIENT_PRESET_IDS = ['rain', 'warm', 'focus', 'ocean', 'wind', 'still'];
             document.getElementById('ambient-audio-enabled').checked = !!settings.ambientAudioEnabled;
@@ -2247,6 +3838,205 @@
             setNtpCheck('ntp-welcome-enabled', settings.ntpWelcomeEnabled !== false);
             setNtpCheck('ntp-welcome-greeting', settings.ntpWelcomeGreeting !== false);
             setNtpCheck('ntp-ai-search', settings.ntpAiSearchEnabled !== false);
+            setNtpCheck('ntp-widgets-enabled', settings.ntpWidgetsEnabled === true);
+
+            function renderNtpWidgetSettingsList() {
+                const api = window.AxisNtpWidgets;
+                const list = document.getElementById('ntp-widgets-active-list');
+                if (!list) return;
+                const layout = api
+                    ? api.normalizeLayout(settings.ntpWidgetLayout)
+                    : Array.isArray(settings.ntpWidgetLayout)
+                      ? settings.ntpWidgetLayout
+                      : [];
+                const rows = [];
+                const esc = (s) => escapeHtml(s);
+                for (const w of layout) {
+                    const type = api?.resolveType ? api.resolveType(w.type) : w.type;
+                    if (!api?.widgetHasConfig?.(type)) continue;
+                    if (type === 'weather') {
+                        const unit = String(w.config?.unit || 'C').toUpperCase() === 'F' ? 'F' : 'C';
+                        rows.push(`<div class="row">
+  <div class="row-label">
+    <div class="row-title">Weather city</div>
+    <div class="row-desc">City name for your Weather tile</div>
+  </div>
+  <div class="row-controls">
+    <input type="text" data-ntp-field="city" data-widget-id="${w.id}" value="${esc(w.config?.city || 'London')}" placeholder="London" spellcheck="false" maxlength="64">
+  </div>
+</div>
+<div class="row">
+  <div class="row-label">
+    <div class="row-title">Temperature unit</div>
+    <div class="row-desc">Celsius or Fahrenheit</div>
+  </div>
+  <div class="row-controls">
+    <select data-ntp-field="unit" data-widget-id="${w.id}">
+      <option value="C"${unit === 'C' ? ' selected' : ''}>°C</option>
+      <option value="F"${unit === 'F' ? ' selected' : ''}>°F</option>
+    </select>
+  </div>
+</div>`);
+                    } else if (type === 'headlines') {
+                        const feeds = api.HEADLINE_FEED_PRESETS || [];
+                        const current = w.config?.feedUrl || feeds[0]?.url || '';
+                        const opts = feeds
+                            .map(
+                                (f) =>
+                                    `<option value="${esc(f.url)}"${f.url === current ? ' selected' : ''}>${esc(f.label)}</option>`
+                            )
+                            .join('');
+                        rows.push(`<div class="row">
+  <div class="row-label">
+    <div class="row-title">News feed</div>
+    <div class="row-desc">Pick a source or paste any RSS URL below</div>
+  </div>
+  <div class="row-controls">
+    <select data-ntp-field="feedUrl" data-widget-id="${w.id}">
+      ${opts}
+      <option value="__custom__"${feeds.some((f) => f.url === current) ? '' : ' selected'}>Custom URL…</option>
+    </select>
+  </div>
+</div>
+<div class="row">
+  <div class="row-label">
+    <div class="row-title">Custom feed URL</div>
+    <div class="row-desc">Used when Custom URL is selected</div>
+  </div>
+  <div class="row-controls">
+    <input type="url" data-ntp-field="feedUrlCustom" data-widget-id="${w.id}" value="${esc(current)}" placeholder="https://…" spellcheck="false">
+  </div>
+</div>`);
+                    } else if (type === 'until') {
+                        rows.push(`<div class="row">
+  <div class="row-label">
+    <div class="row-title">Countdown name</div>
+    <div class="row-desc">Label on your Countdown tile</div>
+  </div>
+  <div class="row-controls">
+    <input type="text" data-ntp-field="label" data-widget-id="${w.id}" value="${esc(w.config?.label || 'Event')}" placeholder="Event" spellcheck="false">
+  </div>
+</div>
+<div class="row">
+  <div class="row-label">
+    <div class="row-title">Countdown date</div>
+    <div class="row-desc">Target day for your Countdown tile</div>
+  </div>
+  <div class="row-controls">
+    <input type="date" data-ntp-field="target" data-widget-id="${w.id}" value="${esc(w.config?.target || '')}">
+  </div>
+</div>`);
+                    } else if (type === 'worldclock') {
+                        const presets = api.WORLD_CLOCK_PRESETS || [];
+                        const tz = w.config?.timezone || 'America/New_York';
+                        const opts = presets
+                            .map(
+                                (p) =>
+                                    `<option value="${esc(p.timezone)}" data-label="${esc(p.label)}"${p.timezone === tz ? ' selected' : ''}>${esc(p.label)}</option>`
+                            )
+                            .join('');
+                        rows.push(`<div class="row">
+  <div class="row-label">
+    <div class="row-title">World clock city</div>
+    <div class="row-desc">Pick a city for your World clock tile</div>
+  </div>
+  <div class="row-controls">
+    <select data-ntp-field="timezone" data-ntp-sync-label="label" data-widget-id="${w.id}">
+      ${opts}
+    </select>
+  </div>
+</div>`);
+                    } else if (type === 'focus') {
+                        const mins = Number(w.config?.minutes) || 25;
+                        rows.push(`<div class="row">
+  <div class="row-label">
+    <div class="row-title">Focus length</div>
+    <div class="row-desc">Any length from 1 to 180 minutes</div>
+  </div>
+  <div class="row-controls">
+    <input type="number" data-ntp-field="minutes" data-widget-id="${w.id}" min="1" max="180" step="1" value="${mins}" inputmode="numeric">
+  </div>
+</div>`);
+                    } else if (type === 'links') {
+                        const links = api.normalizeLinks ? api.normalizeLinks(w.config) : [];
+                        const padded = [...links];
+                        while (padded.length < 4) padded.push({ label: '', url: '' });
+                        const fields = padded
+                            .slice(0, 6)
+                            .map(
+                                (link, i) => `<div class="ntp-widget-deal-fields" style="width:100%;margin-bottom:8px;">
+  <input type="text" data-ntp-link-index="${i}" data-ntp-link-field="label" data-widget-id="${w.id}" value="${esc(link.label || '')}" placeholder="Label" spellcheck="false" maxlength="40">
+  <input type="url" data-ntp-link-index="${i}" data-ntp-link-field="url" data-widget-id="${w.id}" value="${esc(link.url || '')}" placeholder="https://…" spellcheck="false">
+</div>`
+                            )
+                            .join('');
+                        rows.push(`<div class="row" style="align-items:flex-start;">
+  <div class="row-label">
+    <div class="row-title">Quick links</div>
+    <div class="row-desc">Up to six site shortcuts on your Quick links tile</div>
+  </div>
+  <div class="row-controls" style="flex-direction:column;align-items:stretch;min-width:220px;">
+    ${fields}
+  </div>
+</div>`);
+                    }
+                }
+                list.innerHTML = rows.join('') || '<div class="row-desc" style="padding:4px 0;">Add widgets on the New Tab page, then customize them here.</div>';
+            }
+
+            function syncNtpWidgetSettingsFields() {
+                const widgetsOn = document.getElementById('ntp-widgets-enabled')?.checked === true;
+                document.getElementById('ntp-widgets-subgroup')?.classList.toggle('visible', widgetsOn);
+                renderNtpWidgetSettingsList();
+            }
+            syncNtpWidgetSettingsFields();
+
+            async function patchNtpWidgetConfigById(widgetId, patch) {
+                const api = window.AxisNtpWidgets;
+                let layout = api
+                    ? api.normalizeLayout(settings.ntpWidgetLayout)
+                    : Array.isArray(settings.ntpWidgetLayout)
+                      ? settings.ntpWidgetLayout
+                      : [];
+                const w = layout.find((x) => x.id === widgetId);
+                if (!w) return;
+                w.config = { ...(w.config || {}), ...patch };
+                if (patch.url != null) {
+                    const url = String(patch.url || '').trim();
+                    w.config.urlLabel = url.replace(/^https?:\/\//, '').split('/')[0];
+                }
+                settings.ntpWidgetLayout = layout.map((item) => ({
+                    id: item.id,
+                    type: item.type,
+                    col: item.col,
+                    row: item.row,
+                    colSpan: item.colSpan,
+                    rowSpan: item.rowSpan,
+                    config: item.config ? { ...item.config } : {}
+                }));
+                await saveSetting('ntpWidgetLayout', settings.ntpWidgetLayout, false);
+            }
+
+            async function removeNtpWidgetById(widgetId) {
+                const api = window.AxisNtpWidgets;
+                let layout = api
+                    ? api.normalizeLayout(settings.ntpWidgetLayout)
+                    : Array.isArray(settings.ntpWidgetLayout)
+                      ? settings.ntpWidgetLayout
+                      : [];
+                layout = layout.filter((w) => w.id !== widgetId);
+                settings.ntpWidgetLayout = layout;
+                await saveSetting('ntpWidgetLayout', settings.ntpWidgetLayout, false);
+                renderNtpWidgetSettingsList();
+            }
+
+            function syncAiFeaturesSettingsUi() {
+                const on = settings.aiFeaturesEnabled !== false;
+                const toggle = document.getElementById('ai-features-enabled');
+                if (toggle) toggle.checked = on;
+                document.getElementById('ai-features-details')?.classList.toggle('hidden', !on);
+            }
+            syncAiFeaturesSettingsUi();
             const ntpGreetingNameInput = document.getElementById('ntp-greeting-name');
             if (ntpGreetingNameInput) {
                 const storedName = String(settings.ntpGreetingName ?? '').trim();
@@ -2255,8 +4045,7 @@
 
             function syncNtpSettingsNestedState() {
                 const welcomeOn = document.getElementById('ntp-welcome-enabled')?.checked !== false;
-                document.getElementById('ntp-welcome-greeting-row')?.classList.toggle('visible', welcomeOn);
-                document.getElementById('ntp-greeting-name-row')?.classList.toggle('visible', welcomeOn);
+                document.getElementById('ntp-welcome-subgroup')?.classList.toggle('visible', welcomeOn);
             }
             syncNtpSettingsNestedState();
             
@@ -2272,6 +4061,79 @@
                 el.style.background = enabled ? `linear-gradient(${dir}, ${theme}, ${grad})` : theme;
             }
             updateThemePreview();
+
+            async function applyLoadedSettingsToForm() {
+                document.getElementById('ui-theme').value =
+                    settings.uiTheme === 'light' || settings.uiTheme === 'system' ? settings.uiTheme : 'dark';
+                await syncSettingsLightTint();
+                document.getElementById('sidebar-position').value = settings.sidebarPosition || 'left';
+                document.getElementById('search-engine').value = settings.searchEngine || 'google';
+                document.getElementById('always-show-full-url').checked = !!settings.alwaysShowFullUrl;
+                document.getElementById('https-only-mode').checked = !!settings.httpsOnlyMode;
+                document.getElementById('ad-blocker-enabled').checked = settings.adBlockerEnabled !== false;
+                document.getElementById('javascript-enabled').checked = settings.javascriptEnabled !== false;
+                document.getElementById('unpinned-clear-mode').value = settings.unpinnedClearMode || 'app-close';
+                const unpinnedCustomMins = Math.min(
+                    10080,
+                    Math.max(1, Number(settings.unpinnedClearCustomMinutes) || 60)
+                );
+                document.getElementById('unpinned-clear-custom-minutes').value = String(unpinnedCustomMins);
+                syncUnpinnedClearCustomRow();
+                document.getElementById('speech-enabled').checked = settings.speechEnabled !== false;
+                document.getElementById('speech-rate').value = String(settings.speechRate || 1);
+                document.getElementById('speech-pitch').value = String(settings.speechPitch || 1);
+                populateSpeechVoices();
+                document.getElementById('theme-color').value = settings.themeColor || '#1a1a1a';
+                document.getElementById('gradient-color').value = settings.gradientColor || '#2a2a2a';
+                document.getElementById('gradient-enabled').checked = settings.gradientEnabled || false;
+                document.getElementById('gradient-direction').value = settings.gradientDirection || '135deg';
+                document.getElementById('transparent-sites').checked = !!settings.transparentSites;
+                document.getElementById('site-theme-color').checked = !!settings.siteThemeColor;
+                document.getElementById('link-preview').checked = settings.linkPreview !== false;
+                ensureAiProvidersFromSettings();
+                resetAiProviderForm();
+                renderAiProvidersList();
+                const wclRawApply = Number(settings.windowChromeLight);
+                const wclValApply = Math.max(
+                    0,
+                    Math.min(100, Number.isFinite(wclRawApply) ? wclRawApply : 50)
+                );
+                if (wclInput) wclInput.value = String(wclValApply);
+                if (wclLabel) wclLabel.textContent = formatWindowChromeLightLabel(wclValApply);
+                syncNativeWindowChromeTransparency();
+                document.getElementById('ambient-audio-enabled').checked = !!settings.ambientAudioEnabled;
+                document.getElementById('ambient-mute-when-tab-audio').checked = !!settings.ambientMuteWhenTabAudio;
+                const ambientPresetApply = settings.ambientAudioPreset || 'rain';
+                document.getElementById('ambient-audio-preset').value = AMBIENT_PRESET_IDS.includes(
+                    ambientPresetApply
+                )
+                    ? ambientPresetApply
+                    : 'rain';
+                const ambientVolRawApply = Number(settings.ambientAudioVolume);
+                const ambientVolApply = Math.max(
+                    0,
+                    Math.min(100, Number.isFinite(ambientVolRawApply) ? ambientVolRawApply : 48)
+                );
+                if (ambientVolInput) ambientVolInput.value = String(ambientVolApply);
+                if (ambientVolLabel) ambientVolLabel.textContent = ambientVolApply + '%';
+                syncAmbientControlsDisabled();
+                setNtpCheck('ntp-welcome-enabled', settings.ntpWelcomeEnabled !== false);
+                setNtpCheck('ntp-welcome-greeting', settings.ntpWelcomeGreeting !== false);
+                setNtpCheck('ntp-ai-search', settings.ntpAiSearchEnabled !== false);
+                setNtpCheck('ntp-widgets-enabled', settings.ntpWidgetsEnabled === true);
+                syncNtpWidgetSettingsFields();
+                syncAiFeaturesSettingsUi();
+                if (ntpGreetingNameInput) {
+                    const storedName = String(settings.ntpGreetingName ?? '').trim();
+                    ntpGreetingNameInput.value = storedName === 'User' ? '' : storedName;
+                }
+                syncNtpSettingsNestedState();
+                document
+                    .querySelectorAll('.gradient-rows')
+                    .forEach((r) => r.classList.toggle('visible', settings.gradientEnabled));
+                updateThemePreview();
+            }
+            window.__axisApplyLoadedSettingsToForm = applyLoadedSettingsToForm;
             
             // Sidebar nav
             let activeSection = 'customization';
@@ -2285,22 +4147,28 @@
                 });
             }
 
-            let switchSection = function(section) {
+            function showActiveSectionOnly(section) {
+                const target = section || activeSection || 'customization';
                 document.querySelectorAll('.sidebar-item').forEach(n => n.classList.remove('active'));
                 document.querySelectorAll('.pane').forEach(p => {
                     p.classList.remove('active');
-                    p.style.display = '';
+                    p.style.display = 'none';
                 });
-                const item = document.querySelector(`.sidebar-item[data-section="${section}"]`);
-                const pane = document.getElementById(section + '-pane');
+                const item = document.querySelector(`.sidebar-item[data-section="${target}"]`);
+                const pane = document.getElementById(target + '-pane');
                 if (item) item.classList.add('active');
                 if (pane) {
                     pane.classList.add('active');
                     pane.style.display = 'block';
                 }
-                activeSection = section;
+                activeSection = target;
+            }
+
+            let switchSection = function(section) {
+                const prevSection = activeSection;
+                showActiveSectionOnly(section);
                 const mainEl = document.querySelector('.main');
-                if (mainEl) mainEl.scrollTop = 0;
+                if (mainEl && section !== prevSection) mainEl.scrollTop = 0;
             };
             window.__axisSwitchSettingsSection = switchSection;
             document.querySelectorAll('.sidebar-item').forEach(item => {
@@ -2577,23 +4445,37 @@
                     if (btn) btn.disabled = false;
                 }
             });
-            // When the main process records a grant from a site (or another window saves overrides), reload the table.
-            try {
-                if (window.electronAPI && typeof window.electronAPI.onSettingsUpdated === 'function') {
-                    window.electronAPI.onSettingsUpdated(() => {
+            // When the store changes elsewhere (context menu, another window), refresh affected controls.
+            async function refreshStoreBackedSettingsFields() {
                         loadSitePermissionOverrides();
                         loadExtensions();
                         try {
-                            window.electronAPI.getSettings().then((s) => {
+                    const s = await window.electronAPI.getSettings();
+                    if (!s) return;
+                    settings.sidebarPosition = s.sidebarPosition;
+                    const sidebarPos = document.getElementById('sidebar-position');
+                    if (sidebarPos) {
+                        sidebarPos.value = s.sidebarPosition === 'right' ? 'right' : 'left';
+                    }
                                 const ab = document.getElementById('ad-blocker-enabled');
-                                if (ab && s) ab.checked = s.adBlockerEnabled !== false;
-                                if (s) {
-                                    settings.groqApiKey = s.groqApiKey;
-                                    updateGroqKeyStatus();
-                                }
-                            }).catch(() => {});
+                    if (ab) ab.checked = s.adBlockerEnabled !== false;
+                    settings.aiProviders = s.aiProviders;
+                    settings.activeAiProviderId = s.activeAiProviderId;
+                    settings.groqApiKey = s.groqApiKey;
+                    ensureAiProvidersFromSettings();
+                    settings.uiTheme = s.uiTheme;
+                    settings.windowChromeLight = s.windowChromeLight;
+                    syncSettingsLightTint();
+                    syncNativeWindowChromeTransparency();
+                    renderAiProvidersList();
                         } catch (_) {}
-                    });
+            }
+            try {
+                if (window.electronAPI?.onSettingsUpdated) {
+                    window.electronAPI.onSettingsUpdated(() => { void refreshStoreBackedSettingsFields(); });
+                }
+                if (window.electronAPI?.onSettingsStoreUpdated) {
+                    window.electronAPI.onSettingsStoreUpdated(() => { void refreshStoreBackedSettingsFields(); });
                 }
             } catch (_) {}
 
@@ -2610,12 +4492,8 @@
                         pane.querySelectorAll('.row, .shortcut-row').forEach(row => { row.style.display = ''; });
                     });
                     if (settingsSearchEmpty) settingsSearchEmpty.style.display = 'none';
-                    suppressSectionRefresh = true;
-                    try {
-                        switchSection(activeSection || 'customization');
-                    } finally {
-                        suppressSectionRefresh = false;
-                    }
+                    showActiveSectionOnly(activeSection || 'customization');
+                    syncUnpinnedClearCustomRow();
                     return;
                 }
 
@@ -2659,6 +4537,15 @@
             document.getElementById('https-only-mode').addEventListener('change', e => saveSetting('httpsOnlyMode', e.target.checked, false));
             document.getElementById('ad-blocker-enabled').addEventListener('change', e => saveSetting('adBlockerEnabled', e.target.checked, false));
             document.getElementById('javascript-enabled').addEventListener('change', e => saveSetting('javascriptEnabled', e.target.checked, false));
+            document.getElementById('unpinned-clear-mode').addEventListener('change', e => {
+                syncUnpinnedClearCustomRow();
+                saveSetting('unpinnedClearMode', e.target.value, false);
+            });
+            document.getElementById('unpinned-clear-custom-minutes').addEventListener('change', e => {
+                const mins = Math.min(10080, Math.max(1, parseInt(e.target.value, 10) || 60));
+                e.target.value = String(mins);
+                saveSetting('unpinnedClearCustomMinutes', mins, false);
+            });
             document.getElementById('speech-enabled').addEventListener('change', e => saveSetting('speechEnabled', e.target.checked, false));
             document.getElementById('speech-voice').addEventListener('change', e => {
                 speechVoicePersist = e.target.value || '';
@@ -2674,31 +4561,35 @@
                 saveSetting('ambientMuteWhenTabAudio', e.target.checked, false);
             });
             document.getElementById('ambient-audio-preset').addEventListener('change', e => saveSetting('ambientAudioPreset', e.target.value, false));
+            let ambientVolSaveTimer = null;
+            const persistAmbientVolume = (raw) => {
+                const n = Math.max(0, Math.min(100, parseInt(raw, 10) || 0));
+                ambientVolLabel.textContent = n + '%';
+                saveSetting('ambientAudioVolume', n, false);
+            };
             ambientVolInput.addEventListener('input', e => {
-                ambientVolLabel.textContent = parseInt(e.target.value, 10) + '%';
+                const n = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+                ambientVolLabel.textContent = n + '%';
+                if (ambientVolSaveTimer) clearTimeout(ambientVolSaveTimer);
+                ambientVolSaveTimer = setTimeout(() => {
+                    ambientVolSaveTimer = null;
+                    persistAmbientVolume(e.target.value);
+                }, 60);
             });
-            ambientVolInput.addEventListener('change', e => saveSetting('ambientAudioVolume', parseInt(e.target.value, 10), false));
-            groqKeyInput?.addEventListener('change', async (e) => {
-                const v = String(e.target.value || '').trim();
-                if (!v) return;
-                await saveSetting('groqApiKey', v, false);
-                settings.groqApiKey = v;
-                updateGroqKeyStatus();
-            });
-            groqClearBtn?.addEventListener('click', async () => {
-                await saveSetting('groqApiKey', '', false);
-                settings.groqApiKey = '';
-                updateGroqKeyStatus();
-            });
-            document.getElementById('groq-get-key-btn')?.addEventListener('click', () => {
-                if (window.electronAPI?.openExternalUrl) {
-                    window.electronAPI.openExternalUrl('https://console.groq.com/keys');
-                } else if (window.electronAPI?.openUrlInBrowser) {
-                    window.electronAPI.openUrlInBrowser('https://console.groq.com/keys');
+            ambientVolInput.addEventListener('change', e => {
+                if (ambientVolSaveTimer) {
+                    clearTimeout(ambientVolSaveTimer);
+                    ambientVolSaveTimer = null;
                 }
+                persistAmbientVolume(e.target.value);
             });
-            document.getElementById('ui-theme').addEventListener('change', e => {
-                const v = e.target.value === 'light' ? 'light' : 'dark';
+            document.getElementById('ui-theme').addEventListener('change', async e => {
+                const v =
+                    e.target.value === 'light' || e.target.value === 'system'
+                        ? e.target.value
+                        : 'dark';
+                settings.uiTheme = v;
+                await syncSettingsLightTint();
                 saveSetting('uiTheme', v, true);
             });
             document.getElementById('theme-color').addEventListener('input', e => {
@@ -2733,15 +4624,105 @@
             document.getElementById('ntp-greeting-name')?.addEventListener('change', saveNtpGreetingName);
             document.getElementById('ntp-greeting-name')?.addEventListener('blur', saveNtpGreetingName);
             document.getElementById('ntp-ai-search')?.addEventListener('change', e => saveSetting('ntpAiSearchEnabled', e.target.checked, false));
+            document.getElementById('ntp-widgets-enabled')?.addEventListener('change', e => {
+                saveSetting('ntpWidgetsEnabled', e.target.checked, false);
+                syncNtpWidgetSettingsFields();
+            });
+            document.getElementById('ntp-widgets-active-list')?.addEventListener('change', (e) => {
+                const linkField = e.target.closest('[data-ntp-link-field][data-widget-id]');
+                if (linkField) {
+                    const widgetId = linkField.dataset.widgetId;
+                    const api = window.AxisNtpWidgets;
+                    let layout = api
+                        ? api.normalizeLayout(settings.ntpWidgetLayout)
+                        : Array.isArray(settings.ntpWidgetLayout)
+                          ? settings.ntpWidgetLayout
+                          : [];
+                    const w = layout.find((x) => x.id === widgetId);
+                    if (!w) return;
+                    const inputs = document.querySelectorAll(`[data-widget-id="${widgetId}"][data-ntp-link-field]`);
+                    const byIndex = new Map();
+                    inputs.forEach((inp) => {
+                        const i = Number(inp.dataset.ntpLinkIndex);
+                        if (!Number.isFinite(i)) return;
+                        const row = byIndex.get(i) || { label: '', url: '' };
+                        row[inp.dataset.ntpLinkField] = String(inp.value || '').trim();
+                        byIndex.set(i, row);
+                    });
+                    const links = [...byIndex.entries()]
+                        .sort((a, b) => a[0] - b[0])
+                        .map(([, v]) => v)
+                        .filter((v) => v.url);
+                    void patchNtpWidgetConfigById(widgetId, { links });
+                    return;
+                }
+                const input = e.target.closest('[data-ntp-field][data-widget-id]');
+                if (!input) return;
+                const field = input.dataset.ntpField;
+                const widgetId = input.dataset.widgetId;
+                if (!field || !widgetId) return;
+                if (field === 'feedUrlCustom') {
+                    void patchNtpWidgetConfigById(widgetId, { feedUrl: String(input.value || '').trim() });
+                    return;
+                }
+                if (field === 'feedUrl' && input.value === '__custom__') {
+                    const custom = document.querySelector(`[data-widget-id="${widgetId}"][data-ntp-field="feedUrlCustom"]`);
+                    void patchNtpWidgetConfigById(widgetId, {
+                        feedUrl: String(custom?.value || '').trim()
+                    });
+                    return;
+                }
+                if (field === 'timezone' && input.dataset.ntpSyncLabel === 'label') {
+                    const opt = input.selectedOptions?.[0];
+                    const label = opt?.dataset?.label || opt?.textContent || '';
+                    void patchNtpWidgetConfigById(widgetId, {
+                        timezone: String(input.value || '').trim(),
+                        label: String(label || '').trim()
+                    });
+                    return;
+                }
+                if (field === 'minutes') {
+                    const api = window.AxisNtpWidgets;
+                    const mins = api?.clampFocusMinutes
+                        ? api.clampFocusMinutes(input.value)
+                        : Math.max(1, Math.min(180, Number(input.value) || 25));
+                    void patchNtpWidgetConfigById(widgetId, { minutes: mins });
+                    return;
+                }
+                void patchNtpWidgetConfigById(widgetId, { [field]: String(input.value || '').trim() });
+            });
+            document.getElementById('ntp-widgets-reset-layout')?.addEventListener('click', () => {
+                void (async () => {
+                    settings.ntpWidgetLayout = [];
+                    await saveSetting('ntpWidgetLayout', settings.ntpWidgetLayout, false);
+                    syncNtpWidgetSettingsFields();
+                })();
+            });
+            document.getElementById('ai-features-enabled')?.addEventListener('change', e => {
+                settings.aiFeaturesEnabled = e.target.checked;
+                syncAiFeaturesSettingsUi();
+                saveSetting('aiFeaturesEnabled', e.target.checked, false);
+            });
             document.getElementById('transparent-sites').addEventListener('change', e => {
                 saveSetting('transparentSites', e.target.checked, true);
             });
+            document.getElementById('site-theme-color').addEventListener('change', e => {
+                saveSetting('siteThemeColor', e.target.checked, true);
+            });
+            document.getElementById('link-preview').addEventListener('change', e => {
+                saveSetting('linkPreview', e.target.checked, false);
+            });
             wclInput.addEventListener('input', (e) => {
                 const v = parseInt(e.target.value, 10);
-                wclLabel.textContent = formatWindowChromeLightLabel(Number.isFinite(v) ? v : 0);
+                const n = Number.isFinite(v) ? v : 0;
+                wclLabel.textContent = formatWindowChromeLightLabel(n);
+                settings.windowChromeLight = n;
+                syncNativeWindowChromeTransparency();
             });
             wclInput.addEventListener('change', (e) => {
                 const v = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+                settings.windowChromeLight = v;
+                syncNativeWindowChromeTransparency();
                 saveSetting('windowChromeLight', v, true);
                 wclLabel.textContent = formatWindowChromeLightLabel(v);
             });
@@ -2885,6 +4866,10 @@
                         if (e.shiftKey) parts.push('Shift');
                         let key = e.key;
                         if (key === ' ') key = 'Space';
+                        else if (key === 'ArrowLeft') key = 'Left';
+                        else if (key === 'ArrowRight') key = 'Right';
+                        else if (key === 'ArrowUp') key = 'Up';
+                        else if (key === 'ArrowDown') key = 'Down';
                         else if (key.length === 1) key = key.toUpperCase();
                         if (['Control', 'Meta', 'Alt', 'Shift'].includes(key)) return;
                         parts.push(key);
@@ -2949,14 +4934,6 @@
             let vaultEditorMode = null;
             let vaultEditorId = null;
 
-            const VAULT_EYE_SVG =
-                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
-
-            function mountVaultEyeButton(btn) {
-                if (!btn) return;
-                btn.innerHTML = VAULT_EYE_SVG;
-            }
-
             function vaultToast(message, isError) {
                 const el = document.getElementById('vault-toast');
                 if (!el) return;
@@ -2986,6 +4963,7 @@
                 if (autofill) autofill.checked = status.autofillEnabled !== false;
                 await renderVaultLogins();
                 await renderVaultCards();
+                await renderVaultAddresses();
             }
 
             function setVaultRowOpen(row, open) {
@@ -3155,6 +5133,38 @@
                 });
             }
 
+            async function renderVaultAddresses() {
+                const list = document.getElementById('vault-addresses-list');
+                if (!list) return;
+                const res = await window.electronAPI.vaultListAddresses();
+                const items = res.items || [];
+                const countEl = document.getElementById('vault-address-count');
+                if (countEl) countEl.textContent = items.length === 1 ? '1 address' : `${items.length} addresses`;
+                if (!items.length) {
+                    list.innerHTML = '<div class="empty-state" style="padding:16px 12px;">No saved addresses yet. Use <strong>+ Add address</strong> or save from a checkout form.</div>';
+                    return;
+                }
+                list.innerHTML = items.map((item) => {
+                    const label = item.label ? `${escapeHtml(item.label)} · ` : '';
+                    const name = escapeHtml(item.fullName || 'Saved address');
+                    const summary = escapeHtml(item.summary || '');
+                    const id = escapeHtml(item.id);
+                    return `<div class="vault-table-row">
+                        <div class="vault-td-site"><strong>${label}${name}</strong><div style="font-size:12px;color:#86868b;margin-top:2px;">${summary}</div></div>
+                        <div class="vault-td-actions">
+                            <button type="button" class="vault-icon-btn vault-edit-address" data-id="${id}" title="Edit" aria-label="Edit">✎</button>
+                            <button type="button" class="vault-icon-btn destructive vault-del-address" data-id="${id}" title="Delete" aria-label="Delete">⌫</button>
+                        </div>
+                    </div>`;
+                }).join('');
+                list.querySelectorAll('.vault-edit-address').forEach((btn) => {
+                    btn.addEventListener('click', () => void openVaultAddressEditor(btn.dataset.id));
+                });
+                list.querySelectorAll('.vault-del-address').forEach((btn) => {
+                    btn.addEventListener('click', () => void deleteVaultAddress(btn.dataset.id));
+                });
+            }
+
             function hideVaultEditor() {
                 document.getElementById('vault-editor')?.classList.add('hidden');
                 vaultEditorMode = null;
@@ -3168,6 +5178,7 @@
                 document.getElementById('vault-editor-title').textContent = id ? 'Edit password' : 'Add password';
                 document.getElementById('vault-editor-login-fields').classList.remove('hidden');
                 document.getElementById('vault-editor-card-fields').classList.add('hidden');
+                document.getElementById('vault-editor-address-fields').classList.add('hidden');
                 document.getElementById('vault-editor-error').textContent = '';
                 const pw = document.getElementById('vault-edit-password');
                 const pwEye = document.getElementById('vault-edit-password-eye');
@@ -3219,6 +5230,7 @@
                 document.getElementById('vault-editor-title').textContent = id ? 'Edit card' : 'Add card';
                 document.getElementById('vault-editor-login-fields').classList.add('hidden');
                 document.getElementById('vault-editor-card-fields').classList.remove('hidden');
+                document.getElementById('vault-editor-address-fields').classList.add('hidden');
                 document.getElementById('vault-editor-error').textContent = '';
                 if (id) {
                     vaultToast('Waiting for authentication…');
@@ -3264,13 +5276,59 @@
                 ed?.classList.remove('hidden');
             }
 
+            async function openVaultAddressEditor(id) {
+                vaultEditorMode = 'address';
+                vaultEditorId = id || null;
+                const ed = document.getElementById('vault-editor');
+                document.getElementById('vault-editor-title').textContent = id ? 'Edit address' : 'Add address';
+                document.getElementById('vault-editor-login-fields').classList.add('hidden');
+                document.getElementById('vault-editor-card-fields').classList.add('hidden');
+                document.getElementById('vault-editor-address-fields').classList.remove('hidden');
+                document.getElementById('vault-editor-error').textContent = '';
+                const fieldIds = [
+                    'vault-edit-address-label',
+                    'vault-edit-address-name',
+                    'vault-edit-address-org',
+                    'vault-edit-address-line1',
+                    'vault-edit-address-line2',
+                    'vault-edit-address-city',
+                    'vault-edit-address-state',
+                    'vault-edit-address-postal',
+                    'vault-edit-address-country',
+                    'vault-edit-address-phone',
+                    'vault-edit-address-email'
+                ];
+                if (id) {
+                    const row = await window.electronAPI.vaultGetAddress(id);
+                    document.getElementById('vault-edit-address-label').value = row.label || '';
+                    document.getElementById('vault-edit-address-name').value = row.fullName || '';
+                    document.getElementById('vault-edit-address-org').value = row.organization || '';
+                    document.getElementById('vault-edit-address-line1').value = row.addressLine1 || '';
+                    document.getElementById('vault-edit-address-line2').value = row.addressLine2 || '';
+                    document.getElementById('vault-edit-address-city').value = row.city || '';
+                    document.getElementById('vault-edit-address-state').value = row.state || '';
+                    document.getElementById('vault-edit-address-postal').value = row.postalCode || '';
+                    document.getElementById('vault-edit-address-country').value = row.country || '';
+                    document.getElementById('vault-edit-address-phone').value = row.phone || '';
+                    document.getElementById('vault-edit-address-email').value = row.email || '';
+                } else {
+                    fieldIds.forEach((fid) => {
+                        const el = document.getElementById(fid);
+                        if (el) el.value = '';
+                    });
+                }
+                ed?.classList.remove('hidden');
+            }
+
             async function saveVaultEditor() {
                 const err = document.getElementById('vault-editor-error');
                 if (err) err.textContent = '';
                 const msg =
                     vaultEditorMode === 'card'
                         ? 'Save this card to your vault?'
-                        : 'Save this password to your vault?';
+                        : vaultEditorMode === 'address'
+                          ? 'Save this address to your vault?'
+                          : 'Save this password to your vault?';
                 if (!confirm(msg)) return;
                 try {
                     if (vaultEditorMode === 'login') {
@@ -3296,6 +5354,22 @@
                             billingZip: document.getElementById('vault-edit-billing-zip').value
                         });
                         await renderVaultCards();
+                    } else if (vaultEditorMode === 'address') {
+                        await window.electronAPI.vaultSaveAddress({
+                            id: vaultEditorId,
+                            label: document.getElementById('vault-edit-address-label').value,
+                            fullName: document.getElementById('vault-edit-address-name').value,
+                            organization: document.getElementById('vault-edit-address-org').value,
+                            addressLine1: document.getElementById('vault-edit-address-line1').value,
+                            addressLine2: document.getElementById('vault-edit-address-line2').value,
+                            city: document.getElementById('vault-edit-address-city').value,
+                            state: document.getElementById('vault-edit-address-state').value,
+                            postalCode: document.getElementById('vault-edit-address-postal').value,
+                            country: document.getElementById('vault-edit-address-country').value,
+                            phone: document.getElementById('vault-edit-address-phone').value,
+                            email: document.getElementById('vault-edit-address-email').value
+                        });
+                        await renderVaultAddresses();
                     }
                     hideVaultEditor();
                 } catch (e) {
@@ -3317,6 +5391,14 @@
                 await window.electronAPI.vaultDeleteCard(id);
                 hideVaultEditor();
                 await renderVaultCards();
+            }
+
+            async function deleteVaultAddress(id) {
+                if (!(await requireVaultAuth('Delete saved address'))) return;
+                if (!confirm('Are you sure you want to delete this saved address?')) return;
+                await window.electronAPI.vaultDeleteAddress(id);
+                hideVaultEditor();
+                await renderVaultAddresses();
             }
 
             document.getElementById('vault-autofill-enabled')?.addEventListener('change', async (e) => {
@@ -3419,20 +5501,416 @@
                     const tab = btn.dataset.vaultSubtab;
                     document.getElementById('vault-passwords-panel')?.classList.toggle('hidden', tab !== 'passwords');
                     document.getElementById('vault-cards-panel')?.classList.toggle('hidden', tab !== 'cards');
+                    document.getElementById('vault-addresses-panel')?.classList.toggle('hidden', tab !== 'addresses');
                     hideVaultEditor();
                 });
             });
 
             document.getElementById('vault-add-login-btn')?.addEventListener('click', () => void openVaultLoginEditor(null));
             document.getElementById('vault-add-card-btn')?.addEventListener('click', () => void openVaultCardEditor(null));
+            document.getElementById('vault-add-address-btn')?.addEventListener('click', () => void openVaultAddressEditor(null));
             document.getElementById('vault-editor-save')?.addEventListener('click', () => void saveVaultEditor());
             document.getElementById('vault-editor-cancel')?.addEventListener('click', () => hideVaultEditor());
+
+            let profilesCurrentId = 'personal';
+            let profilesCustomImportPath = '';
+            const profilesOverviewBody = document.getElementById('profiles-overview-body');
+            const profilesStartupMode = document.getElementById('profiles-startup-mode');
+            const profilesStartupProfileRow = document.getElementById('profiles-startup-profile-row');
+            const profilesStartupProfile = document.getElementById('profiles-startup-profile');
+            const profilesNewWindowMode = document.getElementById('profiles-new-window-mode');
+            const profilesExportSelect = document.getElementById('profiles-export-select');
+            const profilesBackupStatus = document.getElementById('profiles-backup-status');
+            const profilesImportBrowser = document.getElementById('profiles-import-browser');
+            const profilesImportSource = document.getElementById('profiles-import-source');
+            const profilesImportName = document.getElementById('profiles-import-name');
+            const profilesImportPreview = document.getElementById('profiles-import-preview');
+            const profilesImportStatus = document.getElementById('profiles-import-status');
+
+            function setProfilesStatus(el, text, kind = '') {
+                if (!el) return;
+                el.textContent = text || '';
+                el.classList.remove('ok', 'err');
+                if (kind) el.classList.add(kind);
+            }
+
+            function setImportStatus(text, kind = '') {
+                setProfilesStatus(profilesImportStatus, text, kind);
+            }
+
+            function setBackupStatus(text, kind = '') {
+                setProfilesStatus(profilesBackupStatus, text, kind);
+            }
+
+            function syncStartupProfileRowVisibility() {
+                const show = profilesStartupMode?.value === 'fixed';
+                profilesStartupProfileRow?.classList.toggle('hidden', !show);
+            }
+
+            function fillProfileSelect(selectEl, profiles, selectedId) {
+                if (!selectEl) return;
+                selectEl.innerHTML = (profiles || [])
+                    .map(
+                        (p) =>
+                            `<option value="${escapeHtml(p.id)}"${p.id === selectedId ? ' selected' : ''}>${escapeHtml(p.name || p.id)}</option>`
+                    )
+                    .join('');
+            }
+
+            async function loadProfileGlobalSettings(profiles) {
+                if (!window.electronAPI?.getProfileGlobalSettings) return;
+                const settings = await window.electronAPI.getProfileGlobalSettings();
+                if (profilesStartupMode) profilesStartupMode.value = settings.profileStartupMode || 'resume';
+                if (profilesNewWindowMode) profilesNewWindowMode.value = settings.profileNewWindowMode || 'same';
+                fillProfileSelect(
+                    profilesStartupProfile,
+                    profiles,
+                    settings.profileStartupProfileId || profilesCurrentId
+                );
+                syncStartupProfileRowVisibility();
+            }
+
+            function renderProfilesOverview(profiles, currentId) {
+                if (!profilesOverviewBody) return;
+                if (!Array.isArray(profiles) || profiles.length === 0) {
+                    profilesOverviewBody.innerHTML = '<tr><td colspan="6">No profiles found.</td></tr>';
+                    return;
+                }
+                profilesOverviewBody.innerHTML = profiles
+                    .map((p) => {
+                        const active = p.id === currentId;
+                        return `<tr class="${active ? 'active' : ''}">
+                            <td>${escapeHtml(p.name || p.id)}${active ? '<span class="profiles-badge">This window</span>' : ''}</td>
+                            <td class="num">${p.favorites ?? 0}</td>
+                            <td class="num">${p.history ?? 0}</td>
+                            <td class="num">${p.pinnedTabs ?? 0}</td>
+                            <td class="num">${p.extensions ?? 0}</td>
+                            <td class="num">${escapeHtml(p.storageLabel || '')}</td>
+                        </tr>`;
+                    })
+                    .join('');
+                fillProfileSelect(profilesExportSelect, profiles, currentId);
+            }
+
+            async function refreshProfilesPane() {
+                if (!window.electronAPI?.getProfilesOverviewForWindow) return;
+                try {
+                    const overview = await window.electronAPI.getProfilesOverviewForWindow();
+                    const profiles = overview?.profiles || [];
+                    profilesCurrentId = overview?.currentProfileId || 'personal';
+                    renderProfilesOverview(profiles, profilesCurrentId);
+                    await loadProfileGlobalSettings(profiles);
+                } catch (_) {
+                    if (profilesOverviewBody) {
+                        profilesOverviewBody.innerHTML = '<tr><td colspan="6">Could not load profiles.</td></tr>';
+                    }
+                }
+                await refreshImportBrowsers();
+            }
+
+            profilesStartupMode?.addEventListener('change', () => {
+                syncStartupProfileRowVisibility();
+                void window.electronAPI
+                    ?.setProfileGlobalSetting?.('profileStartupMode', profilesStartupMode.value)
+                    .catch(() => {});
+            });
+
+            profilesStartupProfile?.addEventListener('change', () => {
+                void window.electronAPI
+                    ?.setProfileGlobalSetting?.('profileStartupProfileId', profilesStartupProfile.value)
+                    .catch(() => {});
+            });
+
+            profilesNewWindowMode?.addEventListener('change', () => {
+                void window.electronAPI
+                    ?.setProfileGlobalSetting?.('profileNewWindowMode', profilesNewWindowMode.value)
+                    .catch(() => {});
+            });
+
+            document.getElementById('profiles-export-btn')?.addEventListener('click', () => {
+                void (async () => {
+                    setBackupStatus('Exporting…');
+                    const profileId = profilesExportSelect?.value || profilesCurrentId;
+                    try {
+                        const result = await window.electronAPI.exportAxisProfile?.(profileId);
+                        if (result?.cancelled) {
+                            setBackupStatus('');
+                            return;
+                        }
+                        if (!result?.ok) {
+                            setBackupStatus(result?.error || 'Export failed', 'err');
+                            return;
+                        }
+                        setBackupStatus('Profile backup saved.', 'ok');
+                    } catch (e) {
+                        setBackupStatus(String(e?.message || e), 'err');
+                    }
+                })();
+            });
+
+            document.getElementById('profiles-import-backup-btn')?.addEventListener('click', () => {
+                void (async () => {
+                    setBackupStatus('Importing…');
+                    try {
+                        const result = await window.electronAPI.importAxisProfileBackup?.();
+                        if (result?.cancelled) {
+                            setBackupStatus('');
+                            return;
+                        }
+                        if (!result?.ok) {
+                            setBackupStatus(result?.error || 'Import failed', 'err');
+                            return;
+                        }
+                        setBackupStatus(`Imported “${result.profileName}”.`, 'ok');
+                        await refreshProfilesPane();
+                    } catch (e) {
+                        setBackupStatus(String(e?.message || e), 'err');
+                    }
+                })();
+            });
+
+            function formatImportPreview(p, warnList) {
+                if (!p) return '';
+                const parts = [
+                    `${p.tabGroups || 0} tab groups`,
+                    `${p.pinnedBar || 0} pinned tabs`,
+                    `${p.openTabs || 0} open tabs`,
+                    `${p.bookmarks || 0} favorites`,
+                    `${p.passwords || 0} passwords`,
+                    `${p.cards || 0} cards`,
+                    `${p.addresses || 0} addresses`,
+                    `${p.extensions || 0} extensions`,
+                    `${p.sitePermissions || 0} site permission rules`,
+                    `${p.history || 0} history items`
+                ];
+                let text = `Found ${parts.join(', ')}.`;
+                if (Array.isArray(warnList) && warnList.length > 0) {
+                    text += ` ${warnList[0]}`;
+                }
+                return text;
+            }
+
+            function buildImportPayload() {
+                const payload = {
+                    profileName: profilesImportName?.value?.trim() || 'Imported',
+                    importSession: document.getElementById('profiles-import-session')?.checked !== false,
+                    importBookmarkFolders: document.getElementById('profiles-import-folders')?.checked !== false,
+                    importBookmarks: document.getElementById('profiles-import-bookmarks')?.checked !== false,
+                    importPinnedBar: document.getElementById('profiles-import-pinned')?.checked !== false,
+                    importHistory: document.getElementById('profiles-import-history')?.checked !== false,
+                    importPasswords: document.getElementById('profiles-import-passwords')?.checked !== false,
+                    importCards: document.getElementById('profiles-import-cards')?.checked !== false,
+                    importAddresses: document.getElementById('profiles-import-addresses')?.checked !== false,
+                    importSitePermissions:
+                        document.getElementById('profiles-import-permissions')?.checked !== false,
+                    importExtensions: document.getElementById('profiles-import-extensions')?.checked !== false
+                };
+                if (profilesCustomImportPath) {
+                    payload.customProfilePath = profilesCustomImportPath;
+                } else {
+                    payload.browserId = profilesImportBrowser?.value || '';
+                    payload.sourceProfileId = profilesImportSource?.value || '';
+                }
+                return payload;
+            }
+
+            async function refreshImportPreview() {
+                if (!profilesImportPreview || !window.electronAPI?.previewBrowserImport) return;
+                const payload = buildImportPayload();
+                if (!payload.customProfilePath && (!payload.browserId || !payload.sourceProfileId)) {
+                    profilesImportPreview.textContent = '';
+                    return;
+                }
+                try {
+                    const preview = await window.electronAPI.previewBrowserImport(payload);
+                    if (preview?.ok) {
+                        profilesImportPreview.textContent = formatImportPreview(
+                            preview.preview,
+                            preview.warnings
+                        );
+                    }
+                } catch (_) {
+                    profilesImportPreview.textContent = '';
+                }
+            }
+
+            async function refreshImportBrowsers() {
+                if (!profilesImportBrowser) return;
+                profilesCustomImportPath = '';
+                if (profilesImportPreview) profilesImportPreview.textContent = '';
+                setImportStatus('');
+                try {
+                    const browsers = (await window.electronAPI.listImportableBrowsers?.()) || [];
+                    profilesImportBrowser.innerHTML =
+                        browsers.length > 0
+                            ? '<option value="">Select a browser…</option>' +
+                              browsers
+                                  .map(
+                                      (b) =>
+                                          `<option value="${escapeHtml(b.id)}">${escapeHtml(b.name)} (${b.profileCount} profile${b.profileCount === 1 ? '' : 's'})</option>`
+                                  )
+                                  .join('')
+                            : '<option value="">No supported browsers found on this computer</option>';
+                    if (profilesImportSource) {
+                        profilesImportSource.innerHTML = '<option value="">Choose a browser first</option>';
+                        profilesImportSource.disabled = true;
+                    }
+                } catch (_) {
+                    profilesImportBrowser.innerHTML = '<option value="">Could not scan for browsers</option>';
+                }
+            }
+
+            async function refreshImportSources() {
+                if (!profilesImportBrowser || !profilesImportSource) return;
+                profilesCustomImportPath = '';
+                if (profilesImportPreview) profilesImportPreview.textContent = '';
+                const browserId = profilesImportBrowser.value;
+                if (!browserId) {
+                    profilesImportSource.innerHTML = '<option value="">Choose a browser first</option>';
+                    profilesImportSource.disabled = true;
+                    return;
+                }
+                try {
+                    const sources = (await window.electronAPI.listBrowserImportProfiles?.(browserId)) || [];
+                    profilesImportSource.innerHTML =
+                        sources.length > 0
+                            ? sources
+                                  .map(
+                                      (s) =>
+                                          `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`
+                                  )
+                                  .join('')
+                            : '<option value="">No profiles found</option>';
+                    profilesImportSource.disabled = sources.length === 0;
+                    if (sources[0] && profilesImportName && !profilesImportName.value.trim()) {
+                        profilesImportName.value = sources[0].name;
+                    }
+                    await refreshImportPreview();
+                } catch (_) {
+                    profilesImportSource.innerHTML = '<option value="">Could not read profiles</option>';
+                    profilesImportSource.disabled = true;
+                }
+            }
+
+            profilesImportBrowser?.addEventListener('change', () => void refreshImportSources());
+
+            profilesImportSource?.addEventListener('change', () => {
+                const opt = profilesImportSource.selectedOptions?.[0];
+                if (opt && profilesImportName) profilesImportName.value = opt.textContent || '';
+                void refreshImportPreview();
+            });
+
+            document
+                .querySelectorAll(
+                    '#profiles-import-session, #profiles-import-folders, #profiles-import-bookmarks, #profiles-import-pinned, #profiles-import-history, #profiles-import-passwords, #profiles-import-cards, #profiles-import-addresses, #profiles-import-permissions, #profiles-import-extensions'
+                )
+                .forEach((el) => el?.addEventListener('change', () => void refreshImportPreview()));
+
+            document.getElementById('profiles-import-folder')?.addEventListener('click', () => {
+                void (async () => {
+                    const picked = await window.electronAPI.pickBrowserProfileFolder?.();
+                    if (!picked?.ok || !picked.path) return;
+                    profilesCustomImportPath = picked.path;
+                    if (profilesImportBrowser) profilesImportBrowser.value = '';
+                    if (profilesImportSource) {
+                        profilesImportSource.innerHTML = `<option value="custom">${escapeHtml(pathBasename(picked.path))}</option>`;
+                        profilesImportSource.disabled = false;
+                    }
+                    if (profilesImportName && !profilesImportName.value.trim()) {
+                        profilesImportName.value = pathBasename(picked.path);
+                    }
+                    const preview = await window.electronAPI.inspectImportProfileFolder?.(picked.path);
+                    if (preview?.ok && profilesImportPreview) {
+                        profilesImportPreview.textContent = formatImportPreview(
+                            preview.preview,
+                            preview.warnings
+                        );
+                    }
+                })();
+            });
+
+            function pathBasename(p) {
+                const parts = String(p || '').split(/[/\\]/).filter(Boolean);
+                return parts[parts.length - 1] || 'Imported';
+            }
+
+            document.getElementById('profiles-import-run')?.addEventListener('click', () => {
+                void (async () => {
+                    setImportStatus('Importing…');
+                    const payload = buildImportPayload();
+                    try {
+                        const result = await window.electronAPI.importBrowserProfile?.(payload);
+                        if (!result?.ok) {
+                            setImportStatus(result?.error || 'Import failed', 'err');
+                            return;
+                        }
+                        const stats = result.stats || {};
+                        const warnText =
+                            Array.isArray(result.warnings) && result.warnings.length > 0
+                                ? ` ${result.warnings[0]}`
+                                : '';
+                        setImportStatus(
+                            `Created “${result.profileName}” with ${stats.tabGroups || 0} tab groups, ${stats.pinnedTabs || 0} pinned tabs, ${stats.unpinnedTabs || 0} open tabs, ${stats.favorites || 0} favorites, ${stats.passwords || 0} passwords, ${stats.cards || 0} cards, ${stats.addresses || 0} addresses, ${stats.extensions || 0} extensions, ${stats.sitePermissions || 0} site permission rules, and ${stats.history || 0} history items.${warnText}`,
+                            'ok'
+                        );
+                        profilesCustomImportPath = '';
+                        await refreshProfilesPane();
+                    } catch (e) {
+                        setImportStatus(String(e?.message || e), 'err');
+                    }
+                })();
+            });
+
+            window.electronAPI?.onProfilesUpdated?.(() => {
+                void refreshProfilesPane();
+                try {
+                    const ctx = window.electronAPI?.getSettingsProfileBootstrap?.();
+                    if (ctx) {
+                        settingsEditingProfileId = ctx.profileId || settingsEditingProfileId;
+                        renderSettingsProfileList(ctx.profiles || [], settingsEditingProfileId);
+                    }
+                } catch (_) {}
+            });
+
+            async function reloadSettingsForEditingProfile(nextId) {
+                if (!nextId || nextId === settingsEditingProfileId) return;
+                const wrap = document.getElementById('settings-profile-switch');
+                wrap?.classList.add('is-switching');
+                try {
+                    const res = await window.electronAPI?.setSettingsEditingProfile?.(nextId);
+                    if (!res?.ok) return;
+                    settingsEditingProfileId = res.profileId || nextId;
+                    settings = (await window.electronAPI.getSettings()) || {};
+                    shortcutOverrides = (await window.electronAPI.getShortcutOverrides()) || {};
+                    if (typeof window.__axisApplyLoadedSettingsToForm === 'function') {
+                        await window.__axisApplyLoadedSettingsToForm();
+                    }
+                    if (typeof hideVaultEditor === 'function') hideVaultEditor();
+                    vaultEditorMode = null;
+                    vaultToast?.('');
+                    aiProviderRevealState?.clear?.();
+                    loadedLazySections.clear();
+                    refreshSettingsSection(activeSection || 'customization');
+                    profilesCurrentId = settingsEditingProfileId;
+                    const ctx = window.electronAPI?.getSettingsProfileBootstrap?.() || { profiles: [] };
+                    renderSettingsProfileList(ctx.profiles || [], settingsEditingProfileId);
+                    closeSettingsProfileMenu();
+                    try {
+                        const u = new URL(location.href);
+                        u.searchParams.set('profile', settingsEditingProfileId);
+                        history.replaceState(null, '', u.pathname + u.search + location.hash);
+                    } catch (_) {}
+                } finally {
+                    wrap?.classList.remove('is-switching');
+                }
+            }
 
             const refreshSettingsSectionInternal = (section) => {
                 if (section === 'history') void populateHistory();
                 else if (section === 'extensions') void loadExtensions();
                 else if (section === 'permissions') void loadSitePermissionOverrides();
                 else if (section === 'vault') void refreshVaultPane();
+                else if (section === 'profiles') void refreshProfilesPane();
                 else if (section === 'shortcuts') {
                     void reloadShortcutState().then(() => renderShortcuts());
                 }
@@ -3442,10 +5920,11 @@
                 void loadExtensions();
                 void loadSitePermissionOverrides();
                 void refreshVaultPane();
+                void refreshProfilesPane();
                 void reloadShortcutState().then(() => renderShortcuts());
             };
 
-            const LAZY_SECTIONS = ['vault', 'permissions', 'extensions', 'history', 'shortcuts'];
+            const LAZY_SECTIONS = ['vault', 'permissions', 'extensions', 'history', 'shortcuts', 'profiles'];
             const loadedLazySections = new Set();
             const loadLazySectionOnce = (section) => {
                 if (!section || loadedLazySections.has(section)) return;
@@ -3465,6 +5944,11 @@
                 if (!suppressSectionRefresh) refreshSettingsSection(section);
             };
             window.__axisSwitchSettingsSection = switchSection;
+
+            window.electronAPI?.onSettingsEditingProfileChanged?.((data) => {
+                const id = data?.profileId;
+                if (id && id !== settingsEditingProfileId) void reloadSettingsForEditingProfile(id);
+            });
 
             refreshSettingsSection(activeSection || 'customization');
         })();
