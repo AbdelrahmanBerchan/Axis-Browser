@@ -19,7 +19,21 @@ function vaultFilePathForProfile(app, profileId) {
 }
 
 function emptyVaultPayload() {
-  return { version: VAULT_VERSION, logins: [], cards: [] };
+  return { version: VAULT_VERSION, logins: [], cards: [], addresses: [] };
+}
+
+function formatAddressSummary(addr) {
+  if (!addr || typeof addr !== 'object') return '';
+  const parts = [];
+  const line1 = String(addr.addressLine1 || '').trim();
+  const city = String(addr.city || '').trim();
+  const state = String(addr.state || '').trim();
+  const postal = String(addr.postalCode || '').trim();
+  if (line1) parts.push(line1);
+  const cityLine = [city, state].filter(Boolean).join(', ');
+  const tail = [cityLine, postal].filter(Boolean).join(' ');
+  if (tail) parts.push(tail);
+  return parts.join(', ');
 }
 
 function normalizeVaultOrigin(raw) {
@@ -67,7 +81,7 @@ function newId() {
 
 function createAxisVault(app, _store, profileId = 'personal') {
   const vaultProfileId = profileId;
-  /** @type {{ logins: object[], cards: object[] } | null} */
+  /** @type {{ logins: object[], cards: object[], addresses: object[] } | null} */
   let vaultData = null;
 
   function vaultFilePath() {
@@ -83,7 +97,8 @@ function createAxisVault(app, _store, profileId = 'personal') {
         vaultData = {
           version: VAULT_VERSION,
           logins: Array.isArray(parsed.logins) ? parsed.logins : [],
-          cards: Array.isArray(parsed.cards) ? parsed.cards : []
+          cards: Array.isArray(parsed.cards) ? parsed.cards : [],
+          addresses: Array.isArray(parsed.addresses) ? parsed.addresses : []
         };
         return vaultData;
       }
@@ -257,6 +272,118 @@ function createAxisVault(app, _store, profileId = 'personal') {
     return true;
   }
 
+  function listAddresses() {
+    const data = ensureLoaded();
+    return data.addresses.map((a) => ({
+      id: a.id,
+      label: a.label || '',
+      fullName: a.fullName || '',
+      summary: formatAddressSummary(a),
+      city: a.city || '',
+      updatedAt: a.updatedAt || a.createdAt || 0
+    }));
+  }
+
+  function getAddress(id) {
+    const data = ensureLoaded();
+    const row = data.addresses.find((a) => a.id === id);
+    if (!row) throw new Error('Address not found');
+    return { ...row };
+  }
+
+  function normalizeAddressEntry(entry, existing = null) {
+    const fullName = String(entry.fullName || existing?.fullName || '').trim();
+    const addressLine1 = String(entry.addressLine1 || existing?.addressLine1 || '').trim();
+    const city = String(entry.city || existing?.city || '').trim();
+    const postalCode = String(entry.postalCode || existing?.postalCode || '').trim();
+    if (!fullName) throw new Error('Full name is required');
+    if (!addressLine1) throw new Error('Street address is required');
+    if (!city) throw new Error('City is required');
+    if (!postalCode) throw new Error('ZIP / postal code is required');
+    return {
+      label: String(entry.label || existing?.label || '').trim(),
+      fullName,
+      organization: String(entry.organization || existing?.organization || '').trim(),
+      addressLine1,
+      addressLine2: String(entry.addressLine2 || existing?.addressLine2 || '').trim(),
+      city,
+      state: String(entry.state || existing?.state || '').trim(),
+      postalCode,
+      country: String(entry.country || existing?.country || '').trim(),
+      phone: String(entry.phone || existing?.phone || '').trim(),
+      email: String(entry.email || existing?.email || '').trim()
+    };
+  }
+
+  function addressesMatch(a, b) {
+    if (!a || !b) return false;
+    const norm = (s) => String(s || '').trim().toLowerCase();
+    return (
+      norm(a.fullName) === norm(b.fullName) &&
+      norm(a.addressLine1) === norm(b.addressLine1) &&
+      norm(a.postalCode) === norm(b.postalCode)
+    );
+  }
+
+  function saveAddress(entry) {
+    const data = ensureLoaded();
+    const now = Date.now();
+    let row = entry.id ? data.addresses.find((a) => a.id === entry.id) : null;
+    const normalized = normalizeAddressEntry(entry, row);
+    if (row) {
+      Object.assign(row, normalized, { updatedAt: now });
+    } else {
+      row = {
+        id: newId(),
+        ...normalized,
+        createdAt: now,
+        updatedAt: now
+      };
+      data.addresses.push(row);
+    }
+    persist();
+    return { id: row.id, label: row.label, summary: formatAddressSummary(row) };
+  }
+
+  function deleteAddress(id) {
+    const data = ensureLoaded();
+    const before = data.addresses.length;
+    data.addresses = data.addresses.filter((a) => a.id !== id);
+    if (data.addresses.length === before) throw new Error('Address not found');
+    persist();
+    return true;
+  }
+
+  function matchAddresses() {
+    const data = ensureLoaded();
+    return data.addresses.map((a) => ({
+      id: a.id,
+      label: a.label || '',
+      fullName: a.fullName,
+      organization: a.organization || '',
+      addressLine1: a.addressLine1,
+      addressLine2: a.addressLine2 || '',
+      city: a.city,
+      state: a.state || '',
+      postalCode: a.postalCode,
+      country: a.country || '',
+      phone: a.phone || '',
+      email: a.email || '',
+      summary: formatAddressSummary(a)
+    }));
+  }
+
+  function shouldOfferAddressSave(entry) {
+    const data = ensureLoaded();
+    try {
+      const normalized = normalizeAddressEntry(entry);
+      if (data.addresses.some((a) => addressesMatch(a, normalized))) return false;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function matchLogins(pageOrigin, usernameHint, pageUrl) {
     const data = ensureLoaded();
     const hint = usernameHint ? String(usernameHint).trim().toLowerCase() : '';
@@ -378,6 +505,12 @@ function createAxisVault(app, _store, profileId = 'personal') {
     getCard,
     saveCard,
     deleteCard,
+    listAddresses,
+    getAddress,
+    saveAddress,
+    deleteAddress,
+    matchAddresses,
+    shouldOfferAddressSave,
     matchLogins,
     matchCards,
     shouldOfferLoginSave,
@@ -388,4 +521,4 @@ function createAxisVault(app, _store, profileId = 'personal') {
   };
 }
 
-module.exports = { createAxisVault };
+module.exports = { createAxisVault, formatAddressSummary };
