@@ -6,8 +6,8 @@
   try {
     const { ipcRenderer } = require('electron');
 
-    const COALESCE_MS = 110;
-    const COOLDOWN_MS = 400;
+    const COALESCE_MS = 90;
+    const COOLDOWN_MS = 260;
     const THRESH_AXIAL = 175;
     const MAX_DOMINANT_VERTICAL = 28;
     const HORIZONTAL_DOMINANCE = 1.22;
@@ -66,5 +66,7 @@
   }
 })();
 
+require('./webview-preload-perf.js');
+require('./webview-preload-url-theme.js');
 require('./webview-preload-cws.js');
 require('./webview-preload-vault.js');
