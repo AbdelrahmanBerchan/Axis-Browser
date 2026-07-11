@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: blob: https: http: file:; connect-src 'self' https://api.groq.com https://suggestqueries.google.com; media-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'; worker-src 'self' blob:; manifest-src 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: blob: https: http: file:; connect-src 'self' https://api.groq.com https://api.openai.com https://generativelanguage.googleapis.com https://openrouter.ai https://api.mistral.ai https://suggestqueries.google.com; media-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'; worker-src 'self' blob:; manifest-src 'self'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Axis Browser</title>
     <link rel="stylesheet" href="styles.css">
@@ -221,15 +221,7 @@
                                 <button type="button" id="axis-store-install-host-btn" class="axis-store-install-host-btn" aria-busy="false">Install in Axis</button>
                             </div>
                         </div>
-                        <!-- Legacy webview: placed first, z-index:0 in CSS - never blocks dynamic webviews -->
-                        <webview id="webview" 
-                                 src="data:text/html;charset=utf-8,%3C!DOCTYPE%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Cmeta%20name%3D%22color-scheme%22%20content%3D%22dark%20light%22%3E%3Cstyle%3Ehtml%2Cbody%7Bmargin%3A0%3Bmin-height%3A100%25%3Bbackground%3Atransparent!important%7D%3C%2Fstyle%3E%3C%2Fhead%3E%3Cbody%3E%3C!--axis-empty-guest--%3E%3C%2Fbody%3E%3C%2Fhtml%3E" 
-                                 allowpopups 
-                                 webpreferences="contextIsolation=false,nodeIntegration=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false,spellcheck=yes"
-                                 partition="persist:main"
-                                 autosize="true"
-                                 style="opacity:0;visibility:hidden;pointer-events:none;">
-                        </webview>
+                        <!-- Tab pages use dynamic webviews in #webviews-container (no static guest). -->
                         <!-- Non-interactive edge hint during trackpad/nav gestures (Safari-like pill + arrow) -->
                         <div id="axis-nav-gesture-layer" class="axis-nav-gesture-layer" aria-hidden="true">
                             <div class="axis-nav-gesture-pill axis-nav-gesture-pill--back">
@@ -245,30 +237,63 @@
                         </div>
                         <!-- Dynamic webviews for each tab - must be after legacy so they stack on top -->
                         <div id="webviews-container"></div>
+                        <div id="axis-link-status-layer" class="axis-link-status-layer hidden" aria-hidden="true">
+                            <div class="axis-link-status-hit axis-link-status-hit--left" aria-hidden="true"></div>
+                            <div class="axis-link-status-hit axis-link-status-hit--right" aria-hidden="true"></div>
+                            <div id="axis-link-status" class="axis-link-status" role="status" aria-atomic="true">
+                                <span class="axis-link-status-text"></span>
+                            </div>
+                        </div>
                         <!-- New Tab Page (replaces spotlight - custom local page when opening new tab) -->
                         <div id="new-tab-page" class="new-tab-page hidden">
                             <div id="new-tab-start-view" class="new-tab-start-view">
-                                <div class="new-tab-page-content">
+                                <div class="new-tab-page-layout" id="new-tab-page-layout">
+                                    <div class="new-tab-layout-spacer new-tab-layout-spacer--top" aria-hidden="true"></div>
+                                    <div class="new-tab-hero-zone" id="new-tab-hero-zone">
+                                    <div class="new-tab-page-core">
                                     <div class="new-tab-hero" id="new-tab-hero">
                                         <h1 class="new-tab-greeting" id="new-tab-greeting">Good afternoon.</h1>
                                     </div>
                                     <div class="new-tab-search-section">
                                         <div id="new-tab-ask-setup" class="new-tab-ask-setup hidden" role="note">
-                                            <p class="new-tab-ask-setup-title">Add a free Groq API key to use Ask</p>
-                                            <p class="new-tab-ask-setup-desc">Sign up on Groq (free tier), paste your key in Settings, and you can chat here and in the sidebar AI panel.</p>
+                                            <p class="new-tab-ask-setup-title">Add an API key to use Ask</p>
+                                            <p class="new-tab-ask-setup-desc">Add a key in Settings → AI Chat (Groq, OpenAI, Gemini, and more). Then you can chat here and in the sidebar AI panel.</p>
                                             <div class="new-tab-ask-setup-actions">
                                                 <button type="button" id="new-tab-ask-setup-settings" class="new-tab-ask-setup-btn">Open AI settings</button>
                                                 <button type="button" id="new-tab-ask-setup-groq" class="new-tab-ask-setup-link">Get free key</button>
                                             </div>
                                         </div>
                                         <div class="new-tab-search-wrapper" id="new-tab-search-wrapper">
-                                            <div class="new-tab-search-bar" id="new-tab-search-bar">
-                                                <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search or Enter URL..." autocomplete="off" aria-label="Search or URL">
-                                                <button type="button" id="new-tab-send-btn" class="new-tab-send-btn is-disabled" disabled aria-label="Send message" title="Send">
-                                                    <i class="fas fa-arrow-up" aria-hidden="true"></i>
-                                                </button>
+                                            <div class="ai-chat-composer-chrome" id="new-tab-composer-chrome">
+                                                <div id="new-tab-attach-preview" class="ai-chat-attach-preview hidden" aria-live="polite"></div>
+                                                <div class="new-tab-search-bar" id="new-tab-search-bar">
+                                                    <button type="button" id="new-tab-attach-btn" class="ai-chat-attach-btn hidden" title="Attach image (up to 4)" aria-label="Attach image">
+                                                        <i class="fas fa-image" aria-hidden="true"></i>
+                                                    </button>
+                                                    <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search or Enter URL..." autocomplete="off" aria-label="Search or URL">
+                                                    <button type="button" id="new-tab-send-btn" class="new-tab-send-btn is-disabled" disabled aria-label="Send message" title="Send">
+                                                        <i class="fas fa-arrow-up" aria-hidden="true"></i>
+                                                    </button>
+                                                </div>
                                             </div>
+                                            <input type="file" id="new-tab-image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
                                             <div class="new-tab-suggestions" id="new-tab-suggestions"></div>
+                                        </div>
+                                    </div>
+                                    <button type="button" id="ntp-widgets-opt-in" class="ntp-widgets-opt-in hidden" aria-label="Add widgets to new tab">
+                                        <i class="fas fa-grip" aria-hidden="true"></i>
+                                        <span>Add widgets</span>
+                                    </button>
+                                    </div>
+                                    </div>
+                                    <div class="new-tab-widgets-section ntp-widgets-empty-layout hidden" id="new-tab-widgets-section" aria-label="Widgets">
+                                        <div id="ntp-widgets-grid" class="ntp-widgets-grid"></div>
+                                        <div class="ntp-widgets-foot">
+                                            <button type="button" id="ntp-widgets-edit-btn" class="ntp-widgets-edit-btn" aria-pressed="false">Edit</button>
+                                            <button type="button" id="ntp-widgets-add-btn" class="ntp-widgets-add-btn hidden" aria-expanded="false">Add widget</button>
+                                            <div id="ntp-widget-add-strip" class="ntp-widget-add-strip hidden" aria-label="Add a widget">
+                                                <div id="ntp-widget-catalog" class="ntp-widget-add-chips"></div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -312,9 +337,9 @@
                             <div id="ai-chat-setup" class="ai-chat-setup hidden">
                                 <div class="ai-chat-setup-icon" aria-hidden="true"><i class="fas fa-message"></i></div>
                                 <h3 class="ai-chat-setup-title">Set up AI chat</h3>
-                                <p class="ai-chat-setup-desc">Add a <strong>free</strong> Groq API key to chat here and use <strong>Ask</strong> on the new tab page. Your key stays on this device in your profile settings.</p>
+                                <p class="ai-chat-setup-desc">Add an API key in <strong>Settings → AI Chat</strong> to chat here and use <strong>Ask</strong> on the new tab page. Groq, OpenAI, Gemini, and more are supported.</p>
                                 <button type="button" id="ai-chat-setup-settings" class="ai-chat-setup-btn">Add API key in Settings</button>
-                                <button type="button" id="ai-chat-setup-groq" class="ai-chat-setup-link">Get a free Groq key</button>
+                                <button type="button" id="ai-chat-setup-groq" class="ai-chat-setup-link">Get a free API key</button>
                             </div>
                             <div class="ai-chat-messages" id="ai-chat-messages"></div>
                             <div id="ai-chat-quote-bar" class="ai-chat-quote-bar hidden">
@@ -324,23 +349,34 @@
                                     <i class="fas fa-times"></i>
                                 </button>
                             </div>
-                            <div class="ai-chat-input-container">
-                                <textarea 
-                                    id="ai-chat-input" 
-                                    class="ai-chat-input" 
-                                    placeholder="Add your Groq API key in Settings to start chatting"
-                                    rows="1"
-                                    disabled
-                                    aria-disabled="true"
-                                ></textarea>
-                                <button id="ai-chat-send" class="ai-chat-send-btn" title="Send (Enter)" disabled aria-disabled="true">
-                                    <i class="fas fa-arrow-up"></i>
-                                </button>
+                            <div class="ai-chat-input-container" id="ai-chat-input-container">
+                                <div class="ai-chat-composer-chrome" id="ai-chat-composer-chrome">
+                                    <div id="ai-chat-attach-preview" class="ai-chat-attach-preview hidden" aria-live="polite"></div>
+                                    <div class="ai-chat-composer-bar ai-chat-input-row">
+                                        <button type="button" id="ai-chat-attach-btn" class="ai-chat-attach-btn hidden" title="Attach image (up to 4)" aria-label="Attach image">
+                                            <i class="fas fa-image" aria-hidden="true"></i>
+                                        </button>
+                                        <textarea 
+                                            id="ai-chat-input" 
+                                            class="ai-chat-input" 
+                                            placeholder="Add an API key in Settings to start chatting"
+                                            rows="1"
+                                            disabled
+                                            aria-disabled="true"
+                                        ></textarea>
+                                        <button id="ai-chat-send" class="ai-chat-send-btn" title="Send (Enter)" disabled aria-disabled="true">
+                                            <i class="fas fa-arrow-up"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <input type="file" id="ai-chat-image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
                             </div>
                         </div>
                         <!-- Captures clicks over page content (<webview> does not bubble to document) -->
                         <div id="downloads-popup-backdrop" class="downloads-popup-backdrop hidden" aria-hidden="true"></div>
                         <div id="extensions-menu-backdrop" class="extensions-menu-backdrop hidden" aria-hidden="true"></div>
+                        <div id="adblock-panel-backdrop" class="adblock-panel-backdrop hidden" aria-hidden="true"></div>
+                        <div id="security-panel-backdrop" class="security-panel-backdrop hidden" aria-hidden="true"></div>
                         <div id="vault-autofill-panel" class="vault-autofill-panel hidden" role="listbox" aria-label="Saved passwords">
                             <ul id="vault-autofill-list" class="vault-autofill-list"></ul>
                         </div>
@@ -851,54 +887,6 @@
             </div>
         </div>
 
-        <!-- Security Panel -->
-        <div id="security-panel" class="security-panel hidden">
-            <div class="security-panel-content">
-                <div class="security-header">
-                    <div class="security-status">
-                        <i id="security-icon" class="fas fa-lock"></i>
-                        <div class="security-info">
-                            <h3 id="security-title">Secure Connection</h3>
-                            <p id="security-subtitle">Your connection is encrypted</p>
-                        </div>
-                    </div>
-                    <button id="close-security" class="close-settings">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="security-content">
-                    <div class="security-details">
-                        <div class="security-item">
-                            <label>Website</label>
-                            <span id="security-website">example.com</span>
-                        </div>
-                        <div class="security-item">
-                            <label>Certificate</label>
-                            <span id="security-certificate">Valid</span>
-                        </div>
-                        <div class="security-item">
-                            <label>Encryption</label>
-                            <span id="security-encryption">TLS 1.3</span>
-                        </div>
-                        <div class="security-item">
-                            <label>Connection</label>
-                            <span id="security-connection">Secure</span>
-                        </div>
-                    </div>
-                    <div class="security-actions">
-                        <button id="view-certificate" class="security-btn">
-                            <i class="fas fa-certificate"></i>
-                            View Certificate
-                        </button>
-                        <button id="security-settings" class="security-btn">
-                            <i class="fas fa-cog"></i>
-                            Security Settings
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- File Preview Window -->
         <div id="file-preview-backdrop" class="file-preview-backdrop hidden">
             <div id="file-preview-window" class="file-preview-window">
@@ -956,6 +944,60 @@
             </button>
         </div>
 
+        <div id="adblock-panel" class="adblock-panel hidden" role="dialog" aria-label="Ad blocker">
+            <div class="adblock-panel-header">
+                <div class="adblock-panel-title">
+                    <span class="adblock-panel-icon-wrap" aria-hidden="true">
+                        <i class="fas fa-shield-halved adblock-panel-icon"></i>
+                    </span>
+                    <span class="adblock-panel-heading">Ad blocker</span>
+                    <span id="adblock-panel-badge" class="adblock-badge adblock-badge--on">On</span>
+                </div>
+                <button type="button" id="adblock-panel-close" class="extensions-menu-close-btn" title="Close" aria-label="Close">
+                    <i class="fas fa-times" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="adblock-panel-body">
+                <div id="adblock-panel-stat-wrap" class="adblock-panel-stat-wrap">
+                    <span id="adblock-panel-page-count" class="adblock-panel-stat-num">0</span>
+                    <span class="adblock-panel-stat-label">blocked this page</span>
+                </div>
+                <p id="adblock-panel-status" class="adblock-panel-status">Blocking ads and trackers on this site.</p>
+                <div class="adblock-panel-actions">
+                    <button type="button" id="adblock-panel-site-btn" class="adblock-panel-btn adblock-panel-btn--secondary hidden">Allow this site</button>
+                    <button type="button" id="adblock-panel-global-btn" class="adblock-panel-btn adblock-panel-btn--primary">Turn off everywhere</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="security-panel" class="security-panel hidden" role="dialog" aria-label="Page security">
+            <div class="security-panel-header">
+                <div class="security-panel-title-row">
+                    <span id="security-panel-status-icon" class="security-panel-status-icon security-panel-status-icon--secure" aria-hidden="true">
+                        <i class="fas fa-lock"></i>
+                    </span>
+                    <div class="security-panel-heading-wrap">
+                        <h3 id="security-panel-heading" class="security-panel-heading">Connection is secure</h3>
+                        <p id="security-panel-subheading" class="security-panel-subheading">—</p>
+                    </div>
+                </div>
+                <button type="button" id="close-security" class="extensions-menu-close-btn" title="Close" aria-label="Close">
+                    <i class="fas fa-times" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="security-panel-body">
+                <p id="security-panel-loading" class="security-panel-loading hidden">Checking connection…</p>
+                <dl id="security-panel-facts" class="security-panel-facts"></dl>
+                <details id="security-panel-chain-wrap" class="security-panel-disclosure hidden">
+                    <summary>Certificate chain</summary>
+                    <div id="security-cert-chain" class="security-cert-chain" role="list"></div>
+                </details>
+                <div class="security-panel-actions">
+                    <button type="button" id="security-settings" class="security-panel-btn">HTTPS-only mode</button>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- Vault modals on <body> so they paint above guest <webview> layers -->
@@ -970,6 +1012,10 @@
             <p id="vault-save-card-row" class="vault-save-modal__meta hidden">
                 <span class="vault-save-modal__meta-label">Card</span>
                 <span id="vault-save-card" class="vault-save-modal__meta-value">—</span>
+            </p>
+            <p id="vault-save-address-row" class="vault-save-modal__meta hidden">
+                <span class="vault-save-modal__meta-label">Address</span>
+                <span id="vault-save-address" class="vault-save-modal__meta-value">—</span>
             </p>
             <p id="vault-save-desc" class="vault-save-modal__hint">Stored only on this Mac.</p>
             <div class="vault-save-modal__actions">
@@ -988,7 +1034,7 @@
         </div>
     </div>
 
-    <div id="profile-create-modal" class="vault-modal vault-save-modal hidden" role="dialog" aria-labelledby="profile-create-title" aria-modal="true">
+    <div id="profile-create-modal" class="vault-modal vault-save-modal hidden" role="dialog" aria-labelledby="profile-create-title" aria-modal="true" data-ui-theme="dark">
         <div class="vault-save-modal__card">
             <h2 id="profile-create-title" class="vault-save-modal__title">New profile</h2>
             <p id="profile-create-hint" class="vault-save-modal__hint">Separate tabs, cookies, and settings from your other profiles.</p>
@@ -1005,7 +1051,7 @@
         </div>
     </div>
 
-    <div id="profile-delete-modal" class="vault-modal vault-save-modal hidden" role="alertdialog" aria-labelledby="profile-delete-title" aria-modal="true">
+    <div id="profile-delete-modal" class="vault-modal vault-save-modal hidden" role="alertdialog" aria-labelledby="profile-delete-title" aria-modal="true" data-ui-theme="dark">
         <div class="vault-save-modal__card">
             <h2 id="profile-delete-title" class="vault-save-modal__title">Delete profile?</h2>
             <p id="profile-delete-message" class="vault-save-modal__hint">All tabs, cookies, history, passwords, extensions, and settings for this profile will be removed permanently. This cannot be undone.</p>
@@ -1017,8 +1063,12 @@
     </div>
 
     <script src="axis-profile-icons.js"></script>
+    <script src="axis-icon-picker.js"></script>
     <script src="axis-ntp-greetings.js"></script>
+    <script src="axis-ntp-widgets.js"></script>
     <script src="axis-profile-swipe.js"></script>
+    <script src="axis-undo.js"></script>
+    <script src="axis-ai-providers.js"></script>
     <script src="renderer.js"></script>
 </body>
 </html>
