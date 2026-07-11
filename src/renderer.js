@@ -12,11 +12,17 @@ html, body {
   background-image: none !important;
 }
 #root, #app, #__next, #__nuxt, #__layout, #app-mount, #gatsby-focus-wrapper,
-[data-nuxt-root], [data-vue-app], .app-root, main#main {
+#react-root, .next-container, .app-wrapper, .application-main,
+[data-nuxt-root], [data-vue-app], .app-root {
   background-color: transparent !important;
   background-image: none !important;
 }
-/* YouTube: tokens inherit into open shadow trees */
+#__next > div, #root > div, #app > div, #react-root > div,
+body > div:first-child {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+/* YouTube browse: design tokens inherit into shadow trees */
 html, html[dark], html[dark="true"], html[system-icons][dark], ytd-app {
   --yt-spec-base-background: transparent !important;
   --yt-spec-general-background-a: transparent !important;
@@ -32,34 +38,19 @@ html, html[dark], html[dark="true"], html[system-icons][dark], ytd-app {
   --yt-spec-static-background: transparent !important;
   --yt-spec-static-overlay-background-solid: rgba(0, 0, 0, 0.2) !important;
 }
-ytd-app, ytd-browse, ytd-page-manager, ytd-miniplayer,
-ytd-masthead, ytd-app-drawer, ytd-video-preview, #content.ytd-page-manager,
-ytd-watch-flexy #secondary, ytd-watch-flexy #related {
+ytd-app, ytd-browse, ytd-page-manager, ytd-miniplayer, ytd-masthead,
+ytd-app-drawer, ytd-video-preview, #content.ytd-page-manager,
+yt-page-manager-view, ytd-rich-grid-renderer, ytd-two-column-browse-results-renderer,
+ytd-section-list-renderer, ytd-feed-filter-chip-bar-renderer {
   background-color: transparent !important;
   background: transparent !important;
 }
-/* YouTube player must stay opaque — transparent design tokens break hardware video compositing */
+/* YouTube player must stay opaque — transparent tokens break hardware video compositing */
 #movie_player, #player, #player-container, #player-api, ytd-player,
 .html5-video-player, .html5-video-container, #player-container-inner,
-ytd-watch-flexy #primary, ytd-watch-flexy #primary-inner {
+ytd-watch-flexy, ytd-watch-flexy #primary, ytd-watch-flexy #primary-inner {
   background-color: #000 !important;
   background: #000 !important;
-}
-/* Google web (Search, Images, etc.): main chrome ids */
-#viewport, #cnt, #gsr, #main, #center_col, #rcnt, #rhs, #rhscol, #lhcol,
-#searchform, #tsf, #layout, #rso, #islsp, #islmp, #iur, #isr_m, #iry,
-#arc_tp, #appbar, #main-content, #search, #before-appbar, #sfcnt, #top_nav, #yDmH0d {
-  background-color: transparent !important;
-  background-image: none !important;
-}
-div[role="main"], div[role="navigation"]:not([aria-hidden="true"]) {
-  background-color: transparent !important;
-  background-image: none !important;
-}
-/* Full-width strips (headers / toolbars) often sit outside role=main */
-header, footer, [role="banner"], [role="contentinfo"] {
-  background-color: transparent !important;
-  background-image: none !important;
 }
 `.replace(/\s+/g, ' ').trim();
 
@@ -85,37 +76,38 @@ try{v.load();}catch(e){}
 `.replace(/\s+/g, ' ').trim();
 
 /**
- * YouTube tokens + Google ids + generic sweep: large opaque layers (any host) get cleared.
- * Skips modals, media, form controls, ytd-* hosts, and the YouTube player container.
+ * Site-targeted transparency (V9): YouTube browse + Google get tailored passes;
+ * other sites only clear framework shells. No generic full-page sweep.
  */
 const AXIS_TRANSPARENT_SITES_DOM_PATCH = `
 (function(){
 try{
 var OLD_NS="__axisTransparentV4";
-var NS="__axisTransparentV7";
 var OLD_V5="__axisTransparentV5";
 var OLD_V6="__axisTransparentV6";
+var OLD_V7="__axisTransparentV7";
+var OLD_V8="__axisTransparentV8";
+var NS="__axisTransparentV9";
 var T="transparent";
 var IMP="important";
-function ytVarNames(){return["--yt-spec-base-background","--yt-spec-general-background-a","--yt-spec-general-background-b","--yt-spec-general-background-c","--yt-spec-brand-background-solid","--yt-spec-brand-background-primary","--yt-spec-brand-background-secondary","--yt-raised-background","--yt-spec-menu-background","--yt-spec-feed-background-a","--yt-spec-feed-background-b","--yt-spec-static-background","--yt-spec-static-overlay-background-solid","--yt-spec-10-percent-layer","--yt-spec-themed-blue","--yt-spec-themed-green"];}
-function stopNs(ns){var st=window[ns];if(!st)return false;try{if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}}catch(e){}delete window[ns];return true;}
-function cleanupOldInline(){try{ytVarNames().forEach(function(n){var v=document.documentElement.style.getPropertyValue(n);if(v==="transparent"||v.indexOf("rgba(0,0,0,0.18)")>=0)document.documentElement.style.removeProperty(n);});var sel="html,body,#viewport,#cnt,#gsr,#main,#center_col,#rcnt,#rhs,#rhscol,#lhcol,#islsp,#islmp,#iur,#isr_m,#iry,#rso,#searchform,#tsf,#layout,#arc_tp,#appbar,#main-content,#search,#before-appbar,#sfcnt,#top_nav,#yDmH0d,#scb,#eUDTde,#MAmRG,#lfooter,#tw-container,#analytics-ddh,[role='main'],ytd-app,ytd-browse,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer,[style]";document.querySelectorAll(sel).forEach(function(el){try{["background-color","background","background-image"].forEach(function(p){var v=el.style.getPropertyValue(p);var pr=el.style.getPropertyPriority(p);if(pr==="important"&&(v==="transparent"||v==="rgba(0, 0, 0, 0)"||v==="none"))el.style.removeProperty(p);});}catch(e){}});}catch(e){}}
-if(stopNs(OLD_NS))cleanupOldInline();
-if(stopNs(OLD_V5))cleanupOldInline();
-if(stopNs(OLD_V6))cleanupOldInline();
-var st=window[NS]||(window[NS]={mo:null,t:0,idle:null,sweepTO:null,records:[],lastSweep:0});
-function remember(el,prop){if(!el||!el.style)return;var key="__axisTransparentV7Props";var seen=el[key]||(el[key]={});if(seen[prop])return;seen[prop]=1;var val=el.style.getPropertyValue(prop);var priority=el.style.getPropertyPriority(prop);st.records.push({el:el,prop:prop,value:val,priority:priority,had:!!(val||priority)});}
+function ytVarNames(){return["--yt-spec-base-background","--yt-spec-general-background-a","--yt-spec-general-background-b","--yt-spec-general-background-c","--yt-spec-brand-background-solid","--yt-spec-brand-background-primary","--yt-spec-brand-background-secondary","--yt-raised-background","--yt-spec-menu-background","--yt-spec-feed-background-a","--yt-spec-feed-background-b","--yt-spec-static-background","--yt-spec-static-overlay-background-solid"];}
+function stopNs(ns){var st=window[ns];if(!st)return false;try{if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}if(st.records){for(var i=st.records.length-1;i>=0;i--){var r=st.records[i];try{if(!r||!r.el||!r.el.style)continue;if(r.had)r.el.style.setProperty(r.prop,r.value,r.priority||"");else r.el.style.removeProperty(r.prop);if(r.el.__axisTransparentV9Props)delete r.el.__axisTransparentV9Props[r.prop];if(r.el.__axisTransparentV8Props)delete r.el.__axisTransparentV8Props[r.prop];}catch(e){}}}}catch(e){}delete window[ns];return true;}
+function cleanupOldInline(){try{ytVarNames().forEach(function(n){var v=document.documentElement.style.getPropertyValue(n);if(v==="transparent"||v.indexOf("rgba(0,0,0,0.18)")>=0)document.documentElement.style.removeProperty(n);});}catch(e){}}
+[OLD_NS,OLD_V5,OLD_V6,OLD_V7,OLD_V8].forEach(function(n){if(stopNs(n))cleanupOldInline();});
+var st=window[NS]||(window[NS]={mo:null,t:0,idle:null,sweepTO:null,records:[],lastSweep:0,mode:""});
+function remember(el,prop){if(!el||!el.style)return;var key="__axisTransparentV9Props";var seen=el[key]||(el[key]={});if(seen[prop])return;seen[prop]=1;var val=el.style.getPropertyValue(prop);var priority=el.style.getPropertyPriority(prop);st.records.push({el:el,prop:prop,value:val,priority:priority,had:!!(val||priority)});}
 function setStyle(el,prop,value){try{remember(el,prop);el.style.setProperty(prop,value,IMP);}catch(e){}}
-function isYtWatch(){try{var p=location.pathname||"";if(location.hostname==="youtu.be")return p.length>1;return p.indexOf("/watch")===0||p.indexOf("/shorts/")===0||p.indexOf("/live/")===0||p.indexOf("/embed/")===0;}catch(e){return false;}}
-function applyYt(){var r=document.documentElement;ytVarNames().forEach(function(n){var v=T;if(n.indexOf("overlay")>=0)v="rgba(0,0,0,0.18)";if(n.indexOf("blue")>=0||n.indexOf("green")>=0||n.indexOf("percent-layer")>=0)return;setStyle(r,n,v);});try{var app=document.querySelector("ytd-app");if(app){setStyle(app,"background",T);setStyle(app,"background-color",T);}document.querySelectorAll("ytd-browse,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer").forEach(function(el){setStyle(el,"background",T);setStyle(el,"background-color",T);});document.querySelectorAll("ytd-watch-flexy #secondary,ytd-watch-flexy #related").forEach(function(el){setStyle(el,"background",T);setStyle(el,"background-color",T);});}catch(e){}}
-function googleIds(){return["viewport","cnt","gsr","main","center_col","rcnt","rhs","rhscol","lhcol","islsp","islmp","iur","isr_m","iry","rso","searchform","tsf","layout","arc_tp","appbar","main-content","search","before-appbar","sfcnt","top_nav","yDmH0d","scb","eUDTde","MAmRG","lfooter","tw-container","analytics-ddh"];}
-function applyGoogle(){googleIds().forEach(function(id){try{var el=document.getElementById(id);if(el){setStyle(el,"background-color",T);setStyle(el,"background-image","none");}}catch(e){}});try{var main=document.querySelector('[role="main"]');if(main){setStyle(main,"background-color",T);setStyle(main,"background-image","none");}}catch(e){}}
-function sweepLargeOpaqueLayers(){var b=document.body;if(!b)return;var sk={IMG:1,VIDEO:1,AUDIO:1,CANVAS:1,IFRAME:1,SVG:1,PICTURE:1,OBJECT:1,EMBED:1,STYLE:1,SCRIPT:1,LINK:1,META:1,NOSCRIPT:1,TEMPLATE:1,INPUT:1,TEXTAREA:1,SELECT:1,BUTTON:1,OPTION:1,LABEL:1};var n=0,mx=6500,vh=window.innerHeight||800,vw=window.innerWidth||1200,vA=Math.max(1,vh*vw);if(typeof NodeFilter==="undefined")return;var w=document.createTreeWalker(b,NodeFilter.SHOW_ELEMENT,null),el;while((el=w.nextNode())&&n<mx){n++;var t=el.tagName;if(sk[t])continue;if(t&&t.indexOf("-")>0){var q=t.toLowerCase();if(q.slice(0,4)==="ytd-"||q.slice(0,3)==="yt-")continue;}try{if(el.closest('[aria-modal="true"],[role="dialog"],dialog,[data-radix-portal],.modal,.Modal,[class*="modal_root"]'))continue;if(el.closest("#movie_player,#player,#player-container,#player-api,ytd-player,.html5-video-player,.html5-video-container,#ytd-player"))continue;}catch(e){}try{var cs=getComputedStyle(el);if(cs.display==="none"||cs.visibility==="hidden"||(cs.position==="fixed"&&parseFloat(cs.opacity||"1")<0.04))continue;var bg=cs.backgroundColor;if(!bg||bg==="transparent"||bg==="rgba(0, 0, 0, 0)")continue;var a=1;if(bg.indexOf("rgba")===0){var i=bg.lastIndexOf(",");if(i>0){var tail=bg.slice(i+1,-1).trim();var pv=parseFloat(tail);if(!isNaN(pv))a=pv;}}if(a<0.12)continue;var r=el.getBoundingClientRect();if(r.width<24||r.height<22)continue;var f=r.width*r.height/vA,tl=r.height>Math.min(340,vh*0.38),tb=r.width>vw*0.86&&r.height>90;if(f<0.032&&!tl&&!tb)continue;setStyle(el,"background-color",T);var bi=cs.backgroundImage;if(bi&&bi!=="none"&&bi.indexOf("url(")<0&&(bi.indexOf("gradient")>=0||bi.indexOf("linear-gradient")>=0))setStyle(el,"background-image","none");}catch(e2){}}}
-function scheduleSweep(){if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}var go=function(){st.idle=null;st.sweepTO=null;var now=Date.now();if(now-(st.lastSweep||0)<900)return;st.lastSweep=now;try{sweepLargeOpaqueLayers();}catch(e){}};if(window.requestIdleCallback)st.idle=window.requestIdleCallback(go,{timeout:1200});else st.sweepTO=setTimeout(go,320);}
 function hostOnDomain(h,d){return h===d||h.length>d.length&&h.slice(-(d.length+1))==="."+d;}
-function run(){var host=(String(location.hostname||"")).toLowerCase();var isYt=hostOnDomain(host,"youtube.com")||host==="youtu.be";var isGo=hostOnDomain(host,"google.com")||host.endsWith(".google.com");if(isYt&&!isYtWatch())applyYt();if(isGo)applyGoogle();try{setStyle(document.documentElement,"background-color",T);if(document.body){setStyle(document.body,"background-color",T);setStyle(document.body,"background-image","none");}}catch(e){}scheduleSweep();}
+function isYtWatch(){try{var p=location.pathname||"";if(location.hostname==="youtu.be")return p.length>1;return p.indexOf("/watch")===0||p.indexOf("/shorts/")===0||p.indexOf("/live/")===0||p.indexOf("/embed/")===0;}catch(e){return false;}}
+function applyYt(){var r=document.documentElement;ytVarNames().forEach(function(n){var v=T;if(n.indexOf("overlay")>=0)v="rgba(0,0,0,0.18)";setStyle(r,n,v);});var hosts="ytd-app,ytd-browse,ytd-page-manager,ytd-miniplayer,ytd-masthead,ytd-app-drawer,#content.ytd-page-manager,yt-page-manager-view,ytd-rich-grid-renderer,ytd-two-column-browse-results-renderer,ytd-section-list-renderer,ytd-feed-filter-chip-bar-renderer";try{document.querySelectorAll(hosts).forEach(function(el){setStyle(el,"background",T);setStyle(el,"background-color",T);});}catch(e){}}
+function googleIds(){return["viewport","cnt","gsr","main","center_col","rcnt","rhs","rhscol","lhcol","rso","searchform","tsf","layout","appbar","main-content","search","sfcnt","top_nav","yDmH0d"];}
+function applyGoogle(){googleIds().forEach(function(id){try{var el=document.getElementById(id);if(el){setStyle(el,"background-color",T);setStyle(el,"background-image","none");}}catch(e){}});}
+function applyFrameworkShells(){var sels=["#__next","#root","#app","#react-root",".application-main","#page","#page-content"];sels.forEach(function(sel){try{document.querySelectorAll(sel).forEach(function(el){setStyle(el,"background-color",T);setStyle(el,"background-image","none");});}catch(e){}});try{var b=document.body;if(b&&b.firstElementChild){setStyle(b.firstElementChild,"background-color",T);setStyle(b.firstElementChild,"background-image","none");}}catch(e){}}
+function run(){var host=(String(location.hostname||"")).toLowerCase();var isYt=hostOnDomain(host,"youtube.com")||host==="youtu.be";var isGo=hostOnDomain(host,"google.com")||host.endsWith(".google.com");if(isYt&&isYtWatch()){st.mode="watch";return;}st.mode=isYt?"yt":(isGo?"go":"generic");if(isYt)applyYt();else if(isGo)applyGoogle();else applyFrameworkShells();try{setStyle(document.documentElement,"background-color",T);if(document.body){setStyle(document.body,"background-color",T);setStyle(document.body,"background-image","none");}}catch(e){}}
+st.run=run;
+st.runSweep=run;
 run();
-if(!st.mo&&document.body){st.mo=new MutationObserver(function(){clearTimeout(st.t);st.t=setTimeout(run,480);});st.mo.observe(document.body,{childList:true,subtree:true});}else if(!st.mo){run();}
+if(!st.mo&&document.body){st.mo=new MutationObserver(function(){clearTimeout(st.t);st.t=setTimeout(run,360);});st.mo.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["class","style","dark"]});}else if(!st.mo){run();}
 }catch(e){}
 })();
 `.replace(/\s+/g, ' ').trim();
@@ -123,18 +115,18 @@ if(!st.mo&&document.body){st.mo=new MutationObserver(function(){clearTimeout(st.
 const AXIS_TRANSPARENT_SITES_DOM_PATCH_CLEANUP = `
 (function(){
 try{
-var NS="__axisTransparentV7";
+var NS="__axisTransparentV9";
 var OLD_NS="__axisTransparentV4";
 var OLD_V5="__axisTransparentV5";
 var OLD_V6="__axisTransparentV6";
+var OLD_V7="__axisTransparentV7";
+var OLD_V8="__axisTransparentV8";
 function ytVarNames(){return["--yt-spec-base-background","--yt-spec-general-background-a","--yt-spec-general-background-b","--yt-spec-general-background-c","--yt-spec-brand-background-solid","--yt-spec-brand-background-primary","--yt-spec-brand-background-secondary","--yt-raised-background","--yt-spec-menu-background","--yt-spec-feed-background-a","--yt-spec-feed-background-b","--yt-spec-static-background","--yt-spec-static-overlay-background-solid"];}
-function stop(ns){var st=window[ns];if(!st)return false;try{if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}if(st.records){for(var i=st.records.length-1;i>=0;i--){var r=st.records[i];try{if(!r||!r.el||!r.el.style)continue;if(r.had)r.el.style.setProperty(r.prop,r.value,r.priority||"");else r.el.style.removeProperty(r.prop);if(r.el.__axisTransparentV7Props)delete r.el.__axisTransparentV7Props[r.prop];}catch(e){}}}}catch(e){}delete window[ns];return true;}
-function cleanupOldInline(){try{ytVarNames().forEach(function(n){var v=document.documentElement.style.getPropertyValue(n);if(v==="transparent"||v.indexOf("rgba(0,0,0,0.18)")>=0)document.documentElement.style.removeProperty(n);});var sel="html,body,#viewport,#cnt,#gsr,#main,#center_col,#rcnt,#rhs,#rhscol,#lhcol,#islsp,#islmp,#iur,#isr_m,#iry,#rso,#searchform,#tsf,#layout,#arc_tp,#appbar,#main-content,#search,#before-appbar,#sfcnt,#top_nav,#yDmH0d,#scb,#eUDTde,#MAmRG,#lfooter,#tw-container,#analytics-ddh,[role='main'],ytd-app,ytd-browse,ytd-page-manager,ytd-miniplayer,ytd-feed-filter-chip-bar-renderer,[style]";document.querySelectorAll(sel).forEach(function(el){try{["background-color","background","background-image"].forEach(function(p){var v=el.style.getPropertyValue(p);var pr=el.style.getPropertyPriority(p);if(pr==="important"&&(v==="transparent"||v==="rgba(0, 0, 0, 0)"||v==="none"))el.style.removeProperty(p);});}catch(e){}});}catch(e){}}
-var hadV7=stop(NS);
-var hadV6=stop(OLD_V6);
-var hadV5=stop(OLD_V5);
-var hadV4=stop(OLD_NS);
-if(!hadV7&&!hadV6&&!hadV5&&hadV4)cleanupOldInline();
+function stop(ns){var st=window[ns];if(!st)return false;try{if(st.mo){st.mo.disconnect();st.mo=null;}if(st.t)clearTimeout(st.t);if(st.idle!=null){try{if(window.cancelIdleCallback)window.cancelIdleCallback(st.idle);}catch(e){}st.idle=null;}if(st.sweepTO){clearTimeout(st.sweepTO);st.sweepTO=null;}if(st.records){for(var i=st.records.length-1;i>=0;i--){var r=st.records[i];try{if(!r||!r.el||!r.el.style)continue;if(r.had)r.el.style.setProperty(r.prop,r.value,r.priority||"");else r.el.style.removeProperty(r.prop);if(r.el.__axisTransparentV9Props)delete r.el.__axisTransparentV9Props[r.prop];if(r.el.__axisTransparentV8Props)delete r.el.__axisTransparentV8Props[r.prop];}catch(e){}}}}catch(e){}delete window[ns];return true;}
+function cleanupOldInline(){try{ytVarNames().forEach(function(n){var v=document.documentElement.style.getPropertyValue(n);if(v==="transparent"||v.indexOf("rgba(0,0,0,0.18)")>=0)document.documentElement.style.removeProperty(n);});}catch(e){}}
+var had=stop(NS);
+[OLD_V8,OLD_V7,OLD_V6,OLD_V5,OLD_NS].forEach(function(n){if(stop(n))cleanupOldInline();});
+if(!had)cleanupOldInline();
 }catch(e){}
 })();
 `.replace(/\s+/g, ' ').trim();
@@ -147,7 +139,9 @@ function getShortcutEditorActions() {
         { action: 'new-tab', label: 'New Window' },
         { action: 'next-tab', label: 'Show Next Tab' },
         { action: 'previous-tab', label: 'Show Previous Tab' },
-        { action: 'recover-tab', label: 'Recover Closed Tab' },
+        { action: 'next-profile', label: 'Switch to Next Profile' },
+        { action: 'previous-profile', label: 'Switch to Previous Profile' },
+        { action: 'recover-tab', label: 'Undo' },
         { action: 'refresh', label: 'Refresh Page' },
         { action: 'focus-url', label: 'Focus URL Bar' },
         { action: 'duplicate-tab', label: 'Duplicate Tab' },
@@ -176,62 +170,64 @@ function getShortcutEditorActions() {
 }
 
 /**
- * Shell chrome interpolation: Settings ▸ Window transparency (`windowChromeLight`) — 0 = opaque (handled in getShellChromeStyle),
- * 50 = default blend, 100 = most light. **Transparent endpoint** is very low‑alpha; **above 0** the blend uses a curve (`1 − (1−t)^k`) so mid‑high slider values lean further toward “see through” without changing the control.
+ * Shell chrome: Settings ▸ Window transparency (`windowChromeLight`).
+ * 0 = opaque. 100 = most light through.
+ * Theme RGB is never altered. Transmission = rgba alpha + frost blur on transparent #app.
  */
 const AXIS_SHELL_CHROME_OPAQUE = {
-    glassAlpha: 0.34,
+    glassAlpha: 0.88,
     slideOutAlpha: 1,
     popupAlpha: 0.52,
-    urlBarAlpha: 0.42,
-    blurMain: 72,
-    satMain: 178,
-    blurStrong: 78,
-    satStrong: 184,
-    urlBarBlur: 18,
-    urlBarSat: 126,
-    urlBarTintDefault: 0.38,
-    urlBarTintDark: 0.34,
-    urlBarTintLight: 0.26,
+    urlBarAlpha: 0.72,
+    blurMain: 56,
+    satMain: 138,
+    blurStrong: 62,
+    satStrong: 138,
+    urlBarBlur: 14,
+    urlBarSat: 138,
+    urlBarTintDefault: 0.72,
+    urlBarTintDark: 0.72,
+    urlBarTintLight: 0.72,
     newTabPageAlpha: 0.44,
     newTabPageBlur: 32,
-    newTabPageSat: 148,
+    newTabPageSat: 140,
     newTabSearchAlpha: 0.58,
     newTabSearchBlur: 26,
-    newTabSearchSat: 148,
+    newTabSearchSat: 140,
     newTabToggleAlpha: 0.22,
     newTabToggleBlur: 18,
-    newTabToggleSat: 132,
+    newTabToggleSat: 140,
     newTabAskAlpha: 0.64,
     newTabAskBlur: 28,
-    newTabAskSat: 148,
+    newTabAskSat: 140,
 };
 const AXIS_SHELL_CHROME_TRANSPARENT = {
-    glassAlpha: 0.0045,
-    slideOutAlpha: 1,
-    popupAlpha: 0.038,
-    urlBarAlpha: 0.012,
-    blurMain: 8,
-    satMain: 118,
-    blurStrong: 10,
-    satStrong: 128,
-    urlBarBlur: 4,
-    urlBarSat: 102,
-    urlBarTintDefault: 0.028,
-    urlBarTintDark: 0.025,
-    urlBarTintLight: 0.018,
-    newTabPageAlpha: 0.028,
+    // Very thin tint + zero blur = sharp wallpaper/desktop light (like transparent URL bar).
+    glassAlpha: 0.14,
+    slideOutAlpha: 0.92,
+    popupAlpha: 0.4,
+    urlBarAlpha: 0.36,
+    blurMain: 0,
+    satMain: 100,
+    blurStrong: 0,
+    satStrong: 100,
+    urlBarBlur: 0,
+    urlBarSat: 100,
+    urlBarTintDefault: 0.36,
+    urlBarTintDark: 0.36,
+    urlBarTintLight: 0.36,
+    newTabPageAlpha: 0.24,
     newTabPageBlur: 8,
-    newTabPageSat: 118,
-    newTabSearchAlpha: 0.028,
-    newTabSearchBlur: 6,
-    newTabSearchSat: 112,
-    newTabToggleAlpha: 0.014,
-    newTabToggleBlur: 6,
-    newTabToggleSat: 112,
-    newTabAskAlpha: 0.05,
-    newTabAskBlur: 8,
-    newTabAskSat: 114,
+    newTabPageSat: 140,
+    newTabSearchAlpha: 0.24,
+    newTabSearchBlur: 8,
+    newTabSearchSat: 140,
+    newTabToggleAlpha: 0.16,
+    newTabToggleBlur: 8,
+    newTabToggleSat: 140,
+    newTabAskAlpha: 0.28,
+    newTabAskBlur: 10,
+    newTabAskSat: 140,
 };
 
 /** Extension id from a Chrome Web Store listing URL (must match main-process `parseChromeWebStoreExtensionId`). */
@@ -350,13 +346,27 @@ class AxisBrowser {
         this.tabGroups = new Map(); // Store tab groups: { id, name, tabIds: [], open: true, color: '#FF6B6B' }
         this.favorites = []; // Sidebar favorites shown above pinned tabs
         this._favoriteDrag = null;
+        this._lastSessionExitClean = true;
+        this._tabElementById = new Map();
+        this._lastFavoritesRenderTabId = null;
+        this._historyTrackTimers = new Map();
+        this._unpinnedRecoverySaveTimer = null;
+        this._unpinnedRecoveryInterval = null;
+        /** Cached dominant RGB per favicon URL for favorite active outlines. */
+        this._favoriteAccentCache = new Map();
+        /** In-flight disk writes per profile — load waits so evicted data is not read stale. */
+        this._profilePersistInflight = new Map();
         /** During `syncSidebarFromTabGroups`, empty group that will run close animation (last tab dragged out). */
         this._pendingEmptyGroupCollapseId = null;
         this.pendingTabGroupColor = null; // Color selected for new tab group
         this.settings = {};
+        this._systemUiTheme = 'dark';
         this.selectedSearchEngine = null; // Track selected search engine shortcut
         this.closedTabs = []; // Store recently closed tabs for recovery
-        this.tabUndoStack = []; // Undo stack for close tab / add to group / remove from group (max 15, kept smaller for RAM)
+        /** Most-recently-used tab ids (oldest → newest); drives focus after close. */
+        this._recentTabStack = [];
+        this.tabUndoStack = []; // Cmd+Z undo stack (close, clear, pin, rename, icon, favorites, groups)
+        this._suppressUndo = false;
         // Search engine full word mapping (no shortcuts, only full words)
         this.searchEngineWords = [
             'google',
@@ -396,6 +406,8 @@ class AxisBrowser {
         this.isWebviewLoading = false; // Track if webview is currently loading
         this.spotlightSelectedIndex = -1; // Track selected suggestion index
         this.NEWTAB_URL = 'axis://newtab'; // Custom new tab page (replaces spotlight)
+        /** Tab id whose new-tab / AI chat state is currently painted in the shared `#new-tab-page` overlay. */
+        this._ntpUiBoundTabId = null;
         this.NTP_DEFAULT_FAVICON = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><g fill="none" stroke="%23ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.25"/><path d="M10.25 10.25L13 13"/></g></svg>';
         this.NTP_AI_CHAT_FAVICON = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path fill="none" stroke="%23ffffff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h10a1 1 0 0 1 1 1v4.5a1 1 0 0 1-1 1H6.2L3.5 13V10H3a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1z"/></svg>';
         this.contextMenuTabGroupId = null; // Track which tab group context menu is open
@@ -403,11 +415,16 @@ class AxisBrowser {
         /** Tab whose guest fired the last webpage context menu (may differ from `currentTab`). */
         this._contextMenuSourceTabId = null;
         this.themeCache = new Map(); // Cache theme colors per domain for instant theme switching
+        this.urlBarThemeCache = new Map(); // Cache URL bar tint per domain for instant nav paint
+        this._urlBarThemeCachePersistTimer = null;
         this.currentLibraryItems = []; // Store library items for preview navigation
         this.currentPreviewFile = null; // Current file being previewed
         this.currentPreviewIndex = -1; // Index of current file in library items
         this.previewListenersSetup = false; // Track if preview listeners are set up
         this.aiChatMessages = []; // Store chat message history
+        this._sidebarChatImages = [];
+        this._newTabChatImages = [];
+        this._aiChatMaxImages = 4;
         /** Whether the AI chat panel is open, keyed by normalized tab id (per-tab UI state). */
         this.aiChatPanelOpenByTabId = new Map();
         this.aiChatApiKey = ''; // Groq API key for chat
@@ -429,14 +446,32 @@ class AxisBrowser {
         this._urlBarThemeRefineTimer = null;
         /** Tab switch: disable URL bar tint fade until sync styling or first extract completes. */
         this._urlBarInstantThemeTabSwitch = false;
-        /** Last palette passed to applyCustomTheme — restored on profile switch without recomputing. */
+        this._urlBarNavThemeSnap = false;
+        /** Main-frame navigation: hold URL bar tint until the page commits (revealed with first paint). */
+        this._urlBarPendingByWebview = new WeakMap();
         this._lastShellThemeColors = null;
         /** Profile commit: skip the next switchToTab rAF URL bar refresh (chrome already restored). */
         this._skipNextUrlBarRefresh = false;
         /** Profile switch restored URL bar from runtime cache — skip async extract until tab changes. */
         this._profileUrlBarRestoredFromCache = false;
+        /** Profile switch applied shell palette from settings/cache — skip webview re-theme flash. */
+        this._profileShellThemeFromSnapshot = false;
         /** Tab switch restored URL bar from per-tab snapshot — skip async extract on first refresh. */
         this._tabUrlBarRestoredFromCache = false;
+        /** Tab switch applied shell + URL bar synchronously — rAF only updates navigation chrome. */
+        this._tabSwitchChromeReady = false;
+        /** Skip redundant settings shell repaints when the palette did not change. */
+        this._lastSettingsShellKey = '';
+        this._lastSettingsShellKeyByProfile = new Map();
+        /** Link preview chip — debounced target URL from guest `update-target-url`. */
+        this._linkStatusVisibleUrl = '';
+        this._linkStatusTargetUrl = '';
+        this._linkStatusShowTimer = null;
+        this._linkStatusHideTimer = null;
+        this._linkStatusFadeTimer = null;
+        this._linkStatusDockRight = false;
+        this._linkStatusInDockZone = false;
+        this._linkStatusDockLeaveTimer = null;
         this._settingsUpdatedRaf = null;
         this._ambientAudioCtx = null;
         this._ambientAudioChain = null;
@@ -482,6 +517,7 @@ class AxisBrowser {
         
         // Setup URL bar functionality
         this.setupUrlBar();
+        this.setupLinkStatusBar();
 
         // Listen for messages from embedded note pages
         this.messageHandler = (event) => this.onEmbeddedMessage(event);
@@ -499,7 +535,7 @@ class AxisBrowser {
             favoritesGrid: document.getElementById('favorites-grid'),
             sidebarNewTabBtn: document.getElementById('sidebar-new-tab-btn'),
             clearUnpinnedFloatingBtn: document.getElementById('clear-unpinned-floating'),
-            webview: document.getElementById('webview'),
+            webview: null,
             closeSettings: document.getElementById('close-settings'),
             downloadsBtnFooter: document.getElementById('downloads-btn-footer'),
             sidebarPlusBtn: document.getElementById('sidebar-plus-btn'),
@@ -511,7 +547,6 @@ class AxisBrowser {
             closeDownloads: document.getElementById('close-downloads'),
             refreshDownloads: document.getElementById('refresh-downloads'),
             closeSecurity: document.getElementById('close-security'),
-            viewCertificate: document.getElementById('view-certificate'),
             securitySettings: document.getElementById('security-settings'),
             securityPanel: document.getElementById('security-panel'),
             searchClose: document.getElementById('search-close'),
@@ -545,6 +580,11 @@ class AxisBrowser {
             vaultAutofillPanel: document.getElementById('vault-autofill-panel'),
             vaultPickModal: document.getElementById('vault-pick-modal'),
             urlBarChat: document.getElementById('url-bar-chat'),
+            linkStatusLayer: document.getElementById('axis-link-status-layer'),
+            linkStatus: document.getElementById('axis-link-status'),
+            linkStatusHitLeft: document.querySelector('.axis-link-status-hit--left'),
+            linkStatusHitRight: document.querySelector('.axis-link-status-hit--right'),
+            linkStatusText: document.querySelector('#axis-link-status .axis-link-status-text'),
             sidebarMediaDock: document.getElementById('sidebar-media-dock'),
             sidebarMediaDockCard: document.querySelector('#sidebar-media-dock .sidebar-media-dock-card'),
             sidebarMediaTitle: document.getElementById('sidebar-media-title'),
@@ -565,7 +605,16 @@ class AxisBrowser {
     async init() {
         // Load settings + shortcut cache in parallel (faster first interaction)
         await Promise.all([this.loadSettings(), this.refreshShortcutCache()]);
-        this.syncGroqApiKeyFromSettings?.();
+        try {
+            const recovery = await window.electronAPI.getAxisSessionRecovery?.();
+            this._lastSessionExitClean = recovery?.lastExitClean !== false;
+        } catch (_) {
+            this._lastSessionExitClean = true;
+        }
+        this._loadPersistedUrlBarThemeCache();
+        await this.refreshSystemUiTheme();
+        this.setupSystemUiThemeListener();
+        this.syncAiProviderFromSettings?.();
         const fallbackWebviewPreloadPath = (() => {
             try {
                 return decodeURIComponent(new URL('webview-preload-bundle.js', window.location.href).pathname);
@@ -582,48 +631,48 @@ class AxisBrowser {
             this._webviewCwsPreloadPath = fallbackWebviewPreloadPath || null;
         }
         try {
+            this._webviewLightPreloadPath =
+                (await window.electronAPI.getWebviewLightPreloadPath?.()) || null;
+        } catch (_) {
+            this._webviewLightPreloadPath = null;
+        }
+        try {
             this._settingsWebviewPreloadPath =
                 (await window.electronAPI.getSettingsWebviewPreloadPath?.()) || null;
         } catch (_) {
             this._settingsWebviewPreloadPath = null;
         }
-        try {
-            this._vaultPageScanJs = (await window.electronAPI.vaultGetPageScanJs?.()) || null;
-        } catch (_) {
-            this._vaultPageScanJs = null;
-        }
-        try {
-            const inj = await window.electronAPI.vaultGetAutofillInjectJs?.();
-            this._vaultAutofillBootstrapJs = inj?.bootstrap || null;
-            this._vaultAutofillProbeJs = inj?.probe || null;
-            this._vaultAutofillHideJs = inj?.hide || null;
-        } catch (_) {
-            this._vaultAutofillBootstrapJs = null;
-            this._vaultAutofillProbeJs = null;
-            this._vaultAutofillHideJs = null;
-        }
+        this.runWhenIdle(() => {
+            void (async () => {
+                try {
+                    this._vaultPageScanJs = (await window.electronAPI.vaultGetPageScanJs?.()) || null;
+                } catch (_) {
+                    this._vaultPageScanJs = null;
+                }
+                try {
+                    const inj = await window.electronAPI.vaultGetAutofillInjectJs?.();
+                    this._vaultAutofillBootstrapJs = inj?.bootstrap || null;
+                    this._vaultAutofillProbeJs = inj?.probe || null;
+                    this._vaultAutofillHideJs = inj?.hide || null;
+                } catch (_) {
+                    this._vaultAutofillBootstrapJs = null;
+                    this._vaultAutofillProbeJs = null;
+                    this._vaultAutofillHideJs = null;
+                }
+                this.startVaultCredentialWatcher();
+            })();
+        });
         try {
             window.electronAPI.onVaultGuestIpc?.((msg) => this.handleVaultGuestIpc(msg));
         } catch (_) {}
-        if (this._webviewCwsPreloadPath && this.elements?.webview) {
-            try {
-                this.elements.webview.setAttribute('preload', this._webviewCwsPreloadPath);
-            } catch (_) {
-                /* ignore */
-            }
-        }
-        if (this.elements?.webview) {
-            try {
-                this.elements.webview.setAttribute('partition', this.getSessionPartition());
-            } catch (_) {}
-        }
+        this._retireLegacyGuestWebview();
         this._lastJavascriptEnabled = this.settings?.javascriptEnabled !== false;
         this.syncTransparentSitesUi();
         this.syncAdBlockerUrlBarState();
 
         // Set `data-ui-theme` before any theme apply so CSS fallback rules for the light
         // shell land on the first paint (incognito stays dark regardless).
-        const initialUiTheme = !this.isIncognitoWindow && this.settings?.uiTheme === 'light' ? 'light' : 'dark';
+        const initialUiTheme = !this.isIncognitoWindow && this.isLightUiTheme() ? 'light' : 'dark';
         document.documentElement.setAttribute('data-ui-theme', initialUiTheme);
 
         if (window.electronAPI?.platform === 'darwin') {
@@ -682,14 +731,6 @@ class AxisBrowser {
         
         applyThemeNow();
         
-        setTimeout(() => {
-            if (this.isIncognitoWindow) {
-                this.resetToBlackTheme();
-            } else if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
-                this.applyCustomThemeFromSettings();
-            }
-        }, 50);
-        
         this.applySidebarPosition(); // Apply saved sidebar position
         this._vaultPickWebview = null;
         this._vaultPendingSave = null;
@@ -703,7 +744,6 @@ class AxisBrowser {
         this.setupProfileUi();
         this.ensureProfileSwipeChrome?.();
         this.setupProfileSwipeGestures?.();
-        this.startVaultCredentialWatcher();
         this.setupEventListeners();
         this.setupSidebarMediaDockListeners();
         this.setupNewTabPage();
@@ -714,10 +754,18 @@ class AxisBrowser {
 
         // Load pinned tabs and tab groups (skip in incognito – start fresh)
         if (!this.isIncognitoWindow) {
-            await this.loadFavorites();
-            await this.loadPinnedTabs();
-            await this.loadTabGroups();
+            await Promise.all([
+                this.loadFavorites(),
+                this.loadPinnedTabs(),
+                this.loadTabGroups(),
+                this.loadUnpinnedTabs()
+            ]);
+            this._applyUnpinnedClearOnStartup();
+            this._setupUnpinnedTabsRecoveryPersistence();
         }
+
+        this._setupUnpinnedClearTimer();
+        this._syncUndoShortcutState?.();
 
         // Defer non-critical work to idle time to improve first interaction latency
         this.runWhenIdle(() => {
@@ -727,7 +775,6 @@ class AxisBrowser {
             this.setupPerformanceOptimizations();
             if (!this.isIncognitoWindow) {
                 this._seedCurrentProfileRuntimeCache?.();
-                this._prefetchAdjacentProfileCaches?.();
             }
         });
         
@@ -786,6 +833,177 @@ class AxisBrowser {
             setTimeout(invoke, 0);
         }
     }
+
+    /** Run non-critical guest work after first paint — keeps navigation off the hot path. */
+    _runGuestIdleTask(webview, fn, opts = {}) {
+        if (!webview || typeof fn !== 'function') return;
+        const timeout = opts.timeout != null ? opts.timeout : 900;
+        const allowInactive = !!opts.allowInactive;
+        const run = () => {
+            try {
+                if (!allowInactive && this.getActiveWebview() !== webview) return;
+                fn();
+            } catch (e) {
+                console.error('guest idle task failed', e);
+            }
+        };
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(run, { timeout });
+        } else {
+            setTimeout(run, 32);
+        }
+    }
+
+    _deferGuestLoadChores(webview, tabId) {
+        if (!webview || this.isBenchmarking) return;
+        if (webview.__axisGuestLoadChoresScheduled) return;
+        webview.__axisGuestLoadChoresScheduled = true;
+        this._runGuestIdleTask(webview, () => {
+            webview.__axisGuestLoadChoresScheduled = false;
+            if (this.getActiveWebview() !== webview) return;
+            if (this.settings?.transparentSites) {
+                this._touchTransparentSitesForWebview(webview);
+            }
+            let pageUrl = '';
+            try {
+                pageUrl = webview.getURL() || '';
+            } catch (_) {}
+            if (pageUrl && webview.__axisVaultAutofillUrl !== pageUrl) {
+                this._voidGuestTask(
+                    this.injectVaultAutofillBootstrap(webview).then(() => {
+                        webview.__axisVaultAutofillUrl = pageUrl;
+                    })
+                );
+            }
+            if (pageUrl) {
+                try {
+                    this._touchExtensionStoreListingUiForWebview(webview, pageUrl);
+                } catch (_) {}
+            }
+        });
+    }
+
+    _shouldKeepBackgroundMediaAlive(tabId) {
+        const nid = this._normalizeTabMapKey(tabId);
+        if (nid == null) return false;
+        if (this.pipTabId != null && this._normalizeTabMapKey(this.pipTabId) === nid) return true;
+        if (
+            this._sidebarMediaDock &&
+            this._normalizeTabMapKey(this._sidebarMediaDock.tabId) === nid
+        ) {
+            return true;
+        }
+        return false;
+    }
+
+    _syncWebviewBackgroundThrottling(activeTabId, deferSuspendTabId = null) {
+        const active = this._normalizeTabMapKey(activeTabId);
+        const deferSuspend = this._normalizeTabMapKey(deferSuspendTabId);
+        this.tabs.forEach((tab, id) => {
+            if (!tab?.webview) return;
+            try {
+                const wc = tab.webview.getWebContents?.();
+                if (wc && typeof wc.setBackgroundThrottling === 'function' && !wc.isDestroyed?.()) {
+                    const keepMedia = id === active || this._shouldKeepBackgroundMediaAlive(id);
+                    wc.setBackgroundThrottling(!keepMedia);
+                }
+            } catch (_) {}
+            if (id === active) {
+                this._resumeActiveTabGuest(tab.webview, tab);
+            } else if (deferSuspend != null && id === deferSuspend) {
+                /* PiP check in flight — do not pause/mute yet. */
+            } else if (this._shouldKeepBackgroundMediaAlive(id)) {
+                this._ensureBackgroundMediaPlayback(tab.webview, tab);
+            } else {
+                this._suspendInactiveTabGuest(tab.webview, tab, id);
+            }
+        });
+    }
+
+    _ensureBackgroundMediaPlayback(webview, tab) {
+        if (!webview) return;
+        if (webview.__axisBgAudioMuted) {
+            webview.__axisBgAudioMuted = false;
+            if (tab && !tab.isMuted) {
+                try {
+                    webview.setAudioMuted?.(false);
+                } catch (_) {}
+            }
+        }
+        try {
+            const wc = webview.getWebContents?.();
+            if (wc && typeof wc.setBackgroundThrottling === 'function' && !wc.isDestroyed?.()) {
+                wc.setBackgroundThrottling(false);
+            }
+        } catch (_) {}
+    }
+
+    _suspendInactiveTabGuest(webview, tab, tabId) {
+        if (!webview) return;
+        const nid = this._normalizeTabMapKey(tabId ?? tab?.id);
+        if (nid != null && this._shouldKeepBackgroundMediaAlive(nid)) return;
+        try {
+            const wc = webview.getWebContents?.();
+            if (wc && typeof wc.setBackgroundThrottling === 'function' && !wc.isDestroyed?.()) {
+                wc.setBackgroundThrottling(true);
+            }
+        } catch (_) {}
+        if (tab && !tab.isMuted && !webview.__axisUserMutedTab) {
+            try {
+                if (typeof webview.setAudioMuted === 'function') {
+                    webview.setAudioMuted(true);
+                    webview.__axisBgAudioMuted = true;
+                }
+            } catch (_) {}
+        }
+        if (webview.__axisMediaSuspendDone) return;
+        webview.__axisMediaSuspendDone = true;
+        try {
+            void webview.executeJavaScript(`(function(){
+                if (window.__axisMediaPausedByAxis) return;
+                const pipEl = document.pictureInPictureElement;
+                const nodes = document.querySelectorAll('video,audio');
+                const paused = [];
+                for (const el of nodes) {
+                    if (!el.paused && el !== pipEl) {
+                        paused.push(el);
+                        try { el.pause(); } catch (_) {}
+                    }
+                }
+                if (paused.length) window.__axisMediaPausedByAxis = paused;
+            })();`, false);
+        } catch (_) {}
+    }
+
+    _resumeActiveTabGuest(webview, tab) {
+        if (!webview) return;
+        try {
+            const wc = webview.getWebContents?.();
+            if (wc && typeof wc.setBackgroundThrottling === 'function' && !wc.isDestroyed?.()) {
+                wc.setBackgroundThrottling(false);
+            }
+        } catch (_) {}
+        if (webview.__axisBgAudioMuted) {
+            webview.__axisBgAudioMuted = false;
+            if (tab && !tab.isMuted) {
+                try {
+                    webview.setAudioMuted?.(false);
+                } catch (_) {}
+            }
+        }
+        if (!webview.__axisMediaSuspendDone) return;
+        webview.__axisMediaSuspendDone = false;
+        try {
+            void webview.executeJavaScript(`(function(){
+                const list = window.__axisMediaPausedByAxis;
+                window.__axisMediaPausedByAxis = null;
+                if (!list || !list.length) return;
+                for (const el of list) {
+                    try { el.play(); } catch (_) {}
+                }
+            })();`, false);
+        } catch (_) {}
+    }
     
     // Batch DOM updates to reduce reflows
     batchDOMUpdates(updates) {
@@ -818,13 +1036,159 @@ class AxisBrowser {
         }
     }
 
+    /** Stored Appearance preference: `light`, `dark`, or `system`. */
+    getUiThemePreference() {
+        const v = this.settings?.uiTheme;
+        if (v === 'light' || v === 'dark' || v === 'system') return v;
+        return 'dark';
+    }
+
+    async refreshSystemUiTheme() {
+        try {
+            const t = await window.electronAPI?.getSystemUiTheme?.();
+            if (t === 'light' || t === 'dark') this._systemUiTheme = t;
+        } catch (_) {}
+        if (!this._systemUiTheme) this._systemUiTheme = 'dark';
+    }
+
+    /** Resolved overlay theme for popups/menus (`light` or `dark`). */
+    getEffectiveUiTheme() {
+        if (this.isIncognitoWindow) return 'dark';
+        const pref = this.getUiThemePreference();
+        if (pref === 'light') return 'light';
+        if (pref === 'dark') return 'dark';
+        return this._systemUiTheme === 'light' ? 'light' : 'dark';
+    }
+
+    isLightUiTheme() {
+        return this.getEffectiveUiTheme() === 'light';
+    }
+
+    setupSystemUiThemeListener() {
+        if (this._systemUiThemeListenerAttached) return;
+        this._systemUiThemeListenerAttached = true;
+        window.electronAPI?.onSystemUiThemeChanged?.((theme) => {
+            this._systemUiTheme = theme === 'light' ? 'light' : 'dark';
+            if (this.getUiThemePreference() !== 'system') return;
+            this.applyUiThemeSurfaces();
+        });
+    }
+
+    /** Apply `data-ui-theme` and dependent overlay surfaces only. */
+    applyUiThemeSurfaces() {
+        const preferLightUi = this.isLightUiTheme();
+        document.documentElement.setAttribute('data-ui-theme', preferLightUi ? 'light' : 'dark');
+        void this.syncVaultAutofillUiTheme(this.getActiveWebview()).catch(() => {});
+        if (this.isIncognitoWindow) {
+            this.resetToBlackTheme();
+            return;
+        }
+        if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+            this.applyCustomThemeFromSettings();
+        } else {
+            this.resetToBlackTheme();
+        }
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (tab?.url === this.NEWTAB_URL) {
+            this.applyNewTabCustomization();
+            this.updateNewTabHero();
+        }
+    }
+
     async saveSetting(key, value) {
         try {
-            await window.electronAPI.setSetting(key, value);
+            if (this._profileScopedPersistBlocked?.(key)) return;
+            if (!this.settings || typeof this.settings !== 'object') this.settings = {};
             this.settings[key] = value;
+            await window.electronAPI.setSetting(key, value);
         } catch (error) {
             console.error('Failed to save setting:', error);
         }
+    }
+
+    _profileScopedPersistBlocked(key) {
+        if (!this._profileSwipeFinalizing && !this._profileSwipeLock) return false;
+        if (key == null) return true;
+        return (
+            key === 'tabGroups' ||
+            key === 'pinnedTabs' ||
+            key === 'unpinnedTabs' ||
+            key === 'favorites'
+        );
+    }
+
+    _activeProfileDomKey(profileId = this.profileId) {
+        return String(profileId || 'personal')
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '-') || 'personal';
+    }
+
+    _sidebarNodeOwnedByActiveProfile(node) {
+        if (!node?.dataset) return true;
+        const owner = node.dataset.axisProfile;
+        if (!owner) return true;
+        return owner === this._activeProfileDomKey();
+    }
+
+    _clearDetachedTabElementPool() {
+        const pool = document.getElementById('tab-element-pool');
+        if (pool) pool.replaceChildren();
+    }
+
+    _purgeOrphanSidebarNodes() {
+        const container = this.elements?.tabsContainer || document.getElementById('tabs-container');
+        if (!container) return;
+        const validTabIds = new Set(this.tabs.keys());
+        const validGroupIds = new Set();
+        for (const key of this.tabGroups.keys()) {
+            validGroupIds.add(key);
+            validGroupIds.add(Number(key));
+            validGroupIds.add(String(key));
+        }
+        container.querySelectorAll('.tab-group').forEach((groupEl) => {
+            const gid = groupEl.dataset.tabGroupId;
+            const owned =
+                gid != null &&
+                (validGroupIds.has(gid) ||
+                    validGroupIds.has(Number(gid)) ||
+                    this.tabGroups.has(gid) ||
+                    this.tabGroups.has(Number(gid)));
+            if (!owned || !this._sidebarNodeOwnedByActiveProfile(groupEl)) {
+                groupEl.remove();
+            }
+        });
+        container.querySelectorAll('.tab').forEach((tabEl) => {
+            if (tabEl.classList.contains('tab-favorite-host')) return;
+            const tid = this._normalizeTabMapKey(tabEl.dataset.tabId);
+            if (tid == null || !validTabIds.has(tid) || !this._sidebarNodeOwnedByActiveProfile(tabEl)) {
+                tabEl.remove();
+            }
+        });
+    }
+
+    /** Whether transparent-site injection should run for this URL (not watch/shorts/internal). */
+    _shouldInjectTransparentSites(url) {
+        if (
+            !url ||
+            url === 'about:blank' ||
+            /^axis:/i.test(url) ||
+            /^file:/i.test(url) ||
+            url.startsWith('chrome-error:') ||
+            url.startsWith('chrome-devtools:')
+        ) {
+            return false;
+        }
+        return !this.isYouTubeWatchUrl(url);
+    }
+
+    /** Drop renderer-side inject keys after main-frame navigation (inserted CSS is cleared by Chromium on reload). */
+    _resetTransparentSitesGuestCache(webview) {
+        if (!webview) return;
+        webview.__axisTransparentCssKey = null;
+        webview.__axisTransparentUrl = null;
+        webview.__axisTransparentPageKey = null;
+        webview.__axisTransparentDomPatchKey = null;
+        webview.__axisTransparentDomPatchUrl = null;
     }
 
     async removeTransparentSitesFromWebview(webview) {
@@ -848,7 +1212,17 @@ class AxisBrowser {
         }
         webview.__axisTransparentCssKey = null;
         webview.__axisTransparentUrl = null;
-        webview.__axisTransparentDomPatchUrl = null;
+        webview.__axisTransparentPageKey = null;
+        webview.__axisTransparentDomPatchKey = null;
+    }
+
+    async _nudgeTransparentSitesSweep(webview) {
+        if (!webview) return;
+        try {
+            await webview.executeJavaScript(
+                `(function(){try{var s=window.__axisTransparentV9;if(!s)return;if(typeof s.run==="function")s.run();}catch(e){}})();`
+            );
+        } catch (_) {}
     }
 
     async _runTransparentSitesDomPatch(webview, url) {
@@ -860,9 +1234,14 @@ class AxisBrowser {
                 return '';
             }
         })();
-        if (webview.__axisTransparentDomPatchUrl === pageUrl) return;
+        const pageKey = this._urlStablePageKey(pageUrl);
+        if (webview.__axisTransparentDomPatchKey === pageKey) {
+            void this._nudgeTransparentSitesSweep(webview);
+            return;
+        }
         try {
             await webview.executeJavaScript(AXIS_TRANSPARENT_SITES_DOM_PATCH);
+            webview.__axisTransparentDomPatchKey = pageKey;
             webview.__axisTransparentDomPatchUrl = pageUrl;
         } catch (e) {
             /* guest destroyed / CSP (rare for top document) */
@@ -874,7 +1253,7 @@ class AxisBrowser {
         const prop = '__axisTransparentFlushTimers';
         const prev = webview[prop];
         if (prev) prev.forEach((id) => clearTimeout(id));
-        const delays = [100, 420, 1400];
+        const delays = [300, 900, 2000, 4500, 9000];
         webview[prop] = delays.map((ms) =>
             setTimeout(() => {
                 if (!this.settings?.transparentSites || this.isBenchmarking) return;
@@ -891,10 +1270,15 @@ class AxisBrowser {
         } catch (_) {
             return;
         }
-        if (webview.__axisTransparentCssKey && webview.__axisTransparentUrl === url) return;
+        const pageKey = this._urlStablePageKey(url);
+        if (webview.__axisTransparentCssKey && webview.__axisTransparentPageKey === pageKey) {
+            void this._runTransparentSitesDomPatch(webview, url);
+            this._scheduleTransparentSitesReinjection(webview);
+            return;
+        }
         void this.flushTransparentSitesForWebview(webview)
             .then((didInject) => {
-                if (didInject) this._scheduleTransparentSitesReinjection(webview);
+            if (didInject) this._scheduleTransparentSitesReinjection(webview);
             })
             .catch(() => {});
     }
@@ -914,6 +1298,85 @@ class AxisBrowser {
         } catch (_) {
             return String(url || '');
         }
+    }
+
+    _urlBarThemeSourceRank(source) {
+        const ranks = {
+            header: 100,
+            'meta-inline': 95,
+            meta: 90,
+            'snapshot-restore': 85,
+            'tab-restore': 85,
+            cache: 75,
+            hint: 70,
+            extract: 65,
+            pending: 60,
+            surface: 45,
+            topvote: 40,
+            default: 0,
+            error: 0
+        };
+        return ranks[source] ?? 55;
+    }
+
+    _urlBarThemeSnapshotMatchesTab(tab, snap) {
+        if (!tab?.url || !snap) return false;
+        if (!snap.pageKey) return true;
+        return snap.pageKey === this._urlStablePageKey(tab.url);
+    }
+
+    _resetWebviewUrlBarThemeTracking(webview) {
+        if (!webview) return;
+        webview.__axisThemePageKey = '';
+        webview.__axisThemeSourceRank = 0;
+    }
+
+    _webviewThemeReady(webview) {
+        if (!webview) return false;
+        try {
+            const u = webview.getURL();
+            return !!(u && u !== 'about:blank' && !webview.isLoading());
+        } catch (_) {
+            return false;
+        }
+    }
+
+    _shouldAcceptUrlBarTheme(colorInfo, webview, opts = {}) {
+        if (!colorInfo || !webview) return true;
+        const source = colorInfo.source || 'extract';
+        if (source === 'default' || source === 'error') return false;
+        if (opts.force) return true;
+        let pageKey = '';
+        try {
+            pageKey = this._urlStablePageKey(webview.getURL() || '');
+        } catch (_) {}
+        const rank = this._urlBarThemeSourceRank(source);
+        if (
+            pageKey &&
+            webview.__axisThemePageKey === pageKey &&
+            (webview.__axisThemeSourceRank || 0) > rank
+        ) {
+            return false;
+        }
+        return true;
+    }
+
+    _commitUrlBarThemeToTab(tabId, rgb, source) {
+        const tid = this._normalizeTabMapKey(tabId);
+        if (tid == null || !this.tabs.has(tid)) return;
+        const tab = this.tabs.get(tid);
+        if (!tab?.url || this._isInternalSiteThemeUrl(tab.url)) return;
+        const pageKey = this._urlStablePageKey(tab.url);
+        if (!pageKey) return;
+        tab.siteThemeRgb = {
+            r: rgb.r,
+            g: rgb.g,
+            b: rgb.b,
+            source: source || 'extract',
+            pageKey
+        };
+        this.tabs.set(tid, tab);
+        this._persistUrlBarChromeToTab(tid);
     }
 
     /**
@@ -942,23 +1405,13 @@ class AxisBrowser {
         } catch (e) {
             return false;
         }
-        if (
-            !url ||
-            url === 'about:blank' ||
-            /^axis:/i.test(url) ||
-            /^file:/i.test(url) ||
-            url.startsWith('chrome-error:') ||
-            url.startsWith('chrome-devtools:')
-        ) {
+        if (!this._shouldInjectTransparentSites(url)) {
             await this.removeTransparentSitesFromWebview(webview);
             return false;
         }
-        // Transparent-site CSS breaks YouTube hardware video compositing on watch pages.
-        if (this.isYouTubeWatchUrl(url)) {
-            await this.removeTransparentSitesFromWebview(webview);
-            return false;
-        }
-        if (webview.__axisTransparentCssKey && webview.__axisTransparentUrl === url) {
+        const pageKey = this._urlStablePageKey(url);
+        if (webview.__axisTransparentCssKey && webview.__axisTransparentPageKey === pageKey) {
+            await this._runTransparentSitesDomPatch(webview, url);
             return true;
         }
         try {
@@ -968,12 +1421,14 @@ class AxisBrowser {
                     await webview.removeInsertedCSS(prev);
                 } catch (e) {}
                 webview.__axisTransparentCssKey = null;
+                webview.__axisTransparentDomPatchKey = null;
                 webview.__axisTransparentDomPatchUrl = null;
             }
             const key = await webview.insertCSS(AXIS_TRANSPARENT_SITES_CSS);
             if (key) {
                 webview.__axisTransparentCssKey = key;
                 webview.__axisTransparentUrl = url;
+                webview.__axisTransparentPageKey = this._urlStablePageKey(url);
                 await this._runTransparentSitesDomPatch(webview, url);
                 return true;
             }
@@ -986,17 +1441,16 @@ class AxisBrowser {
 
     applyTransparentSitesToAllWebviews() {
         if (!this.settings?.transparentSites) return;
-        // Hide background tabs before injecting transparency (injection is async; avoids one frame of bleed).
-        this._syncBackgroundTabWebviewsForTransparentSetting();
         const cur = this.currentTab;
         this.tabs.forEach((tab, id) => {
             if (!tab?.webview) return;
             if (id === cur) {
                 this._touchTransparentSitesForWebview(tab.webview);
             } else {
-                this._scheduleTransparentSitesTouchForBackgroundWebview(tab.webview);
+                void this.removeTransparentSitesFromWebview(tab.webview);
             }
         });
+        this._syncBackgroundTabWebviewsForTransparentSetting();
     }
 
     removeTransparentSitesFromAllWebviews() {
@@ -1036,17 +1490,25 @@ class AxisBrowser {
         if (!container) return;
         for (const wv of Array.from(container.querySelectorAll('webview'))) {
             const nid = this._normalizeTabMapKey(wv.dataset.tabId);
+            let remove = false;
             if (nid == null || !this.tabs.has(nid)) {
-                try {
-                    this.cleanupWebviewListeners(wv);
-                    try {
-                        wv.src = 'about:blank';
-                    } catch (_) {}
-                } catch (_) {}
-                try {
-                    wv.remove();
-                } catch (_) {}
+                remove = true;
+            } else {
+                const tab = this.tabs.get(nid);
+                if (tab?.webview && tab.webview !== wv) {
+                    remove = true;
+                }
             }
+            if (!remove) continue;
+            try {
+                this.cleanupWebviewListeners(wv);
+                try {
+                    wv.src = 'about:blank';
+                } catch (_) {}
+            } catch (_) {}
+            try {
+                wv.remove();
+            } catch (_) {}
         }
     }
 
@@ -1055,14 +1517,16 @@ class AxisBrowser {
         this._purgeStaleWebviewsInContainer();
         const ct = this._normalizeTabMapKey(this.currentTab);
         if (ct != null && !this.tabs.has(ct)) {
-            this._applyFocusAfterTabClose(null);
+            this._removeTabFromRecentStack(ct);
+            this._applyFocusAfterTabClose(ct, this._findNeighborTabToActivate(ct));
         }
         const cur = this._normalizeTabMapKey(this.currentTab);
         const active = cur != null ? this.tabs.get(cur) : null;
         if (active?.isFavoriteTab) {
-            this.renderFavorites();
+            /* Layout only — closing another tab must not rebuild favorites (accent flash). */
             this._forceGuestLayoutSync();
         }
+        this._scheduleUnpinnedTabsRecoverySave();
     }
 
     _scheduleTransparentSitesTouchForBackgroundWebview(webview) {
@@ -1085,6 +1549,8 @@ class AxisBrowser {
         if (urlBar && !on) {
             urlBar.style.backdropFilter = '';
             urlBar.style.webkitBackdropFilter = '';
+        } else if (on) {
+            this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
         }
         this._syncNewTabWebviewUnderlay();
     }
@@ -1097,14 +1563,14 @@ class AxisBrowser {
         const wv = tab?.webview;
         if (!wv || tab?.url !== this.NEWTAB_URL) return;
         if (ntpOpen) {
-            wv.style.opacity = '0';
-            wv.style.visibility = 'hidden';
+                wv.style.opacity = '0';
+                wv.style.visibility = 'hidden';
             this._clearWebviewCanvasColor();
-        } else {
-            wv.style.opacity = '1';
-            wv.style.visibility = 'visible';
+            } else {
+                wv.style.opacity = '1';
+                wv.style.visibility = 'visible';
+            }
         }
-    }
 
     getActiveProfileDisplayName() {
         if (this.isIncognitoWindow) return 'Incognito';
@@ -1144,6 +1610,7 @@ class AxisBrowser {
         if (greetingEl) greetingEl.style.display = greetingOn ? '' : 'none';
         const hasQuery = !!(input?.value?.trim());
         newTabPage?.classList.toggle('has-query', hasQuery);
+        this._syncNtpHeroAnchor();
     }
 
     isNewTabInChat() {
@@ -1155,21 +1622,28 @@ class AxisBrowser {
         );
     }
 
+    _isOnNewTabPage() {
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        return tab?.url === this.NEWTAB_URL;
+    }
+
     mountNewTabSearchBarToStart() {
         const wrapper = document.getElementById('new-tab-search-wrapper');
+        const chrome = document.getElementById('new-tab-composer-chrome');
         const bar = document.getElementById('new-tab-search-bar');
-        if (!wrapper || !bar) return;
-        if (bar.parentElement !== wrapper) {
-            wrapper.insertBefore(bar, wrapper.firstChild);
+        if (!wrapper || !chrome || !bar) return;
+        if (chrome.parentElement !== wrapper) {
+            wrapper.insertBefore(chrome, wrapper.firstChild);
         }
         bar.classList.remove('new-tab-ai-composer-bar');
     }
 
     mountNewTabSearchBarToComposer() {
         const slot = document.getElementById('new-tab-ai-composer-slot');
+        const chrome = document.getElementById('new-tab-composer-chrome');
         const bar = document.getElementById('new-tab-search-bar');
-        if (!slot || !bar) return;
-        slot.appendChild(bar);
+        if (!slot || !chrome || !bar) return;
+        slot.appendChild(chrome);
         bar.classList.add('new-tab-ai-composer-bar');
     }
 
@@ -1185,11 +1659,12 @@ class AxisBrowser {
         this.syncNewTabInputChrome();
     }
 
-    async beginNewTabAiChatTransition({ animate = true } = {}) {
+    async beginNewTabAiChatTransition({ animate = true, force = false } = {}) {
+        if (!this.isAiFeaturesEnabled()) return;
         const page = document.getElementById('new-tab-page');
         const startView = document.getElementById('new-tab-start-view');
         if (!page) return;
-        if (this.isNewTabInChat()) return;
+        if (!force && this.isNewTabInChat()) return;
 
         if (!animate) {
             this._finishNewTabAiChatLayout();
@@ -1234,7 +1709,7 @@ class AxisBrowser {
         if (!tab || tab.url !== this.NEWTAB_URL) return false;
         if (tabId === this.currentTab) return this.isNewTabInChat();
         const st = tab.newTabPageState;
-        return st?.inChat === true || !!(st?.askMessagesHtml && String(st.askMessagesHtml).trim());
+        return st?.inChat === true || !!(st?.askMessagesHtml && String(st.askMessagesHtml).trim()) || this._hasNewTabAiChatState(st, tab);
     }
 
     setNewTabAiChatChromeVisible(enabled) {
@@ -1273,11 +1748,7 @@ class AxisBrowser {
         if (tabElement) {
             const titleEl = tabElement.querySelector('.tab-title');
             if (titleEl && titleEl.textContent !== title) titleEl.textContent = title;
-            const faviconEl = tabElement.querySelector('.tab-favicon');
-            if (faviconEl && faviconEl.tagName === 'IMG') {
-                faviconEl.style.visibility = 'visible';
-                if (faviconEl.src !== favicon) faviconEl.src = favicon;
-            }
+            this._applyBuiltInTabFaviconElement(tabElement, tab, tabId);
             this.updateTabTooltip(tabId);
         }
 
@@ -1291,9 +1762,23 @@ class AxisBrowser {
         const input = document.getElementById('new-tab-input');
         const btn = document.getElementById('new-tab-send-btn');
         if (!btn || !input) return;
-        const canSend = this.isNewTabInChat() && !!input.value.trim();
+        const hasImages = (this._newTabChatImages?.length || 0) > 0;
+        const canSend = this.isNewTabInChat() && (!!input.value.trim() || hasImages);
         btn.disabled = !canSend;
         btn.classList.toggle('is-disabled', !canSend);
+    }
+
+    updateSidebarChatSendButtonState() {
+        const input = document.getElementById('ai-chat-input');
+        const btn = document.getElementById('ai-chat-send');
+        if (!btn || !input) return;
+        const hasKey = this.hasAiApiKey();
+        const hasImages = (this._sidebarChatImages?.length || 0) > 0;
+        const hasText = !!input.value.trim();
+        const canSend = hasKey && (hasText || hasImages);
+        btn.disabled = !canSend;
+        btn.setAttribute('aria-disabled', canSend ? 'false' : 'true');
+        if (!hasKey) btn.tabIndex = -1;
     }
 
     syncNewTabInputChrome() {
@@ -1307,6 +1792,7 @@ class AxisBrowser {
         page?.classList.toggle('ntp-in-chat', inChat);
         this.updateNewTabSendButtonState();
         this.updateNewTabHero();
+        this._syncAiChatImageAttachUi();
     }
 
     showNewTabAskSetup() {
@@ -1333,6 +1819,7 @@ class AxisBrowser {
     }
 
     triggerNewTabAskFromSearch() {
+        if (!this.isAiFeaturesEnabled()) return;
         const input = document.getElementById('new-tab-input');
         if (!input?.value?.trim()) return;
         if (!this.hasGroqApiKey()) {
@@ -1347,35 +1834,52 @@ class AxisBrowser {
         const ch = this._ambientAudioChain;
         if (!ch) return;
         try {
-            if (ch.source) {
+            if (ch.lfos) {
+                for (const lfo of ch.lfos) {
+                    try {
+                        lfo.stop();
+                    } catch (_) {}
+                    try {
+                        lfo.disconnect();
+                    } catch (_) {}
+                }
+            }
+            if (ch.sources) {
+                for (const src of ch.sources) {
+                    try {
+                        src.stop();
+                    } catch (_) {}
+                    try {
+                        src.disconnect();
+                    } catch (_) {}
+                }
+            } else if (ch.source) {
                 try {
                     ch.source.stop();
-                } catch (e) {
-                    /* already stopped */
-                }
+                } catch (_) {}
                 try {
                     ch.source.disconnect();
-                } catch (e) {}
+                } catch (_) {}
             }
             if (ch.nodes) {
-                ch.nodes.forEach((n) => {
+                for (const n of ch.nodes) {
                     try {
                         n.disconnect();
-                    } catch (e) {}
-                });
+                    } catch (_) {}
+                }
             }
-        } catch (e) {}
+        } catch (_) {}
         this._ambientAudioChain = null;
     }
 
     /**
-     * Maps settings slider (0–1) to master gain. Perceptual curve + low ceiling
-     * so ambient stays “bed” level and high slider positions are usable.
+     * Maps settings slider (0–1) to master gain. Gentle perceptual curve so mid
+     * positions are audible and the top of the slider stays usable as a bed.
      */
     _ambientUiToMaxNodeGain(volume01) {
         const v = Math.max(0, Math.min(1, volume01));
-        const shaped = Math.pow(v, 1.28);
-        const maxOut = 0.26;
+        const shaped = Math.pow(v, 1.15);
+        const maxOut = 0.42;
         return Math.max(0, Math.min(1, shaped * maxOut));
     }
 
@@ -1395,18 +1899,18 @@ class AxisBrowser {
         return targetGain;
     }
 
-    _createAmbientNoiseBuffer(ctx, seconds, type) {
-        const frames = Math.max(1, Math.floor(ctx.sampleRate * seconds));
-        const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
-        const d = buf.getChannelData(0);
+    _fillAmbientNoiseChannel(data, type) {
+        const frames = data.length;
         if (type === 'brown') {
             let last = 0;
             for (let i = 0; i < frames; i++) {
                 const w = Math.random() * 2 - 1;
-                last = (last + 0.035 * w) * 0.985;
-                d[i] = Math.max(-1, Math.min(1, last * 2.45));
+                last = (last + 0.02 * w) * 0.996;
+                data[i] = Math.max(-1, Math.min(1, last * 3.5));
             }
-        } else if (type === 'pink') {
+            return;
+        }
+        if (type === 'pink') {
             let b0 = 0;
             let b1 = 0;
             let b2 = 0;
@@ -1424,170 +1928,285 @@ class AxisBrowser {
                 b5 = -0.7616 * b5 - white * 0.016898;
                 const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
                 b6 = 0.536926 * b6 + white * 0.115926;
-                d[i] = Math.max(-1, Math.min(1, pink * 0.11));
+                data[i] = Math.max(-1, Math.min(1, pink * 0.11));
             }
-        } else {
-            for (let i = 0; i < frames; i++) {
-                d[i] = Math.random() * 2 - 1;
-            }
+            return;
         }
-        const fade = Math.min(Math.floor(ctx.sampleRate * 0.07), Math.floor(frames / 2));
-        if (fade > 32) {
+        for (let i = 0; i < frames; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+    }
+
+    /** Long stereo noise with equal-power loop crossfade (avoids short mono “whoosh” loops). */
+    _createAmbientNoiseBuffer(ctx, seconds, type) {
+        const frames = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+        const buf = ctx.createBuffer(2, frames, ctx.sampleRate);
+        const left = buf.getChannelData(0);
+        const right = buf.getChannelData(1);
+        this._fillAmbientNoiseChannel(left, type);
+        this._fillAmbientNoiseChannel(right, type);
+
+        const fade = Math.min(Math.floor(ctx.sampleRate * 0.55), Math.floor(frames / 2));
+        if (fade > 64) {
             for (let i = 0; i < fade; i++) {
                 const t = i / fade;
                 const w = 0.5 - 0.5 * Math.cos(Math.PI * t);
-                const head = d[i];
-                const tail = d[frames - fade + i];
-                const mid = head * (1 - w) + tail * w;
-                d[i] = mid;
-                d[frames - fade + i] = mid;
+                for (const ch of [left, right]) {
+                    const head = ch[i];
+                    const tail = ch[frames - fade + i];
+                    const mid = head * (1 - w) + tail * w;
+                    ch[i] = mid;
+                    ch[frames - fade + i] = mid;
+                }
             }
         }
         return buf;
     }
 
-    startAmbientAudio(preset, volume01, masterGainOverride) {
-        this.stopAmbientAudio();
+    async _ensureAmbientAudioContext() {
         const Ctx = window.AudioContext || window.webkitAudioContext;
-        if (!Ctx) return;
-
-        if (!this._ambientAudioCtx) {
+        if (!Ctx) return null;
+        if (!this._ambientAudioCtx || this._ambientAudioCtx.state === 'closed') {
             this._ambientAudioCtx = new Ctx();
         }
         const ctx = this._ambientAudioCtx;
-        if (ctx.state === 'suspended' && ctx.resume) {
-            ctx.resume().catch(() => {});
+        if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+            try {
+                await ctx.resume();
+            } catch (_) {}
         }
+        if (ctx.state === 'suspended') {
+            this._armAmbientAudioUnlock();
+        }
+        return ctx;
+    }
+
+    _armAmbientAudioUnlock() {
+        if (this._ambientUnlockArmed) return;
+        this._ambientUnlockArmed = true;
+        const unlock = () => {
+            if (!this._ambientUnlockArmed) return;
+            this._ambientUnlockArmed = false;
+            document.removeEventListener('pointerdown', unlock, true);
+            document.removeEventListener('keydown', unlock, true);
+            if (this.settings?.ambientAudioEnabled === true) {
+                void this.applyAmbientFromSettings();
+            }
+        };
+        document.addEventListener('pointerdown', unlock, true);
+        document.addEventListener('keydown', unlock, true);
+    }
+
+    _setAmbientMasterGain(outGain) {
+        const ch = this._ambientAudioChain;
+        const ctx = this._ambientAudioCtx;
+        if (!ch?.master || !ctx) return;
+        try {
+            ch.master.gain.cancelScheduledValues(ctx.currentTime);
+            ch.master.gain.setTargetAtTime(outGain, ctx.currentTime, 0.05);
+        } catch (_) {
+            try {
+                ch.master.gain.value = outGain;
+            } catch (_) {}
+        }
+    }
+
+    async startAmbientAudio(preset, volume01, masterGainOverride) {
+        this.stopAmbientAudio();
+        const ctx = await this._ensureAmbientAudioContext();
+        if (!ctx) return;
 
         const baseGain = this._ambientUiToMaxNodeGain(volume01);
         const targetGain =
             typeof masterGainOverride === 'number' && Number.isFinite(masterGainOverride)
                 ? masterGainOverride
                 : baseGain;
-        const trim = ctx.createGain();
+
         const master = ctx.createGain();
-        master.gain.value = targetGain;
+        master.gain.value = 0;
+        master.connect(ctx.destination);
 
-        const compressor = ctx.createDynamicsCompressor();
-        compressor.threshold.value = -32;
-        compressor.knee.value = 22;
-        compressor.ratio.value = 2.1;
-        compressor.attack.value = 0.025;
-        compressor.release.value = 0.38;
+        const nodes = [master];
+        const sources = [];
+        const lfos = [];
 
-        const source = ctx.createBufferSource();
-        const nodes = [];
-        let filter;
-        let hp;
-        let shelf;
-
-        const connectToDestination = (tail) => {
-            tail.connect(trim);
-            trim.connect(master);
-            master.connect(compressor);
-            compressor.connect(ctx.destination);
-            nodes.push(trim, master, compressor);
+        const startLoop = (buffer, offset = 0) => {
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.loop = true;
+            source.loopStart = 0;
+            source.loopEnd = buffer.duration;
+            sources.push(source);
+            try {
+                source.start(0, offset % Math.max(0.001, buffer.duration));
+            } catch (_) {
+                try {
+                    source.start(0);
+                } catch (_) {}
+            }
+            return source;
         };
 
+        const attachLfo = (param, rateHz, depth, baseValue) => {
+            const lfo = ctx.createOscillator();
+            lfo.type = 'sine';
+            lfo.frequency.value = rateHz;
+            const depthGain = ctx.createGain();
+            depthGain.gain.value = depth;
+            lfo.connect(depthGain);
+            depthGain.connect(param);
+            nodes.push(depthGain);
+            lfos.push(lfo);
+            try {
+                param.value = baseValue;
+            } catch (_) {}
+            try {
+                lfo.start(0);
+            } catch (_) {}
+        };
+
+        const bufferSeconds = 16;
+        let filter;
+        let hp;
+        let lp;
+        let shelf;
+        let trim;
+        let source;
+
         switch (preset) {
-            case 'rain':
-                trim.gain.value = 1;
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 4, 'pink');
-                source.loop = true;
-                filter = ctx.createBiquadFilter();
-                filter.type = 'bandpass';
-                filter.frequency.value = 820;
-                filter.Q.value = 0.62;
-                source.connect(filter);
-                connectToDestination(filter);
-                nodes.unshift(filter);
-                break;
-            case 'warm':
-                trim.gain.value = 1;
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 4, 'brown');
-                source.loop = true;
-                filter = ctx.createBiquadFilter();
-                filter.type = 'lowpass';
-                filter.frequency.value = 400;
-                filter.Q.value = 0.48;
-                source.connect(filter);
-                connectToDestination(filter);
-                nodes.unshift(filter);
-                break;
-            case 'focus':
-                trim.gain.value = 0.9;
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 4, 'brown');
-                source.loop = true;
-                filter = ctx.createBiquadFilter();
-                filter.type = 'lowpass';
-                filter.frequency.value = 118;
-                filter.Q.value = 0.32;
-                source.connect(filter);
-                connectToDestination(filter);
-                nodes.unshift(filter);
-                break;
-            case 'ocean':
-                trim.gain.value = 1;
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 4, 'brown');
-                source.loop = true;
-                filter = ctx.createBiquadFilter();
-                filter.type = 'bandpass';
-                filter.frequency.value = 205;
-                filter.Q.value = 0.32;
-                shelf = ctx.createBiquadFilter();
-                shelf.type = 'lowshelf';
-                shelf.frequency.value = 265;
-                shelf.gain.value = 2.4;
-                source.connect(filter);
-                filter.connect(shelf);
-                connectToDestination(shelf);
-                nodes.unshift(filter, shelf);
-                break;
-            case 'wind':
-                trim.gain.value = 1;
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 3.5, 'pink');
-                source.loop = true;
+            case 'rain': {
+                trim = ctx.createGain();
+                trim.gain.value = 1.05;
+                source = startLoop(this._createAmbientNoiseBuffer(ctx, bufferSeconds, 'pink'));
                 hp = ctx.createBiquadFilter();
                 hp.type = 'highpass';
-                hp.frequency.value = 440;
+                hp.frequency.value = 220;
+                hp.Q.value = 0.7;
                 filter = ctx.createBiquadFilter();
-                filter.type = 'peaking';
-                filter.frequency.value = 1050;
+                filter.type = 'bandpass';
+                filter.frequency.value = 980;
                 filter.Q.value = 0.55;
-                filter.gain.value = -2.5;
+                lp = ctx.createBiquadFilter();
+                lp.type = 'lowpass';
+                lp.frequency.value = 5200;
+                lp.Q.value = 0.5;
                 source.connect(hp);
                 hp.connect(filter);
-                connectToDestination(filter);
-                nodes.unshift(hp, filter);
+                filter.connect(lp);
+                lp.connect(trim);
+                trim.connect(master);
+                nodes.push(trim, hp, filter, lp);
                 break;
-            case 'still':
-                trim.gain.value = 0.55;
-                source.buffer = this._createAmbientNoiseBuffer(ctx, 4, 'brown');
-                source.loop = true;
+            }
+            case 'warm': {
+                trim = ctx.createGain();
+                trim.gain.value = 1.1;
+                source = startLoop(this._createAmbientNoiseBuffer(ctx, bufferSeconds, 'brown'));
                 filter = ctx.createBiquadFilter();
                 filter.type = 'lowpass';
-                filter.frequency.value = 620;
+                filter.frequency.value = 380;
+                filter.Q.value = 0.45;
+                shelf = ctx.createBiquadFilter();
+                shelf.type = 'lowshelf';
+                shelf.frequency.value = 140;
+                shelf.gain.value = 2.2;
                 source.connect(filter);
-                connectToDestination(filter);
-                nodes.unshift(filter);
+                filter.connect(shelf);
+                shelf.connect(trim);
+                trim.connect(master);
+                nodes.push(trim, filter, shelf);
                 break;
+            }
+            case 'focus': {
+                trim = ctx.createGain();
+                trim.gain.value = 1.15;
+                source = startLoop(this._createAmbientNoiseBuffer(ctx, bufferSeconds, 'brown'));
+                filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 140;
+                filter.Q.value = 0.35;
+                source.connect(filter);
+                filter.connect(trim);
+                trim.connect(master);
+                nodes.push(trim, filter);
+                break;
+            }
+            case 'ocean': {
+                trim = ctx.createGain();
+                trim.gain.value = 1.05;
+                source = startLoop(this._createAmbientNoiseBuffer(ctx, bufferSeconds, 'brown'), 1.7);
+                filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 240;
+                filter.Q.value = 0.28;
+                shelf = ctx.createBiquadFilter();
+                shelf.type = 'lowshelf';
+                shelf.frequency.value = 220;
+                shelf.gain.value = 3.2;
+                lp = ctx.createBiquadFilter();
+                lp.type = 'lowpass';
+                lp.frequency.value = 900;
+                lp.Q.value = 0.4;
+                source.connect(filter);
+                filter.connect(shelf);
+                shelf.connect(lp);
+                lp.connect(trim);
+                trim.connect(master);
+                attachLfo(filter.frequency, 0.07, 55, 240);
+                attachLfo(trim.gain, 0.05, 0.12, 1.05);
+                nodes.push(trim, filter, shelf, lp);
+                break;
+            }
+            case 'wind': {
+                trim = ctx.createGain();
+                trim.gain.value = 1;
+                source = startLoop(this._createAmbientNoiseBuffer(ctx, bufferSeconds, 'pink'), 2.4);
+                hp = ctx.createBiquadFilter();
+                hp.type = 'highpass';
+                hp.frequency.value = 280;
+                hp.Q.value = 0.6;
+                filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 900;
+                filter.Q.value = 0.45;
+                source.connect(hp);
+                hp.connect(filter);
+                filter.connect(trim);
+                trim.connect(master);
+                attachLfo(filter.frequency, 0.11, 180, 900);
+                attachLfo(trim.gain, 0.08, 0.1, 1);
+                nodes.push(trim, hp, filter);
+                break;
+            }
+            case 'still': {
+                trim = ctx.createGain();
+                trim.gain.value = 0.72;
+                source = startLoop(this._createAmbientNoiseBuffer(ctx, bufferSeconds, 'brown'));
+                filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 520;
+                filter.Q.value = 0.4;
+                source.connect(filter);
+                filter.connect(trim);
+                trim.connect(master);
+                nodes.push(trim, filter);
+                break;
+            }
             default:
                 try {
                     master.disconnect();
-                    compressor.disconnect();
-                } catch (e) {}
+                } catch (_) {}
                 return;
         }
 
-        this._ambientAudioChain = { source, master, trim, compressor, nodes };
-        try {
-            source.start(0);
-        } catch (e) {
-            this.stopAmbientAudio();
+        this._ambientAudioChain = { sources, master, nodes, lfos };
+        this._setAmbientMasterGain(targetGain);
+        if (ctx.state === 'suspended') {
+            this._armAmbientAudioUnlock();
         }
     }
 
-    applyAmbientFromSettings() {
+    async applyAmbientFromSettings() {
         const presets = new Set(['rain', 'warm', 'focus', 'ocean', 'wind', 'still']);
         const on = this.settings?.ambientAudioEnabled === true;
         let preset = this.settings?.ambientAudioPreset || 'rain';
@@ -1609,26 +2228,23 @@ class AxisBrowser {
             this._ambientAudioChain &&
             this._ambientPreset === preset &&
             this._ambientAudioChain.master &&
-            this._ambientAudioCtx
+            this._ambientAudioCtx &&
+            this._ambientAudioCtx.state !== 'closed'
         ) {
-            try {
-                const ctx = this._ambientAudioCtx;
-                this._ambientAudioChain.master.gain.setTargetAtTime(outGain, ctx.currentTime, 0.06);
-            } catch (e) {
-                try {
-                    this._ambientAudioChain.master.gain.value = outGain;
-                } catch (e2) {}
-            }
+            await this._ensureAmbientAudioContext();
+            this._setAmbientMasterGain(outGain);
             return;
         }
 
         this._ambientPreset = preset;
-        this.startAmbientAudio(preset, v01, outGain);
+        await this.startAmbientAudio(preset, v01, outGain);
     }
 
     setupEventListeners() {
         const el = this.elements;
         if (!el) return; // Safety check
+
+        document.getElementById('axis-toast')?.remove();
         
         // Navigation controls - use cached elements
         el.backBtn?.addEventListener('click', () => this.goBack());
@@ -1649,6 +2265,7 @@ class AxisBrowser {
         // AI chat panel
         this.setupAIChat();
         this.setupAiChatMarkdownLinks();
+        this.applyAiFeaturesVisibility();
 
         // Settings - use cached elements
         el.closeSettings?.addEventListener('click', () => this.toggleSettings());
@@ -1767,15 +2384,10 @@ class AxisBrowser {
         el.emptyStateBtnEmpty?.addEventListener('click', () => this.createNewTab());
         el.sidebarNewTabBtn?.addEventListener('click', () => this.createNewTab());
 
-        // Security panel - use cached elements
-        el.closeSecurity?.addEventListener('click', () => this.toggleSecurity());
-        el.viewCertificate?.addEventListener('click', () => this.viewCertificate());
+        // Security panel
+        el.closeSecurity?.addEventListener('click', () => this.closeSecurityPanel());
         el.securitySettings?.addEventListener('click', () => this.openSecuritySettings());
-        el.securityPanel?.addEventListener('click', (e) => {
-            if (e.target.id === 'security-panel') {
-                this.toggleSecurity();
-            }
-        });
+        document.getElementById('security-panel-backdrop')?.addEventListener('click', () => this.closeSecurityPanel());
 
         // Backdrop click closes any open modal - use cached elements
         if (el.modalBackdrop) {
@@ -2019,7 +2631,7 @@ class AxisBrowser {
                     this.printPage();
                     break;
                 case 'inspect': {
-                    const inspectWv = this.getActiveWebview();
+                    const inspectWv = this.getContextMenuWebview();
                     if (!inspectWv) break;
                     const ic = this.webviewContextInfo || {};
                     const fromData =
@@ -2048,7 +2660,7 @@ class AxisBrowser {
                 case 'replace-misspelling': {
                     const replacement = data && typeof data.replacement === 'string' ? data.replacement : '';
                     const manualWord = data && typeof data.manualReplaceWord === 'string' ? data.manualReplaceWord : '';
-                    const activeWebview = this.getActiveWebview();
+                    const activeWebview = this.getContextMenuWebview();
                     if (!replacement || !activeWebview) break;
                     if (manualWord) {
                         const wordJson = JSON.stringify(manualWord);
@@ -2315,9 +2927,6 @@ class AxisBrowser {
             }
         });
         
-        // Setup native emoji picker
-        this.setupNativeEmojiPicker();
-        
         // Listen for tab group context menu actions from main process
         window.electronAPI.onTabGroupContextMenuAction((action) => {
             switch (action) {
@@ -2538,47 +3147,13 @@ class AxisBrowser {
         `;
         document.body.appendChild(this.contextMenuBackdrop);
         
-        // Track mouse position to detect when over menu
-        let mouseOverMenu = false;
-        const mouseMoveHandler = (e) => {
-            const contextMenu = document.getElementById('webpage-context-menu');
-            if (contextMenu && !contextMenu.classList.contains('hidden')) {
-                const rect = contextMenu.getBoundingClientRect();
-                mouseOverMenu = (
-                    e.clientX >= rect.left && 
-                    e.clientX <= rect.right && 
-                    e.clientY >= rect.top && 
-                    e.clientY <= rect.bottom
-                );
-                // Enable/disable backdrop based on mouse position
-                if (this.contextMenuBackdrop) {
-                    this.contextMenuBackdrop.style.pointerEvents = mouseOverMenu ? 'none' : 'auto';
-                }
-            } else {
-                mouseOverMenu = false;
-                if (this.contextMenuBackdrop) {
-                    this.contextMenuBackdrop.style.pointerEvents = 'auto';
-                }
-            }
-        };
-        document.addEventListener('mousemove', mouseMoveHandler);
-        this._contextMenuMouseMoveHandler = mouseMoveHandler;
-        
         // Click handler for backdrop - closes menu if clicking outside
         this.contextMenuBackdrop.addEventListener('mousedown', (e) => {
             const contextMenu = document.getElementById('webpage-context-menu');
             if (!contextMenu || contextMenu.classList.contains('hidden')) return;
-            
-            // If mouse is over menu, backdrop should be disabled, so this shouldn't fire
-            // But double-check anyway
-            if (mouseOverMenu) {
-                return;
-            }
-            
-            // Click is outside menu - close it
             e.preventDefault();
             e.stopPropagation();
-                this.hideWebpageContextMenu();
+            this.hideWebpageContextMenu();
         });
         
         // Global click handler for non-webview areas
@@ -2587,7 +3162,7 @@ class AxisBrowser {
             if (!contextMenu || contextMenu.classList.contains('hidden')) return;
             
             // Check if click is on the menu
-            if (e.target.closest('.context-menu') || mouseOverMenu) {
+            if (e.target.closest('.context-menu') || e.target.closest('#webpage-context-menu')) {
                 return; // Click is on menu - don't close
             }
             
@@ -2601,11 +3176,16 @@ class AxisBrowser {
         
         // Click anywhere else to close context menus (for non-webview areas)
         document.addEventListener('mousedown', (e) => {
-            if (
-                !e.target.closest('#profile-switch-row-menu') &&
-                !e.target.closest('.profile-switch-more-btn')
-            ) {
+            const onRowMenu = e.target.closest('#profile-switch-row-menu');
+            const onMoreBtn = e.target.closest('.profile-switch-more-btn');
+
+            if (!onRowMenu && !onMoreBtn) {
                 this.closeProfileRowMenu();
+            }
+
+            // Row menu lives on document.body — keep the profile popover open while using it.
+            if (onRowMenu || onMoreBtn) {
+                return;
             }
 
             // Check if clicking on any context menu or backdrop - if so, don't close
@@ -2639,6 +3219,74 @@ class AxisBrowser {
                 this.hideWebpageContextMenu();
                 this.hideSidebarContextMenu();
                 this.hideTabGroupContextMenu();
+            }
+        });
+
+        // Shell text fields — Cut/Copy/Paste + Emoji and Symbols (URL bar has its own menu)
+        document.addEventListener(
+            'contextmenu',
+            (e) => {
+                if (e.defaultPrevented) return;
+                if (e.target.closest('webview')) return;
+                const el = e.target.closest('input, textarea, [contenteditable=""], [contenteditable="true"]');
+                if (!el) return;
+                if (el.id === 'url-bar-input') return;
+                if (el instanceof HTMLInputElement) {
+                    const type = (el.type || 'text').toLowerCase();
+                    if (
+                        type === 'button' ||
+                        type === 'checkbox' ||
+                        type === 'radio' ||
+                        type === 'file' ||
+                        type === 'submit' ||
+                        type === 'reset' ||
+                        type === 'image' ||
+                        type === 'range' ||
+                        type === 'color' ||
+                        type === 'hidden'
+                    ) {
+                        return;
+                    }
+                    if (el.readOnly || el.disabled) return;
+                }
+                if (el instanceof HTMLTextAreaElement && (el.readOnly || el.disabled)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                this._emojiContextEditableEl = el;
+                const isInput = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+                const hasSelection = isInput
+                    ? el.selectionStart != null &&
+                      el.selectionEnd != null &&
+                      el.selectionStart !== el.selectionEnd
+                    : !!(globalThis.getSelection && String(globalThis.getSelection()).length > 0);
+                void window.electronAPI?.showEditableContextMenu?.(e.clientX, e.clientY, {
+                    isEditable: true,
+                    hasSelection,
+                    canCut: hasSelection,
+                    canCopy: hasSelection,
+                    canPaste: true
+                });
+            },
+            true
+        );
+
+        window.electronAPI?.onRefocusEditableForEmoji?.(() => {
+            const el = this._emojiContextEditableEl;
+            if (el && document.contains(el)) {
+                try {
+                    el.focus({ preventScroll: true });
+                } catch (_) {
+                    try {
+                        el.focus();
+                    } catch (_) {}
+                }
+                return;
+            }
+            const wv = this.getActiveWebview?.();
+            if (wv) {
+                try {
+                    wv.focus();
+                } catch (_) {}
             }
         });
 
@@ -2887,6 +3535,14 @@ class AxisBrowser {
                 /* ignore */
             }
         });
+
+        window.electronAPI.onThemeColorHeader?.((payload) => {
+            try {
+                this._applyUrlBarThemeColorString(payload?.color, payload?.url);
+            } catch (_) {
+                /* ignore */
+            }
+        });
         
         // URL bar native context menu actions
         window.electronAPI.onUrlBarContextMenuAction?.((action, data) => {
@@ -2972,8 +3628,8 @@ class AxisBrowser {
 
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState !== 'visible') return;
-            if (this.settings?.ambientAudioEnabled && this._ambientAudioCtx?.resume) {
-                this._ambientAudioCtx.resume().catch(() => {});
+            if (this.settings?.ambientAudioEnabled === true) {
+                void this.applyAmbientFromSettings();
             }
         });
     }
@@ -3094,7 +3750,7 @@ class AxisBrowser {
                 isActive ? '<i class="fas fa-check profile-switch-btn-check" aria-hidden="true"></i>' : ''
             }`;
             switchBtn.addEventListener('click', async () => {
-                this.hideProfileSwitcherMenu();
+        this.hideProfileSwitcherMenu();
                 if (id === this.profileId && !this.isIncognitoWindow) return;
                 try {
                     if (this.isIncognitoWindow) {
@@ -3184,14 +3840,18 @@ class AxisBrowser {
 
     ensureProfileRowMenu() {
         let menu = document.getElementById('profile-switch-row-menu');
-        if (menu) return menu;
-        const panel = document.getElementById('profile-switcher-panel');
-        if (!panel) return null;
+        if (menu) {
+            if (menu.parentElement !== document.body) {
+                document.body.appendChild(menu);
+            }
+            return menu;
+        }
         menu = document.createElement('div');
         menu.id = 'profile-switch-row-menu';
         menu.className = 'profile-switch-row-menu hidden';
         menu.setAttribute('role', 'menu');
-        panel.appendChild(menu);
+        menu.addEventListener('mousedown', (e) => e.stopPropagation());
+        document.body.appendChild(menu);
         return menu;
     }
 
@@ -3236,14 +3896,10 @@ class AxisBrowser {
             menu.appendChild(deleteItem);
         }
         menu.classList.remove('hidden');
-        const rowRect = row.getBoundingClientRect();
-        const panel = document.getElementById('profile-switcher-panel');
-        const panelRect = panel?.getBoundingClientRect();
-        if (panelRect) {
-            menu.style.top = `${Math.max(0, rowRect.bottom - panelRect.top + 2)}px`;
-            menu.style.right = `${Math.max(0, panelRect.right - rowRect.right + 2)}px`;
-            menu.style.left = 'auto';
-        }
+        const anchorRect = anchorBtn.getBoundingClientRect();
+        menu.style.top = `${Math.round(anchorRect.bottom + 2)}px`;
+        menu.style.left = 'auto';
+        menu.style.right = `${Math.max(8, Math.round(window.innerWidth - anchorRect.right + 2))}px`;
     }
 
     async onProfileListDrop(e, targetRow) {
@@ -3311,9 +3967,9 @@ class AxisBrowser {
         const switcher = document.getElementById('sidebar-profile-switcher');
         if (!root || !menu || !trigger) return;
         if (!root.classList.contains('is-open')) {
-            menu.classList.add('hidden');
+        menu.classList.add('hidden');
             menu.setAttribute('aria-hidden', 'true');
-            trigger.setAttribute('aria-expanded', 'false');
+        trigger.setAttribute('aria-expanded', 'false');
             switcher?.classList.remove('is-open');
             return;
         }
@@ -3384,6 +4040,8 @@ class AxisBrowser {
         const deleteCancelBtn = document.getElementById('profile-delete-cancel');
         if (!modal || !input || !confirmBtn || !cancelBtn) return;
 
+        this.ensureProfileRowMenu();
+
         this._profileModalMode = 'create';
         this._profileEditId = null;
         this._profileDeleteId = null;
@@ -3411,11 +4069,6 @@ class AxisBrowser {
             deleteConfirmBtn.addEventListener('click', () => void this.confirmProfileDelete());
             deleteModal.addEventListener('mousedown', (e) => e.stopPropagation());
         }
-
-        const profilePanel = document.getElementById('profile-switcher-panel');
-        profilePanel?.addEventListener('mouseleave', () => {
-            this.closeProfileRowMenu();
-        });
     }
 
     setProfileFormModalTheme(modal) {
@@ -3618,51 +4271,172 @@ class AxisBrowser {
     async applySettingsUpdateFromMain() {
         try {
             const prevJs = this._lastJavascriptEnabled;
+            const before = this._settingsApplySnapshot();
             await this.loadSettings();
+            const after = this._settingsApplySnapshot();
+            if (this._settingsApplySnapshotsEqual(before, after)) {
+                this._notifySettingsTabWebviewsStoreUpdated();
+                return;
+            }
+
+            const themeChanged =
+                before.themeColor !== after.themeColor ||
+                before.gradientColor !== after.gradientColor ||
+                before.gradientEnabled !== after.gradientEnabled ||
+                before.gradientDirection !== after.gradientDirection ||
+                before.siteThemeColor !== after.siteThemeColor ||
+                before.ui !== after.ui;
+            const transparentChanged = before.transparent !== after.transparent;
+            const sidebarChanged = before.sidebar !== after.sidebar;
+            const jsChanged = before.js !== after.js;
+            const adBlockChanged = before.adBlock !== after.adBlock;
+            const ambientChanged =
+                before.ambientOn !== after.ambientOn ||
+                before.ambientMute !== after.ambientMute ||
+                before.ambientPreset !== after.ambientPreset ||
+                before.ambientVol !== after.ambientVol;
+            const linkPreviewChanged = before.linkPreview !== after.linkPreview;
+            const windowChromeChanged = before.windowChromeLight !== after.windowChromeLight;
+
+            if (
+                (ambientChanged || linkPreviewChanged) &&
+                !themeChanged &&
+                !transparentChanged &&
+                !sidebarChanged &&
+                !jsChanged &&
+                !adBlockChanged &&
+                !windowChromeChanged &&
+                before.ui === after.ui
+            ) {
+                if (ambientChanged) void this.applyAmbientFromSettings();
+                if (linkPreviewChanged) this._applyLinkPreviewSetting();
+                this._notifySettingsTabWebviewsStoreUpdated();
+                return;
+            }
+
+            if (before.ui !== after.ui) {
+                await this.refreshSystemUiTheme();
+            }
             await this.refreshShortcutCache();
-            this.syncGroqApiKeyFromSettings?.();
-            const curJs = this.settings?.javascriptEnabled !== false;
-            if (prevJs !== undefined && prevJs !== curJs) {
+            this.syncAiProviderFromSettings?.();
+            if (prevJs !== undefined && jsChanged) {
                 this.rebuildAllTabWebviewsForWebPreferences();
             }
-            this._lastJavascriptEnabled = curJs;
-            this.syncTransparentSitesUi();
-            if (this.settings?.transparentSites) {
-                this._syncBackgroundTabWebviewsForTransparentSetting();
+            this._lastJavascriptEnabled = after.js;
+            if (transparentChanged) {
+                this.syncTransparentSitesUi();
             }
-            this.applyCustomThemeFromSettings();
-            this.applySidebarPosition();
-            if (this.settings?.transparentSites) {
-                this.applyTransparentSitesToAllWebviews();
-            } else {
-                this.removeTransparentSitesFromAllWebviews();
+            if (themeChanged || before.ui !== after.ui) {
+                this.applyUiThemeSurfaces();
+            } else if (windowChromeChanged) {
+                this.applyCustomThemeFromSettings();
+            }
+            if (sidebarChanged) {
+                this.applySidebarPosition();
+            }
+            if (transparentChanged) {
+                if (after.transparent) {
+                    const activeWv = this.getActiveWebview();
+                    if (activeWv) void this.flushTransparentSitesForWebview(activeWv);
+                    this._syncBackgroundTabWebviewsForTransparentSetting();
+                } else {
+                    this.removeTransparentSitesFromAllWebviews();
+                }
             }
             const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
             const wv = this.getActiveWebview();
-            this.updateUrlBar(wv, { skipExtractTheme: true });
-            if (tab && tab.url === this.NEWTAB_URL) {
-                this.applyNewTabCustomization();
-                this.updateNewTabHero();
-            } else if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
-                this.applyInternalShellUrlBarStyle();
-            } else if (wv) {
-                await this.extractUrlBarTheme(wv);
+            if (themeChanged || before.ui !== after.ui) {
+                this.updateUrlBar(wv, { skipExtractTheme: true });
+                if (tab && tab.url === this.NEWTAB_URL) {
+                    this.applyNewTabCustomization();
+                    this.updateNewTabHero();
+                } else if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+                    this.applyInternalShellUrlBarStyle();
+                } else if (wv) {
+                    await this.extractUrlBarTheme(wv);
+                } else {
+                    this.applyAppThemeToUrlBar();
+                }
             } else {
-                this.applyAppThemeToUrlBar();
+                this.updateUrlBar(wv, { skipExtractTheme: true });
+            }
+            if (adBlockChanged) {
+                this.syncAdBlockerUrlBarState();
             }
             this.applyAmbientFromSettings();
-            this.syncAdBlockerUrlBarState();
+            this.applyAiFeaturesVisibility();
+            this._applyLinkPreviewSetting();
+            this._setupUnpinnedClearTimer();
             const emp = document.getElementById('extensions-menu-panel');
             if (emp && !emp.classList.contains('hidden')) {
                 void this.populateExtensionsMenu();
+            }
+            const adblockPanel = document.getElementById('adblock-panel');
+            if (adblockPanel && !adblockPanel.classList.contains('hidden')) {
+                void this.refreshAdblockPanel();
             }
             if (wv) {
                 try {
                     this._touchExtensionStoreListingUiForWebview(wv, wv.getURL() || '');
                 } catch (_) {}
             }
+            this._notifySettingsTabWebviewsStoreUpdated();
+            const ntpTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+            if (ntpTab?.url === this.NEWTAB_URL) {
+                this.syncNtpWidgetsVisibility();
+                this.renderNtpWidgets();
+            }
         } catch (e) {
             console.error('applySettingsUpdateFromMain failed', e);
+        }
+    }
+
+    _normalizeWindowChromeLight(raw) {
+        const n = Number(raw);
+        const v = Number.isFinite(n) ? n : 50;
+        return Math.max(0, Math.min(100, Math.round(v)));
+    }
+
+    _settingsApplySnapshot() {
+        const s = this.settings || {};
+        let ambientVol = Number(s.ambientAudioVolume);
+        if (!Number.isFinite(ambientVol)) ambientVol = 48;
+        return {
+            js: s.javascriptEnabled !== false,
+            transparent: !!s.transparentSites,
+            ui: s.uiTheme || 'dark',
+            themeColor: s.themeColor || '',
+            gradientColor: s.gradientColor || '',
+            gradientEnabled: !!s.gradientEnabled,
+            gradientDirection: s.gradientDirection || '',
+            siteThemeColor: !!s.siteThemeColor,
+            sidebar: s.sidebarPosition || 'left',
+            adBlock: s.adBlockerEnabled !== false,
+            ambientOn: s.ambientAudioEnabled === true,
+            ambientMute: s.ambientMuteWhenTabAudio === true,
+            ambientPreset: s.ambientAudioPreset || 'rain',
+            ambientVol: Math.max(0, Math.min(100, ambientVol)),
+            linkPreview: s.linkPreview !== false,
+            windowChromeLight: this._normalizeWindowChromeLight(s.windowChromeLight),
+            ntpWidgets: s.ntpWidgetsEnabled === true,
+            ntpWidgetLayout: JSON.stringify(s.ntpWidgetLayout || [])
+        };
+    }
+
+    _settingsApplySnapshotsEqual(a, b) {
+        if (!a || !b) return false;
+        return JSON.stringify(a) === JSON.stringify(b);
+    }
+
+    /** Settings tabs live in guest webviews and do not receive main-window `settings-updated` IPC. */
+    _notifySettingsTabWebviewsStoreUpdated() {
+        for (const tab of this.tabs.values()) {
+            if (!tab?.webview || (!tab.isSettings && tab.url !== 'axis://settings')) continue;
+            try {
+                if (typeof tab.webview.send === 'function') {
+                    tab.webview.send('axis-settings-store-updated');
+                }
+            } catch (_) {}
         }
     }
 
@@ -3671,14 +4445,237 @@ class AxisBrowser {
         return this.settings?.adBlockerEnabled !== false;
     }
 
+    isAdblockDisabledForHostname(hostname) {
+        const h = String(hostname || '').trim().toLowerCase().replace(/^www\./, '');
+        if (!h) return false;
+        const ex = this.settings?.adBlockerSiteExceptions;
+        return !!(ex && typeof ex === 'object' && ex[h] === true);
+    }
+
+    isAdBlockerActiveForSite(hostname) {
+        return this.isAdBlockerEnabled() && !this.isAdblockDisabledForHostname(hostname);
+    }
+
     syncAdBlockerUrlBarState() {
         const btn = this.elements?.urlBarAdblock;
         if (!btn) return;
-        const on = this.isAdBlockerEnabled();
-        btn.classList.toggle('url-bar-adblock-on', on);
-        btn.classList.toggle('url-bar-adblock-off', !on);
-        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-        btn.title = on ? 'Ad blocker on — click to disable' : 'Ad blocker off — click to enable';
+        const ctx = this.getAdblockPageContext();
+        const globalOn = this.isAdBlockerEnabled();
+        const active = this.isAdBlockerActiveForSite(ctx.pageHostname);
+        btn.classList.toggle('url-bar-adblock-on', active);
+        btn.classList.toggle('url-bar-adblock-off', !active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        if (!globalOn) {
+            btn.title = 'Ad blocker off everywhere';
+        } else if (ctx.pageHostname && this.isAdblockDisabledForHostname(ctx.pageHostname)) {
+            btn.title = `Ad blocker off on ${ctx.pageLabel}`;
+        } else {
+            btn.title = 'Ad blocker on';
+        }
+        const panel = document.getElementById('adblock-panel');
+        if (panel && !panel.classList.contains('hidden')) {
+            void this.refreshAdblockPanel();
+        }
+    }
+
+    getAdblockPageContext() {
+        const wv = this.getActiveWebview();
+        let webContentsId = 0;
+        let pageHostname = '';
+        let pageLabel = 'Not on a website';
+        try {
+            if (wv && typeof wv.getWebContentsId === 'function') {
+                webContentsId = wv.getWebContentsId() || 0;
+            }
+            const url = wv && typeof wv.getURL === 'function' ? wv.getURL() || '' : '';
+            if (url && !url.startsWith('about:') && !url.startsWith('axis:') && !url.startsWith('data:')) {
+                pageHostname = new URL(url).hostname || '';
+                pageLabel = pageHostname;
+            }
+        } catch (_) {}
+        return { webContentsId, pageHostname, pageLabel };
+    }
+
+    async refreshAdblockPanel() {
+        const panel = document.getElementById('adblock-panel');
+        if (!panel || panel.classList.contains('hidden')) return;
+        const ctx = this.getAdblockPageContext();
+        let stats = {
+            enabled: this.isAdBlockerEnabled(),
+            siteDisabled: false,
+            active: this.isAdBlockerEnabled(),
+            pageBlocked: 0,
+        };
+        try {
+            stats = await window.electronAPI.getAdblockStats(ctx);
+        } catch (_) {}
+        const globalOn = stats.enabled !== false;
+        const siteDisabled = !!stats.siteDisabled;
+        const active = globalOn && !siteDisabled;
+        const hasSite = !!ctx.pageHostname;
+        const pageBlocked = Number(stats.pageBlocked) || 0;
+
+        const badge = document.getElementById('adblock-panel-badge');
+        const statWrap = document.getElementById('adblock-panel-stat-wrap');
+        const pageCount = document.getElementById('adblock-panel-page-count');
+        const statusEl = document.getElementById('adblock-panel-status');
+        const globalBtn = document.getElementById('adblock-panel-global-btn');
+        const siteBtn = document.getElementById('adblock-panel-site-btn');
+        const iconWrap = panel.querySelector('.adblock-panel-icon-wrap');
+
+        if (badge) {
+            badge.textContent = !globalOn ? 'Off' : siteDisabled ? 'Allowed' : 'On';
+            badge.classList.toggle('adblock-badge--on', active);
+            badge.classList.toggle('adblock-badge--warn', globalOn && siteDisabled);
+            badge.classList.toggle('adblock-badge--off', !globalOn);
+        }
+        if (iconWrap) {
+            iconWrap.classList.toggle('adblock-panel-icon-wrap--on', active);
+            iconWrap.classList.toggle('adblock-panel-icon-wrap--warn', globalOn && siteDisabled);
+            iconWrap.classList.toggle('adblock-panel-icon-wrap--off', !globalOn);
+        }
+        if (statWrap) {
+            statWrap.classList.toggle('hidden', !active || !hasSite);
+        }
+        if (pageCount) {
+            pageCount.textContent = pageBlocked.toLocaleString();
+        }
+        if (statusEl) {
+            if (!globalOn) {
+                statusEl.textContent = 'Ads and trackers are not blocked in this profile.';
+            } else if (!hasSite) {
+                statusEl.textContent = 'Open a website to allow or block a specific site.';
+            } else if (siteDisabled) {
+                statusEl.textContent = `${ctx.pageLabel} is allowed — nothing is blocked here.`;
+            } else {
+                statusEl.textContent = `Blocking ads and trackers on ${ctx.pageLabel}.`;
+            }
+        }
+        if (globalBtn) {
+            globalBtn.textContent = globalOn ? 'Turn off everywhere' : 'Turn on everywhere';
+        }
+        if (siteBtn) {
+            if (!hasSite || !globalOn) {
+                siteBtn.classList.add('hidden');
+            } else {
+                siteBtn.classList.remove('hidden');
+                siteBtn.textContent = siteDisabled ? 'Block this site' : 'Allow this site';
+            }
+        }
+        panel.classList.toggle('adblock-panel--off', !active);
+    }
+
+    positionAdblockPanel() {
+        const panel = document.getElementById('adblock-panel');
+        const btn = this.elements?.urlBarAdblock;
+        if (!panel || !btn) return;
+        const rect = btn.getBoundingClientRect();
+        const margin = 8;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+        const popupWidth = Math.min(300, viewportWidth - margin * 2);
+        panel.style.width = `${popupWidth}px`;
+        let left = rect.right - popupWidth;
+        if (left < margin) left = rect.left;
+        if (left + popupWidth + margin > viewportWidth) {
+            left = viewportWidth - popupWidth - margin;
+        }
+        left = Math.max(margin, left);
+        panel.style.left = `${left}px`;
+        panel.style.top = `${rect.bottom + margin}px`;
+        panel.style.right = 'auto';
+    }
+
+    closeAdblockPanel() {
+        const panel = document.getElementById('adblock-panel');
+        const backdrop = document.getElementById('adblock-panel-backdrop');
+        if (this._adblockPanelRefreshTimer) {
+            clearInterval(this._adblockPanelRefreshTimer);
+            this._adblockPanelRefreshTimer = null;
+        }
+        if (backdrop) {
+            backdrop.classList.add('hidden');
+            backdrop.setAttribute('aria-hidden', 'true');
+        }
+        document.body.classList.remove('adblock-panel-open');
+        if (panel) panel.classList.add('hidden');
+    }
+
+    async toggleAdblockPanel() {
+        const panel = document.getElementById('adblock-panel');
+        if (!panel) return;
+        if (!panel.classList.contains('hidden')) {
+            this.closeAdblockPanel();
+            return;
+        }
+
+        const dp = document.getElementById('downloads-popup');
+        if (dp && !dp.classList.contains('hidden')) {
+            this.hideDownloadsPopup();
+        }
+        this.closeExtensionsMenu();
+        this.closeSecurityPanel();
+
+        await this.refreshAdblockPanel();
+        this.positionAdblockPanel();
+        const backdrop = document.getElementById('adblock-panel-backdrop');
+        if (backdrop) {
+            backdrop.classList.remove('hidden');
+            backdrop.setAttribute('aria-hidden', 'false');
+        }
+        document.body.classList.add('adblock-panel-open');
+        panel.classList.remove('hidden');
+        if (this._adblockPanelRefreshTimer) clearInterval(this._adblockPanelRefreshTimer);
+        this._adblockPanelRefreshTimer = setInterval(() => {
+            void this.refreshAdblockPanel();
+        }, 1200);
+    }
+
+    async setAdBlockerEnabled(enabled) {
+        const next = !!enabled;
+        await this.saveSetting('adBlockerEnabled', next);
+        try {
+            window.electronAPI.sendSettingsUpdated();
+        } catch (_) {}
+        const wv = this.getActiveWebview();
+        if (wv) {
+            try {
+                wv.reload();
+            } catch (_) {}
+        }
+        this.syncAdBlockerUrlBarState();
+        await this.refreshAdblockPanel();
+    }
+
+    async setAdblockSiteException(hostname, disabled) {
+        const host = String(hostname || '').trim();
+        if (!host) return;
+        try {
+            await window.electronAPI.setAdblockSiteException(host, !!disabled);
+        } catch (_) {
+            return;
+        }
+        try {
+            this.settings = await window.electronAPI.getSettings();
+        } catch (_) {}
+        const wv = this.getActiveWebview();
+        if (wv) {
+            try {
+                wv.reload();
+            } catch (_) {}
+        }
+        this.syncAdBlockerUrlBarState();
+        await this.refreshAdblockPanel();
+    }
+
+    async toggleAdBlockerGlobalFromPanel() {
+        await this.setAdBlockerEnabled(!this.isAdBlockerEnabled());
+    }
+
+    async toggleAdBlockerSiteFromPanel() {
+        const ctx = this.getAdblockPageContext();
+        if (!ctx.pageHostname) return;
+        const disabled = !this.isAdblockDisabledForHostname(ctx.pageHostname);
+        await this.setAdblockSiteException(ctx.pageHostname, disabled);
     }
     
     // Copy the current tab's URL to clipboard
@@ -3810,8 +4807,9 @@ class AxisBrowser {
             case 'pin-tab':
                 if (this.isIncognitoWindow) break;
                 if (this.currentTab) {
-                    const el = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
-                    if (el) this.togglePinTab(this.currentTab, el, null);
+                    const tid = this._normalizeTabMapKey(this.currentTab);
+                    const el = tid != null ? this._resolveLooseSidebarTabElement(tid) : null;
+                    if (el) this.togglePinTab(tid, el, null);
                 }
                 break;
             case 'new-tab':
@@ -3822,6 +4820,12 @@ class AxisBrowser {
                 break;
             case 'previous-tab':
                 this.switchToAdjacentTab(-1);
+                break;
+            case 'next-profile':
+                void this.switchToAdjacentProfile(1);
+                break;
+            case 'previous-profile':
+                void this.switchToAdjacentProfile(-1);
                 break;
             case 'duplicate-tab':
                 this.duplicateCurrentTab();
@@ -3839,7 +4843,7 @@ class AxisBrowser {
                 this.showDownloadsPopup();
                 break;
             case 'toggle-chat':
-                this.toggleAIChat();
+                if (this.isAiFeaturesEnabled()) this.toggleAIChat();
                 break;
             case 'toggle-mute-tab':
                 if (this.currentTab) this.toggleTabMute(this.currentTab);
@@ -3918,6 +4922,7 @@ class AxisBrowser {
         if (this.webviewListenersSetup.has(webview)) {
             // Update tabId in case it changed
             webview.dataset.tabId = String(tabId);
+            this._ensureWebviewLinkStatusListener(webview, tabId);
             return;
         }
 
@@ -3928,7 +4933,8 @@ class AxisBrowser {
         
         webview.__eventHandlers = {};
         
-        const isActiveTab = () => this.currentTab === tabId;
+        const tabKey = this._normalizeTabMapKey(tabId);
+        const isActiveTab = () => this._normalizeTabMapKey(this.currentTab) === tabKey;
         const getTab = () => this.tabs.get(tabId);
         const clearLoadingTimeout = () => {
             if (webview.__loadingTimeout) {
@@ -3982,9 +4988,9 @@ class AxisBrowser {
             this.updateNavigationButtons();
             this.updateRefreshButton(true); // Change reload button to X
             
-            // Apply cached theme instantly for faster perceived loading
+            // Hold URL bar tint until the new document commits with the page
             if (currentUrl && currentUrl !== 'about:blank') {
-                this.applyCachedTheme(currentUrl);
+                this._prepareUrlBarThemeForNav(currentUrl, webview);
             }
             
             webview.__loadingTimeout = setTimeout(() => {
@@ -4009,14 +5015,34 @@ class AxisBrowser {
         webview.__eventHandlers.didStartLoading = didStartLoadingHandler;
         webview.addEventListener('did-start-loading', didStartLoadingHandler);
 
+        const didStartNavigationHandler = (e) => {
+            if (!e || e.isMainFrame === false) return;
+            try {
+                const wcId = typeof webview.getWebContentsId === 'function' ? webview.getWebContentsId() : 0;
+                const navUrl = e.url || '';
+                if (wcId && navUrl) {
+                    void window.electronAPI?.resetAdblockPageStats?.(wcId, navUrl);
+                }
+            } catch (_) {}
+            if (!isActiveTab()) return;
+            const navUrl = e.url || '';
+            if (this.isBenchmarking) return;
+            this._hideLinkStatusNow();
+            if (navUrl && navUrl !== 'about:blank') {
+                this._prepareUrlBarThemeForNav(navUrl, webview);
+            }
+        };
+        webview.__eventHandlers.didStartNavigation = didStartNavigationHandler;
+        webview.addEventListener('did-start-navigation', didStartNavigationHandler);
+
         const loadCommitHandler = (e) => {
             if (!e || !e.isMainFrame) return;
-            if (!this.isBenchmarking && this.settings?.transparentSites) {
-                this._touchTransparentSitesForWebview(webview);
-            }
             webview.__loadProgressMilestone = Math.max(webview.__loadProgressMilestone || 0, 0.28);
             if (this.loadingBarTabId === tabId && isActiveTab()) {
                 this.setUrlBarLoadProgress(webview.__loadProgressMilestone, tabId);
+            }
+            if (isActiveTab() && !this.isBenchmarking) {
+                this._revealUrlBarThemeWithPage(webview);
             }
         };
         webview.__eventHandlers.loadCommit = loadCommitHandler;
@@ -4024,6 +5050,13 @@ class AxisBrowser {
 
         // Extract theme early on dom-ready (before all resources load)
         const domReadyHandler = () => {
+            webview.__axisGuestDocumentReady = true;
+            try {
+                const wc = webview.getWebContents?.();
+                if (wc && typeof wc.setBackgroundThrottling === 'function' && !wc.isDestroyed?.()) {
+                    wc.setBackgroundThrottling(!isActiveTab());
+                }
+            } catch (_) {}
             tryBindLoadProgressFromWebContents();
             if (!this.isBenchmarking) {
                 webview.__loadProgressMilestone = Math.max(webview.__loadProgressMilestone || 0, 0.58);
@@ -4032,50 +5065,25 @@ class AxisBrowser {
                 }
             }
 
-            // Transparent sites: every tab (not only the active one); follow-up passes catch SPAs after hydrate
-            if (!this.isBenchmarking && this.settings?.transparentSites) {
-                this._touchTransparentSitesForWebview(webview);
-            }
-            
-            if (isActiveTab()) {
-                this._voidGuestTask(this.injectVaultAutofillBootstrap(webview));
-            }
             if (isActiveTab() && !this.isBenchmarking) {
-                try {
-                    const readyUrl = webview.getURL() || '';
-                    this._touchExtensionStoreListingUiForWebview(webview, readyUrl);
-                } catch (_) {}
+                this._triggerEarlyUrlBarThemeExtract(webview);
+                this._deferGuestLoadChores(webview, tabId);
+                if (this.settings?.transparentSites) {
+                    this._touchTransparentSitesForWebview(webview);
+                }
+                if (webview.__axisUrlBarNavHold && !webview.__axisUrlBarNavRevealed) {
+                    this._revealUrlBarThemeWithPage(webview);
+                }
             }
             if (!isActiveTab() || this.isBenchmarking) return;
         };
         webview.__eventHandlers.domReady = domReadyHandler;
         webview.addEventListener('dom-ready', domReadyHandler);
         
-        // Light dom-ready pass: eager-load lazy images (single run, no timeouts)
-        const domReadyOptimizeHandler = () => {
-            try {
-                webview.executeJavaScript(`
-                    (function() {
-                        document.querySelectorAll('img[loading="lazy"], img[data-src], img[data-lazy-src]').forEach(function(img) {
-                            img.loading = 'eager';
-                            if (img.dataset.src) img.src = img.dataset.src;
-                            if (img.dataset.lazySrc) img.src = img.dataset.lazySrc;
-                        });
-                        document.querySelectorAll('iframe[loading="lazy"]').forEach(function(f) { f.loading = 'eager'; });
-                    })();
-                `).catch(() => {});
-            } catch (e) {}
-        };
-        webview.__eventHandlers.domReadyOptimize = domReadyOptimizeHandler;
-        webview.addEventListener('dom-ready', domReadyOptimizeHandler);
-        
         const didFinishLoadHandler = (event) => {
             clearLoadingTimeout();
             // Only hide loading when main frame finishes (avoid hiding on iframe/subframe load)
             const isMainFrame = event == null || event.isMainFrame !== false;
-            if (isMainFrame && !this.isBenchmarking && this.settings?.transparentSites) {
-                this._touchTransparentSitesForWebview(webview);
-            }
             if (isMainFrame && this.loadingBarTabId === tabId) {
                 this.bumpUrlBarLoadMilestone(webview, tabId, 1);
                 this.hideLoadingIndicator();
@@ -4121,41 +5129,23 @@ class AxisBrowser {
                 () => this.updateSecurityIndicator(),
             ]);
             
-                this.trackPageInHistory();
+                this.scheduleTrackPageInHistory(tabId);
 
             const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
             if (tabElement) {
                 this.updateTabFavicon(tabId, tabElement);
             }
-            
-            // Lightweight: disable lazy loading once (no observers or intervals to avoid slowing pages)
-            try {
-                webview.executeJavaScript(`
-                    (function() {
-                        document.querySelectorAll('img[loading="lazy"], img[data-src], img[data-lazy-src]').forEach(function(img) {
-                            img.loading = 'eager';
-                            if (img.dataset.src && !img.src) img.src = img.dataset.src;
-                            if (img.dataset.lazySrc && !img.src) img.src = img.dataset.lazySrc;
-                        });
-                        document.querySelectorAll('iframe[loading="lazy"]').forEach(function(f) { f.loading = 'eager'; });
-                    })();
-                `).catch(() => {});
-            } catch (e) {}
-            if (isActiveTab()) {
-                this._voidGuestTask(this.injectVaultAutofillBootstrap(webview));
-            }
-            const finishUrl = (() => {
+            let finishUrl = '';
+            if (isMainFrame) {
                 try {
-                    return webview.getURL() || '';
-                } catch (_) {
-                    return '';
-                }
-            })();
+                    finishUrl = webview.getURL() || '';
+                } catch (_) {}
+            }
             if (isMainFrame && finishUrl) {
                 this._nudgeYouTubePlayerIfNeeded(webview, finishUrl);
             }
-            if (isMainFrame && isActiveTab() && !this.isBenchmarking && finishUrl) {
-                this._touchExtensionStoreListingUiForWebview(webview, finishUrl);
+            if (isMainFrame && finishUrl && this.settings?.transparentSites && !this.isBenchmarking) {
+                this._touchTransparentSitesForWebview(webview);
             }
         };
         webview.__eventHandlers.didFinishLoad = didFinishLoadHandler;
@@ -4176,12 +5166,17 @@ class AxisBrowser {
             }
             if (!isActiveTab() || this.isBenchmarking || !wasMainNav) return;
 
+            this._releaseUrlBarNavThemeSnapIfNeeded();
+            webview.__axisGuestDocumentReady = true;
+
             this.batchDOMUpdates([
                 () => this.updateUrlBar(),
                 () => this.updateNavigationButtons(),
                 () => this.updateTabTitle()
             ]);
-            this.updateUrlBar(webview);
+            if (this.settings?.transparentSites && !this.isBenchmarking) {
+                this._touchTransparentSitesForWebview(webview);
+            }
         };
         webview.__eventHandlers.didStopLoading = didStopLoadingHandler;
         webview.addEventListener('did-stop-loading', didStopLoadingHandler);
@@ -4235,6 +5230,7 @@ class AxisBrowser {
                 this.loadingBarTabId = null;
             }
             webview.__axisMainNavPending = false;
+            this._clearUrlBarNavThemeHold(webview);
             if (tabId === this.currentTab) {
                 this.isWebviewLoading = false;
                 this.updateRefreshButton(false);
@@ -4250,12 +5246,14 @@ class AxisBrowser {
             }
             this[retryKey] = count + 1;
 
+            if (!isActiveTab()) return;
+
             if (event.errorCode === -2) {
                 webview.reload();
             } else if (event.errorCode === -105) {
                 const currentUrl = event.validatedURL || webview.getURL() || 'https://www.google.com';
                 this.handleDNSFailure(currentUrl, webview);
-            } else if (isActiveTab()) {
+            } else {
                 this.showErrorPage(event.errorDescription, webview);
             }
 
@@ -4284,13 +5282,23 @@ class AxisBrowser {
             this.isBenchmarking = /browserbench\.org\/speedometer/i.test(nextUrl);
             if (event.isMainFrame !== false) {
                 webview.__axisMainNavPending = true;
+                webview.__axisGuestLoadChoresScheduled = false;
+                webview.__axisGuestDocumentReady = false;
+                this._resetWebviewUrlBarThemeTracking(webview);
+                if (this.settings?.transparentSites) {
+                    this._resetTransparentSitesGuestCache(webview);
+                }
+                ++this._urlBarThemeSeq;
             }
             if (!this.isBenchmarking) {
-                this.updateUrlBar();
-                // Apply cached theme immediately on navigation start for instant feedback
+                let priorUrl = '';
+                try {
+                    priorUrl = webview.getURL() || '';
+                } catch (_) {}
                 if (nextUrl && nextUrl !== 'about:blank') {
-                    this.applyCachedTheme(nextUrl);
+                    this._prepareUrlBarThemeForNav(nextUrl, webview, priorUrl);
                 }
+                this.updateUrlBar(null, { skipExtractTheme: true });
             }
         };
         webview.__eventHandlers.willNavigate = willNavigateHandler;
@@ -4311,6 +5319,7 @@ class AxisBrowser {
                 } catch (_) {}
             }
             if (!isActiveTab() || this.isBenchmarking) return;
+                this.closeSecurityPanel();
                 this.batchDOMUpdates([
                     () => this.updateUrlBar(),
                     () => this.updateNavigationButtons()
@@ -4328,14 +5337,20 @@ class AxisBrowser {
             } catch (_) {
                 navUrl = '';
             }
+            const prevUrl = webview.__axisLastInPageUrl || '';
             const stableKey = this._urlStablePageKey(navUrl);
             const pageChanged = stableKey !== webview.__axisLastStablePageKey;
+            const watchBoundary =
+                this.isYouTubeWatchUrl(prevUrl) !== this.isYouTubeWatchUrl(navUrl);
             webview.__axisLastInPageUrl = navUrl;
             if (pageChanged) {
                 webview.__axisLastStablePageKey = stableKey;
             }
 
-            if (!this.isBenchmarking && this.settings?.transparentSites && pageChanged) {
+            if (!this.isBenchmarking && this.settings?.transparentSites && (pageChanged || watchBoundary)) {
+                if (watchBoundary) {
+                    this._resetTransparentSitesGuestCache(webview);
+                }
                 this._touchTransparentSitesForWebview(webview);
             }
             try {
@@ -4347,11 +5362,11 @@ class AxisBrowser {
                 } catch (_) {}
             }
             if (!isActiveTab() || this.isBenchmarking) return;
-            this.batchDOMUpdates([
-                () => this.updateNavigationButtons(),
+                this.batchDOMUpdates([
+                    () => this.updateNavigationButtons(),
                 () => (pageChanged ? this.updateTabTitle() : undefined),
                 () => this.updateUrlBar(webview, { skipExtractTheme: !pageChanged })
-            ]);
+                ]);
         };
         webview.__eventHandlers.didNavigateInPage = didNavigateInPageHandler;
         webview.addEventListener('did-navigate-in-page', didNavigateInPageHandler);
@@ -4405,8 +5420,8 @@ class AxisBrowser {
         };
         webview.__eventHandlers.pageFaviconUpdated = pageFaviconUpdatedHandler;
         webview.addEventListener('page-favicon-updated', pageFaviconUpdatedHandler);
-        
-        this.startAudioDetection(tabId, webview);
+
+        this.bindWebviewAudioStateListener(tabId, webview);
 
         const contextMenuHandler = (e) => {
             this._contextMenuSourceTabId = tabId;
@@ -4448,12 +5463,28 @@ class AxisBrowser {
         };
         webview.__eventHandlers.contextMenu = contextMenuHandler;
         webview.addEventListener('context-menu', contextMenuHandler);
+
+        const updateTargetUrlHandler = (e) => {
+            this._handleLinkStatusTargetUrl(tabKey, (e && e.url) || '');
+        };
+        this._bindWebviewLinkStatusListener(webview, updateTargetUrlHandler);
         
         const ipcMessageHandler = (event) => {
             const { channel, args } = event;
             if (channel === 'axis-nav-gesture') {
                 const dir = args && args[0];
                 this.tryNavigateWithAxisGesture(dir, webview, tabId);
+                return;
+            }
+            if (channel === 'axis-url-bar-theme-hint') {
+                if (!isActiveTab()) return;
+                this._applyUrlBarThemeHint(args && args[0], webview);
+                return;
+            }
+            if (channel === 'axis-url-bar-theme-prefetch') {
+                if (!isActiveTab()) return;
+                const prefetchUrl = args && args[0]?.url;
+                if (prefetchUrl) this._prefetchUrlBarThemeForUrl(prefetchUrl);
                 return;
             }
             if (channel === 'axis-cws-add-to-chrome') {
@@ -4536,9 +5567,9 @@ class AxisBrowser {
 
         const eventMap = {
             didStartLoading:   'did-start-loading',
+            didStartNavigation:'did-start-navigation',
             loadCommit:        'load-commit',
             domReady:          'dom-ready',
-            domReadyOptimize:  'dom-ready',
             didFinishLoad:     'did-finish-load',
             didStopLoading:    'did-stop-loading',
             consoleMessage:    'console-message',
@@ -4549,6 +5580,7 @@ class AxisBrowser {
             pageTitleUpdated:  'page-title-updated',
             pageFaviconUpdated:'page-favicon-updated',
             contextMenu:       'context-menu',
+            updateTargetUrl:   'update-target-url',
             ipcMessage:        'ipc-message',
         };
 
@@ -4574,6 +5606,14 @@ class AxisBrowser {
         if (webview.__audioCheckInterval) {
             clearInterval(webview.__audioCheckInterval);
             webview.__audioCheckInterval = null;
+        }
+        if (webview.__axisAudioStateHandler && webview.__axisAudioStateWc) {
+            try {
+                webview.__axisAudioStateWc.removeListener('audio-state-changed', webview.__axisAudioStateHandler);
+            } catch (_) {}
+            webview.__axisAudioStateHandler = null;
+            webview.__axisAudioStateWc = null;
+            webview.__axisAudioStateBound = false;
         }
 
         webview.__eventHandlers = null;
@@ -4743,8 +5783,9 @@ class AxisBrowser {
     }
 
     setupPerformanceOptimizations() {
-        // Disable DNS prefetch and resource preloading entirely - they hurt Speedometer benchmarks
-        // by causing unnecessary network and DOM work during benchmark execution
+        // Real browsing: Chromium lazy image/frame loading stays enabled (see main.js flags).
+        // Link hover dns-prefetch / preconnect runs in guest preload — zero cost until you point at a link.
+        this._syncWebviewBackgroundThrottling(this.currentTab);
     }
 
     setupColorWheel(wheel, handle) {
@@ -4927,9 +5968,15 @@ class AxisBrowser {
 
     applyCustomThemeFromSettings() {
         if (this.isIncognitoWindow) return;
+        if (this._profileSwipeThemeActive) return;
+        this._siteThemeColorActiveHex = null;
         if (!this.settings) {
             this.settings = {};
         }
+        const shellKey = this._settingsShellKey();
+        this._lastSettingsShellKey = shellKey;
+        const pid = String(this.profileId || 'personal');
+        this._lastSettingsShellKeyByProfile.set(pid, shellKey);
         
         const themeColor = this.settings.themeColor || '#1a1a1a';
         const gradientColor = this.settings.gradientColor || '#2a2a2a';
@@ -4958,6 +6005,141 @@ class AxisBrowser {
         }
     }
 
+    _isSiteThemeColorEnabled() {
+        return !this.isIncognitoWindow && !!this.settings?.siteThemeColor;
+    }
+
+    _rgbToHex(rgb) {
+        if (!rgb || typeof rgb !== 'object') return null;
+        const parts = ['r', 'g', 'b'].map((key) => {
+            const value = Math.max(0, Math.min(255, Math.round(Number(rgb[key]))));
+            if (!Number.isFinite(value)) return null;
+            return value.toString(16).padStart(2, '0');
+        });
+        if (parts.some((part) => part == null)) return null;
+        return `#${parts.join('')}`;
+    }
+
+    _isInternalSiteThemeUrl(url) {
+        const value = String(url || '');
+        return (
+            value === this.NEWTAB_URL ||
+            value === 'axis://settings' ||
+            value.startsWith('axis:') ||
+            value.startsWith('about:')
+        );
+    }
+
+    _resetSiteThemeColorToSettings() {
+        if (!this._siteThemeColorActiveHex) return;
+        this._siteThemeColorActiveHex = null;
+        this._reapplySettingsShellIfNeeded(true);
+    }
+
+    _settingsShellKey() {
+        const s = this.settings || {};
+        return `${s.themeColor || ''}|${s.gradientColor || ''}|${!!s.gradientEnabled}|${!!s.transparentSites}|${this.isLightUiTheme()}|${this._normalizeWindowChromeLight(s.windowChromeLight)}`;
+    }
+
+    _reapplySettingsShellIfNeeded(force = false) {
+        if (this.isIncognitoWindow) return;
+        if (this._profileSwipeThemeActive) return;
+        const key = this._settingsShellKey();
+        const pid = String(this.profileId || 'personal');
+        const lastKey = this._lastSettingsShellKeyByProfile.get(pid) || '';
+        if (!force && key === lastKey && this._lastShellThemeColors) return;
+        this._lastSettingsShellKey = key;
+        this._lastSettingsShellKeyByProfile.set(pid, key);
+        if (this.settings?.themeColor || this.settings?.gradientColor) {
+            this.applyCustomThemeFromSettings();
+        } else {
+            this.resetToBlackTheme();
+        }
+    }
+
+    _applyTabShellForSwitch(tab) {
+        if (this.isIncognitoWindow || !tab) return;
+        const url = tab.url || '';
+        const internal =
+            url === this.NEWTAB_URL ||
+            url === 'axis://settings' ||
+            tab.isSettings ||
+            url.startsWith('axis:note://') ||
+            url === 'about:blank';
+
+        if (internal) {
+            if (this._siteThemeColorActiveHex) this._siteThemeColorActiveHex = null;
+            return;
+        }
+
+        const snap = tab.urlBarChromeSnapshot;
+        if (!this._urlBarThemeSnapshotMatchesTab(tab, snap)) {
+            if (this._siteThemeColorActiveHex) this._siteThemeColorActiveHex = null;
+            this._reapplySettingsShellIfNeeded(true);
+            return;
+        }
+        const shellHex =
+            snap?.siteThemeActive && snap?.shellThemeHex
+                ? snap.shellThemeHex
+                : snap?.canvasHex && this._isSiteThemeColorEnabled()
+                  ? snap.canvasHex
+                  : null;
+        if (shellHex && this._isSiteThemeColorEnabled()) {
+            const hex = shellHex;
+            if (this._siteThemeColorActiveHex !== hex) {
+                const rgb = this.hexToRgb(hex);
+                if (rgb) this._applySiteThemeColorFromRgb(rgb, 'tab-restore');
+            }
+            return;
+        }
+
+        if (this._siteThemeColorActiveHex) this._siteThemeColorActiveHex = null;
+        this._reapplySettingsShellIfNeeded(true);
+    }
+
+    _applySiteThemeColorFromRgb(rgb, source = 'site') {
+        if (!this._isSiteThemeColorEnabled()) return false;
+        if (source === 'default' || source === 'error') return false;
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (tab?.isSettings || this._isInternalSiteThemeUrl(tab?.url)) return false;
+
+        const hex = this._rgbToHex(rgb);
+        if (!hex) return false;
+        if (this._siteThemeColorActiveHex === hex) return true;
+
+        const colors = this.generateHarmoniousColors(hex);
+        if (this.settings?.gradientEnabled) {
+            colors.gradientColor = this.darkenColor(hex, this.isDarkColor(hex) ? 0.08 : 0.14);
+        }
+        this._siteThemeColorActiveHex = hex;
+        this.applyCustomTheme(colors);
+        return true;
+    }
+
+    _applyCachedSiteThemeColor(url) {
+        if (!this._isSiteThemeColorEnabled() || this._isInternalSiteThemeUrl(url)) return false;
+        const found = this._lookupUrlBarThemeEntry(url);
+        const rgb = found?.entry?.rgb;
+        if (!rgb) return false;
+        return this._applySiteThemeColorFromRgb(rgb, rgb.source || 'cache');
+    }
+
+    _applyCurrentSiteThemeColor() {
+        if (!this._isSiteThemeColorEnabled()) {
+            this._resetSiteThemeColorToSettings();
+            return false;
+        }
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (!tab || tab.isSettings || this._isInternalSiteThemeUrl(tab.url)) {
+            this._resetSiteThemeColorToSettings();
+            return false;
+        }
+        if (this._applyCachedSiteThemeColor(tab.url)) return true;
+        const webview = this.getActiveWebview();
+        if (webview) void this.extractUrlBarTheme(webview, { early: true });
+        return false;
+    }
+
     // Apply theme only to sidebar (used when no tabs are open)
     applyThemeToSidebarOnly() {
         if (!this.settings) {
@@ -4970,17 +6152,17 @@ class AxisBrowser {
         const gradientDirection = this.settings.gradientDirection || 'to right';
         const chrome = this.getShellChromeStyle();
 
-        const gaT = this.getThemeAwareGlassAlpha(themeColor, chrome.glassAlpha);
-        const gaG = gradientEnabled ? this.getThemeAwareGlassAlpha(gradientColor, chrome.glassAlpha) : gaT;
+        const glassPrim = chrome.glassAlpha;
+        const glassGrad = chrome.glassAlpha;
 
         // Create sidebar background
         let sidebarBg;
         if (gradientEnabled) {
-            const themeRgba = this.hexToRgba(themeColor, gaT);
-            const gradientRgba = this.hexToRgba(gradientColor, gaG);
+            const themeRgba = this.shellGlassRgba(themeColor, glassPrim);
+            const gradientRgba = this.shellGlassRgba(gradientColor, glassGrad);
             sidebarBg = this.smoothGradient(gradientDirection, themeRgba, gradientRgba);
         } else {
-            sidebarBg = this.hexToRgba(themeColor, gaT);
+            sidebarBg = this.shellGlassRgba(themeColor, glassPrim);
         }
         
         // Apply to sidebar only
@@ -4993,8 +6175,15 @@ class AxisBrowser {
         // Also apply to app container for the blur effect
         const app = document.getElementById('app');
         if (app) {
-            app.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
-            app.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
+            this._paintAppShellBackground(app, {
+                shellBase: themeColor,
+                shellGradientSecondary: gradientColor,
+                gradientEnabled,
+                gradientDirection,
+                glassPrim,
+                glassGrad: glassPrim,
+                backdrop: chrome.backdropStrong,
+            });
         }
     }
 
@@ -5080,10 +6269,31 @@ class AxisBrowser {
         return 0.2126 * r + 0.7152 * g + 0.0722 * b;
     }
 
+    /** Shell paint: exact theme RGB — never shifted toward grey or a lighter tint. */
+    resolveShellGlassPaint(hexInput, transmissionAlpha) {
+        const alpha =
+            typeof transmissionAlpha === 'number' && Number.isFinite(transmissionAlpha)
+                ? transmissionAlpha
+                : 1;
+        let hex = hexInput;
+        if (!hex || typeof hex !== 'string') hex = '#1a1a1a';
+        else {
+            hex = hex.trim();
+            if (!hex.startsWith('#')) hex = '#1a1a1a';
+        }
+        return { hex, alpha };
+    }
+
+    shellGlassRgba(hexInput, transmissionAlpha) {
+        const paint = this.resolveShellGlassPaint(hexInput, transmissionAlpha);
+        return this.hexToRgba(paint.hex, paint.alpha) || `rgba(26, 26, 26, ${paint.alpha})`;
+    }
+
     /**
-     * Bright shells on vibrancy: too much luminance bump → grey slab; too little → **lost hue** (neutral
-     * “show-through” dominates). This curve keeps **transmission** from `baseAlpha` but adds **chroma
-     * insurance** (lift × saturation) so pale / vivid tints still read as the picked color.
+     * Bright shells on vibrancy: dark / saturated tints need a small alpha bump so hue survives
+     * see-through glass. **Pale / light theme colors already read at low alpha** — boosting them
+     * turns the frame into a solid pastel slab. This curve preserves transmission from `baseAlpha`
+     * while only adding chroma insurance where luminance is low.
      */
     getThemeAwareGlassAlpha(hexInput, baseAlpha) {
         if (typeof baseAlpha !== 'number' || !Number.isFinite(baseAlpha)) return baseAlpha;
@@ -5100,7 +6310,7 @@ class AxisBrowser {
             return baseAlpha;
         }
         const lift = Math.min(1, Math.max(0, (L - 0.14) / 0.82));
-        if (lift <= 0.003) return baseAlpha;
+        const pale = lift;
 
         let hslSat = 0;
         try {
@@ -5113,24 +6323,36 @@ class AxisBrowser {
         const airy = baseAlpha < 0.13;
         let maxBump;
         if (airy) {
-            const paleRing = 1 - lift * 0.68;
-            const spreadCap = headroom * (0.095 + paleRing * 0.32);
-            const chromaPreserve = lift * (0.026 + hslSat * 0.072 + baseAlpha * 5.2);
-            const baseline = Math.max(
-                0.042,
-                0.066 + baseAlpha * 2.9 - lift * 0.016 + hslSat * 0.036
-            );
-            maxBump = Math.min(spreadCap, baseline + chromaPreserve);
-        } else {
-            maxBump = Math.min(headroom * 0.98, Math.max(baseAlpha + 0.28, 0.71 - baseAlpha * 0.12));
+            // Ultra-clear glass: keep alpha tiny; chroma is restored via backdrop saturation, not grey slabs.
+            const chromaMicro =
+                (1 - pale) * (0.004 + hslSat * 0.012 + baseAlpha * 0.85) +
+                pale * (0.0015 + hslSat * 0.004);
+            let alpha = baseAlpha + chromaMicro;
+            const maxAiry = baseAlpha + headroom * (0.025 + hslSat * 0.045 + (1 - pale) * 0.02);
+            alpha = Math.min(alpha, maxAiry);
+            const softFloor = baseAlpha * (1.05 + hslSat * 0.12);
+            alpha = Math.max(alpha, Math.min(softFloor, baseAlpha + 0.008));
+            if (pale > 0.45) {
+                const paleCap =
+                    baseAlpha + headroom * (0.06 + hslSat * 0.12) * (0.22 + (1 - pale) * 0.55);
+                alpha = Math.min(alpha, paleCap);
+            }
+            return Math.min(0.18, alpha);
+        }
+
+        maxBump = Math.min(headroom * 0.98, Math.max(baseAlpha + 0.28, 0.71 - baseAlpha * 0.12));
             const opaqueish = 0.36;
             const airyEdge = 0.13;
             const transmissionWeight = Math.max(0, Math.min(1, (opaqueish - baseAlpha) / (opaqueish - airyEdge)));
-            const paleAtten = lift * Math.pow(transmissionWeight, 1.15) * 0.78;
-            maxBump *= Math.max(0.32, 1 - paleAtten);
+        const paleAtten = pale * Math.pow(transmissionWeight, 1.05) * (0.92 + (1 - transmissionWeight) * 0.28);
+        maxBump *= Math.max(0.12, 1 - paleAtten);
+        const curved = (1 - pale) * (1 - pale) * 0.55 + pale * pale * 0.22 + hslSat * 0.08;
+        let alpha = baseAlpha + maxBump * curved;
+        if (pale > 0.42 && transmissionWeight > 0.35) {
+            const paleCap = baseAlpha + headroom * (0.22 + hslSat * 0.28) * (0.32 + (1 - pale) * 0.68);
+            alpha = Math.min(alpha, paleCap);
         }
-        const curved = lift * lift;
-        return Math.min(0.985, baseAlpha + maxBump * curved);
+        return Math.min(0.985, alpha);
     }
 
     // Calculate contrast ratio between two colors
@@ -5261,16 +6483,409 @@ class AxisBrowser {
             return null;
         }
     }
-    
-    // Apply cached theme for a domain instantly
-    applyCachedTheme(url) {
+
+    _urlBarThemeDomainCandidates(url) {
         const domain = this.getDomainFromUrl(url);
-        if (domain && this.themeCache.has(domain)) {
-            const cachedColors = this.themeCache.get(domain);
-            this.applyCustomTheme(cachedColors);
+        if (!domain) return [];
+        const keys = [domain];
+        if (domain.startsWith('www.')) keys.push(domain.slice(4));
+        const parts = domain.split('.');
+        if (parts.length > 2) keys.push(parts.slice(-2).join('.'));
+        return keys;
+    }
+
+    /** Page-first keys for URL bar tint cache — avoids wrong colors across paths on one host. */
+    _urlBarThemeCacheLookupKeys(url) {
+        const keys = [];
+        const page = this._urlStablePageKey(url);
+        if (page) keys.push(`p:${page}`);
+        for (const host of this._urlBarThemeDomainCandidates(url)) {
+            keys.push(`h:${host}`);
+            keys.push(host);
+        }
+        return keys;
+    }
+
+    _lookupUrlBarThemeEntry(url, opts = {}) {
+        const page = this._urlStablePageKey(url);
+        if (page) {
+            const pageCacheKey = `p:${page}`;
+            if (this.urlBarThemeCache.has(pageCacheKey)) {
+                return { key: pageCacheKey, entry: this.urlBarThemeCache.get(pageCacheKey) };
+            }
+        }
+        if (opts.pageOnly) return null;
+        for (const key of this._urlBarThemeCacheLookupKeys(url)) {
+            if (key.startsWith('p:')) continue;
+            if (this.urlBarThemeCache.has(key)) {
+                return { key, entry: this.urlBarThemeCache.get(key) };
+            }
+        }
+        return null;
+    }
+
+    _isUrlBarThemeHeldForWebview(webview) {
+        return !!(webview && webview.__axisUrlBarNavHold && !webview.__axisUrlBarNavRevealed);
+    }
+
+    _beginUrlBarNavThemeHold(webview, url) {
+        if (!webview) return;
+        webview.__axisUrlBarNavHold = true;
+        webview.__axisUrlBarNavRevealed = false;
+        webview.__axisUrlBarNavHoldUrl = url || '';
+    }
+
+    _clearUrlBarNavThemeHold(webview) {
+        if (!webview) return;
+        webview.__axisUrlBarNavHold = false;
+        webview.__axisUrlBarNavRevealed = false;
+        webview.__axisUrlBarNavHoldUrl = '';
+        this._urlBarPendingByWebview.delete(webview);
+    }
+
+    _stageUrlBarThemeForWebview(webview, payload) {
+        if (!webview || !payload) return;
+        this._urlBarPendingByWebview.set(webview, payload);
+    }
+
+    _applyPendingUrlBarTheme(pending) {
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar || !pending) return false;
+        urlBar.classList.remove('hidden');
+        this._setUrlBarInternalShellMode(null);
+        if (pending.kind === 'cache' && pending.entry) {
+            const entry = pending.entry;
+            if (entry.rgb) {
+                if (this._applyUrlBarColorInfo({ ...entry.rgb, source: entry.rgb.source || 'cache' }, urlBar)) {
+                    if (entry.canvasHex) this._syncWebviewCanvasColor(entry.canvasHex);
+                    this._syncWebPanelVisualState();
+                    return true;
+                }
+            }
+            if (entry.snapshot && this._restoreUrlBarChromeSnapshot(entry.snapshot)) {
+                if (entry.canvasHex) this._syncWebviewCanvasColor(entry.canvasHex);
+                this._syncWebPanelVisualState();
+                return true;
+            }
+            return false;
+        }
+        if (pending.kind === 'rgb' && pending.rgb) {
+            if (this._applyUrlBarColorInfo({ ...pending.rgb, source: pending.source || 'pending' }, urlBar)) {
+                this._syncWebPanelVisualState();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    _shouldHoldUrlBarThemeForNav(fromUrl, toUrl) {
+        if (!toUrl || toUrl === 'about:blank') return false;
+        if (String(toUrl).startsWith('axis://') || String(toUrl).startsWith('axis:note://')) return false;
+        if (!fromUrl || fromUrl === 'about:blank') return true;
+        return this._urlStablePageKey(fromUrl) !== this._urlStablePageKey(toUrl);
+    }
+
+    /** Stage tint during navigation — applied when the page commits, not before. */
+    _prepareUrlBarThemeForNav(url, webview, fromUrl = '') {
+        if (!url || url === 'about:blank' || !webview) return false;
+        if (String(url).startsWith('axis://') || String(url).startsWith('axis:note://')) return false;
+        let priorUrl = fromUrl;
+        if (!priorUrl) {
+            try {
+                priorUrl = webview.getURL() || '';
+            } catch (_) {
+                priorUrl = '';
+            }
+        }
+        if (!this._shouldHoldUrlBarThemeForNav(priorUrl, url)) return false;
+        this._beginUrlBarNavThemeHold(webview, url);
+        let found = this._lookupUrlBarThemeEntry(url, { pageOnly: true });
+        if (!found) found = this._lookupUrlBarThemeEntry(url, { pageOnly: false });
+        if (found && found.entry.transparentSites === !!this.settings?.transparentSites) {
+            this._stageUrlBarThemeForWebview(webview, { kind: 'cache', entry: found.entry });
             return true;
         }
         return false;
+    }
+
+    /** Reveal staged URL bar tint on the same frame as the new document's first paint. */
+    _revealUrlBarThemeWithPage(webview) {
+        if (!webview || this.isBenchmarking) return;
+        if (!webview.__axisUrlBarNavHold || webview.__axisUrlBarNavRevealed) return;
+        if (this.getActiveWebview() !== webview) return;
+
+        const runReveal = () => {
+            if (!webview.__axisUrlBarNavHold || webview.__axisUrlBarNavRevealed) return;
+            if (this.getActiveWebview() !== webview) return;
+            webview.__axisUrlBarNavRevealed = true;
+            webview.__axisUrlBarNavHold = false;
+
+            const pending = this._urlBarPendingByWebview.get(webview);
+            this._beginUrlBarNavThemeSnap();
+            if (pending) {
+                this._applyPendingUrlBarTheme(pending);
+                this._urlBarPendingByWebview.delete(webview);
+            } else if (this.settings?.transparentSites) {
+                this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
+            } else {
+                void this.extractUrlBarTheme(webview);
+            }
+            requestAnimationFrame(() => {
+                this._releaseUrlBarNavThemeSnapIfNeeded();
+            });
+        };
+        requestAnimationFrame(() => requestAnimationFrame(runReveal));
+    }
+
+    _snapUrlBarThemeForUrl(url) {
+        if (!url || url === 'about:blank') return false;
+        if (String(url).startsWith('axis://') || String(url).startsWith('axis:note://')) return false;
+        this._beginUrlBarNavThemeSnap();
+        const hit = this.applyCachedUrlBarTheme(url);
+        return hit;
+    }
+
+    _prefetchUrlBarThemeForUrl(url) {
+        /* Hover prefetch warms network only — do not change URL bar before navigation. */
+        void url;
+        return false;
+    }
+
+    _parseUrlBarColorString(colorStr) {
+        const raw = String(colorStr || '').trim();
+        if (!raw) return null;
+        if (raw.startsWith('#')) {
+            const rgb = this.hexToRgb(raw);
+            if (rgb && (rgb.r + rgb.g + rgb.b > 0 || raw === '#000000')) return rgb;
+            return null;
+        }
+        const match = raw.match(/[\d.]+/g);
+        if (match && match.length >= 3) {
+            const r = Math.round(parseFloat(match[0]));
+            const g = Math.round(parseFloat(match[1]));
+            const b = Math.round(parseFloat(match[2]));
+            const a = match.length >= 4 ? parseFloat(match[3]) : 1;
+            if (a < 0.1) return null;
+            return { r, g, b };
+        }
+        return null;
+    }
+
+    _applyUrlBarThemeColorString(colorStr, url) {
+        const rgb = this._parseUrlBarColorString(colorStr);
+        if (!rgb) return false;
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        const headerPageKey = url ? this._urlStablePageKey(url) : '';
+        const tabPageKey = tab?.url ? this._urlStablePageKey(tab.url) : '';
+        if (headerPageKey && tabPageKey && headerPageKey !== tabPageKey) return false;
+        const webview = this.getActiveWebview();
+        if (!webview) return false;
+        if (webview && this._isUrlBarThemeHeldForWebview(webview)) {
+            this._stageUrlBarThemeForWebview(webview, { kind: 'rgb', rgb, source: 'header' });
+            return true;
+        }
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar || this._isInternalShellUrlBar(urlBar)) return false;
+        if (!this._shouldAcceptUrlBarTheme({ ...rgb, source: 'header' }, webview)) return false;
+        this._beginUrlBarNavThemeSnap();
+        if (!this._applyUrlBarColorInfo({ ...rgb, source: 'header' }, urlBar, { force: true })) return false;
+        if (url) this._cacheUrlBarThemeForUrl(url, { ...rgb, source: 'header' });
+        return true;
+    }
+    
+    // Apply cached theme for a domain instantly
+    applyCachedTheme(url) {
+        for (const key of this._urlBarThemeDomainCandidates(url)) {
+            if (this.themeCache.has(key)) {
+                this.applyCustomTheme(this.themeCache.get(key));
+            return true;
+            }
+        }
+        return false;
+    }
+
+    _loadPersistedUrlBarThemeCache() {
+        try {
+            const raw = localStorage.getItem('axis-url-bar-theme-cache-v1');
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return;
+            for (const [domain, entry] of Object.entries(parsed)) {
+                if (!domain || (!entry?.snapshot?.vars && !entry?.rgb)) continue;
+                const normalized = {
+                    snapshot: entry.snapshot || null,
+                    canvasHex: entry.canvasHex || '',
+                    transparentSites: !!entry.transparentSites,
+                    rgb: entry.rgb || null,
+                    pageKey: entry.pageKey || null
+                };
+                if (domain.startsWith('p:') || domain.startsWith('h:')) {
+                    this.urlBarThemeCache.set(domain, normalized);
+                } else {
+                    this.urlBarThemeCache.set(domain, normalized);
+                    if (entry.pageKey) {
+                        this.urlBarThemeCache.set(`p:${entry.pageKey}`, normalized);
+                    }
+                }
+            }
+        } catch (_) {
+            /* ignore corrupt cache */
+        }
+    }
+
+    _schedulePersistUrlBarThemeCache() {
+        if (this._urlBarThemeCachePersistTimer) return;
+        this._urlBarThemeCachePersistTimer = setTimeout(() => {
+            this._urlBarThemeCachePersistTimer = null;
+            try {
+                const payload = {};
+                for (const [domain, entry] of this.urlBarThemeCache.entries()) {
+                    payload[domain] = {
+                        snapshot: entry.snapshot,
+                        canvasHex: entry.canvasHex || '',
+                        transparentSites: !!entry.transparentSites,
+                        rgb: entry.rgb || null,
+                        pageKey: entry.pageKey || null
+                    };
+                }
+                localStorage.setItem('axis-url-bar-theme-cache-v1', JSON.stringify(payload));
+            } catch (_) {
+                /* ignore quota errors */
+            }
+        }, 120);
+    }
+
+    /** Instantly restore a previously extracted URL bar tint for this page. */
+    applyCachedUrlBarTheme(url, opts = {}) {
+        const urlBarOnly = !!opts.urlBarOnly;
+        const pageOnly = opts.pageOnly !== false;
+        const found = this._lookupUrlBarThemeEntry(url, { pageOnly });
+        if (!found) return false;
+        const { entry } = found;
+        if (entry.transparentSites !== !!this.settings?.transparentSites) return false;
+
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar || this._isInternalShellUrlBar(urlBar)) return false;
+
+        urlBar.classList.remove('hidden');
+        this._setUrlBarInternalShellMode(null);
+
+        if (entry.rgb) {
+            if (this._applyUrlBarColorInfo({ ...entry.rgb, source: entry.rgb.source || 'cache' }, urlBar)) {
+                if (!urlBarOnly) this._applySiteThemeColorFromRgb(entry.rgb, entry.rgb.source || 'cache');
+                if (entry.canvasHex) this._syncWebviewCanvasColor(entry.canvasHex);
+                this._syncWebPanelVisualState();
+                return true;
+            }
+        }
+
+        if (!entry.snapshot || !this._restoreUrlBarChromeSnapshot(entry.snapshot)) return false;
+        if (!urlBarOnly && entry.rgb) this._applySiteThemeColorFromRgb(entry.rgb, entry.rgb.source || 'cache');
+        if (entry.canvasHex) this._syncWebviewCanvasColor(entry.canvasHex);
+        this._syncWebPanelVisualState();
+        return true;
+    }
+
+    _cacheUrlBarThemeForUrl(url, rgb = null) {
+        const pageKey = this._urlStablePageKey(url);
+        if (!pageKey) return;
+        const snapshot = this._captureUrlBarChromeSnapshot();
+        if (!snapshot?.vars || !Object.keys(snapshot.vars).length) return;
+        const container = document.querySelector('.webview-container');
+        const canvasHex = container?.style.getPropertyValue('--axis-webview-canvas')?.trim() || '';
+        let storedRgb = rgb;
+        if (!storedRgb && canvasHex && canvasHex.startsWith('#')) {
+            storedRgb = this.hexToRgb(canvasHex);
+        }
+        const entry = {
+            snapshot,
+            canvasHex,
+            transparentSites: !!this.settings?.transparentSites,
+            rgb: storedRgb || null,
+            pageKey
+        };
+        this.urlBarThemeCache.set(`p:${pageKey}`, entry);
+        if (storedRgb?.source === 'meta') {
+            const domain = this.getDomainFromUrl(url);
+            if (domain) this.urlBarThemeCache.set(`h:${domain}`, entry);
+        }
+        if (canvasHex && canvasHex !== '#121212' && canvasHex !== '#fafafa') {
+            try {
+                const domain = this.getDomainFromUrl(url);
+                if (domain) {
+                    this.themeCache.set(domain, this.generateHarmoniousColors(canvasHex));
+                }
+            } catch (_) {}
+        }
+        if (this.urlBarThemeCache.size > 384) {
+            const first = this.urlBarThemeCache.keys().next().value;
+            if (first) this.urlBarThemeCache.delete(first);
+        }
+        this._schedulePersistUrlBarThemeCache();
+    }
+
+    _applyUrlBarThemeHint(payload, webview) {
+        if (!payload || !webview) return;
+        if (this.getActiveWebview() !== webview) return;
+        const { r, g, b, source } = payload;
+        if (typeof r !== 'number' || typeof g !== 'number' || typeof b !== 'number') return;
+        const hintSource = source || 'hint';
+        if (
+            hintSource === 'surface' &&
+            webview.__axisGuestDocumentReady !== true &&
+            !this._webviewThemeReady(webview)
+        ) {
+            return;
+        }
+        if (!this._shouldAcceptUrlBarTheme({ r, g, b, source: hintSource }, webview)) return;
+
+        if (this._isUrlBarThemeHeldForWebview(webview)) {
+            this._stageUrlBarThemeForWebview(webview, {
+                kind: 'rgb',
+                rgb: { r, g, b },
+                source: hintSource
+            });
+            return;
+        }
+
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar || this._isInternalShellUrlBar(urlBar)) return;
+
+        this._beginUrlBarNavThemeSnap();
+        if (this._applyUrlBarColorInfo({ r, g, b, source: hintSource }, urlBar)) {
+            let cacheUrl = '';
+            try {
+                cacheUrl = webview.getURL() || '';
+            } catch (_) {}
+            if (cacheUrl) {
+                this._cacheUrlBarThemeForUrl(cacheUrl, { r, g, b, source: hintSource });
+            }
+        }
+    }
+
+    _beginUrlBarNavThemeSnap() {
+        this._urlBarNavThemeSnap = true;
+        this.elements?.webviewUrlBar?.classList.add('url-bar--instant-theme');
+    }
+
+    _triggerEarlyUrlBarThemeExtract(webview) {
+        if (!webview || this.isBenchmarking) return;
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (!tab) return;
+        if (
+            tab.url === this.NEWTAB_URL ||
+            tab.url === 'axis://settings' ||
+            tab.isSettings ||
+            String(tab.url || '').startsWith('axis:note://')
+        ) {
+            return;
+        }
+        if (this.settings?.transparentSites) {
+            this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
+            return;
+        }
+        if (this._applyTabSiteThemeFromMemory(tab)) return;
+        void this.extractUrlBarTheme(webview, { early: true });
     }
 
     _captureShellChromeSnapshot() {
@@ -5278,10 +6893,361 @@ class AxisBrowser {
         return { colors: { ...this._lastShellThemeColors } };
     }
 
+    /** Deterministic shell palette from a profile's saved settings (not whatever is on screen now). */
+    _shellChromeSnapshotFromSettings(settings) {
+        if (!settings || this.isIncognitoWindow) return null;
+        const themeColor = settings.themeColor || '#1a1a1a';
+        const gradientColor = settings.gradientColor || '#2a2a2a';
+        const colors = this.generateHarmoniousColors(themeColor);
+        if (settings.gradientEnabled) {
+            colors.gradientColor = gradientColor;
+        }
+        return { colors };
+    }
+
     _restoreShellChromeSnapshot(snapshot) {
         if (!snapshot?.colors) return false;
         this.applyCustomTheme(snapshot.colors);
         return true;
+    }
+
+    /**
+     * Precompute stable shell backgrounds for profile-swipe crossfade.
+     * Uses each profile's own settings — never the live screen palette.
+     */
+    resolveProfileSwipeThemePack(settings) {
+        if (!settings || this.isIncognitoWindow) return null;
+        const themeColor = settings.themeColor || '#1a1a1a';
+        const gradientColor = settings.gradientColor || '#2a2a2a';
+        const colors = this.generateHarmoniousColors(themeColor);
+        const gradientEnabled = !!(settings.gradientEnabled && gradientColor);
+        const shellBase = colors.primary;
+        const chrome = this.getShellChromeStyle();
+        const glassPrim = chrome.glassAlpha;
+        const direction = settings.gradientDirection || '135deg';
+        let glassGrad = glassPrim;
+        let shellBg;
+        let gradHex = null;
+
+        if (gradientEnabled) {
+            glassGrad = chrome.glassAlpha;
+            shellBg = this.smoothGradient(
+                direction,
+                this.shellGlassRgba(shellBase, glassPrim),
+                this.shellGlassRgba(gradientColor, glassGrad)
+            );
+            gradHex = gradientColor;
+        } else {
+            shellBg = this.shellGlassRgba(shellBase, glassPrim);
+        }
+
+        const primPaint = this.resolveShellGlassPaint(shellBase, glassPrim);
+        const surfP = this.approximateGlassSurfaceHex(primPaint.hex, glassPrim);
+        const surfG =
+            gradientEnabled && gradientColor
+                ? this.approximateGlassSurfaceHex(
+                      this.resolveShellGlassPaint(gradientColor, glassGrad).hex,
+                      glassGrad
+                  )
+                : null;
+        const shellContrastPal = this.deriveShellContrastTextPalette(surfP, surfG);
+
+        return {
+            themeColor: shellBase,
+            accent: colors.accent,
+            shellBg,
+            gradientHex: gradHex,
+            gradientEnabled,
+            direction,
+            glassPrim,
+            glassGrad,
+            shellInkRgb: shellContrastPal.inkRgb,
+            textPrimary: shellContrastPal.primary,
+            textMuted: shellContrastPal.muted
+        };
+    }
+
+    _lerpProfileSwipeChannel(a, b, t) {
+        return a + (b - a) * t;
+    }
+
+    _lerpProfileSwipeHex(a, b, t) {
+        const from = this._parseHexColorForSwipe(a);
+        const to = this._parseHexColorForSwipe(b);
+        if (!from || !to) return t >= 0.5 ? b || a : a || b;
+        try {
+            const norm = (hex) => (hex.startsWith('#') ? hex : `#${hex}`);
+            const fromHsl = this.hexToHsl(norm(a));
+            const toHsl = this.hexToHsl(norm(b));
+            let dh = toHsl.h - fromHsl.h;
+            if (dh > 180) dh -= 360;
+            if (dh < -180) dh += 360;
+            const h = (fromHsl.h + dh * t + 360) % 360;
+            const s = fromHsl.s + (toHsl.s - fromHsl.s) * t;
+            const l = fromHsl.l + (toHsl.l - fromHsl.l) * t;
+            return this.hslToHex(h, s, l);
+        } catch (_) {
+            const mix = (x, y) => this._lerpProfileSwipeChannel(x, y, t);
+            const hex = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+            return `#${hex(mix(from.r, to.r))}${hex(mix(from.g, to.g))}${hex(mix(from.b, to.b))}`;
+        }
+    }
+
+    _lerpProfileSwipeInkRgb(a, b, t) {
+        const parse = (raw) => {
+            if (!raw || typeof raw !== 'string') return null;
+            const parts = raw.split(',').map((n) => Number(String(n).trim()));
+            if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
+            return parts;
+        };
+        const from = parse(a);
+        const to = parse(b);
+        if (!from || !to) return t >= 0.5 ? b || a : a || b;
+        const mix = (i) => Math.round(this._lerpProfileSwipeChannel(from[i], to[i], t));
+        return `${mix(0)}, ${mix(1)}, ${mix(2)}`;
+    }
+
+    _parseHexColorForSwipe(hex) {
+        if (!hex || typeof hex !== 'string') return null;
+        const raw = hex.trim().replace('#', '');
+        if (raw.length === 3) {
+            return {
+                r: parseInt(raw[0] + raw[0], 16),
+                g: parseInt(raw[1] + raw[1], 16),
+                b: parseInt(raw[2] + raw[2], 16)
+            };
+        }
+        if (raw.length !== 6) return null;
+        return {
+            r: parseInt(raw.slice(0, 2), 16),
+            g: parseInt(raw.slice(2, 4), 16),
+            b: parseInt(raw.slice(4, 6), 16)
+        };
+    }
+
+    blendProfileSwipeThemePacks(fromPack, toPack, t) {
+        if (!fromPack && !toPack) return null;
+        if (!fromPack) return toPack;
+        if (!toPack) return fromPack;
+        const clamped = Math.max(0, Math.min(1, t));
+        const themeColor = this._lerpProfileSwipeHex(fromPack.themeColor, toPack.themeColor, clamped);
+        const accent = this._lerpProfileSwipeHex(fromPack.accent, toPack.accent, clamped);
+        const glassPrim = this._lerpProfileSwipeChannel(fromPack.glassPrim, toPack.glassPrim, clamped);
+        const glassGrad = this._lerpProfileSwipeChannel(fromPack.glassGrad, toPack.glassGrad, clamped);
+        const direction = toPack.direction || fromPack.direction || '135deg';
+        const gradA = fromPack.gradientHex;
+        const gradB = toPack.gradientHex;
+        let gradientHex = null;
+        let shellBg;
+
+        if (gradA && gradB) {
+            gradientHex = this._lerpProfileSwipeHex(gradA, gradB, clamped);
+            shellBg = this.smoothGradient(
+                direction,
+                this.hexToRgba(themeColor, glassPrim),
+                this.hexToRgba(gradientHex, glassGrad)
+            );
+        } else if (gradA || gradB) {
+            const fromGrad = gradA || fromPack.themeColor;
+            const toGrad = gradB || toPack.themeColor;
+            gradientHex = this._lerpProfileSwipeHex(fromGrad, toGrad, clamped);
+            shellBg = this.smoothGradient(
+                direction,
+                this.hexToRgba(themeColor, glassPrim),
+                this.hexToRgba(gradientHex, glassGrad)
+            );
+        } else {
+            shellBg = this.hexToRgba(themeColor, glassPrim);
+        }
+
+        return {
+            themeColor,
+            accent,
+            shellBg,
+            gradientHex,
+            gradientEnabled: !!gradientHex,
+            shellInkRgb: this._lerpProfileSwipeInkRgb(
+                fromPack.shellInkRgb,
+                toPack.shellInkRgb,
+                clamped
+            ),
+            textPrimary: this._lerpProfileSwipeHex(fromPack.textPrimary, toPack.textPrimary, clamped),
+            textMuted: this._lerpProfileSwipeHex(fromPack.textMuted, toPack.textMuted, clamped)
+        };
+    }
+
+    _ensureProfileSwipeThemeOverlay() {
+        let overlay = document.getElementById('axis-profile-swipe-theme-overlay');
+        if (overlay) return overlay;
+        overlay = document.createElement('div');
+        overlay.id = 'axis-profile-swipe-theme-overlay';
+        overlay.setAttribute('aria-hidden', 'true');
+        overlay.innerHTML =
+            '<div class="axis-profile-swipe-theme-layer axis-profile-swipe-theme-layer--from"></div>' +
+            '<div class="axis-profile-swipe-theme-layer axis-profile-swipe-theme-layer--to"></div>';
+        const app = document.getElementById('app');
+        if (app) app.insertBefore(overlay, app.firstChild);
+        else document.body.insertBefore(overlay, document.body.firstChild);
+        return overlay;
+    }
+
+    _styleProfileSwipeThemeLayer(layer, shellBg) {
+        if (!layer) return;
+        layer.style.background = shellBg || 'transparent';
+        const chrome = this.getShellChromeStyle();
+        if (chrome) {
+            layer.style.setProperty('backdrop-filter', chrome.backdropMain, 'important');
+            layer.style.setProperty('-webkit-backdrop-filter', chrome.backdropMain, 'important');
+        }
+    }
+
+    /** GPU crossfade between two fixed profile shells — transforms, not stepped recolors. */
+    armProfileSwipeThemeCrossfade(fromPack, toPack) {
+        if (this.isIncognitoWindow || !fromPack || !toPack) return;
+        const overlay = this._ensureProfileSwipeThemeOverlay();
+        const fromLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--from');
+        const toLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--to');
+        this._styleProfileSwipeThemeLayer(fromLayer, fromPack.shellBg);
+        this._styleProfileSwipeThemeLayer(toLayer, toPack.shellBg);
+        if (fromLayer) fromLayer.style.removeProperty('opacity');
+        if (toLayer) toLayer.style.removeProperty('opacity');
+        overlay.style.setProperty('--profile-swipe-mix', '0');
+        overlay.classList.add('is-active');
+        document.body.classList.add('profile-swipe-theme-active');
+        if (!document.body.classList.contains('theme-switching')) {
+            document.body.classList.add('theme-switching');
+        }
+        this._profileSwipeThemeMix = 0;
+        this._profileSwipeOverlayFromPack = fromPack;
+        this._profileSwipeOverlayToPack = toPack;
+        const root = document.documentElement.style;
+        root.setProperty('--background-color', 'transparent');
+        root.setProperty('--sidebar-background', 'transparent');
+        root.setProperty('--sidebar-slide-out-background', 'transparent');
+        root.setProperty('--primary-gradient', fromPack.shellBg);
+        const app = document.getElementById('app');
+        const mainArea = document.getElementById('main-area');
+        const sidebar = this.elements?.sidebar || document.getElementById('sidebar');
+        if (app) app.style.setProperty('background', 'transparent', 'important');
+        if (mainArea) {
+            mainArea.style.setProperty('background', 'transparent', 'important');
+            mainArea.style.setProperty('backdrop-filter', 'none', 'important');
+            mainArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        }
+        if (sidebar) {
+            sidebar.style.setProperty('background', 'transparent', 'important');
+            sidebar.style.setProperty('backdrop-filter', 'none', 'important');
+            sidebar.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        }
+        this.setProfileSwipeThemeMix(0, fromPack, toPack);
+    }
+
+    setProfileSwipeThemeMix(progress, fromPack, toPack) {
+        if (this.isIncognitoWindow) return;
+        const from = fromPack || this._profileSwipeOverlayFromPack;
+        const to = toPack || this._profileSwipeOverlayToPack;
+        if (!from || !to) return;
+        const t = Math.max(0, Math.min(1, progress));
+        if (Math.abs(t - (this._profileSwipeThemeMix ?? -1)) < 0.00008) return;
+        this._profileSwipeThemeMix = t;
+
+        const overlay = document.getElementById('axis-profile-swipe-theme-overlay');
+        if (overlay?.classList.contains('is-active')) {
+            overlay.style.setProperty('--profile-swipe-mix', String(t));
+            const blended = this.blendProfileSwipeThemePacks(from, to, t);
+            const fromLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--from');
+            const toLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--to');
+            if (blended && fromLayer) {
+                this._styleProfileSwipeThemeLayer(fromLayer, blended.shellBg);
+                fromLayer.style.opacity = '1';
+            }
+            if (toLayer) toLayer.style.opacity = '0';
+        }
+    }
+
+    tearDownProfileSwipeThemeOverlay() {
+        this._profileSwipeThemeMix = null;
+        this._profileSwipeOverlayFromPack = null;
+        this._profileSwipeOverlayToPack = null;
+        document.body.classList.remove('profile-swipe-theme-active');
+        const overlay = document.getElementById('axis-profile-swipe-theme-overlay');
+        overlay?.classList.remove('is-active');
+        overlay?.style.removeProperty('--profile-swipe-mix');
+        const app = document.getElementById('app');
+        const mainArea = document.getElementById('main-area');
+        const sidebar = this.elements?.sidebar || document.getElementById('sidebar');
+        app?.style.removeProperty('background');
+        mainArea?.style.removeProperty('background');
+        mainArea?.style.removeProperty('backdrop-filter');
+        mainArea?.style.removeProperty('-webkit-backdrop-filter');
+        sidebar?.style.removeProperty('background');
+        sidebar?.style.removeProperty('backdrop-filter');
+        sidebar?.style.removeProperty('-webkit-backdrop-filter');
+        const root = document.documentElement.style;
+        root.removeProperty('--background-color');
+        root.removeProperty('--sidebar-background');
+        root.removeProperty('--sidebar-slide-out-background');
+    }
+
+    /** Lightweight shell tint during profile swipe — no full applyCustomTheme pipeline. */
+    applyProfileSwipeThemePack(pack) {
+        if (!pack || this.isIncognitoWindow) return;
+        if (document.body?.classList.contains('profile-swipe-theme-active')) return;
+        if (document.body && !document.body.classList.contains('theme-switching')) {
+            document.body.classList.add('theme-switching');
+        }
+        const root = document.documentElement.style;
+        root.setProperty('--background-color', pack.shellBg);
+        root.setProperty('--sidebar-background', pack.shellBg);
+        root.setProperty('--sidebar-slide-out-background', pack.shellBg);
+        root.setProperty('--primary-gradient', pack.shellBg);
+        root.setProperty('--theme-color', pack.themeColor);
+        root.setProperty('--primary-color', pack.themeColor);
+        root.setProperty('--accent-color', pack.accent);
+        if (pack.shellInkRgb) {
+            root.setProperty('--shell-ink-rgb', pack.shellInkRgb);
+        }
+        if (pack.textPrimary) {
+            root.setProperty('--text-color', pack.textPrimary);
+            root.setProperty('--tab-text', pack.textPrimary);
+            root.setProperty('--tab-text-active', pack.textPrimary);
+            root.setProperty('--button-text', pack.textPrimary);
+            root.setProperty('--icon-hover', pack.textPrimary);
+        }
+        if (pack.textMuted) {
+            root.setProperty('--text-color-muted', pack.textMuted);
+            root.setProperty('--url-bar-text-muted', pack.textMuted);
+            root.setProperty('--tab-close-color', pack.textMuted);
+            root.setProperty('--icon-color', pack.textMuted);
+        }
+        if (pack.gradientHex) {
+            root.setProperty('--gradient-color', pack.gradientHex);
+            root.setProperty('--gradient-enabled', '1');
+        } else {
+            root.setProperty('--gradient-enabled', '0');
+        }
+
+        const chrome = this.getShellChromeStyle();
+        const app = document.getElementById('app');
+        if (app) {
+            app.style.setProperty('background', pack.shellBg, 'important');
+            if (chrome) {
+                app.style.setProperty('backdrop-filter', chrome.backdropMain, 'important');
+                app.style.setProperty('-webkit-backdrop-filter', chrome.backdropMain, 'important');
+            }
+        }
+        const mainArea = document.getElementById('main-area');
+        const sidebar = this.elements?.sidebar || document.getElementById('sidebar');
+        if (mainArea) {
+            mainArea.style.setProperty('background', 'transparent', 'important');
+            mainArea.style.setProperty('backdrop-filter', 'none', 'important');
+            mainArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        }
+        if (sidebar) {
+            sidebar.style.setProperty('background', 'transparent', 'important');
+            sidebar.style.setProperty('backdrop-filter', 'none', 'important');
+            sidebar.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        }
     }
 
     _captureUrlBarChromeSnapshot() {
@@ -5303,6 +7269,14 @@ class AxisBrowser {
         const webkitBackdrop = urlBar.style.getPropertyValue('-webkit-backdrop-filter');
         if (backdrop) vars['backdrop-filter'] = backdrop;
         if (webkitBackdrop) vars['-webkit-backdrop-filter'] = webkitBackdrop;
+        const container = document.querySelector('.webview-container');
+        const canvasHex = container?.style.getPropertyValue('--axis-webview-canvas')?.trim() || '';
+        const siteThemeActive = !!(this._isSiteThemeColorEnabled() && this._siteThemeColorActiveHex);
+        const shellThemeHex = siteThemeActive
+            ? this._siteThemeColorActiveHex
+            : (this.settings?.themeColor || this._lastShellThemeColors?.primary || '#1a1a1a');
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        const pageKey = tab?.url ? this._urlStablePageKey(tab.url) : '';
         return {
             hidden: urlBar.classList.contains('hidden'),
             darkMode: urlBar.classList.contains('dark-mode'),
@@ -5312,6 +7286,10 @@ class AxisBrowser {
                 : urlBar.classList.contains('settings-page')
                   ? 'settings'
                   : null,
+            canvasHex,
+            shellThemeHex,
+            siteThemeActive,
+            pageKey,
             vars
         };
     }
@@ -5347,8 +7325,22 @@ class AxisBrowser {
             if (val) urlBar.style.setProperty(key, val);
             else urlBar.style.removeProperty(key);
         }
+        if (snapshot.canvasHex) {
+            this._syncWebviewCanvasColor(snapshot.canvasHex);
+        }
+        if (
+            this._isSiteThemeColorEnabled() &&
+            (snapshot.siteThemeActive || snapshot.canvasHex)
+        ) {
+            const shellHex = snapshot.shellThemeHex || snapshot.canvasHex;
+            if (shellHex) {
+                const rgb = this.hexToRgb(shellHex);
+                if (rgb) this._applySiteThemeColorFromRgb(rgb, 'snapshot-restore');
+            }
+        }
+        this._syncWebPanelVisualState();
         this.applyChatPanelTheme(urlBar);
-        return Object.keys(vars).length > 0;
+        return Object.keys(vars).length > 0 || !!snapshot.canvasHex;
     }
 
     _persistUrlBarChromeToTab(tabId) {
@@ -5361,11 +7353,57 @@ class AxisBrowser {
         this.tabs.set(tid, t);
     }
 
+    /** Restore this tab's saved site tint instantly (snapshot, memory, or exact page cache). */
+    _applyTabSiteThemeFromMemory(tab) {
+        if (!tab?.url || this._isInternalSiteThemeUrl(tab.url)) return false;
+        if (this.settings?.transparentSites) {
+            this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
+            return true;
+        }
+        const pageKey = this._urlStablePageKey(tab.url);
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar) return false;
+
+        const snap = tab.urlBarChromeSnapshot;
+        const hasUrlSnap =
+            snap &&
+            this._urlBarThemeSnapshotMatchesTab(tab, snap) &&
+            (snap.internalShell ||
+                snap.canvasHex ||
+                (snap.vars && Object.keys(snap.vars).length > 0));
+
+        if (hasUrlSnap) {
+            this._applyTabShellForSwitch(tab);
+            if (this._restoreUrlBarChromeSnapshot(snap)) return true;
+        }
+
+        if (tab.siteThemeRgb?.pageKey === pageKey) {
+            const { r, g, b, source } = tab.siteThemeRgb;
+            this._applyTabShellForSwitch(tab);
+            if (this._applyUrlBarColorInfo(
+                { r, g, b, source: source || 'tab-restore' },
+                urlBar,
+                { force: true }
+            )) {
+                return true;
+            }
+        }
+
+        if (this.applyCachedUrlBarTheme(tab.url, { pageOnly: true })) {
+            return true;
+        }
+
+        return false;
+    }
+
     /** Restore URL bar tint instantly when switching tabs (same idea as profile chrome cache). */
     _applyTabChromeImmediate(tab) {
         if (!tab) return;
         try {
+            this._tabSwitchChromeReady = false;
             this._tabUrlBarRestoredFromCache = false;
+            this._clearUrlBarThemeRefineTimer();
+            ++this._urlBarThemeSeq;
 
             this._urlBarInstantThemeTabSwitch = true;
             this.elements?.webviewUrlBar?.classList.add('url-bar--instant-theme');
@@ -5373,13 +7411,18 @@ class AxisBrowser {
             const urlSnap = tab.urlBarChromeSnapshot;
             const hasUrlSnap =
                 urlSnap &&
-                (urlSnap.internalShell || (urlSnap.vars && Object.keys(urlSnap.vars).length > 0));
+                this._urlBarThemeSnapshotMatchesTab(tab, urlSnap) &&
+                (urlSnap.internalShell ||
+                    urlSnap.canvasHex ||
+                    (urlSnap.vars && Object.keys(urlSnap.vars).length > 0));
+
+            let restored = false;
 
             if (tab.url === this.NEWTAB_URL) {
                 this._setUrlBarInternalShellMode('ntp');
                 if (hasUrlSnap && urlSnap.internalShell) {
                     this._restoreUrlBarChromeSnapshot(urlSnap);
-                    this._tabUrlBarRestoredFromCache = true;
+                    restored = true;
                 } else {
                     this.applyInternalShellUrlBarStyle();
                 }
@@ -5387,28 +7430,31 @@ class AxisBrowser {
                 this._setUrlBarInternalShellMode('settings');
                 if (hasUrlSnap && urlSnap.internalShell) {
                     this._restoreUrlBarChromeSnapshot(urlSnap);
-                    this._tabUrlBarRestoredFromCache = true;
+                    restored = true;
                 } else {
                     this.applyInternalShellUrlBarStyle();
                 }
-            } else if (hasUrlSnap) {
-                this._restoreUrlBarChromeSnapshot(urlSnap);
-                this._tabUrlBarRestoredFromCache = true;
+            } else if (this._applyTabSiteThemeFromMemory(tab)) {
+                restored = true;
             } else if (
                 tab.url &&
                 tab.url !== 'about:blank' &&
                 !String(tab.url).startsWith('axis:note://')
             ) {
-                if (!this.applyCachedTheme(tab.url)) {
-                    this.applyAppThemeToUrlBar();
-                }
+                this._applyTabShellForSwitch(tab);
+                this.applyAppThemeToUrlBar({ skipShellReset: true });
             } else {
-                this.applyAppThemeToUrlBar();
+                this._applyTabShellForSwitch(tab);
+                this.applyAppThemeToUrlBar({ skipShellReset: true });
             }
 
-            const wv = tab.webview;
-            if (wv) {
-                this.updateUrlBar(wv, { skipExtractTheme: true, keepInstantTheme: true });
+            if (restored) this._tabUrlBarRestoredFromCache = true;
+
+            this._tabSwitchChromeReady = true;
+
+            const wv = tab.webview || this.getActiveWebview();
+            if (!restored && wv && this._webviewThemeReady(wv) && !this.settings?.transparentSites) {
+                void this.extractUrlBarTheme(wv);
             }
         } catch (e) {
             console.error('tab chrome immediate apply failed', e);
@@ -5451,6 +7497,7 @@ class AxisBrowser {
     }
     
     applyCustomTheme(colors) {
+        if (this._profileSwipeThemeActive) return;
         if (colors && typeof colors === 'object') {
             this._lastShellThemeColors = { ...colors };
         }
@@ -5479,13 +7526,12 @@ class AxisBrowser {
         // `uiTheme` flips ONLY overlay/secondary surfaces (popups, menus, Cmd+F,
         // security panel, zoom indicator, context menus, notes/history/downloads panels)
         // via `data-ui-theme="light"` + targeted CSS. Settings, new tab, and AI chat
-        // stay dark. The main
-        // shell (tabs, sidebar, url bar strip, nav buttons, background gradient) and
+        // follow the same light/dark ink. The main
         // every theme-color-driven variable (`--theme-color`, `--gradient-color`,
         // `--primary-gradient`, `--accent-color`, `--primary-color`, shell glass,
         // tab hover/active) are IDENTICAL in both modes so the user's theme color
         // is never visually altered. Incognito ignores this flag (forced black below).
-        const preferLightUi = this.settings?.uiTheme === 'light' && !this.isIncognitoWindow;
+        const preferLightUi = this.isLightUiTheme();
         document.documentElement.setAttribute('data-ui-theme', preferLightUi ? 'light' : 'dark');
         void this.syncVaultAutofillUiTheme(this.getActiveWebview()).catch(() => {});
 
@@ -5514,11 +7560,8 @@ class AxisBrowser {
         let glassPrim = 1;
         let glassGrad = 1;
         if (!forceOpaqueBlack) {
-            glassPrim = this.getThemeAwareGlassAlpha(shellBase, chrome.glassAlpha);
-            glassGrad =
-                gradientEnabled && shellGradientSecondary
-                    ? this.getThemeAwareGlassAlpha(shellGradientSecondary, chrome.glassAlpha)
-                    : glassPrim;
+            glassPrim = chrome.glassAlpha;
+            glassGrad = chrome.glassAlpha;
         }
 
         let uiTextPrimary = colors.text;
@@ -5527,10 +7570,14 @@ class AxisBrowser {
         let shellChromeIsDark = this.isDarkColor(colors.primary);
         let shellContrastPal = null;
         if (!forceOpaqueBlack) {
-            const surfP = this.approximateGlassSurfaceHex(shellBase, glassPrim);
+            const primPaint = this.resolveShellGlassPaint(shellBase, glassPrim);
+            const surfP = this.approximateGlassSurfaceHex(primPaint.hex, glassPrim);
             const surfG =
                 gradientEnabled && shellGradientSecondary
-                    ? this.approximateGlassSurfaceHex(shellGradientSecondary, glassGrad)
+                    ? this.approximateGlassSurfaceHex(
+                          this.resolveShellGlassPaint(shellGradientSecondary, glassGrad).hex,
+                          glassGrad
+                      )
                     : null;
             shellContrastPal = this.deriveShellContrastTextPalette(surfP, surfG);
             uiTextPrimary = shellContrastPal.primary;
@@ -5570,12 +7617,12 @@ class AxisBrowser {
         if (!forceOpaqueBlack && gradientEnabled) {
             const bgGrad = this.smoothGradient(
                 gradientDirection,
-                this.hexToRgba(shellBase, glassPrim),
-                this.hexToRgba(shellGradientSecondary, glassGrad)
+                this.shellGlassRgba(shellBase, glassPrim),
+                this.shellGlassRgba(shellGradientSecondary, glassGrad)
             );
             style.setProperty('--background-color', bgGrad);
         } else if (!forceOpaqueBlack) {
-            style.setProperty('--background-color', this.hexToRgba(shellBase, glassPrim));
+            style.setProperty('--background-color', this.shellGlassRgba(shellBase, glassPrim));
         }
         style.setProperty('--text-color', uiTextPrimary);
         style.setProperty('--text-color-secondary', textSecondary);
@@ -5588,21 +7635,35 @@ class AxisBrowser {
             glassSidebarBg = '#000000';
             sidebarSlideOutBg = '#000000';
         } else if (gradientEnabled) {
-            const primaryRgba = this.hexToRgba(shellBase, glassPrim);
-            const gradientRgba = this.hexToRgba(shellGradientSecondary, glassGrad);
-            glassSidebarBg = this.smoothGradient(gradientDirection, primaryRgba, gradientRgba);
-            const primarySlide = this.hexToRgba(shellBase, chrome.slideOutAlpha);
-            const gradientSlide = this.hexToRgba(shellGradientSecondary, chrome.slideOutAlpha);
+            glassSidebarBg = this.smoothGradient(
+                gradientDirection,
+                this.shellGlassRgba(shellBase, glassPrim),
+                this.shellGlassRgba(shellGradientSecondary, glassGrad)
+            );
+            /* Overlay sits on the page — keep it solid enough to read (not window-glass airy). */
+            const slideFloor = 0.92;
+            const slidePrim = Math.max(
+                slideFloor,
+                this.getThemeAwareGlassAlpha(shellBase, chrome.slideOutAlpha)
+            );
+            const slideGrad = Math.max(
+                slideFloor,
+                this.getThemeAwareGlassAlpha(shellGradientSecondary, chrome.slideOutAlpha)
+            );
+            const primarySlide = this.hexToRgba(shellBase, slidePrim);
+            const gradientSlide = this.hexToRgba(shellGradientSecondary, slideGrad);
             sidebarSlideOutBg = this.smoothGradient(gradientDirection, primarySlide, gradientSlide);
         } else {
-            glassSidebarBg = this.hexToRgba(shellBase, glassPrim) || `rgba(20, 20, 20, ${glassPrim})`;
-            sidebarSlideOutBg = this.hexToRgba(shellBase, chrome.slideOutAlpha) || `rgb(28, 28, 28)`;
+            glassSidebarBg = this.shellGlassRgba(shellBase, glassPrim) || `rgba(20, 20, 20, ${glassPrim})`;
+            const slideFloor = 0.92;
+            const slideAlpha = Math.max(
+                slideFloor,
+                this.getThemeAwareGlassAlpha(shellBase, chrome.slideOutAlpha)
+            );
+            sidebarSlideOutBg = this.hexToRgba(shellBase, slideAlpha) || `rgba(28, 28, 28, 0.94)`;
         }
         // Popups use subtle dominant color (shell base, even if gradient)
-        const popupBgAlpha = forceOpaqueBlack
-            ? chrome.popupAlpha
-            : this.getThemeAwareGlassAlpha(shellBase, chrome.popupAlpha);
-        const popupBgRgba = this.hexToRgba(shellBase, popupBgAlpha);
+        const popupBgRgba = this.shellGlassRgba(shellBase, chrome.popupAlpha);
         style.setProperty('--popup-background-subtle', popupBgRgba);
         style.setProperty('--popup-header', headerBg);
         style.setProperty('--button-background', 'transparent');
@@ -5635,8 +7696,8 @@ class AxisBrowser {
         if (gradientEnabled) {
             const gradient = this.smoothGradient(
                 gradientDirection,
-                this.hexToRgba(darkerPrimary, glassPrim),
-                this.hexToRgba(gradientColorResolved, glassGrad)
+                this.shellGlassRgba(shellBase, glassPrim),
+                this.shellGlassRgba(shellGradientSecondary, glassGrad)
             );
             style.setProperty('--primary-gradient', gradient);
             style.setProperty('--theme-color', darkerPrimary);
@@ -5689,13 +7750,13 @@ class AxisBrowser {
         const mainArea = document.getElementById('main-area');
         const contentArea = document.getElementById('content-area');
         const app = document.getElementById('app');
-        
+
         if (hasTabs) {
-            // When tabs are open: Apply theme to main-area for seamless blend
+            // Single shell paint on #app — avoid stacking the same gradient on #main-area (visible seam at sidebar edge).
             if (mainArea) {
-                mainArea.style.setProperty('background', glassSidebarBg, 'important');
-                mainArea.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
-                mainArea.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
+                mainArea.style.setProperty('background', 'transparent', 'important');
+                mainArea.style.setProperty('backdrop-filter', 'none', 'important');
+                mainArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
             }
             
             // Remove backgrounds from individual elements to prevent duplication
@@ -5711,31 +7772,35 @@ class AxisBrowser {
         }
             
         if (app) {
-                // Use semi-transparent background for frosted glass effect (shell base, not theme color)
-                const appBg = gradientEnabled ?
-                    this.smoothGradient(gradientDirection, this.hexToRgba(shellBase, glassPrim), this.hexToRgba(shellGradientSecondary, glassGrad)) :
-                    this.hexToRgba(shellBase, glassPrim);
-                app.style.setProperty('background', appBg, 'important');
-            app.style.setProperty('backdrop-filter', chrome.backdropMain, 'important');
-            app.style.setProperty('-webkit-backdrop-filter', chrome.backdropMain, 'important');
+                this._paintAppShellBackground(app, {
+                    shellBase,
+                    shellGradientSecondary,
+                    gradientEnabled,
+                    gradientDirection,
+                    glassPrim,
+                    glassGrad,
+                    backdrop: chrome.backdropMain,
+                });
             }
         } else {
             // When NO tabs are open: Keep theme background everywhere, just hide webviews
-            // Apply theme to main-area so background is visible
             if (mainArea) {
-                mainArea.style.setProperty('background', glassSidebarBg, 'important');
-                mainArea.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
-                mainArea.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
+                mainArea.style.setProperty('background', 'transparent', 'important');
+                mainArea.style.setProperty('backdrop-filter', 'none', 'important');
+                mainArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
             }
             
-            // Also apply to app element (shell base so light mode stays light regardless of theme color)
+            // App carries the one shell gradient/blur layer
             if (app) {
-                const appBg = gradientEnabled ?
-                    this.smoothGradient(gradientDirection, this.hexToRgba(shellBase, glassPrim), this.hexToRgba(shellGradientSecondary, glassGrad)) :
-                    this.hexToRgba(shellBase, glassPrim);
-                app.style.setProperty('background', appBg, 'important');
-                app.style.setProperty('backdrop-filter', chrome.backdropStrong, 'important');
-                app.style.setProperty('-webkit-backdrop-filter', chrome.backdropStrong, 'important');
+                this._paintAppShellBackground(app, {
+                    shellBase,
+                    shellGradientSecondary,
+                    gradientEnabled,
+                    gradientDirection,
+                    glassPrim,
+                    glassGrad,
+                    backdrop: chrome.backdropStrong,
+                });
             }
             
             // Remove backgrounds from individual elements to prevent duplication
@@ -5757,8 +7822,8 @@ class AxisBrowser {
         this._applyNewTabSurfaceChromeVars();
         this._applyNewTabPageChrome();
         if (!forceOpaqueBlack) {
-            style.setProperty('--axis-ts-urlbar-blur', `${chrome.blurMain}px`);
-            style.setProperty('--axis-ts-urlbar-sat', `${chrome.satMain}%`);
+            style.setProperty('--axis-ts-urlbar-blur', `${chrome.urlBarBlur}px`);
+            style.setProperty('--axis-ts-urlbar-sat', `${chrome.urlBarSat}%`);
         }
         
         // Re-enable transitions after theme is applied (use RAF to ensure CSS variables are updated first)
@@ -5816,15 +7881,113 @@ class AxisBrowser {
     }
 
     /**
-     * New tab + AI chat page glass — fixed moderate tint/blur, not tied to Window transparency.
-     * (URL bar still follows shell chrome; these are the full-page and panel backgrounds.)
+     * New tab + AI chat page glass — fixed tint/blur (not tied to Window transparency).
+     * Light mode: white frosted glass. Dark mode: dark frosted glass.
      */
     getNewTabSurfaceChromeStyle() {
+        const lightUi = this.isLightUiTheme();
+        if (lightUi) {
+            return {
+                theme: 'light',
+                pageBg: 'rgba(255, 255, 255, 0.94)',
+                pageBlur: 32,
+                pageSat: 155,
+                searchBg: 'rgba(255, 255, 255, 0.98)',
+                searchSolidBg: '#ffffff',
+                searchSolidBlur: 0,
+                searchBlur: 28,
+                searchSat: 155,
+                toggleBg: 'rgba(255, 255, 255, 0.72)',
+                toggleBlur: 20,
+                toggleSat: 145,
+                askBg: 'rgba(255, 255, 255, 0.88)',
+                askBlur: 28,
+                askSat: 152,
+                aiPanelBg: 'rgba(255, 255, 255, 0.90)',
+                aiPanelBlur: 44,
+                aiPanelSat: 155,
+                chatPanelBorder: 'rgba(0, 0, 0, 0.08)',
+                chatPanelText: 'rgba(0, 0, 0, 0.9)',
+                chatPanelTextMuted: 'rgba(0, 0, 0, 0.5)',
+                chatPanelShadow: '-6px 0 24px rgba(0, 0, 0, 0.08)',
+                chatHoverBg: 'rgba(0, 0, 0, 0.06)',
+                chatSurfaceBg: 'rgba(0, 0, 0, 0.04)',
+                chatSurfaceStrongBg: 'rgba(0, 0, 0, 0.07)',
+                chatInputFooterBg: 'rgba(0, 0, 0, 0.03)',
+                chatComposerBg: 'rgba(255, 255, 255, 0.92)',
+                chatComposerInset: 'inset 0 1px 0 rgba(255, 255, 255, 1)',
+                chatUserBubbleBg: 'rgba(0, 0, 0, 0.06)',
+                chatUserBubbleBorder: 'rgba(0, 0, 0, 0.08)',
+                chatAssistantBubbleBg: 'rgba(0, 0, 0, 0.04)',
+                chatQuoteBg: 'rgba(0, 0, 0, 0.05)',
+                chatQuoteBorder: 'rgba(0, 0, 0, 0.22)',
+                chatScrollbarThumb: 'rgba(0, 0, 0, 0.12)',
+                chatMdCodeBg: 'rgba(0, 0, 0, 0.06)',
+                chatMdPreBg: 'rgba(0, 0, 0, 0.05)',
+                chatMdPreText: 'rgba(0, 0, 0, 0.88)',
+                chatMdLink: '#2563eb',
+                chatMdMarker: 'rgba(0, 0, 0, 0.4)',
+                chatMdQuoteBg: 'rgba(0, 0, 0, 0.04)',
+                chatMdHr: 'rgba(0, 0, 0, 0.1)',
+                chatDropOutline: 'rgba(0, 0, 0, 0.22)',
+                chatBtnBg: 'rgba(0, 0, 0, 0.06)',
+                chatBtnBgHover: 'rgba(0, 0, 0, 0.1)',
+                chatBtnBorder: 'rgba(0, 0, 0, 0.1)',
+                chatResizeHandle: 'rgba(0, 0, 0, 0.15)',
+                chatNtpComposerGradient:
+                    'linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.55) 35%, rgba(255, 255, 255, 0.92) 100%)',
+                chatNtpAskText: 'rgba(0, 0, 0, 0.9)',
+                chatNtpAskLoading: 'rgba(0, 0, 0, 0.45)',
+                ntpInk: 'rgba(0, 0, 0, 0.88)',
+                ntpInkStrong: 'rgba(0, 0, 0, 0.92)',
+                ntpInkMuted: 'rgba(0, 0, 0, 0.52)',
+                ntpInkFaint: 'rgba(0, 0, 0, 0.42)',
+                ntpInkLabel: 'rgba(0, 0, 0, 0.5)',
+                ntpTextShadow: 'none',
+                ntpIconBg: 'rgba(0, 0, 0, 0.06)',
+                ntpWidgetRing: 'rgba(0, 0, 0, 0.12)',
+                ntpWidgetRingHover: 'rgba(0, 0, 0, 0.2)',
+                ntpWidgetEditBg: 'rgba(0, 0, 0, 0.03)',
+                ntpFocusInner: 'rgba(255, 255, 255, 0.9)',
+                ntpBtnBg: 'rgba(0, 0, 0, 0.06)',
+                ntpBtnBgHover: 'rgba(0, 0, 0, 0.1)',
+                ntpEditBtn: 'rgba(0, 0, 0, 0.5)',
+                ntpEditBtnHover: 'rgba(0, 0, 0, 0.88)',
+                ntpDlBarBg: 'rgba(0, 0, 0, 0.08)',
+                ntpGreeting: 'rgba(0, 0, 0, 0.88)',
+                ntpInput: 'rgba(0, 0, 0, 0.9)',
+                ntpPlaceholder: 'rgba(0, 0, 0, 0.42)',
+                ntpLinkAccent: '#2563eb',
+                ntpSuggestionHover: 'rgba(0, 0, 0, 0.04)',
+                ntpSuggestionActive: 'rgba(0, 0, 0, 0.07)',
+                chromeBorder: 'rgba(0, 0, 0, 0.1)',
+                chromeDivider: 'rgba(0, 0, 0, 0.06)',
+                ntpChromeShadow: '0 14px 44px rgba(0, 0, 0, 0.1)',
+                ntpOptInBg: 'rgba(255, 255, 255, 0.96)',
+                ntpOptInBgHover: '#ffffff',
+                ntpOptInBorder: 'rgba(0, 0, 0, 0.1)',
+                ntpOptInBorderHover: 'rgba(0, 0, 0, 0.14)',
+                ntpOptInColor: 'rgba(0, 0, 0, 0.72)',
+                ntpOptInColorHover: 'rgba(0, 0, 0, 0.88)',
+                ntpAddStripBg: '#ffffff',
+                ntpAddStripBorder: 'rgba(0, 0, 0, 0.1)',
+                ntpAddStripShadow: '0 10px 28px rgba(0, 0, 0, 0.1)',
+                ntpWidgetRemoveBg: 'rgba(0, 0, 0, 0.07)',
+                ntpWidgetRemoveColor: 'rgba(0, 0, 0, 0.72)',
+                ntpWidgetRemoveHoverBg: 'rgba(220, 50, 45, 0.88)',
+                ntpWidgetRemoveHoverColor: '#ffffff',
+                ntpResizeGrip: 'rgba(0, 0, 0, 0.45)',
+                ntpDropPreviewBorder: 'rgba(0, 0, 0, 0.32)',
+            };
+        }
         return {
+            theme: 'dark',
             pageBg: 'rgba(10, 11, 14, 0.20)',
             pageBlur: 32,
             pageSat: 155,
             searchBg: 'rgba(12, 13, 17, 0.26)',
+            searchSolidBg: '#000',
+            searchSolidBlur: 0,
             searchBlur: 28,
             searchSat: 155,
             toggleBg: 'rgba(255, 255, 255, 0.1)',
@@ -5836,6 +7999,78 @@ class AxisBrowser {
             aiPanelBg: 'rgba(9, 10, 13, 0.72)',
             aiPanelBlur: 44,
             aiPanelSat: 155,
+            chatPanelBorder: 'rgba(255, 255, 255, 0.1)',
+            chatPanelText: 'rgba(255, 255, 255, 0.96)',
+            chatPanelTextMuted: 'rgba(255, 255, 255, 0.55)',
+            chatPanelShadow: '-6px 0 24px rgba(0, 0, 0, 0.22)',
+            chatHoverBg: 'rgba(255, 255, 255, 0.1)',
+            chatSurfaceBg: 'rgba(255, 255, 255, 0.04)',
+            chatSurfaceStrongBg: 'rgba(255, 255, 255, 0.1)',
+            chatInputFooterBg: 'rgba(0, 0, 0, 0.15)',
+            chatComposerBg: 'rgba(255, 255, 255, 0.04)',
+            chatComposerInset: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
+            chatUserBubbleBg: 'rgba(255, 255, 255, 0.1)',
+            chatUserBubbleBorder: 'rgba(255, 255, 255, 0.08)',
+            chatAssistantBubbleBg: 'rgba(255, 255, 255, 0.05)',
+            chatQuoteBg: 'rgba(0, 0, 0, 0.25)',
+            chatQuoteBorder: 'rgba(255, 255, 255, 0.35)',
+            chatScrollbarThumb: 'rgba(255, 255, 255, 0.12)',
+            chatMdCodeBg: 'rgba(255, 255, 255, 0.1)',
+            chatMdPreBg: 'rgba(0, 0, 0, 0.35)',
+            chatMdPreText: 'rgba(255, 255, 255, 0.92)',
+            chatMdLink: 'rgba(255, 255, 255, 0.92)',
+            chatMdMarker: 'rgba(255, 255, 255, 0.45)',
+            chatMdQuoteBg: 'rgba(255, 255, 255, 0.04)',
+            chatMdHr: 'rgba(255, 255, 255, 0.12)',
+            chatDropOutline: 'rgba(255, 255, 255, 0.22)',
+            chatBtnBg: 'rgba(255, 255, 255, 0.06)',
+            chatBtnBgHover: 'rgba(255, 255, 255, 0.12)',
+            chatBtnBorder: 'rgba(255, 255, 255, 0.08)',
+            chatResizeHandle: 'rgba(255, 255, 255, 0.2)',
+            chatNtpComposerGradient:
+                'linear-gradient(180deg, transparent 0%, rgba(6, 6, 8, 0.28) 35%, rgba(6, 6, 8, 0.52) 100%)',
+            chatNtpAskText: 'rgba(255, 255, 255, 0.94)',
+            chatNtpAskLoading: 'rgba(255, 255, 255, 0.45)',
+            ntpInk: 'rgba(255, 255, 255, 0.88)',
+            ntpInkStrong: '#fff',
+            ntpInkMuted: 'rgba(255, 255, 255, 0.55)',
+            ntpInkFaint: 'rgba(255, 255, 255, 0.45)',
+            ntpInkLabel: 'rgba(255, 255, 255, 0.5)',
+            ntpTextShadow: '0 1px 3px rgba(0, 0, 0, 0.55)',
+            ntpIconBg: 'rgba(255, 255, 255, 0.08)',
+            ntpWidgetRing: 'rgba(255, 255, 255, 0.16)',
+            ntpWidgetRingHover: 'rgba(255, 255, 255, 0.28)',
+            ntpWidgetEditBg: 'rgba(255, 255, 255, 0.04)',
+            ntpFocusInner: 'rgba(12, 14, 20, 0.55)',
+            ntpBtnBg: 'rgba(255, 255, 255, 0.12)',
+            ntpBtnBgHover: 'rgba(255, 255, 255, 0.2)',
+            ntpEditBtn: 'rgba(255, 255, 255, 0.5)',
+            ntpEditBtnHover: 'rgba(255, 255, 255, 0.9)',
+            ntpDlBarBg: 'rgba(255, 255, 255, 0.12)',
+            ntpGreeting: 'rgba(255, 255, 255, 0.96)',
+            ntpInput: 'rgba(255, 255, 255, 0.96)',
+            ntpPlaceholder: 'rgba(255, 255, 255, 0.42)',
+            ntpLinkAccent: '#c8ddff',
+            ntpSuggestionHover: 'rgba(255, 255, 255, 0.06)',
+            ntpSuggestionActive: 'rgba(255, 255, 255, 0.09)',
+            chromeBorder: 'rgba(255, 255, 255, 0.14)',
+            chromeDivider: 'rgba(255, 255, 255, 0.08)',
+            ntpChromeShadow: 'none',
+            ntpOptInBg: 'rgba(20, 22, 30, 0.65)',
+            ntpOptInBgHover: 'rgba(30, 32, 42, 0.8)',
+            ntpOptInBorder: 'rgba(255, 255, 255, 0.16)',
+            ntpOptInBorderHover: 'rgba(255, 255, 255, 0.24)',
+            ntpOptInColor: 'rgba(255, 255, 255, 0.82)',
+            ntpOptInColorHover: '#ffffff',
+            ntpAddStripBg: '#000000',
+            ntpAddStripBorder: 'rgba(255, 255, 255, 0.1)',
+            ntpAddStripShadow: '0 10px 28px rgba(0, 0, 0, 0.45)',
+            ntpWidgetRemoveBg: 'rgba(0, 0, 0, 0.45)',
+            ntpWidgetRemoveColor: 'rgba(255, 255, 255, 0.9)',
+            ntpWidgetRemoveHoverBg: 'rgba(200, 60, 50, 0.75)',
+            ntpWidgetRemoveHoverColor: 'rgba(255, 255, 255, 0.95)',
+            ntpResizeGrip: 'rgba(255, 255, 255, 0.7)',
+            ntpDropPreviewBorder: 'rgba(255, 255, 255, 0.45)',
         };
     }
 
@@ -5846,6 +8081,8 @@ class AxisBrowser {
         style.setProperty('--axis-nt-page-blur', `${sc.pageBlur}px`);
         style.setProperty('--axis-nt-page-sat', `${sc.pageSat}%`);
         style.setProperty('--axis-nt-search-bg', sc.searchBg);
+        style.setProperty('--axis-nt-search-solid-bg', sc.searchSolidBg);
+        style.setProperty('--axis-nt-search-solid-blur', `${sc.searchSolidBlur}px`);
         style.setProperty('--axis-nt-search-blur', `${sc.searchBlur}px`);
         style.setProperty('--axis-nt-search-sat', `${sc.searchSat}%`);
         style.setProperty('--axis-nt-toggle-bg', sc.toggleBg);
@@ -5857,10 +8094,62 @@ class AxisBrowser {
     }
 
     /** Paint full new-tab / in-tab AI chat background (one frosted layer on #new-tab-page). */
+    _applyNewTabInkVars(page, sc) {
+        if (!page || !sc) return;
+        page.dataset.ntpTheme = sc.theme || 'dark';
+        const ink = [
+            ['ntpInk', '--ntp-ink'],
+            ['ntpInkStrong', '--ntp-ink-strong'],
+            ['ntpInkMuted', '--ntp-ink-muted'],
+            ['ntpInkFaint', '--ntp-ink-faint'],
+            ['ntpInkLabel', '--ntp-ink-label'],
+            ['ntpTextShadow', '--ntp-text-shadow'],
+            ['ntpIconBg', '--ntp-icon-bg'],
+            ['ntpWidgetRing', '--ntp-widget-ring'],
+            ['ntpWidgetRingHover', '--ntp-widget-ring-hover'],
+            ['ntpWidgetEditBg', '--ntp-widget-edit-bg'],
+            ['ntpFocusInner', '--ntp-focus-inner'],
+            ['ntpBtnBg', '--ntp-btn-bg'],
+            ['ntpBtnBgHover', '--ntp-btn-bg-hover'],
+            ['ntpEditBtn', '--ntp-edit-btn'],
+            ['ntpEditBtnHover', '--ntp-edit-btn-hover'],
+            ['ntpDlBarBg', '--ntp-dl-bar-bg'],
+            ['ntpGreeting', '--ntp-greeting'],
+            ['ntpInput', '--ntp-input'],
+            ['ntpPlaceholder', '--ntp-placeholder'],
+            ['ntpLinkAccent', '--ntp-link-accent'],
+            ['ntpSuggestionHover', '--ntp-suggestion-hover'],
+            ['ntpSuggestionActive', '--ntp-suggestion-active'],
+            ['chromeBorder', '--ntp-chrome-border'],
+            ['chromeDivider', '--ntp-chrome-divider'],
+            ['ntpChromeShadow', '--ntp-chrome-shadow'],
+            ['ntpOptInBg', '--ntp-opt-in-bg'],
+            ['ntpOptInBgHover', '--ntp-opt-in-bg-hover'],
+            ['ntpOptInBorder', '--ntp-opt-in-border'],
+            ['ntpOptInBorderHover', '--ntp-opt-in-border-hover'],
+            ['ntpOptInColor', '--ntp-opt-in-color'],
+            ['ntpOptInColorHover', '--ntp-opt-in-color-hover'],
+            ['ntpAddStripBg', '--ntp-add-strip-bg'],
+            ['ntpAddStripBorder', '--ntp-add-strip-border'],
+            ['ntpAddStripShadow', '--ntp-add-strip-shadow'],
+            ['ntpWidgetRemoveBg', '--ntp-widget-remove-bg'],
+            ['ntpWidgetRemoveColor', '--ntp-widget-remove-color'],
+            ['ntpWidgetRemoveHoverBg', '--ntp-widget-remove-hover-bg'],
+            ['ntpWidgetRemoveHoverColor', '--ntp-widget-remove-hover-color'],
+            ['ntpResizeGrip', '--ntp-resize-grip'],
+            ['ntpDropPreviewBorder', '--ntp-drop-preview-border'],
+        ];
+        for (const [key, cssVar] of ink) {
+            if (sc[key] != null) page.style.setProperty(cssVar, sc[key]);
+        }
+    }
+
     _applyNewTabPageChrome() {
         this._applyNewTabSurfaceChromeVars();
+        const sc = this.getNewTabSurfaceChromeStyle();
         const page = document.getElementById('new-tab-page');
         if (page) {
+            this._applyNewTabInkVars(page, sc);
             page.style.removeProperty('background');
             page.style.removeProperty('backdrop-filter');
             page.style.removeProperty('-webkit-backdrop-filter');
@@ -5879,14 +8168,68 @@ class AxisBrowser {
         }
     }
 
+    _aiChatChromeCssVarEntries(sc) {
+        if (!sc) return [];
+        return [
+            ['--chat-panel-bg', sc.aiPanelBg],
+            ['--chat-panel-blur', `${sc.aiPanelBlur}px`],
+            ['--chat-panel-sat', `${sc.aiPanelSat}%`],
+            ['--chat-panel-border', sc.chatPanelBorder],
+            ['--chat-panel-text', sc.chatPanelText],
+            ['--chat-panel-text-muted', sc.chatPanelTextMuted],
+            ['--chat-panel-shadow', sc.chatPanelShadow],
+            ['--chat-hover-bg', sc.chatHoverBg],
+            ['--chat-surface-bg', sc.chatSurfaceBg],
+            ['--chat-surface-strong-bg', sc.chatSurfaceStrongBg],
+            ['--chat-input-footer-bg', sc.chatInputFooterBg],
+            ['--chat-composer-bg', sc.chatComposerBg],
+            ['--chat-composer-inset', sc.chatComposerInset],
+            ['--chat-user-bubble-bg', sc.chatUserBubbleBg],
+            ['--chat-user-bubble-border', sc.chatUserBubbleBorder],
+            ['--chat-assistant-bubble-bg', sc.chatAssistantBubbleBg],
+            ['--chat-quote-bg', sc.chatQuoteBg],
+            ['--chat-quote-border', sc.chatQuoteBorder],
+            ['--chat-scrollbar-thumb', sc.chatScrollbarThumb],
+            ['--chat-md-code-bg', sc.chatMdCodeBg],
+            ['--chat-md-pre-bg', sc.chatMdPreBg],
+            ['--chat-md-pre-text', sc.chatMdPreText],
+            ['--chat-md-link', sc.chatMdLink],
+            ['--chat-md-marker', sc.chatMdMarker],
+            ['--chat-md-quote-bg', sc.chatMdQuoteBg],
+            ['--chat-md-hr', sc.chatMdHr],
+            ['--chat-drop-outline', sc.chatDropOutline],
+            ['--chat-btn-bg', sc.chatBtnBg],
+            ['--chat-btn-bg-hover', sc.chatBtnBgHover],
+            ['--chat-btn-border', sc.chatBtnBorder],
+            ['--chat-resize-handle', sc.chatResizeHandle],
+            ['--chat-ntp-composer-gradient', sc.chatNtpComposerGradient],
+            ['--chat-ntp-ask-text', sc.chatNtpAskText],
+            ['--chat-ntp-ask-loading', sc.chatNtpAskLoading],
+        ];
+    }
+
+    _applyAiChatChromeVarsTo(el, sc) {
+        if (!el || !sc) return;
+        const style = el.style;
+        for (const [name, value] of this._aiChatChromeCssVarEntries(sc)) {
+            if (value != null) style.setProperty(name, value);
+        }
+    }
+
     _applyAiChatPanelChrome() {
         const sc = this.getNewTabSurfaceChromeStyle();
-        const root = document.documentElement.style;
-        root.setProperty('--chat-panel-bg', sc.aiPanelBg);
-        root.setProperty('--chat-panel-blur', `${sc.aiPanelBlur}px`);
-        root.setProperty('--chat-panel-sat', `${sc.aiPanelSat}%`);
+        const targets = [
+            document.documentElement,
+            document.querySelector('.webview-container'),
+            document.getElementById('ai-chat-panel'),
+            document.getElementById('new-tab-page'),
+        ].filter(Boolean);
+        for (const el of targets) {
+            this._applyAiChatChromeVarsTo(el, sc);
+        }
         const panel = document.getElementById('ai-chat-panel');
         if (panel) {
+            panel.dataset.chatTheme = sc.theme || 'dark';
             panel.style.removeProperty('background');
             panel.style.removeProperty('backdrop-filter');
             panel.style.removeProperty('-webkit-backdrop-filter');
@@ -5896,7 +8239,7 @@ class AxisBrowser {
     /** One body class drives panel fill / overscan — keeps idle, NTP, AI chat, and sites consistent. */
     _syncWebPanelVisualState() {
         const body = document.body;
-        body.classList.remove('panel-ntp', 'panel-site', 'panel-idle');
+        body.classList.remove('panel-ntp', 'panel-site', 'panel-idle', 'panel-settings');
 
         if (body.classList.contains('chrome-no-tabs')) {
             this._clearWebviewCanvasColor();
@@ -5921,15 +8264,21 @@ class AxisBrowser {
         }
 
         const u = String(tab.url || '');
+        const isSettings =
+            u === 'axis://settings' || !!tab.isSettings;
         const isRealSite =
             u &&
             u !== 'about:blank' &&
             u !== this.NEWTAB_URL &&
-            u !== 'axis://settings' &&
+            !isSettings &&
             !u.startsWith('axis:note://') &&
-            !tab.isSettings &&
             !/^axis:/i.test(u);
         const guestActive = tab.webview && !tab.webview.classList.contains('inactive');
+
+        body.classList.toggle(
+            'panel-settings',
+            isSettings && guestActive
+        );
 
         if (isRealSite && guestActive) {
             body.classList.add('panel-site');
@@ -5939,14 +8288,32 @@ class AxisBrowser {
         }
     }
 
+    /** Solid theme paint for shell rgba (exact hex — never shifted). */
+    _paintAppShellBackground(app, { shellBase, shellGradientSecondary, gradientEnabled, gradientDirection, glassPrim, glassGrad, backdrop }) {
+        if (!app) return;
+        for (const id of ['axis-shell-veil-layer', 'axis-shell-tint-layer']) {
+            document.getElementById(id)?.remove();
+        }
+        app.classList.remove('axis-shell-glass');
+        const appBg = gradientEnabled
+            ? this.smoothGradient(
+                  gradientDirection,
+                  this.shellGlassRgba(shellBase, glassPrim),
+                  this.shellGlassRgba(shellGradientSecondary, glassGrad)
+              )
+            : this.shellGlassRgba(shellBase, glassPrim);
+        app.style.setProperty('background', appBg, 'important');
+        const backdropVal = backdrop || 'none';
+        app.style.setProperty('backdrop-filter', backdropVal, 'important');
+        app.style.setProperty('-webkit-backdrop-filter', backdropVal, 'important');
+    }
+
     getShellChromeStyle(opts = {}) {
         const tSlider = this.getShellChromeTransmissionT();
         // New tab / AI chat surfaces always use dark glass (unaffected by uiTheme).
-        const lightUi = !opts.forceDarkNewTabSurfaces
-            && this.settings?.uiTheme === 'light'
-            && !this.isIncognitoWindow;
-        const ntSearchRGB = lightUi ? '244, 245, 247' : '14, 15, 18';
-        const ntAskRGB = lightUi ? '248, 249, 251' : '10, 11, 14';
+        const lightUi = !opts.forceDarkNewTabSurfaces && this.isLightUiTheme();
+        const ntSearchRGB = lightUi ? '252, 250, 247' : '14, 15, 18';
+        const ntAskRGB = lightUi ? '250, 248, 245' : '10, 11, 14';
         const ntToggleRGB = lightUi ? '0, 0, 0' : '255, 255, 255';
         /** Slider 0: solid theme colors, no blur — `AXIS_SHELL_CHROME_OPAQUE` is still partly translucent for the old "opaque" *blend endpoint* at t>0. */
         if (tSlider <= 0) {
@@ -5981,44 +8348,45 @@ class AxisBrowser {
                 newTabAskSat: 140,
             };
         }
-        /** Concave remap: slider mid–high spends more blend weight on the airy endpoint (`AXIS_SHELL_CHROME_TRANSPARENT`). */
-        const chromeBlendEaseExp = 1.85;
-        const tBlend = 1 - Math.pow(1 - tSlider, chromeBlendEaseExp);
-        const L = (a, b) => a + (b - a) * tBlend;
+        /** Alpha + blur both move linearly — wide alpha range is what lets light through. */
+        const La = (a, b) => a + (b - a) * tSlider;
+        const Lb = (a, b) => a + (b - a) * tSlider;
         const o = AXIS_SHELL_CHROME_OPAQUE;
         const tr = AXIS_SHELL_CHROME_TRANSPARENT;
-        const glassAlpha = L(o.glassAlpha, tr.glassAlpha);
-        const slideOutAlpha = L(o.slideOutAlpha, tr.slideOutAlpha);
-        const popupAlpha = L(o.popupAlpha, tr.popupAlpha);
-        const urlBarAlpha = L(o.urlBarAlpha, tr.urlBarAlpha);
-        const blurMain = Math.round(L(o.blurMain, tr.blurMain));
-        const satMain = Math.round(L(o.satMain, tr.satMain));
-        const blurStrong = Math.round(L(o.blurStrong, tr.blurStrong));
-        const satStrong = Math.round(L(o.satStrong, tr.satStrong));
-        const urlBarBlur = Math.round(L(o.urlBarBlur, tr.urlBarBlur));
-        const urlBarSat = Math.round(L(o.urlBarSat, tr.urlBarSat));
-        const urlBarTintDefault = L(o.urlBarTintDefault, tr.urlBarTintDefault);
-        const urlBarTintDark = L(o.urlBarTintDark, tr.urlBarTintDark);
-        const urlBarTintLight = L(o.urlBarTintLight, tr.urlBarTintLight);
-        const ntP = L(o.newTabPageAlpha, tr.newTabPageAlpha);
+        const glassAlpha = La(o.glassAlpha, tr.glassAlpha);
+        const slideOutAlpha = La(o.slideOutAlpha, tr.slideOutAlpha);
+        const popupAlpha = La(o.popupAlpha, tr.popupAlpha);
+        const urlBarAlpha = La(o.urlBarAlpha, tr.urlBarAlpha);
+        const blurMain = Math.round(Lb(o.blurMain, tr.blurMain));
+        const satMain = Math.round(La(o.satMain, tr.satMain));
+        const blurStrong = Math.round(Lb(o.blurStrong, tr.blurStrong));
+        const satStrong = Math.round(La(o.satStrong, tr.satStrong));
+        const urlBarBlur = Math.round(Lb(o.urlBarBlur, tr.urlBarBlur));
+        const urlBarSat = Math.round(La(o.urlBarSat, tr.urlBarSat));
+        const urlBarTintDefault = La(o.urlBarTintDefault, tr.urlBarTintDefault);
+        const urlBarTintDark = La(o.urlBarTintDark, tr.urlBarTintDark);
+        const urlBarTintLight = La(o.urlBarTintLight, tr.urlBarTintLight);
+        const ntP = La(o.newTabPageAlpha, tr.newTabPageAlpha);
         const newTabPageBg = `rgba(8, 9, 12, ${ntP.toFixed(3)})`;
-        const newTabPageBlur = Math.round(L(o.newTabPageBlur, tr.newTabPageBlur));
-        const newTabPageSat = Math.round(L(o.newTabPageSat, tr.newTabPageSat));
-        const ntS = L(o.newTabSearchAlpha, tr.newTabSearchAlpha);
+        const newTabPageBlur = Math.round(Lb(o.newTabPageBlur, tr.newTabPageBlur));
+        const newTabPageSat = Math.round(La(o.newTabPageSat, tr.newTabPageSat));
+        const ntS = La(o.newTabSearchAlpha, tr.newTabSearchAlpha);
         const newTabSearchBg = `rgba(${ntSearchRGB}, ${ntS.toFixed(3)})`;
         // In dark mode the toggle uses white overlay; in light mode flip to a black overlay
         // with a lower alpha so the in-app new tab page matches the rest of the shell.
-        const ntTogA = L(o.newTabToggleAlpha, tr.newTabToggleAlpha);
+        const ntTogA = La(o.newTabToggleAlpha, tr.newTabToggleAlpha);
         const newTabToggleBg = `rgba(${ntToggleRGB}, ${(lightUi ? Math.min(ntTogA, 0.12) : ntTogA).toFixed(3)})`;
-        const ntA = L(o.newTabAskAlpha, tr.newTabAskAlpha);
+        const ntA = La(o.newTabAskAlpha, tr.newTabAskAlpha);
         const newTabAskBg = `rgba(${ntAskRGB}, ${ntA.toFixed(3)})`;
-        const newTabSearchBlur = Math.round(L(o.newTabSearchBlur, tr.newTabSearchBlur));
-        const newTabSearchSat = Math.round(L(o.newTabSearchSat, tr.newTabSearchSat));
-        const newTabToggleBlur = Math.round(L(o.newTabToggleBlur, tr.newTabToggleBlur));
-        const newTabToggleSat = Math.round(L(o.newTabToggleSat, tr.newTabToggleSat));
-        const newTabAskBlur = Math.round(L(o.newTabAskBlur, tr.newTabAskBlur));
-        const newTabAskSat = Math.round(L(o.newTabAskSat, tr.newTabAskSat));
-        return {
+        const newTabSearchBlur = Math.round(Lb(o.newTabSearchBlur, tr.newTabSearchBlur));
+        const newTabSearchSat = Math.round(La(o.newTabSearchSat, tr.newTabSearchSat));
+        const newTabToggleBlur = Math.round(Lb(o.newTabToggleBlur, tr.newTabToggleBlur));
+        const newTabToggleSat = Math.round(La(o.newTabToggleSat, tr.newTabToggleSat));
+        const newTabAskBlur = Math.round(Lb(o.newTabAskBlur, tr.newTabAskBlur));
+        const newTabAskSat = Math.round(La(o.newTabAskSat, tr.newTabAskSat));
+        const backdropFor = (blur, sat) =>
+            blur > 0 ? `blur(${blur}px) saturate(${sat}%)` : 'none';
+        const chrome = {
             t: tSlider,
             glassAlpha,
             slideOutAlpha,
@@ -6026,9 +8394,9 @@ class AxisBrowser {
             urlBarAlpha,
             blurMain,
             satMain,
-            backdropMain: `blur(${blurMain}px) saturate(${satMain}%)`,
-            backdropStrong: `blur(${blurStrong}px) saturate(${satStrong}%)`,
-            urlBarBackdrop: `blur(${urlBarBlur}px) saturate(${urlBarSat}%)`,
+            backdropMain: backdropFor(blurMain, satMain),
+            backdropStrong: backdropFor(blurStrong, satStrong),
+            urlBarBackdrop: backdropFor(urlBarBlur, urlBarSat),
             urlBarBlur,
             urlBarSat,
             urlBarTintDefault,
@@ -6047,6 +8415,7 @@ class AxisBrowser {
             newTabAskBlur,
             newTabAskSat,
         };
+        return chrome;
     }
 
     // Convert hex or rgb() color to rgba with configurable alpha for glass effect
@@ -6110,7 +8479,7 @@ class AxisBrowser {
         const lin1 = [srgbToLinear(c1[0]), srgbToLinear(c1[1]), srgbToLinear(c1[2])];
         const lin2 = [srgbToLinear(c2[0]), srgbToLinear(c2[1]), srgbToLinear(c2[2])];
 
-        const STOPS = 16;
+        const STOPS = 24;
         const parts = [];
         for (let i = 0; i <= STOPS; i++) {
             const t = i / STOPS;
@@ -6155,8 +8524,34 @@ class AxisBrowser {
 
     getTabWebpreferencesString() {
         const base =
-            'contextIsolation=false,nodeIntegration=false,sandbox=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false,spellcheck=yes';
+            'contextIsolation=false,nodeIntegration=false,sandbox=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes';
         return this.settings?.javascriptEnabled === false ? `${base},javascript=no` : base;
+    }
+
+    /** True when a tab needs a Chromium guest (new-tab overlay alone does not). */
+    _tabNeedsGuestWebview(tab) {
+        if (!tab) return false;
+        if (this._isSettingsTab(tab)) return true;
+        const url = (tab.pinned && tab.savedLinkUrl) ? tab.savedLinkUrl : (tab.url || '');
+        if (!url || url === this.NEWTAB_URL || url === 'about:blank') return false;
+        if (url.startsWith('axis:note://')) return true;
+        if (/^axis:/i.test(url)) return false;
+        return true;
+    }
+
+    /** Remove the static legacy #webview so it does not spawn an extra renderer process. */
+    _retireLegacyGuestWebview() {
+        const legacy = document.getElementById('webview');
+        if (!legacy || legacy.dataset?.axisRetired === '1') return;
+        try {
+            legacy.dataset.axisRetired = '1';
+            this.cleanupWebviewListeners?.(legacy);
+            legacy.src = 'about:blank';
+            legacy.remove();
+        } catch (_) {}
+        if (this.elements?.webview === legacy) {
+            this.elements.webview = null;
+        }
     }
 
     getSettingsTabWebpreferencesString() {
@@ -6220,7 +8615,9 @@ class AxisBrowser {
         );
         const preloadPath = options.useSettingsPreload
             ? this._settingsWebviewPreloadPath
-            : this._webviewCwsPreloadPath;
+            : (this.settings?.vaultAutofillEnabled === false && this._webviewLightPreloadPath
+                ? this._webviewLightPreloadPath
+                : this._webviewCwsPreloadPath);
         if (preloadPath) {
             try {
                 webview.setAttribute('preload', preloadPath);
@@ -6526,6 +8923,30 @@ class AxisBrowser {
         return tab?.webview || null;
     }
 
+    /** Guest webview for the tab that opened the last webpage context menu (falls back to active). */
+    getContextMenuWebview() {
+        const menuTabId = this._normalizeTabMapKey(this._contextMenuSourceTabId);
+        if (menuTabId != null && this.tabs.has(menuTabId)) {
+            const wv = this.tabs.get(menuTabId)?.webview;
+            if (wv) return wv;
+        }
+        return this.getActiveWebview();
+    }
+
+    _applyTabMuteState(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+        const webview = tab.webview;
+        if (webview) {
+            try {
+                webview.setAudioMuted(!!tab.isMuted);
+                webview.__axisUserMutedTab = !!tab.isMuted;
+                if (tab.isMuted) webview.__axisBgAudioMuted = false;
+            } catch (_) {}
+        }
+        this.updateTabAudioIndicator(tabId, tab.isPlayingAudio);
+    }
+
     createNewTab(url = null, options = {}) {
         let effectiveUrl = url;
         if (options && options.trustedContextImage && typeof url === 'string') {
@@ -6562,6 +8983,7 @@ class AxisBrowser {
         const tabElement = document.createElement('div');
         tabElement.className = 'tab';
         tabElement.dataset.tabId = tabId;
+        tabElement.dataset.axisProfile = this._activeProfileDomKey();
         
         // Create tab object first to check for custom icon / favicon
         const tab = {
@@ -6578,14 +9000,7 @@ class AxisBrowser {
         this.tabs.set(tabId, tab);
         
         // Determine icon HTML based on type
-        let iconHTML = '<img class="tab-favicon" src="" alt="" draggable="false" onerror="this.style.visibility=\'hidden\'">';
-        if (tab.customIcon) {
-            if (tab.customIconType === 'emoji') {
-                iconHTML = `<span class="tab-favicon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">${tab.customIcon}</span>`;
-            } else {
-                iconHTML = `<i class="fas ${tab.customIcon} tab-favicon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: rgba(255, 255, 255, 0.7);"></i>`;
-            }
-        }
+        const iconHTML = this.tabFaviconIconHtml(tab, tabId);
         
         tabElement.innerHTML = `
             <div class="tab-content">
@@ -6617,9 +9032,11 @@ class AxisBrowser {
             isPlayingAudio: false
         };
         
-        const webview = this.createTabWebview(tabId);
-        if (webview) {
-            tabData.webview = webview;
+        if (this._tabNeedsGuestWebview(tabData)) {
+            const webview = this.createTabWebview(tabId, this._settingsWebviewOptionsForTab(tabData));
+            if (webview) {
+                tabData.webview = webview;
+            }
         }
         
         this.tabs.set(tabId, tabData);
@@ -6636,17 +9053,32 @@ class AxisBrowser {
         this.setupTabEventListeners(tabElement, tabId);
 
         // Only reset new tab page when opening a brand-new tab (not when returning to an existing one)
-        this._resetNewTabPageOnShow = !effectiveUrl || effectiveUrl === this.NEWTAB_URL;
+        this._resetNewTabPageOnShow =
+            !options.preserveNewTabState && (!effectiveUrl || effectiveUrl === this.NEWTAB_URL);
         // Switch to new tab (navigate() below is the single place that sets webview.src)
+        if (!options.skipActivate) {
         this.switchToTab(tabId);
+        }
 
         this.updateEmptyState();
 
         if (effectiveUrl) {
+            if (options.skipActivate) {
+                const restoredTab = this.tabs.get(tabId);
+                if (restoredTab) {
+                    restoredTab.url = effectiveUrl;
+                    this.tabs.set(tabId, restoredTab);
+                    const wv = restoredTab.webview;
+                    if (wv && effectiveUrl !== this.NEWTAB_URL && effectiveUrl !== 'axis://settings') {
+                        wv.src = effectiveUrl;
+                    }
+                }
+            } else {
             this.navigate(effectiveUrl, {
                 skipHttpsConfirm: true,
                 trustedContextImage: !!(options && options.trustedContextImage)
             });
+            }
         }
         this.updateTabFavicon(tabId, tabElement);
         this.updateTabTooltip(tabId);
@@ -6816,6 +9248,8 @@ class AxisBrowser {
     switchToTab(rawTabId, opts = {}) {
         const fromProfileSwitch = !!opts.fromProfileSwitch;
         this.hideVaultAutofillPanel();
+        this.closeSecurityPanel();
+        this._hideLinkStatusNow();
         const tabId = this._normalizeTabMapKey(rawTabId);
         if (tabId == null || !this.tabs.has(tabId)) {
             if (this.tabs.size === 0) {
@@ -6844,11 +9278,15 @@ class AxisBrowser {
             return;
         }
 
+        const prevCur = this._normalizeTabMapKey(this.currentTab);
+        if (prevCur === tabId && !fromProfileSwitch) {
+            return;
+        }
+
         if (this._sidebarMediaDock && this._normalizeTabMapKey(this._sidebarMediaDock.tabId) === tabId) {
             this.hideSidebarMediaDock();
         }
 
-        const prevCur = this._normalizeTabMapKey(this.currentTab);
         const switchedDifferentTab = prevCur != null && prevCur !== tabId;
 
         // Save new-tab-page state and URL bar chrome for the tab we're leaving
@@ -6856,32 +9294,43 @@ class AxisBrowser {
             const prevTab = this.tabs.get(prevCur);
             if (prevTab) {
                 if (prevTab.url === this.NEWTAB_URL) {
-                    this.saveNewTabPageStateToTab(prevCur);
+                this.saveNewTabPageStateToTab(prevCur);
+                this._ntpUiBoundTabId = null;
                 }
                 this._persistUrlBarChromeToTab(prevCur);
             }
         }
 
         // INSTANT tab switching - all critical updates happen synchronously
-        let activeTab = document.querySelector(`[data-tab-id="${tabId}"]`);
+        let activeTab = this._getTabElement(tabId);
         const tab = this.tabs.get(tabId);
         if (tab?.isFavoriteTab) {
             this._ensureFavoriteTabHostElement(tabId);
-            activeTab = document.querySelector(`[data-tab-id="${tabId}"]`);
+            activeTab = this._getTabElement(tabId);
         }
 
         const prevTabId = prevCur;
+        let deferSuspendForPipTabId = null;
         if (prevTabId != null && prevTabId !== tabId) {
             const prevTab = this.tabs.get(prevTabId);
             if (prevTab?.webview) {
-                this.checkAndShowPIP(prevTabId, prevTab.webview);
+                deferSuspendForPipTabId = prevTabId;
+                void this.checkAndShowPIP(prevTabId, prevTab.webview).finally(() => {
+                    const cur = this._normalizeTabMapKey(this.currentTab);
+                    if (cur === prevTabId) return;
+                    if (this._shouldKeepBackgroundMediaAlive(prevTabId)) return;
+                    const t = this.tabs.get(prevTabId);
+                    if (t?.webview) this._suspendInactiveTabGuest(t.webview, t, prevTabId);
+                });
             }
-            const prevTabElement = document.querySelector(`[data-tab-id="${prevTabId}"]`);
+            const prevTabElement = this._getTabElement(prevTabId);
             if (prevTabElement) prevTabElement.classList.remove('active');
         }
 
         // Demote other webviews before the active tab paints (always fully hide — avoids multi-guest bleed)
+        this._purgeStaleWebviewsInContainer();
         this._prepareWebviewsForTabSwitch(tabId);
+        this._syncWebviewBackgroundThrottling(tabId, deferSuspendForPipTabId);
         
         // Hide PIP if switching back to the tab that has PIP
         if (this.pipTabId === tabId) {
@@ -6890,6 +9339,7 @@ class AxisBrowser {
         
         // CRITICAL: Update current tab immediately (must be before updateEmptyState so empty state hides)
         this.currentTab = tabId;
+        this._recordTabActivation(tabId);
         this.updateEmptyState();
         this.syncAIChatPanelForCurrentTab();
 
@@ -6916,7 +9366,7 @@ class AxisBrowser {
                     this.tabs.set(tabId, tab);
                 }
             }
-            if (!tab.webview) {
+            if (!tab.webview && this._tabNeedsGuestWebview(tab)) {
                 const webview = this.createTabWebview(tabId, this._settingsWebviewOptionsForTab(tab));
                 if (webview) {
                     tab.webview = webview;
@@ -7039,16 +9489,7 @@ class AxisBrowser {
                 }
                 
                 this.elements.webview = webview;
-                if (
-                    !fromProfileSwitch &&
-                    !this._tabUrlBarRestoredFromCache &&
-                    tab.url &&
-                    tab.url !== 'about:blank' &&
-                    tab.url !== 'axis://settings' &&
-                    !tab.url.startsWith('axis:note://')
-                ) {
-                    this.applyCachedTheme(tab.url);
-                }
+                this._applyTabMuteState(tabId);
                 if (tab.isFavoriteTab) {
                     requestAnimationFrame(() => this._forceGuestLayoutSync());
                 }
@@ -7086,6 +9527,9 @@ class AxisBrowser {
             if (tab?.webview && tab.url) {
                 this._nudgeYouTubePlayerIfNeeded(tab.webview, tab.url);
                 setTimeout(() => this._nudgeYouTubePlayerIfNeeded(tab.webview, tab.url), 420);
+                if (!this.isBenchmarking && /^https?:/i.test(tab.url)) {
+                    this._deferGuestLoadChores(tab.webview, tabId);
+                }
             }
             if (activeTab) {
                 this.updateTabFavicon(tabId, activeTab);
@@ -7094,8 +9538,13 @@ class AxisBrowser {
             this.updateNavigationButtons();
             const skipUrlBarRefresh = this._skipNextUrlBarRefresh;
             const tabUrlBarRestored = this._tabUrlBarRestoredFromCache;
+            const chromeReady = this._tabSwitchChromeReady;
+            if (chromeReady) this._tabSwitchChromeReady = false;
             if (skipUrlBarRefresh) {
                 this._skipNextUrlBarRefresh = false;
+            } else if (chromeReady && tab) {
+                this._updateUrlBarNavigationState(tab.webview, tab);
+                this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
             } else if (tab?.webview) {
                 this.updateUrlBar(tab.webview, {
                     skipExtractTheme: tabUrlBarRestored,
@@ -7149,6 +9598,10 @@ class AxisBrowser {
             if (tab?.isFavoriteTab) {
                 this.renderFavorites();
             }
+            const adblockPanel = document.getElementById('adblock-panel');
+            if (adblockPanel && !adblockPanel.classList.contains('hidden')) {
+                void this.refreshAdblockPanel();
+            }
         });
     }
 
@@ -7157,17 +9610,24 @@ class AxisBrowser {
         const suggestionsContainer = document.getElementById('new-tab-suggestions');
         if (!input || !suggestionsContainer) return;
 
+        let ntpHadQuery = !!input.value?.trim();
+
         const throttledUpdate = this.throttle((value) => {
             this.updateNewTabSuggestions(value);
             this.spotlightSelectedIndex = -1;
-            this.updateNewTabHero();
             this.updateNewTabSendButtonState();
             if (value.trim()) this.hideNewTabAskSetup();
         }, 50);
 
         input.addEventListener('input', (e) => {
-            throttledUpdate(e.target.value.trim());
+            const value = e.target.value;
+            const hasQuery = !!value.trim();
+            throttledUpdate(value.trim());
             this.updateNewTabSendButtonState();
+            if (ntpHadQuery !== hasQuery) {
+                ntpHadQuery = hasQuery;
+                this.updateNewTabHero();
+            }
         });
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Tab') {
@@ -7218,6 +9678,7 @@ class AxisBrowser {
         });
         this.mountNewTabSearchBarToStart();
         this.setupNewTabMenuButton();
+        this.setupNtpWidgets();
         this.applyNewTabCustomization();
 
         if (this._ntpGreetingClockInterval) clearInterval(this._ntpGreetingClockInterval);
@@ -7243,7 +9704,7 @@ class AxisBrowser {
         const page = document.getElementById('new-tab-page');
         const wrapper = document.getElementById('new-tab-search-wrapper');
 
-        wrapper?.classList.toggle('ntp-ai-off', s.ntpAiSearchEnabled === false);
+        wrapper?.classList.toggle('ntp-ai-off', s.ntpAiSearchEnabled === false || s.aiFeaturesEnabled === false);
 
         page?.classList.remove('ntp-bg-frosted', 'ntp-bg-theme');
         page?.style.removeProperty('--axis-ntp-bg-tint');
@@ -7256,6 +9717,8 @@ class AxisBrowser {
         this._applyNewTabSurfaceChromeVars();
         this._applyNewTabPageChrome();
         this.updateNewTabHero();
+        this.syncNtpWidgetsVisibility();
+        this.renderNtpWidgets();
         const input = document.getElementById('new-tab-input');
         if (input?.value?.trim() && !this.isNewTabInChat()) {
             void this.updateNewTabSuggestions(input.value.trim());
@@ -7266,11 +9729,1884 @@ class AxisBrowser {
         }
     }
 
+    _ntpWidgetsApi() {
+        return typeof AxisNtpWidgets !== 'undefined' ? AxisNtpWidgets : null;
+    }
+
+    getNtpWidgetLayout() {
+        const api = this._ntpWidgetsApi();
+        if (!api) return [];
+        const raw = this.settings?.ntpWidgetLayout;
+        return api.normalizeLayout(raw);
+    }
+
+    async saveNtpWidgetLayout(layout) {
+        const api = this._ntpWidgetsApi();
+        if (!api || !Array.isArray(layout)) return;
+        this.settings = this.settings || {};
+        this.settings.ntpWidgetLayout = layout.map((w) => ({
+            id: w.id,
+            type: w.type,
+            col: w.col,
+            row: w.row,
+            colSpan: w.colSpan,
+            rowSpan: w.rowSpan,
+            config: w.config ? { ...w.config } : {}
+        }));
+        try {
+            await window.electronAPI?.setSetting?.('ntpWidgetLayout', this.settings.ntpWidgetLayout);
+        } catch (_) {}
+    }
+
+    _ntpWidgetPrefs() {
+        const layout = Array.isArray(this.settings?.ntpWidgetLayout) ? this.settings.ntpWidgetLayout : [];
+        const api = this._ntpWidgetsApi();
+        const weather = layout.find((w) => (api?.resolveType(w?.type) || w?.type) === 'weather');
+        const headlines = layout.find((w) => (api?.resolveType(w?.type) || w?.type) === 'headlines');
+        const until = layout.find((w) => (api?.resolveType(w?.type) || w?.type) === 'until');
+        const worldclock = layout.find((w) => (api?.resolveType(w?.type) || w?.type) === 'worldclock');
+        return {
+            city: weather?.config?.city || 'London',
+            feedUrl: headlines?.config?.feedUrl || 'https://feeds.bbci.co.uk/news/rss.xml',
+            untilLabel: until?.config?.label || 'Vacation',
+            untilTarget: until?.config?.target || '',
+            worldclockLabel: worldclock?.config?.label || 'NYC',
+            worldclockTimezone: worldclock?.config?.timezone || 'America/New_York'
+        };
+    }
+
+    async enableNtpWidgets(openPicker = false) {
+        this.settings = this.settings || {};
+        if (this.settings.ntpWidgetsEnabled !== true) {
+            this.settings.ntpWidgetsEnabled = true;
+            try {
+                await window.electronAPI?.setSetting?.('ntpWidgetsEnabled', true);
+            } catch (_) {}
+        }
+        this.syncNtpWidgetsVisibility();
+        this.renderNtpWidgets();
+        if (openPicker) {
+            this.setNtpEditMode(true);
+            this.setNtpPickerOpen(true);
+        }
+    }
+
+    async disableNtpWidgets() {
+        this.settings = this.settings || {};
+        this.settings.ntpWidgetsEnabled = false;
+        this.setNtpEditMode(false);
+        this.setNtpPickerOpen(false);
+        try {
+            await window.electronAPI?.setSetting?.('ntpWidgetsEnabled', false);
+        } catch (_) {}
+        if (this._ntpClockTimer) {
+            clearInterval(this._ntpClockTimer);
+            this._ntpClockTimer = null;
+        }
+        if (this._ntpWorldTimer) {
+            clearInterval(this._ntpWorldTimer);
+            this._ntpWorldTimer = null;
+        }
+        if (this._ntpFocusState) {
+            for (const st of this._ntpFocusState.values()) {
+                if (st.interval) clearInterval(st.interval);
+            }
+            this._ntpFocusState.clear();
+        }
+        this.syncNtpWidgetsVisibility();
+        this.renderNtpWidgets();
+    }
+
+    syncNtpWidgetsVisibility() {
+        const section = document.getElementById('new-tab-widgets-section');
+        const optIn = document.getElementById('ntp-widgets-opt-in');
+        const inChat = this.isNewTabInChat();
+        const enabled = this.settings?.ntpWidgetsEnabled === true;
+        const showWidgets = enabled && !inChat;
+        optIn?.classList.toggle('hidden', showWidgets);
+        section?.classList.toggle('hidden', !showWidgets);
+        if (showWidgets) {
+            this._syncNtpLayoutEmptyState();
+            this._ensureNtpHeroAnchorObserver();
+        } else {
+            const layout = document.getElementById('new-tab-page-layout');
+            layout?.style.removeProperty('--ntp-widgets-anchor');
+            layout?.style.removeProperty('min-height');
+        }
+        if (!showWidgets) {
+            this.setNtpEditMode(false);
+            this.setNtpPickerOpen(false);
+        }
+    }
+
+    _syncNtpLayoutEmptyState() {
+        const section = document.getElementById('new-tab-widgets-section');
+        const layout = document.getElementById('new-tab-page-layout');
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (!section) return;
+        const hasTiles = this.getNtpWidgetLayout().length > 0;
+        layout?.classList.toggle('ntp-has-tiles', hasTiles);
+        section.classList.toggle('ntp-widgets-empty-layout', !hasTiles);
+        if (!hasTiles && grid) {
+            grid.innerHTML = '';
+            grid.style.gridTemplateRows = '';
+        }
+        this._syncNtpHeroAnchor();
+    }
+
+    _syncNtpHeroAnchor() {
+        const layout = document.getElementById('new-tab-page-layout');
+        const heroZone = document.getElementById('new-tab-hero-zone');
+        const section = document.getElementById('new-tab-widgets-section');
+        if (!layout || !heroZone) return;
+
+        if (section?.classList.contains('hidden')) {
+            layout.style.removeProperty('--ntp-widgets-anchor');
+            layout.style.removeProperty('min-height');
+            return;
+        }
+
+        const apply = () => {
+            const heroH = heroZone.offsetHeight;
+            const gap = 18;
+            const anchor = Math.round(heroH / 2 + gap);
+            layout.style.setProperty('--ntp-widgets-anchor', `${anchor}px`);
+            // Keep the new tab viewport-sized — widgets must not grow the page or create scroll.
+            layout.style.removeProperty('min-height');
+            this._clampNtpWidgetsToViewport();
+        };
+
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(apply);
+        else apply();
+    }
+
+    _ntpViewportWidgetRows() {
+        const api = this._ntpWidgetsApi();
+        const layoutEl = document.getElementById('new-tab-page-layout');
+        const heroZone = document.getElementById('new-tab-hero-zone');
+        const hostH = layoutEl?.clientHeight || window.innerHeight;
+        const lift = parseFloat(getComputedStyle(layoutEl || document.documentElement).getPropertyValue('--ntp-hero-lift')) || 56;
+        const heroH = heroZone?.offsetHeight || 160;
+        const gap = 18;
+        const anchor = Math.round(heroH / 2 + gap);
+        const top = hostH * 0.5 + anchor - lift;
+        const footReserve = 44;
+        const available = Math.max(80, hostH - top - footReserve - 16);
+        const cell = (api?.ROW_H || 80) + 12;
+        return Math.max(1, Math.floor((available + 12) / cell));
+    }
+
+    _ntpMaxVisibleWidgetRows() {
+        const section = document.getElementById('new-tab-widgets-section');
+        const api = this._ntpWidgetsApi();
+        if (!api || section?.classList.contains('hidden')) return 4;
+        return this._ntpViewportWidgetRows();
+    }
+
+    _ntpClampPlace(col, row, colSpan, rowSpan) {
+        const api = this._ntpWidgetsApi();
+        const maxRows = this._ntpMaxVisibleWidgetRows();
+        const cols = api?.COLS || 4;
+        const cSpan = Math.max(1, colSpan || 1);
+        const rSpan = Math.max(1, rowSpan || 1);
+        const maxCol = Math.max(1, cols - cSpan + 1);
+        const maxRow = Math.max(1, maxRows - rSpan + 1);
+        return {
+            col: Math.max(1, Math.min(maxCol, col || 1)),
+            row: Math.max(1, Math.min(maxRow, row || 1))
+        };
+    }
+
+    _ntpClampLayoutToVisible(layout) {
+        const api = this._ntpWidgetsApi();
+        if (!api || !Array.isArray(layout) || !layout.length) return layout || [];
+        const maxRows = this._ntpMaxVisibleWidgetRows();
+        let changed = false;
+        const next = layout.map((w) => {
+            const copy = { ...w, config: { ...(w.config || {}) } };
+            if (copy.rowSpan > maxRows) {
+                copy.rowSpan = maxRows;
+                changed = true;
+            }
+            const place = this._ntpClampPlace(copy.col, copy.row, copy.colSpan, copy.rowSpan);
+            if (place.col !== copy.col || place.row !== copy.row) {
+                copy.col = place.col;
+                copy.row = place.row;
+                changed = true;
+            }
+            return copy;
+        });
+        const sanitized = api.sanitizeLayout ? api.sanitizeLayout(next) : next;
+        return { layout: sanitized, changed: changed || sanitized !== next };
+    }
+
+    _clampNtpWidgetsToViewport() {
+        const api = this._ntpWidgetsApi();
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (!api || !grid) return;
+        const maxRows = this._ntpMaxVisibleWidgetRows();
+        let layout = this.getNtpWidgetLayout();
+        const clamped = this._ntpClampLayoutToVisible(layout);
+        if (clamped.changed) {
+            layout = clamped.layout;
+            this._ntpWidgetLayout = layout;
+            void this.saveNtpWidgetLayout(layout);
+            layout.forEach((w) => {
+                const el = grid.querySelector(`[data-widget-id="${w.id}"]`);
+                if (!el) return;
+                el.style.setProperty('--ntp-w-col', w.col);
+                el.style.setProperty('--ntp-w-row', w.row);
+                el.style.setProperty('--ntp-w-cspan', w.colSpan);
+                el.style.setProperty('--ntp-w-rspan', w.rowSpan);
+                el.dataset.cspan = String(w.colSpan);
+                el.dataset.rspan = String(w.rowSpan);
+            });
+        }
+        const rows = Math.min(api.gridRows(layout), maxRows);
+        if (layout.length) {
+            grid.style.gridTemplateRows = `repeat(${Math.max(1, rows)}, ${api.ROW_H}px)`;
+        }
+        grid.style.maxHeight = `${rows * api.ROW_H + Math.max(0, rows - 1) * 12}px`;
+    }
+
+    _ensureNtpHeroAnchorObserver() {
+        if (this._ntpHeroAnchorObserver) return;
+        const heroZone = document.getElementById('new-tab-hero-zone');
+        const section = document.getElementById('new-tab-widgets-section');
+        if (!heroZone || typeof ResizeObserver !== 'function') return;
+        this._ntpHeroAnchorObserver = new ResizeObserver(() => this._syncNtpHeroAnchor());
+        this._ntpHeroAnchorObserver.observe(heroZone);
+        if (section) this._ntpHeroAnchorObserver.observe(section);
+        window.addEventListener('resize', this._onNtpHeroAnchorResize);
+    }
+
+    _onNtpHeroAnchorResize = () => {
+        this._syncNtpHeroAnchor();
+    };
+
+    setNtpEditMode(editing) {
+        this._ntpEditMode = !!editing;
+        const section = document.getElementById('new-tab-widgets-section');
+        const editBtn = document.getElementById('ntp-widgets-edit-btn');
+        const addBtn = document.getElementById('ntp-widgets-add-btn');
+        section?.classList.toggle('ntp-widgets-editing', this._ntpEditMode);
+        addBtn?.classList.toggle('hidden', !this._ntpEditMode);
+        if (editBtn) {
+            editBtn.textContent = this._ntpEditMode ? 'Done' : 'Edit';
+            editBtn.setAttribute('aria-pressed', this._ntpEditMode ? 'true' : 'false');
+        }
+        if (!this._ntpEditMode) {
+            this.setNtpPickerOpen(false);
+            this._ntpClearDropPreview(document.getElementById('ntp-widgets-grid'));
+        }
+    }
+
+    setNtpPickerOpen(open) {
+        const strip = document.getElementById('ntp-widget-add-strip');
+        const addBtn = document.getElementById('ntp-widgets-add-btn');
+        strip?.classList.toggle('hidden', !open);
+        addBtn?.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => this._clampNtpWidgetsToViewport());
+        } else {
+            this._clampNtpWidgetsToViewport();
+        }
+    }
+
+    _buildNtpWidgetCatalog() {
+        const api = this._ntpWidgetsApi();
+        const catalog = document.getElementById('ntp-widget-catalog');
+        if (!api || !catalog || catalog.dataset.built === '1') return;
+        catalog.dataset.built = '1';
+        const items = api.getPickerItems();
+        catalog.innerHTML = items
+            .map(
+                (t) =>
+                    `<button type="button" class="ntp-widget-add-chip" data-widget-type="${t.id}" title="${api.escapeHtml(t.desc)}">
+  <i class="fas ${t.icon}" aria-hidden="true"></i>
+  <span>${api.escapeHtml(t.label)}</span>
+</button>`
+            )
+            .join('');
+    }
+
+    _insertNtpWidget(widget) {
+        const api = this._ntpWidgetsApi();
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (!api || !grid || !widget) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = this._renderNtpWidgetCard(widget);
+        const card = wrap.firstElementChild;
+        if (!card) return;
+        this._syncNtpLayoutEmptyState();
+        grid.appendChild(card);
+        grid.style.gridTemplateRows = `repeat(${api.gridRows(this.getNtpWidgetLayout())}, ${api.ROW_H}px)`;
+        this._ntpWidgetStructureKeyCached = this._ntpWidgetStructureKey(this.getNtpWidgetLayout());
+        if (api.isAsyncType(widget.type)) void this._hydrateNtpWidget(widget);
+        else card.classList.add('ntp-widget-ready');
+        card.classList.add('ntp-widget-enter');
+        requestAnimationFrame(() => card.classList.remove('ntp-widget-enter'));
+        this._syncNtpClockTimer();
+        this._clampNtpWidgetsToViewport();
+    }
+
+    _removeNtpWidgetFromGrid(widgetId) {
+        const api = this._ntpWidgetsApi();
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (!grid) return;
+        const card = grid.querySelector(`[data-widget-id="${widgetId}"]`);
+        if (card) {
+            card.classList.add('ntp-widget-exit');
+            const removeNow = () => card.remove();
+            card.addEventListener('transitionend', removeNow, { once: true });
+            setTimeout(removeNow, 200);
+        }
+        const layout = this.getNtpWidgetLayout();
+        if (!layout.length) {
+            this._syncNtpLayoutEmptyState();
+            this._ntpWidgetStructureKeyCached = '';
+        } else if (api) {
+            grid.style.gridTemplateRows = `repeat(${api.gridRows(layout)}, ${api.ROW_H}px)`;
+            this._ntpWidgetStructureKeyCached = this._ntpWidgetStructureKey(layout);
+        }
+        this._syncNtpClockTimer();
+        this._clampNtpWidgetsToViewport();
+    }
+
+    _addNtpWidget(type) {
+        const api = this._ntpWidgetsApi();
+        if (!api) return;
+        const maxVisible = this._ntpMaxVisibleWidgetRows();
+        const fit = api.findPlacementWithShrink
+            ? api.findPlacementWithShrink(type, this.getNtpWidgetLayout(), maxVisible)
+            : null;
+        if (!fit) return;
+        const w = api.createWidget(type, fit.col, fit.row, this._ntpWidgetPrefs(), {
+            colSpan: fit.colSpan,
+            rowSpan: fit.rowSpan,
+        });
+        if (!w) return;
+        this._ntpWidgetLayout = [...this.getNtpWidgetLayout(), w];
+        void this.saveNtpWidgetLayout(this._ntpWidgetLayout);
+        this._insertNtpWidget(w);
+    }
+
+    setupNtpWidgets() {
+        if (this._ntpWidgetsSetup) return;
+        this._ntpWidgetsSetup = true;
+        const api = this._ntpWidgetsApi();
+        if (!api) return;
+
+        const grid = document.getElementById('ntp-widgets-grid');
+        const section = document.getElementById('new-tab-widgets-section');
+        const catalog = document.getElementById('ntp-widget-catalog');
+        const editBtn = document.getElementById('ntp-widgets-edit-btn');
+        const addBtn = document.getElementById('ntp-widgets-add-btn');
+        const optInBtn = document.getElementById('ntp-widgets-opt-in');
+        if (!grid || !section) return;
+
+        this._ntpWidgetLayout = this.getNtpWidgetLayout();
+        this._ntpFetchCache = this._ntpFetchCache || new Map();
+        this._ntpEditMode = false;
+        this._buildNtpWidgetCatalog();
+        this._ensureNtpHeroAnchorObserver();
+
+        optInBtn?.addEventListener('click', () => {
+            void this.enableNtpWidgets(true);
+        });
+
+        editBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.setNtpEditMode(!this._ntpEditMode);
+        });
+
+        addBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const strip = document.getElementById('ntp-widget-add-strip');
+            this.setNtpPickerOpen(!!strip?.classList.contains('hidden'));
+        });
+
+        catalog?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-widget-type]');
+            if (!btn) return;
+            this._addNtpWidget(btn.dataset.widgetType);
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            if (!document.getElementById('ntp-widget-add-strip')?.classList.contains('hidden')) {
+                this.setNtpPickerOpen(false);
+            }
+        });
+
+        grid.addEventListener('click', (e) => {
+            const removeBtn = e.target.closest('.ntp-widget-remove');
+            if (removeBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const card = removeBtn.closest('.ntp-widget');
+                const id = card?.dataset?.widgetId;
+                if (!id) return;
+                this._ntpWidgetLayout = this.getNtpWidgetLayout().filter((w) => w.id !== id);
+                void this.saveNtpWidgetLayout(this._ntpWidgetLayout);
+                this._removeNtpWidgetFromGrid(id);
+                return;
+            }
+            const focusBtn = e.target.closest('.ntp-w-focus-btn');
+            if (focusBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = focusBtn.dataset.widgetId;
+                if (id) this._toggleNtpFocus(id);
+                return;
+            }
+            const focusReset = e.target.closest('[data-ntp-focus-reset]');
+            if (focusReset) {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = focusReset.dataset.widgetId;
+                if (id) this._resetNtpFocus(id);
+                return;
+            }
+            const focusPreset = e.target.closest('[data-ntp-focus-mins]');
+            if (focusPreset) {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = focusPreset.dataset.widgetId;
+                const mins = Number(focusPreset.dataset.ntpFocusMins);
+                if (id && Number.isFinite(mins)) this._setNtpFocusMinutes(id, mins);
+                return;
+            }
+            const weatherUnit = e.target.closest('[data-ntp-weather-unit]');
+            if (weatherUnit) {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = weatherUnit.dataset.widgetId;
+                if (id) this._toggleNtpWeatherUnit(id);
+                return;
+            }
+            const headlineCycle = e.target.closest('[data-ntp-headline-cycle]');
+            if (headlineCycle) {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = headlineCycle.dataset.widgetId;
+                if (id) this._cycleNtpHeadlineFeed(id);
+                return;
+            }
+            const quoteNext = e.target.closest('[data-ntp-quote-next]');
+            if (quoteNext) {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = quoteNext.dataset.widgetId;
+                if (id) this._nextNtpQuote(id);
+                return;
+            }
+            const linkRemove = e.target.closest('[data-ntp-link-remove]');
+            if (linkRemove) {
+                e.preventDefault();
+                e.stopPropagation();
+                const card = linkRemove.closest('.ntp-widget');
+                const id = card?.dataset?.widgetId;
+                const linkId = linkRemove.getAttribute('data-ntp-link-remove');
+                if (id && linkId) this._removeNtpLink(id, linkId);
+                return;
+            }
+            const taskRemove = e.target.closest('[data-ntp-task-remove]');
+            if (taskRemove) {
+                e.preventDefault();
+                e.stopPropagation();
+                const card = taskRemove.closest('.ntp-widget');
+                const id = card?.dataset?.widgetId;
+                const taskId = taskRemove.getAttribute('data-ntp-task-remove');
+                if (id && taskId) this._removeNtpTask(id, taskId);
+                return;
+            }
+            const taskClear = e.target.closest('[data-ntp-task-clear-done]');
+            if (taskClear) {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = taskClear.dataset.widgetId;
+                if (id) this._clearDoneNtpTasks(id);
+                return;
+            }
+            const taskToggle = e.target.closest('[data-ntp-task-toggle]');
+            if (taskToggle) {
+                e.preventDefault();
+                e.stopPropagation();
+                const card = taskToggle.closest('.ntp-widget');
+                const id = card?.dataset?.widgetId;
+                const taskId = taskToggle.getAttribute('data-ntp-task-toggle');
+                if (id && taskId) this._toggleNtpTask(id, taskId);
+                return;
+            }
+            const reopenBtn = e.target.closest('[data-ntp-reopen]');
+            if (reopenBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                this._reopenClosedTabAt(Number(reopenBtn.dataset.ntpReopen));
+                return;
+            }
+            const link = e.target.closest('[data-ntp-url]');
+            if (link) {
+                e.preventDefault();
+                const url = link.getAttribute('data-ntp-url');
+                if (url) void this.navigate(url);
+            }
+        });
+
+        grid.addEventListener('submit', (e) => {
+            const focusForm = e.target.closest('.ntp-w-focus-custom');
+            if (focusForm) {
+                e.preventDefault();
+                const id = focusForm.dataset.widgetId;
+                const input = focusForm.querySelector('.ntp-w-focus-custom-input');
+                const mins = Number(input?.value);
+                if (id && Number.isFinite(mins)) this._setNtpFocusMinutes(id, mins);
+                return;
+            }
+            const worldCustom = e.target.closest('.ntp-w-world-custom');
+            if (worldCustom) {
+                e.preventDefault();
+                const id = worldCustom.dataset.widgetId;
+                const input = worldCustom.querySelector('.ntp-w-world-tz-input');
+                if (id && input) this._setNtpWorldTimezone(id, input.value);
+                return;
+            }
+            const feedCustom = e.target.closest('.ntp-w-feed-custom');
+            if (feedCustom) {
+                e.preventDefault();
+                const id = feedCustom.dataset.widgetId;
+                const input = feedCustom.querySelector('.ntp-w-feed-input');
+                const url = String(input?.value || '').trim();
+                if (id && url) this._setNtpHeadlineFeed(id, url);
+                if (input) input.value = '';
+                return;
+            }
+            const linkForm = e.target.closest('.ntp-w-link-add');
+            if (linkForm) {
+                e.preventDefault();
+                const id = linkForm.dataset.widgetId;
+                const input = linkForm.querySelector('.ntp-w-link-input');
+                const raw = String(input?.value || '').trim();
+                if (!id || !raw) return;
+                this._addNtpLink(id, raw);
+                if (input) input.value = '';
+                return;
+            }
+            const form = e.target.closest('.ntp-w-task-add');
+            if (!form) return;
+            e.preventDefault();
+            const id = form.dataset.widgetId;
+            const input = form.querySelector('.ntp-w-task-input');
+            const text = String(input?.value || '').trim();
+            if (!id || !text) return;
+            this._addNtpTask(id, text);
+            if (input) input.value = '';
+        });
+
+        grid.addEventListener('change', (e) => {
+            const worldPreset = e.target.closest('[data-ntp-world-preset]');
+            if (worldPreset) {
+                const id = worldPreset.dataset.widgetId;
+                if (id) this._setNtpWorldPreset(id, worldPreset.value);
+                return;
+            }
+            const headlineFeed = e.target.closest('[data-ntp-headline-feed]');
+            if (headlineFeed) {
+                const id = headlineFeed.dataset.widgetId;
+                if (id) this._setNtpHeadlineFeed(id, headlineFeed.value);
+                return;
+            }
+            const untilField = e.target.closest('[data-ntp-until-field]');
+            if (!untilField) return;
+            const id = untilField.dataset.widgetId;
+            const field = untilField.dataset.ntpUntilField;
+            if (!id || !field) return;
+            this._patchNtpWidgetConfig(id, { [field]: String(untilField.value || '').trim() });
+            if (field === 'target') this._refreshNtpWidgetAt(id);
+            else this._paintNtpUntilDom(id);
+        });
+
+        grid.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            const cityInput = e.target.closest('[data-ntp-weather-city]');
+            if (cityInput) {
+                e.preventDefault();
+                cityInput.blur();
+                return;
+            }
+            const worldLabel = e.target.closest('[data-ntp-world-label]');
+            if (worldLabel) {
+                e.preventDefault();
+                worldLabel.blur();
+            }
+        });
+
+        grid.addEventListener('blur', (e) => {
+            const cityInput = e.target.closest('[data-ntp-weather-city]');
+            if (cityInput) {
+                const id = cityInput.dataset.widgetId;
+                const city = String(cityInput.value || '').trim() || 'London';
+                if (id) this._setNtpWeatherCity(id, city);
+                return;
+            }
+            const worldLabel = e.target.closest('[data-ntp-world-label]');
+            if (worldLabel) {
+                const id = worldLabel.dataset.widgetId;
+                if (id) {
+                    this._patchNtpWidgetConfig(id, {
+                        label: String(worldLabel.value || '').trim() || 'City'
+                    });
+                }
+                return;
+            }
+            const untilLabel = e.target.closest('.ntp-w-until-label-input');
+            if (untilLabel) {
+                const id = untilLabel.dataset.widgetId;
+                if (id) {
+                    this._patchNtpWidgetConfig(id, { label: String(untilLabel.value || '').trim() || 'Event' });
+                    this._paintNtpUntilDom(id);
+                }
+                return;
+            }
+            const ta = e.target.closest('.ntp-widget-notes-input');
+            if (!ta) return;
+            const id = ta.dataset.widgetId;
+            const layout = this.getNtpWidgetLayout();
+            const w = layout.find((x) => x.id === id);
+            if (!w) return;
+            w.config = w.config || {};
+            w.config.text = ta.value;
+            void this.saveNtpWidgetLayout(layout);
+        }, true);
+
+        this._bindNtpWidgetDrag(grid, section);
+        this._bindNtpWidgetResize(grid, section);
+        this.renderNtpWidgets();
+    }
+
+    _ntpGridMetrics() {
+        const api = this._ntpWidgetsApi();
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (!api || !grid) return null;
+        const rect = grid.getBoundingClientRect();
+        const gap = api.GAP;
+        const cols = api.COLS;
+        const colW = (rect.width - gap * (cols - 1)) / cols;
+        const rowH = api.ROW_H;
+        return { api, grid, rect, gap, cols, colW, rowH };
+    }
+
+    _ntpPointerToCell(clientX, clientY) {
+        const m = this._ntpGridMetrics();
+        if (!m) return { col: 1, row: 1 };
+        const x = clientX - m.rect.left;
+        const y = clientY - m.rect.top;
+        const stepX = m.colW + m.gap;
+        const stepY = m.rowH + m.gap;
+        let col = Math.floor((x + m.gap * 0.5) / stepX) + 1;
+        let row = Math.floor((y + m.gap * 0.5) / stepY) + 1;
+        const maxRows = this._ntpMaxVisibleWidgetRows();
+        col = Math.max(1, Math.min(m.cols, col));
+        row = Math.max(1, Math.min(maxRows, row));
+        return { col, row };
+    }
+
+    _ntpClearDropPreview(grid) {
+        grid?.querySelector('.ntp-drop-preview')?.remove();
+    }
+
+    _ntpUpdateDropPreview(grid, widget, place) {
+        if (!grid || !widget || !place) return;
+        let el = grid.querySelector('.ntp-drop-preview');
+        if (!el) {
+            el = document.createElement('div');
+            el.className = 'ntp-drop-preview';
+            grid.appendChild(el);
+        }
+        el.style.setProperty('--ntp-w-col', place.col);
+        el.style.setProperty('--ntp-w-row', place.row);
+        el.style.setProperty('--ntp-w-cspan', widget.colSpan);
+        el.style.setProperty('--ntp-w-rspan', widget.rowSpan);
+    }
+
+    _refreshNtpWidgetAt(widgetId) {
+        const api = this._ntpWidgetsApi();
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (!api || !grid) return;
+        const w = this.getNtpWidgetLayout().find((x) => x.id === widgetId);
+        if (!w) return;
+        const card = grid.querySelector(`[data-widget-id="${widgetId}"]`);
+        if (!card) return;
+        const html = this._renderNtpWidgetCard(w);
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html;
+        const next = wrap.firstElementChild;
+        if (!next) return;
+        next.classList.add('ntp-widget-ready');
+        card.replaceWith(next);
+        this._ntpWidgetStructureKeyCached = this._ntpWidgetStructureKey(this.getNtpWidgetLayout());
+        if (api.isAsyncType(w.type)) void this._hydrateNtpWidget(w);
+    }
+
+    _findOpenNtpGridSlot(colSpan, rowSpan) {
+        const api = this._ntpWidgetsApi();
+        const layout = this.getNtpWidgetLayout();
+        if (!api) return { col: 1, row: 1 };
+        const maxVisible = this._ntpMaxVisibleWidgetRows();
+        const maxStartRow = Math.max(1, maxVisible - rowSpan + 1);
+        const searchFloor = Math.min(maxStartRow, api.gridRows(layout) + 1);
+        for (let row = 1; row <= searchFloor; row++) {
+            for (let col = 1; col <= api.COLS - colSpan + 1; col++) {
+                const trial = { id: '__new', type: 'today', col, row, colSpan, rowSpan, config: {} };
+                if (api.canPlace(layout, trial, col, row, '__new')) {
+                    return { col, row };
+                }
+            }
+        }
+        return { col: 1, row: 1 };
+    }
+
+    _applyNtpWidgetSizeClasses(layout) {
+        const api = this._ntpWidgetsApi();
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (!api || !grid || !Array.isArray(layout)) return;
+        layout.forEach((w) => {
+            const el = grid.querySelector(`[data-widget-id="${w.id}"]`);
+            if (!el) return;
+            el.classList.remove('ntp-widget--xs', 'ntp-widget--sm', 'ntp-widget--md', 'ntp-widget--lg');
+            const cls = api.widgetSizeClass(w);
+            if (cls) el.classList.add(cls);
+            el.dataset.cspan = String(w.colSpan);
+            el.dataset.rspan = String(w.rowSpan);
+        });
+    }
+
+    _ntpWidgetNeedsResizeRefresh(type) {
+        const api = this._ntpWidgetsApi();
+        return api?.needsResizeRefresh ? api.needsResizeRefresh(type) : true;
+    }
+
+    _bindNtpWidgetDrag(grid, section) {
+        const api = this._ntpWidgetsApi();
+        if (!api) return;
+        if (this._ntpDragBound) return;
+        this._ntpDragBound = true;
+
+        const state = { active: null, ghost: null, widgetId: null, dragRaf: 0, lastX: 0, lastY: 0, pointerId: null };
+
+        const stopDragLoop = () => {
+            if (state.dragRaf) {
+                cancelAnimationFrame(state.dragRaf);
+                state.dragRaf = 0;
+            }
+        };
+
+        const clearDrag = () => {
+            stopDragLoop();
+            if (state.pointerId != null && state.active) {
+                try {
+                    state.active.releasePointerCapture(state.pointerId);
+                } catch (_) {}
+            }
+            state.pointerId = null;
+            if (state.ghost) {
+                state.ghost.remove();
+                state.ghost = null;
+            }
+            state.active?.classList.remove('ntp-widget-dragging');
+            state.active = null;
+            state.widgetId = null;
+            grid.classList.remove('ntp-widgets-dragging');
+            section.classList.remove('ntp-widgets-layout-active');
+            this._ntpClearDropPreview(grid);
+        };
+
+        grid.addEventListener('pointerdown', (e) => {
+            if (!section.classList.contains('ntp-widgets-editing')) return;
+            if (e.button !== 0) return;
+            if (e.target.closest('.ntp-widget-resize, .ntp-widget-remove, a, button, textarea, input, select, label')) return;
+            const card = e.target.closest('.ntp-widget');
+            if (!card) return;
+            e.preventDefault();
+            state.active = card;
+            state.widgetId = card.dataset.widgetId;
+            state.lastX = e.clientX;
+            state.lastY = e.clientY;
+            state.pointerId = e.pointerId;
+
+            const paintDrag = () => {
+                state.dragRaf = 0;
+                if (!state.ghost || !state.widgetId) return;
+                state.ghost.style.left = `${state.lastX - state.ghost.offsetWidth / 2}px`;
+                state.ghost.style.top = `${state.lastY - state.ghost.offsetHeight / 2}px`;
+                const cell = this._ntpPointerToCell(state.lastX, state.lastY);
+                const layout = this.getNtpWidgetLayout();
+                const w = layout.find((x) => x.id === state.widgetId);
+                if (!w) return;
+                const clamped = this._ntpClampPlace(cell.col, cell.row, w.colSpan, w.rowSpan);
+                const place = api.findPlacement(
+                    layout,
+                    w,
+                    clamped.col,
+                    clamped.row,
+                    w.id,
+                    this._ntpMaxVisibleWidgetRows()
+                );
+                const safe = this._ntpClampPlace(place.col, place.row, w.colSpan, w.rowSpan);
+                this._ntpUpdateDropPreview(grid, w, safe);
+                if (state.ghost) state.dragRaf = requestAnimationFrame(paintDrag);
+            };
+
+            const onMove = (ev) => {
+                if (!state.ghost || !state.widgetId) return;
+                state.lastX = ev.clientX;
+                state.lastY = ev.clientY;
+            };
+
+            const detach = () => {
+                card.removeEventListener('pointermove', onMove);
+                card.removeEventListener('pointerup', onUp);
+                card.removeEventListener('pointercancel', onCancel);
+            };
+
+            const onUp = (ev) => {
+                detach();
+                stopDragLoop();
+                if (!state.widgetId) return;
+                state.lastX = ev.clientX;
+                state.lastY = ev.clientY;
+                const cell = this._ntpPointerToCell(state.lastX, state.lastY);
+                const layout = this.getNtpWidgetLayout();
+                const wid = state.widgetId;
+                const w = layout.find((x) => x.id === wid);
+                const clamped = w
+                    ? this._ntpClampPlace(cell.col, cell.row, w.colSpan, w.rowSpan)
+                    : cell;
+                let moved = api.moveWidget(layout, wid, clamped.col, clamped.row, this._ntpMaxVisibleWidgetRows());
+                moved = this._ntpClampLayoutToVisible(moved).layout;
+                this._ntpWidgetLayout = moved;
+                void this.saveNtpWidgetLayout(moved);
+                clearDrag();
+                this._applyNtpLayoutToGrid(moved, { animate: true });
+                this._applyNtpWidgetSizeClasses(moved);
+            };
+
+            const onCancel = () => {
+                detach();
+                clearDrag();
+            };
+
+            try {
+                card.setPointerCapture(e.pointerId);
+            } catch (_) {}
+            card.classList.add('ntp-widget-dragging');
+            grid.classList.add('ntp-widgets-dragging');
+            section.classList.add('ntp-widgets-layout-active');
+            const ghost = card.cloneNode(true);
+            ghost.classList.add('ntp-widget-ghost');
+            ghost.style.width = `${card.offsetWidth}px`;
+            ghost.style.height = `${card.offsetHeight}px`;
+            document.body.appendChild(ghost);
+            state.ghost = ghost;
+            state.ghost.style.left = `${e.clientX - ghost.offsetWidth / 2}px`;
+            state.ghost.style.top = `${e.clientY - ghost.offsetHeight / 2}px`;
+            state.dragRaf = requestAnimationFrame(paintDrag);
+
+            card.addEventListener('pointermove', onMove);
+            card.addEventListener('pointerup', onUp);
+            card.addEventListener('pointercancel', onCancel);
+        });
+    }
+
+    _bindNtpWidgetResize(grid, section) {
+        const api = this._ntpWidgetsApi();
+        if (!api || this._ntpResizeBound) return;
+        this._ntpResizeBound = true;
+
+        const state = { widgetId: null, card: null, startColSpan: 1, startRowSpan: 1, resizeRaf: 0, lastX: 0, lastY: 0, pointerId: null };
+
+        const stopResizeLoop = () => {
+            if (state.resizeRaf) {
+                cancelAnimationFrame(state.resizeRaf);
+                state.resizeRaf = 0;
+            }
+        };
+
+        const clearResize = () => {
+            stopResizeLoop();
+            if (state.pointerId != null && state.card) {
+                try {
+                    state.card.releasePointerCapture(state.pointerId);
+                } catch (_) {}
+            }
+            state.pointerId = null;
+            state.card?.classList.remove('ntp-widget-resizing');
+            state.widgetId = null;
+            state.card = null;
+            grid.classList.remove('ntp-widgets-resizing');
+            section.classList.remove('ntp-widgets-layout-active');
+        };
+
+        grid.addEventListener('pointerdown', (e) => {
+            if (!section.classList.contains('ntp-widgets-editing')) return;
+            if (e.button !== 0) return;
+            const handle = e.target.closest('.ntp-widget-resize');
+            if (!handle) return;
+            const card = handle.closest('.ntp-widget');
+            if (!card) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const widgetId = card.dataset.widgetId;
+            const layout = this.getNtpWidgetLayout();
+            const w = layout.find((x) => x.id === widgetId);
+            if (!w) return;
+            state.widgetId = widgetId;
+            state.card = card;
+            state.startColSpan = w.colSpan;
+            state.startRowSpan = w.rowSpan;
+            state.lastX = e.clientX;
+            state.lastY = e.clientY;
+            state.pointerId = e.pointerId;
+
+            const paintResize = () => {
+                state.resizeRaf = 0;
+                const m = this._ntpGridMetrics();
+                if (!m || !state.widgetId || !state.card) return;
+                const layoutNow = this.getNtpWidgetLayout();
+                const wNow = layoutNow.find((x) => x.id === state.widgetId);
+                if (!wNow) return;
+                const span = api.spanFromPointer(
+                    wNow,
+                    state.lastX,
+                    state.lastY,
+                    m.rect,
+                    m.colW,
+                    m.rowH,
+                    m.gap
+                );
+                const maxRows = this._ntpMaxVisibleWidgetRows();
+                const maxRowSpan = Math.max(1, maxRows - wNow.row + 1);
+                let colSpan = span.colSpan;
+                let rowSpan = Math.min(span.rowSpan, maxRowSpan);
+                const minC = api.typeDef?.(wNow.type)?.minColSpan || 1;
+                const minR = api.typeDef?.(wNow.type)?.minRowSpan || 1;
+                while (
+                    (colSpan > minC || rowSpan > minR) &&
+                    api.canResize &&
+                    !api.canResize(layoutNow, wNow, colSpan, rowSpan, wNow.id)
+                ) {
+                    if (colSpan > rowSpan && colSpan > minC) colSpan--;
+                    else if (rowSpan > minR) rowSpan--;
+                    else if (colSpan > minC) colSpan--;
+                    else break;
+                }
+                if (api.canResize && !api.canResize(layoutNow, wNow, colSpan, rowSpan, wNow.id)) {
+                    colSpan = wNow.colSpan;
+                    rowSpan = wNow.rowSpan;
+                }
+                state.card.style.setProperty('--ntp-w-cspan', colSpan);
+                state.card.style.setProperty('--ntp-w-rspan', rowSpan);
+                state.card.dataset.cspan = String(colSpan);
+                state.card.dataset.rspan = String(rowSpan);
+                const endRow = wNow.row + rowSpan - 1;
+                const needed = Math.min(Math.max(api.gridRows(layoutNow), endRow), maxRows);
+                grid.style.gridTemplateRows = `repeat(${needed}, ${api.ROW_H}px)`;
+                if (state.card) state.resizeRaf = requestAnimationFrame(paintResize);
+            };
+
+            const onMove = (ev) => {
+                if (!state.widgetId || !state.card) return;
+                state.lastX = ev.clientX;
+                state.lastY = ev.clientY;
+            };
+
+            const detach = () => {
+                card.removeEventListener('pointermove', onMove);
+                card.removeEventListener('pointerup', onUp);
+                card.removeEventListener('pointercancel', onCancel);
+            };
+
+            const onUp = (ev) => {
+                detach();
+                stopResizeLoop();
+                if (!state.widgetId) return;
+                state.lastX = ev.clientX;
+                state.lastY = ev.clientY;
+                const m = this._ntpGridMetrics();
+                const layoutNow = this.getNtpWidgetLayout();
+                const wNow = layoutNow.find((x) => x.id === state.widgetId);
+                if (!wNow || !m) {
+                    clearResize();
+                    return;
+                }
+                const span = api.spanFromPointer(
+                    wNow,
+                    state.lastX,
+                    state.lastY,
+                    m.rect,
+                    m.colW,
+                    m.rowH,
+                    m.gap
+                );
+                const maxRows = this._ntpMaxVisibleWidgetRows();
+                const maxRowSpan = Math.max(1, maxRows - wNow.row + 1);
+                let resized = api.resizeWidget(
+                    layoutNow,
+                    state.widgetId,
+                    span.colSpan,
+                    Math.min(span.rowSpan, maxRowSpan)
+                );
+                resized = this._ntpClampLayoutToVisible(resized).layout;
+                const wid = state.widgetId;
+                const wFinal = resized.find((x) => x.id === wid);
+                this._ntpWidgetLayout = resized;
+                void this.saveNtpWidgetLayout(resized);
+                clearResize();
+                this._applyNtpLayoutToGrid(resized);
+                this._applyNtpWidgetSizeClasses(resized);
+                if (wFinal && this._ntpWidgetNeedsResizeRefresh(wFinal.type)) {
+                    this._refreshNtpWidgetAt(wid);
+                }
+            };
+
+            const onCancel = () => {
+                detach();
+                if (state.card) {
+                    state.card.style.setProperty('--ntp-w-cspan', state.startColSpan);
+                    state.card.style.setProperty('--ntp-w-rspan', state.startRowSpan);
+                }
+                clearResize();
+                this._applyNtpLayoutToGrid(this.getNtpWidgetLayout());
+            };
+
+            try {
+                card.setPointerCapture(e.pointerId);
+            } catch (_) {}
+            card.classList.add('ntp-widget-resizing');
+            grid.classList.add('ntp-widgets-resizing');
+            section.classList.add('ntp-widgets-layout-active');
+            state.resizeRaf = requestAnimationFrame(paintResize);
+
+            card.addEventListener('pointermove', onMove);
+            card.addEventListener('pointerup', onUp);
+            card.addEventListener('pointercancel', onCancel);
+        });
+    }
+
+    _ntpWidgetStructureKey(layout) {
+        if (!Array.isArray(layout)) return '';
+        return layout
+            .map((w) => {
+                let cfg = '';
+                try {
+                    cfg = JSON.stringify(w.config || {});
+                } catch (_) {
+                    cfg = '';
+                }
+                return `${w.id}:${w.type}:${w.col}:${w.row}:${w.colSpan}x${w.rowSpan}:${cfg}`;
+            })
+            .join('|');
+    }
+
+    _applyNtpLayoutToGrid(layout, { animate = false } = {}) {
+        const api = this._ntpWidgetsApi();
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (!api || !grid || !Array.isArray(layout)) return;
+        const maxRows = this._ntpMaxVisibleWidgetRows();
+        const rows = Math.min(api.gridRows(layout), maxRows);
+        grid.style.gridTemplateRows = `repeat(${Math.max(1, rows)}, ${api.ROW_H}px)`;
+        layout.forEach((w) => {
+            const el = grid.querySelector(`[data-widget-id="${w.id}"]`);
+            if (!el) return;
+            if (animate) el.classList.add('ntp-widget-animate');
+            el.style.setProperty('--ntp-w-col', w.col);
+            el.style.setProperty('--ntp-w-row', w.row);
+            el.style.setProperty('--ntp-w-cspan', w.colSpan);
+            el.style.setProperty('--ntp-w-rspan', w.rowSpan);
+            el.dataset.cspan = String(w.colSpan);
+            el.dataset.rspan = String(w.rowSpan);
+        });
+        this._clampNtpWidgetsToViewport();
+        if (animate) {
+            requestAnimationFrame(() => {
+                grid.querySelectorAll('.ntp-widget-animate').forEach((el) => {
+                    el.classList.remove('ntp-widget-animate');
+                });
+            });
+            setTimeout(() => {
+                grid.querySelectorAll('.ntp-widget-animate').forEach((el) => {
+                    el.classList.remove('ntp-widget-animate');
+                });
+            }, 280);
+        }
+    }
+
+    _renderNtpWidgetCard(widget) {
+        const api = this._ntpWidgetsApi();
+        if (!api) return '';
+        const type = api.resolveType(widget.type) || widget.type;
+        switch (type) {
+            case 'today':
+                return api.renderToday(widget);
+            case 'weather':
+            case 'headlines':
+            case 'recent':
+            case 'favorites':
+            case 'topsites':
+            case 'pinned':
+            case 'stats':
+                return api.renderSkeleton(widget);
+            case 'links':
+                return api.renderLinks(widget);
+            case 'tasks':
+                return api.renderTasks(widget);
+            case 'note':
+                return api.renderNote(widget);
+            case 'reopen':
+                return api.renderReopen(widget, this._ntpClosedTabsPreview());
+            case 'focus':
+                return api.renderFocus(widget, this._getNtpFocusState(widget.id, widget));
+            case 'until':
+                return api.renderUntil(widget);
+            case 'worldclock':
+                return api.renderWorldclock(widget);
+            case 'quote':
+                return api.renderQuote(widget);
+            default:
+                return api.renderSkeleton(widget);
+        }
+    }
+
+    async _ntpRecentHistoryPreview() {
+        if (this.isIncognitoWindow) return [];
+        try {
+            const history = await this.getHistory();
+            return history.slice(0, 12).map((item) => ({
+                title: item.title,
+                url: item.url,
+                favicon: item.favicon || this.getFaviconUrl(item.url),
+                time: item.time
+            }));
+        } catch (_) {
+            return [];
+        }
+    }
+
+    async _ntpTopSitesPreview() {
+        const api = this._ntpWidgetsApi();
+        if (this.isIncognitoWindow || !api?.computeTopSites) return [];
+        try {
+            const raw = (await window.electronAPI?.getHistory?.()) || [];
+            const mapped = raw.map((item) => ({
+                title: item.title,
+                url: item.url,
+                favicon: item.favicon || (item.url ? this.getFaviconUrl(item.url) : '')
+            }));
+            return api.computeTopSites(mapped, 12).map((s) => ({
+                ...s,
+                favicon: s.favicon || this.getFaviconUrl(s.url)
+            }));
+        } catch (_) {
+            return [];
+        }
+    }
+
+    _ntpPinnedTabsPreview() {
+        const out = [];
+        for (const tab of this.tabs.values()) {
+            if (!tab?.pinned) continue;
+            const url = tab.url || '';
+            if (!url || url.startsWith('axis://')) continue;
+            out.push({
+                title: tab.title || url,
+                url,
+                favicon: tab.favicon || this.getFaviconUrl(url),
+                tabId: tab.id
+            });
+            if (out.length >= 12) break;
+        }
+        return out;
+    }
+
+    _ntpStatsPreview() {
+        let tabs = 0;
+        let pinned = 0;
+        for (const tab of this.tabs.values()) {
+            tabs += 1;
+            if (tab?.pinned) pinned += 1;
+        }
+        return {
+            tabs,
+            pinned,
+            favorites: Array.isArray(this.favorites) ? this.favorites.length : 0,
+            closed: Array.isArray(this.closedTabs) ? this.closedTabs.length : 0
+        };
+    }
+
+    _ntpClosedTabsPreview() {
+        return (this.closedTabs || []).slice(0, 6).map((tab) => ({
+            title: tab.title || tab.url || 'Tab',
+            url: tab.url,
+            favicon: tab.favicon || (tab.url ? this.getFaviconUrl(tab.url) : '')
+        }));
+    }
+
+    async _ntpDownloadsPreview() {
+        let active = [];
+        let recent = [];
+        try {
+            active = (await window.electronAPI?.getActiveDownloads?.()) || [];
+        } catch (_) {}
+        try {
+            recent = (await window.electronAPI?.getDownloadsFromFolder?.()) || [];
+        } catch (_) {}
+        const activeRows = active.map((d) => {
+            const name = d.filename || d.path || 'Downloading';
+            const total = Number(d.totalBytes || d.size || 0);
+            const received = Number(d.receivedBytes || 0);
+            const progress = total > 0 ? Math.round((received / total) * 100) : null;
+            return { name, filename: name, path: d.path, active: true, progress };
+        });
+        const recentRows = recent.slice(0, 6).map((item) => ({
+            name: item.name || item.path || 'File',
+            path: item.path,
+            active: false,
+            meta: `${this.formatFileSize(item.size || 0)} · ${this.formatTimeAgo(item.mtime)}`
+        }));
+        return { active: activeRows, recent: recentRows };
+    }
+
+    _getNtpFocusState(widgetId, widget) {
+        if (!this._ntpFocusState) this._ntpFocusState = new Map();
+        if (!this._ntpFocusState.has(widgetId)) {
+            const mins = Number(widget?.config?.minutes) || 25;
+            this._ntpFocusState.set(widgetId, { remaining: mins * 60, running: false, interval: null });
+        }
+        return this._ntpFocusState.get(widgetId);
+    }
+
+    _toggleNtpFocus(widgetId) {
+        const w = this.getNtpWidgetLayout().find((x) => x.id === widgetId);
+        const st = this._getNtpFocusState(widgetId, w);
+        if (st.running) {
+            st.running = false;
+            if (st.interval) clearInterval(st.interval);
+            st.interval = null;
+        } else {
+            const mins = Number(w?.config?.minutes) || 25;
+            if (st.remaining <= 0) st.remaining = mins * 60;
+            st.running = true;
+            if (st.interval) clearInterval(st.interval);
+            st.interval = setInterval(() => this._tickNtpFocus(widgetId), 1000);
+        }
+        this._paintNtpFocusDom(widgetId);
+    }
+
+    _setNtpFocusMinutes(widgetId, minutes) {
+        const api = this._ntpWidgetsApi();
+        const mins = api?.clampFocusMinutes
+            ? api.clampFocusMinutes(minutes)
+            : Math.max(1, Math.min(180, Number(minutes) || 25));
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w) return;
+        w.config = { ...(w.config || {}), minutes: mins };
+        const st = this._getNtpFocusState(widgetId, w);
+        st.running = false;
+        if (st.interval) clearInterval(st.interval);
+        st.interval = null;
+        st.remaining = mins * 60;
+        void this.saveNtpWidgetLayout(layout);
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _resetNtpFocus(widgetId) {
+        const w = this.getNtpWidgetLayout().find((x) => x.id === widgetId);
+        if (!w) return;
+        const mins = Number(w.config?.minutes) || 25;
+        const st = this._getNtpFocusState(widgetId, w);
+        st.running = false;
+        if (st.interval) clearInterval(st.interval);
+        st.interval = null;
+        st.remaining = mins * 60;
+        this._paintNtpFocusDom(widgetId);
+    }
+
+    _toggleNtpWeatherUnit(widgetId) {
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w) return;
+        const next = String(w.config?.unit || 'C').toUpperCase() === 'F' ? 'C' : 'F';
+        w.config = { ...(w.config || {}), unit: next };
+        void this.saveNtpWidgetLayout(layout);
+        void this._hydrateNtpWidget(w);
+    }
+
+    _setNtpWeatherCity(widgetId, city) {
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w) return;
+        const next = String(city || '').trim() || 'London';
+        if (String(w.config?.city || '') === next) return;
+        w.config = { ...(w.config || {}), city: next };
+        void this.saveNtpWidgetLayout(layout);
+        const cache = this._ntpFetchCache;
+        if (cache) {
+            for (const key of [...cache.keys()]) {
+                if (key.startsWith('weather:')) cache.delete(key);
+            }
+        }
+        void this._hydrateNtpWidget(w);
+    }
+
+    _cycleNtpHeadlineFeed(widgetId) {
+        const api = this._ntpWidgetsApi();
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w || !api?.nextHeadlineFeed) return;
+        const next = api.nextHeadlineFeed(w.config?.feedUrl);
+        w.config = { ...(w.config || {}), feedUrl: next.url };
+        void this.saveNtpWidgetLayout(layout);
+        void this._hydrateNtpWidget(w);
+    }
+
+    _setNtpHeadlineFeed(widgetId, feedUrl) {
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w) return;
+        const url = String(feedUrl || '').trim();
+        if (!url) return;
+        w.config = { ...(w.config || {}), feedUrl: url };
+        void this.saveNtpWidgetLayout(layout);
+        void this._hydrateNtpWidget(w);
+    }
+
+    _nextNtpQuote(widgetId) {
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w) return;
+        const offset = (Number(w.config?.offset) || 0) + 1;
+        w.config = { ...(w.config || {}), offset };
+        void this.saveNtpWidgetLayout(layout);
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _setNtpWorldPreset(widgetId, timezone) {
+        const api = this._ntpWidgetsApi();
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w || !api) return;
+        const tz = api.normalizeTimeZone?.(timezone) || timezone;
+        if (!tz || (api.isValidTimeZone && !api.isValidTimeZone(tz))) return;
+        const preset = api.WORLD_CLOCK_PRESETS?.find((p) => p.timezone === tz);
+        w.config = {
+            ...(w.config || {}),
+            timezone: tz,
+            label: preset?.label || w.config?.label || tz.split('/').pop()?.replace(/_/g, ' ') || 'City'
+        };
+        void this.saveNtpWidgetLayout(layout);
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _setNtpWorldTimezone(widgetId, timezone) {
+        const api = this._ntpWidgetsApi();
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w || !api) return;
+        const tz = api.normalizeTimeZone?.(timezone);
+        if (!tz) return;
+        const preset = api.WORLD_CLOCK_PRESETS?.find((p) => p.timezone === tz);
+        const label =
+            w.config?.label && !api.WORLD_CLOCK_PRESETS?.some((p) => p.label === w.config.label)
+                ? w.config.label
+                : preset?.label || tz.split('/').pop()?.replace(/_/g, ' ') || 'City';
+        w.config = { ...(w.config || {}), timezone: tz, label };
+        void this.saveNtpWidgetLayout(layout);
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _addNtpLink(widgetId, rawUrl) {
+        const api = this._ntpWidgetsApi();
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w || !api) return;
+        let url = String(rawUrl || '').trim();
+        if (!url) return;
+        if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+        try {
+            // Validate
+            void new URL(url);
+        } catch (_) {
+            return;
+        }
+        let host = '';
+        try {
+            host = new URL(url).hostname.replace(/^www\./, '');
+        } catch (_) {}
+        const links = api.normalizeLinks(w.config);
+        links.unshift({
+            id: 'l-' + Math.random().toString(36).slice(2, 9),
+            label: host || url,
+            url
+        });
+        w.config = { ...(w.config || {}), links: links.slice(0, 8) };
+        void this.saveNtpWidgetLayout(layout);
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _removeNtpLink(widgetId, linkId) {
+        const api = this._ntpWidgetsApi();
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w || !api) return;
+        const links = api.normalizeLinks(w.config).filter((l) => l.id !== linkId);
+        w.config = { ...(w.config || {}), links };
+        void this.saveNtpWidgetLayout(layout);
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _paintNtpUntilDom(widgetId) {
+        const api = this._ntpWidgetsApi();
+        const w = this.getNtpWidgetLayout().find((x) => x.id === widgetId);
+        const card = document.querySelector(`[data-widget-id="${widgetId}"]`);
+        if (!api || !w || !card) return;
+        const days = api.daysUntil?.(w.config?.target);
+        const phrase =
+            days == null
+                ? 'Pick a date'
+                : days === 0
+                  ? 'Today'
+                  : days === 1
+                    ? 'Tomorrow'
+                    : days < 0
+                      ? `${Math.abs(days)}d ago`
+                      : `${days}d left`;
+        const num = days == null ? '—' : String(days < 0 ? Math.abs(days) : days);
+        card.querySelectorAll('.ntp-w-until-num').forEach((el) => {
+            el.textContent = num;
+        });
+        card.querySelectorAll('.ntp-w-until-sub').forEach((el) => {
+            el.textContent = phrase;
+        });
+    }
+
+    _removeNtpTask(widgetId, taskId) {
+        const api = this._ntpWidgetsApi();
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w || !api) return;
+        const tasks = api.normalizeTasks(w.config).filter((t) => t.id !== taskId);
+        w.config = { ...(w.config || {}), tasks };
+        void this.saveNtpWidgetLayout(layout);
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _clearDoneNtpTasks(widgetId) {
+        const api = this._ntpWidgetsApi();
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w || !api) return;
+        const tasks = api.normalizeTasks(w.config).filter((t) => !t.done);
+        w.config = { ...(w.config || {}), tasks };
+        void this.saveNtpWidgetLayout(layout);
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _patchNtpWidgetConfig(widgetId, patch) {
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w) return null;
+        w.config = { ...(w.config || {}), ...patch };
+        void this.saveNtpWidgetLayout(layout);
+        return w;
+    }
+
+    _toggleNtpTask(widgetId, taskId) {
+        const api = this._ntpWidgetsApi();
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w || !api) return;
+        const tasks = api.normalizeTasks(w.config).map((t) =>
+            t.id === taskId ? { ...t, done: !t.done } : t
+        );
+        w.config = { ...(w.config || {}), tasks };
+        void this.saveNtpWidgetLayout(layout);
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _addNtpTask(widgetId, text) {
+        const api = this._ntpWidgetsApi();
+        const layout = this.getNtpWidgetLayout();
+        const w = layout.find((x) => x.id === widgetId);
+        if (!w || !api) return;
+        const tasks = api.normalizeTasks(w.config);
+        tasks.unshift({
+            id: 't-' + Math.random().toString(36).slice(2, 9),
+            text: String(text).trim(),
+            done: false
+        });
+        w.config = { ...(w.config || {}), tasks: tasks.slice(0, 20) };
+        void this.saveNtpWidgetLayout(layout);
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _ntpFavoritesPreview() {
+        const list = Array.isArray(this.favorites) ? this.favorites : [];
+        return list.slice(0, 8).map((f) => ({
+            title: f.title || f.name || f.url || 'Favorite',
+            url: f.url || '',
+            favicon: f.favicon || (f.url ? this.getFaviconUrl(f.url) : '')
+        }));
+    }
+
+    _tickNtpFocus(widgetId) {
+        const st = this._ntpFocusState?.get(widgetId);
+        if (!st?.running) return;
+        st.remaining -= 1;
+        if (st.remaining <= 0) {
+            st.remaining = 0;
+            st.running = false;
+            if (st.interval) clearInterval(st.interval);
+            st.interval = null;
+            this.showNotification?.('Focus session complete', 'success');
+            this._refreshNtpWidgetAt(widgetId);
+            return;
+        }
+        this._paintNtpFocusDom(widgetId);
+    }
+
+    _paintNtpFocusDom(widgetId) {
+        const api = this._ntpWidgetsApi();
+        const w = this.getNtpWidgetLayout().find((x) => x.id === widgetId);
+        const st = this._ntpFocusState?.get(widgetId);
+        if (!api || !w || !st) return;
+        const mins = Number(w.config?.minutes) || 25;
+        const time = api.formatFocusTime(st.remaining);
+        const pct = Math.max(0, Math.min(100, Math.round((1 - st.remaining / (mins * 60)) * 100)));
+        const card = document.querySelector(`[data-widget-id="${widgetId}"]`);
+        if (!card) return;
+        card.querySelectorAll('.ntp-w-focus-time').forEach((el) => {
+            el.textContent = time;
+        });
+        card.querySelectorAll('.ntp-w-focus-ring').forEach((el) => {
+            el.style.setProperty('--ntp-focus-pct', `${pct}%`);
+        });
+        const btn = card.querySelector('.ntp-w-focus-btn');
+        if (btn) btn.textContent = st.running ? 'Pause' : st.remaining < mins * 60 && st.remaining > 0 ? 'Resume' : 'Start';
+        const reset = card.querySelector('[data-ntp-focus-reset]');
+        if (reset) reset.disabled = st.remaining >= mins * 60 && !st.running;
+        card.querySelectorAll('[data-ntp-focus-mins]').forEach((el) => {
+            const m = Number(el.dataset.ntpFocusMins);
+            el.classList.toggle('is-active', m === mins);
+        });
+    }
+
+    _reopenClosedTabAt(index) {
+        const i = Number(index);
+        if (!Number.isFinite(i) || i < 0 || i >= this.closedTabs.length) return;
+        const closedTab = this.closedTabs.splice(i, 1)[0];
+        const urlToLoad = this.sanitizeUrl(closedTab.url) || closedTab.url || 'https://www.google.com';
+        const preserveNewTabState = !!closedTab.newTabPageState;
+        const newTabId = this.createNewTab(urlToLoad, { preserveNewTabState });
+        const tab = this.tabs.get(newTabId);
+        if (tab) {
+            this._applyRecoveredTabState(newTabId, closedTab);
+            this.showNotification(`Reopened: ${closedTab.title}`, 'success');
+        }
+        this._syncUndoShortcutState?.();
+        this._refreshNtpWidgetsByType('reopen');
+        this._refreshNtpWidgetsByType('stats');
+        this._refreshNtpWidgetsByType('pinned');
+    }
+
+    _refreshNtpWidgetsByType(type) {
+        const api = this._ntpWidgetsApi();
+        if (!api || this.settings?.ntpWidgetsEnabled !== true) return;
+        const resolved = api.resolveType(type) || type;
+        this.getNtpWidgetLayout()
+            .filter((w) => (api.resolveType(w.type) || w.type) === resolved)
+            .forEach((w) => {
+                if (api.isAsyncType(w.type)) void this._hydrateNtpWidget(w);
+                else this._refreshNtpWidgetAt(w.id);
+            });
+    }
+
+    async _fetchNtpWidgetData(widget) {
+        const api = this._ntpWidgetsApi();
+        if (!api) return null;
+        const cache = this._ntpFetchCache || (this._ntpFetchCache = new Map());
+        const ttl = 5 * 60 * 1000;
+        const now = Date.now();
+        const type = api.resolveType(widget.type) || widget.type;
+        if (type === 'weather') {
+            const city = String(widget.config?.city || 'London').trim().toLowerCase();
+            const key = `weather:${city}`;
+            const hit = cache.get(key);
+            if (hit && now - hit.at < ttl) return hit.data;
+            const data = await api.fetchWeather(widget.config);
+            cache.set(key, { at: now, data });
+            return data;
+        }
+        if (type === 'headlines') {
+            const feed = String(widget.config?.feedUrl || '').trim();
+            const key = `headlines:${feed}`;
+            const hit = cache.get(key);
+            if (hit && now - hit.at < ttl) return hit.data;
+            const data = await api.fetchNewsItems(widget.config);
+            cache.set(key, { at: now, data });
+            return data;
+        }
+        if (type === 'recent') {
+            const key = 'recent:history';
+            const hit = cache.get(key);
+            if (hit && now - hit.at < 30000) return hit.data;
+            const data = await this._ntpRecentHistoryPreview();
+            cache.set(key, { at: now, data });
+            return data;
+        }
+        if (type === 'favorites') {
+            return this._ntpFavoritesPreview();
+        }
+        if (type === 'topsites') {
+            const key = 'topsites:history';
+            const hit = cache.get(key);
+            if (hit && now - hit.at < 60000) return hit.data;
+            const data = await this._ntpTopSitesPreview();
+            cache.set(key, { at: now, data });
+            return data;
+        }
+        if (type === 'pinned') {
+            return this._ntpPinnedTabsPreview();
+        }
+        if (type === 'stats') {
+            return this._ntpStatsPreview();
+        }
+        return null;
+    }
+
+    renderNtpWidgets(opts = {}) {
+        const api = this._ntpWidgetsApi();
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (!api || !grid) return;
+        this.syncNtpWidgetsVisibility();
+        if (this.settings?.ntpWidgetsEnabled !== true) {
+            if (this._ntpClockTimer) {
+                clearInterval(this._ntpClockTimer);
+                this._ntpClockTimer = null;
+            }
+            return;
+        }
+
+        const layout = this.getNtpWidgetLayout();
+        this._ntpWidgetLayout = layout;
+        const structureKey = this._ntpWidgetStructureKey(layout);
+
+        if (!layout.length) {
+            grid.innerHTML = '';
+            this._syncNtpLayoutEmptyState();
+            this._ntpWidgetStructureKeyCached = '';
+            this._syncNtpClockTimer();
+            this._syncNtpWorldclockTimer();
+            return;
+        }
+
+        this._syncNtpLayoutEmptyState();
+
+        const sameStructure =
+            !opts.force &&
+            structureKey === this._ntpWidgetStructureKeyCached &&
+            grid.querySelectorAll('.ntp-widget').length === layout.length;
+
+        if (sameStructure) {
+            this._applyNtpLayoutToGrid(layout);
+            this._applyNtpWidgetSizeClasses(layout);
+            layout.filter((w) => api.isAsyncType(w.type)).forEach((w) => void this._hydrateNtpWidget(w));
+            this._syncNtpClockTimer();
+            this._syncNtpWorldclockTimer();
+            this._syncNtpHeroAnchor();
+            this._clampNtpWidgetsToViewport();
+            return;
+        }
+
+        grid.style.gridTemplateRows = `repeat(${api.gridRows(layout)}, ${api.ROW_H}px)`;
+        grid.innerHTML = layout.map((w) => this._renderNtpWidgetCard(w)).join('');
+        this._ntpWidgetStructureKeyCached = structureKey;
+        layout.filter((w) => api.isAsyncType(w.type)).forEach((w) => void this._hydrateNtpWidget(w));
+        grid.querySelectorAll('.ntp-widget:not(.ntp-widget-ready)').forEach((el) => {
+            const t = api.resolveType(el.dataset.widgetType) || el.dataset.widgetType;
+            if (!api.isAsyncType(t)) el.classList.add('ntp-widget-ready');
+        });
+
+        this._syncNtpLiveTimer();
+        this._syncNtpHeroAnchor();
+        this._clampNtpWidgetsToViewport();
+    }
+
+    /** One shared 1s tick for clock, world clock, and lightweight live tiles. */
+    _syncNtpLiveTimer() {
+        if (this._ntpClockTimer) {
+            clearInterval(this._ntpClockTimer);
+            this._ntpClockTimer = null;
+        }
+        if (this._ntpWorldTimer) {
+            clearInterval(this._ntpWorldTimer);
+            this._ntpWorldTimer = null;
+        }
+        const enabled = this.settings?.ntpWidgetsEnabled === true;
+        const ntpVisible = !document.getElementById('new-tab-page')?.classList.contains('hidden');
+        if (!enabled || !ntpVisible) return;
+
+        const layout = this.getNtpWidgetLayout();
+        const api = this._ntpWidgetsApi();
+        if (!api || !layout.length) return;
+
+        const hasToday = layout.some((w) => (api.resolveType(w.type) || w.type) === 'today');
+        const hasWorld = layout.some((w) => (api.resolveType(w.type) || w.type) === 'worldclock');
+        if (!hasToday && !hasWorld) return;
+
+        const tick = () => {
+            if (hasToday) this._paintNtpTodayDom();
+            if (hasWorld) this._paintNtpWorldclockDom();
+        };
+        tick();
+        this._ntpClockTimer = setInterval(tick, 1000);
+    }
+
+    _paintNtpTodayDom() {
+        const now = new Date();
+        document.querySelectorAll('.ntp-widget--today').forEach((card) => {
+            const rspan = Number(card.dataset.rspan || 1);
+            const withSeconds = card.classList.contains('ntp-widget--md') || card.classList.contains('ntp-widget--lg') || rspan >= 2;
+            const time = now.toLocaleTimeString([], {
+                hour: 'numeric',
+                minute: '2-digit',
+                second: withSeconds ? '2-digit' : undefined
+            });
+            const date = now.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+            card.querySelectorAll('.ntp-w-today-time').forEach((el) => {
+                el.textContent = time;
+            });
+            card.querySelectorAll('.ntp-w-today-date').forEach((el) => {
+                el.textContent = date;
+            });
+        });
+    }
+
+    _paintNtpWorldclockDom() {
+        const api = this._ntpWidgetsApi();
+        if (!api) return;
+        this.getNtpWidgetLayout()
+            .filter((w) => (api.resolveType(w.type) || w.type) === 'worldclock')
+            .forEach((w) => {
+                const parts = api.worldClockParts
+                    ? api.worldClockParts(w.config?.timezone || 'America/New_York')
+                    : { time: '—', weekday: '', offset: '' };
+                const card = document.querySelector(`.ntp-widget--worldclock[data-widget-id="${w.id}"]`);
+                if (!card) return;
+                card.querySelectorAll('.ntp-w-world-time').forEach((el) => {
+                    el.textContent = parts.time;
+                });
+                card.querySelectorAll('.ntp-w-world-date').forEach((el) => {
+                    const extra =
+                        parts.offset && !card.querySelector('.ntp-w-world-offset') ? ` · ${parts.offset}` : '';
+                    el.textContent = `${parts.weekday}${extra}`;
+                });
+                card.querySelectorAll('.ntp-w-world-offset').forEach((el) => {
+                    el.textContent = parts.offset || '';
+                });
+            });
+    }
+
+    _syncNtpWorldclockTimer() {
+        this._syncNtpLiveTimer();
+    }
+
+    _syncNtpClockTimer() {
+        this._syncNtpLiveTimer();
+    }
+
+    async _hydrateNtpWidget(widget) {
+        const api = this._ntpWidgetsApi();
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (!api || !grid) return;
+        const card = grid.querySelector(`[data-widget-id="${widget.id}"]`);
+        if (!card) return;
+
+        const genMap = this._ntpHydrateGen || (this._ntpHydrateGen = new Map());
+        const token = (genMap.get(widget.id) || 0) + 1;
+        genMap.set(widget.id, token);
+
+        let html = '';
+        const type = api.resolveType(widget.type) || widget.type;
+        if (type === 'headlines') {
+            const items = await this._fetchNtpWidgetData(widget);
+            if (genMap.get(widget.id) !== token) return;
+            html = api.renderHeadlines(widget, items || []);
+        } else if (type === 'weather') {
+            const data = await this._fetchNtpWidgetData(widget);
+            if (genMap.get(widget.id) !== token) return;
+            html = api.renderWeather(widget, data || {});
+        } else if (type === 'recent') {
+            const items = await this._fetchNtpWidgetData(widget);
+            if (genMap.get(widget.id) !== token) return;
+            html = api.renderRecent(widget, items || []);
+        } else if (type === 'favorites') {
+            const items = await this._fetchNtpWidgetData(widget);
+            if (genMap.get(widget.id) !== token) return;
+            html = api.renderFavorites(widget, items || []);
+        } else if (type === 'topsites') {
+            const items = await this._fetchNtpWidgetData(widget);
+            if (genMap.get(widget.id) !== token) return;
+            html = api.renderTopsites(widget, items || []);
+        } else if (type === 'pinned') {
+            const items = await this._fetchNtpWidgetData(widget);
+            if (genMap.get(widget.id) !== token) return;
+            html = api.renderPinned(widget, items || []);
+        } else if (type === 'stats') {
+            const data = await this._fetchNtpWidgetData(widget);
+            if (genMap.get(widget.id) !== token) return;
+            html = api.renderStats(widget, data || {});
+        }
+        if (genMap.get(widget.id) !== token) return;
+        if (!html) {
+            card.classList.add('ntp-widget-ready');
+            return;
+        }
+
+        const live = grid.querySelector(`[data-widget-id="${widget.id}"]`);
+        if (!live || !live.parentElement) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html;
+        const next = wrap.firstElementChild;
+        if (!next) return;
+        next.classList.add('ntp-widget-ready');
+        if (this._ntpEditMode) {
+            const section = document.getElementById('new-tab-widgets-section');
+            if (section?.classList.contains('ntp-widgets-editing')) {
+                /* keep edit chrome via section class */
+            }
+        }
+        live.replaceWith(next);
+    }
+
+    _ntpOpenTabsPreview() {
+        return { count: 0, items: [] };
+    }
+
+    _ntpWidgetQuickLinks() {
+        return [];
+    }
+
     navigateNewTabSuggestions(direction, container) {
         const items = container?.querySelectorAll('.spotlight-suggestion-item');
         if (!items?.length) return;
         this.spotlightSelectedIndex = Math.max(-1, Math.min(this.spotlightSelectedIndex + direction, items.length - 1));
         items.forEach((el, i) => el.classList.toggle('active', i === this.spotlightSelectedIndex));
+    }
+
+    _setNtpSearchExpanded(expanded) {
+        document.getElementById('new-tab-search-wrapper')?.classList.toggle('ntp-search-expanded', !!expanded);
     }
 
     async updateNewTabSuggestions(query) {
@@ -7283,17 +11619,20 @@ class AxisBrowser {
                 this._newTabSuggestionsCloseTimer = null;
             }
             if (container.children.length > 0) {
+                container.classList.remove('ntp-suggestions-open');
                 container.classList.add('new-tab-suggestions-closing');
                 this._newTabSuggestionsCloseTimer = setTimeout(() => {
-                    container.innerHTML = '';
-                    container.classList.remove('new-tab-suggestions-closing', 'loading');
+                    container.replaceChildren();
+                    container.classList.remove('new-tab-suggestions-closing', 'ntp-suggestions-open');
                     this.spotlightSelectedIndex = -1;
                     this._newTabSuggestionsCloseTimer = null;
-                }, 320);
+                    this._setNtpSearchExpanded(false);
+                }, 250);
             } else {
-                container.innerHTML = '';
-                container.classList.remove('loading');
+                container.replaceChildren();
+                container.classList.remove('ntp-suggestions-open');
                 this.spotlightSelectedIndex = -1;
+                this._setNtpSearchExpanded(false);
             }
             return;
         }
@@ -7302,8 +11641,11 @@ class AxisBrowser {
             this._newTabSuggestionsCloseTimer = null;
         }
         container.classList.remove('new-tab-suggestions-closing');
-        container.classList.add('loading');
+        container.classList.add('ntp-suggestions-open');
+        this._setNtpSearchExpanded(true);
+        const seq = (this._ntpSuggestionsSeq = (this._ntpSuggestionsSeq || 0) + 1);
         const suggestions = await this.generateAdvancedSuggestions(query);
+        if (seq !== this._ntpSuggestionsSeq) return;
         this.updateNewTabSuggestionsContent(container, suggestions, query);
     }
 
@@ -7311,7 +11653,7 @@ class AxisBrowser {
         const q = (query || '').trim();
         if (!q || this.isNewTabInChat()) return;
         const short = q.length > 52 ? `${q.slice(0, 49)}…` : q;
-        const aiOn = this.settings?.ntpAiSearchEnabled !== false;
+        const aiOn = this.isAiFeaturesEnabled() && this.settings?.ntpAiSearchEnabled !== false;
 
         const addRow = (extraClass, iconClass, badge, handler) => {
             const el = document.createElement('div');
@@ -7335,54 +11677,70 @@ class AxisBrowser {
     }
 
     updateNewTabSuggestionsContent(container, suggestions, query = '') {
-        container.classList.remove('loading', 'new-tab-suggestions-closing');
-        container.innerHTML = '';
+        container.classList.remove('new-tab-suggestions-closing');
         this.spotlightSelectedIndex = -1;
 
-        this._appendNewTabActionRows(container, query);
+        const frag = document.createDocumentFragment();
+        this._appendNewTabActionRows(frag, query);
 
-        if (!suggestions || suggestions.length === 0) {
-            return;
-        }
-
-        let visible = suggestions.slice(0, 6);
-
-        const selectedEngine = this.selectedSearchEngine;
-        visible.forEach((s, i) => {
-            const el = document.createElement('div');
-            el.className = 'spotlight-suggestion-item';
-            el.setAttribute('data-index', i);
-            let faviconUrl = null;
-            if (s.isTab && s.tabId) {
-                const tab = this.tabs.get(s.tabId);
-                faviconUrl = tab?.favicon || (tab?.url ? this.getFaviconUrl(tab.url) : null);
-            } else if (s.url || s.isHistory || s.isUrl) {
-                faviconUrl = this.getFaviconUrl(s.url);
-            }
-            const iconHtml = faviconUrl
-                ? `<img src="${this.escapeHtml(faviconUrl)}" alt="" class="spotlight-favicon" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />`
-                : '';
-            const fallbackIconHtml = faviconUrl ? `<i class="${this.escapeHtml(s.icon)}" style="display:none;"></i>` : `<i class="${this.escapeHtml(s.icon)}"></i>`;
-            el.innerHTML = `
+        if (suggestions?.length) {
+            const visible = suggestions.slice(0, 6);
+            const selectedEngine = this.selectedSearchEngine;
+            visible.forEach((s, i) => {
+                const el = document.createElement('div');
+                el.className = 'spotlight-suggestion-item';
+                el.setAttribute('data-index', i);
+                let faviconUrl = null;
+                if (s.isTab && s.tabId) {
+                    const tab = this.tabs.get(s.tabId);
+                    faviconUrl = tab?.favicon || (tab?.url ? this.getFaviconUrl(tab.url) : null);
+                } else if (s.url || s.isHistory || s.isUrl) {
+                    faviconUrl = this.getFaviconUrl(s.url);
+                }
+                const iconHtml = faviconUrl
+                    ? `<img src="${this.escapeHtml(faviconUrl)}" alt="" class="spotlight-favicon" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />`
+                    : '';
+                const fallbackIconHtml = faviconUrl ? `<i class="${this.escapeHtml(s.icon)}" style="display:none;"></i>` : `<i class="${this.escapeHtml(s.icon)}"></i>`;
+                el.innerHTML = `
                 <div class="spotlight-suggestion-icon">${iconHtml}${fallbackIconHtml}</div>
                 <div class="spotlight-suggestion-text">${this.escapeHtml(s.text)}</div>
                 ${(s.isTab && s.tabId) ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
             `;
-            el.addEventListener('click', () => this.performSuggestionAction(s, selectedEngine, true));
-            container.appendChild(el);
-        });
+                el.addEventListener('click', () => this.performSuggestionAction(s, selectedEngine, true));
+                frag.appendChild(el);
+            });
+        }
+
+        container.replaceChildren(frag);
+        const open = container.children.length > 0;
+        container.classList.toggle('ntp-suggestions-open', open);
+        this._setNtpSearchExpanded(open);
     }
 
     async sendNewTabAskMessage() {
+        if (!this.isAiFeaturesEnabled()) return;
         const input = document.getElementById('new-tab-input');
         const messagesContainer = document.getElementById('new-tab-ask-messages');
         if (!input || !messagesContainer) return;
 
         const text = input.value.trim();
-        if (!text) return;
+        const images = (this._newTabChatImages || []).map((img) => ({
+            mimeType: img.mimeType,
+            base64: img.base64,
+            dataUrl: img.dataUrl,
+            name: img.name
+        }));
+        if (!text && !images.length) return;
 
-        if (!this.hasGroqApiKey()) {
+        if (!this.hasAiApiKey()) {
             this.showNewTabAskSetup();
+            return;
+        }
+        if (images.length && !this.activeProviderSupportsImages()) {
+            this.showNotification?.(
+                'Your active provider does not support images. Switch to a vision-capable key in Settings → AI Chat.',
+                'error'
+            );
             return;
         }
 
@@ -7391,10 +11749,12 @@ class AxisBrowser {
         if (suggestionsContainer) {
             suggestionsContainer.innerHTML = '';
             suggestionsContainer.classList.add('new-tab-suggestions-closing');
+            this._setNtpSearchExpanded(false);
         }
 
         input.value = '';
-        this.updateNewTabSendButtonState();
+        this._newTabChatImages = [];
+        this._syncAiChatImageAttachUi();
 
         const isFirstMessage = !this.isNewTabInChat();
         if (isFirstMessage) {
@@ -7402,12 +11762,14 @@ class AxisBrowser {
             this.syncNewTabInputChrome();
         }
 
+        const imagesHtml = this._buildUserMessageImagesHtml(images);
+        const bubbleInner = imagesHtml + (text ? this.escapeHtml(text) : '');
         const userDiv = document.createElement('div');
         userDiv.className = 'new-tab-ask-message user';
         userDiv.innerHTML = `
             <div class="new-tab-ask-avatar user" aria-hidden="true"><i class="fas fa-user"></i></div>
             <div class="new-tab-ask-body">
-                <div class="new-tab-ask-bubble">${this.escapeHtml(text)}</div>
+                <div class="new-tab-ask-bubble">${bubbleInner}</div>
             </div>
         `;
         messagesContainer.appendChild(userDiv);
@@ -7439,7 +11801,7 @@ class AxisBrowser {
 
         try {
             const history = tab ? tab.newTabAskHistory : this._getNewTabAskHistoryForTab(this.currentTab);
-            const response = await this.getChatAIResponse(text, { history });
+            const response = await this.getChatAIResponse(text, { history, images });
             const updated = messagesContainer.querySelector(
                 ".new-tab-ask-message.assistant[data-message-id=\"" + loadingId + "\"]"
             );
@@ -7529,11 +11891,11 @@ class AxisBrowser {
         const page = document.getElementById('new-tab-page');
         if (input) input.value = '';
         this.spotlightSelectedIndex = -1;
-        if (searchWrapper) searchWrapper.classList.remove('hidden');
+        if (searchWrapper) searchWrapper.classList.remove('hidden', 'ntp-search-expanded');
         if (suggestionsContainer) {
             suggestionsContainer.classList.remove('hidden');
             suggestionsContainer.innerHTML = '';
-            suggestionsContainer.classList.remove('loading', 'new-tab-suggestions-closing');
+            suggestionsContainer.classList.remove('new-tab-suggestions-closing');
         }
         if (askMessages) {
             askMessages.innerHTML = '';
@@ -7542,11 +11904,167 @@ class AxisBrowser {
         startView?.classList.remove('hidden');
         chatView?.classList.add('hidden');
         page?.classList.remove('ntp-ai-chat-mode', 'ntp-ai-chat-entering', 'ntp-ai-chat-exiting');
+        this._newTabChatImages = [];
         this.mountNewTabSearchBarToStart();
         this.setNewTabAiChatChromeVisible(false);
         this.hideNewTabAskSetup();
         this.syncNewTabInputChrome();
         this.updateNewTabSuggestions('');
+        const tabId = this._normalizeTabMapKey(this.currentTab);
+        if (tabId != null) this._ntpUiBoundTabId = tabId;
+    }
+
+    _hasNewTabAiChatState(state, tab) {
+        if (!state && !tab) return false;
+        const st = state || tab?.newTabPageState;
+        if (st?.inChat === true) return true;
+        if (st?.askMessagesHtml && String(st.askMessagesHtml).trim()) return true;
+        if (Array.isArray(st?.askMessageHistory) && st.askMessageHistory.length) return true;
+        if (Array.isArray(tab?.newTabAskHistory) && tab.newTabAskHistory.length) return true;
+        return false;
+    }
+
+    _savedNewTabInAiChatFromPayload(data) {
+        return this._hasNewTabAiChatState(data?.newTabPageState, data);
+    }
+
+    /** Built-in tab icons (New Tab / AI Chat) — works from live tabs, saved payloads, and swipe previews. */
+    resolveTabFaviconForData(data, tabId = null) {
+        if (!data || data.customIcon) return null;
+        const url = data.url || data.savedLinkUrl || null;
+        if (url === this.NEWTAB_URL) {
+            const inChat =
+                tabId != null && typeof this.isTabInNtpAiChat === 'function'
+                    ? this.isTabInNtpAiChat(tabId)
+                    : this._savedNewTabInAiChatFromPayload(data);
+            return inChat ? this.NTP_AI_CHAT_FAVICON : this.NTP_DEFAULT_FAVICON;
+        }
+        if (data.favicon) return data.favicon;
+        if (url) {
+            try {
+                return this.getFaviconUrl(url);
+            } catch (_) {
+                /* ignore */
+            }
+        }
+        return null;
+    }
+
+    /** Font Awesome sidebar icon for New Tab / AI Chat — safe in HTML (data-URI SVG breaks when escaped). */
+    builtInTabFaviconIconHtml(data, tabId = null) {
+        const url = data?.url || data?.savedLinkUrl;
+        if (url !== this.NEWTAB_URL) return null;
+        const inChat =
+            tabId != null && typeof this.isTabInNtpAiChat === 'function'
+                ? this.isTabInNtpAiChat(tabId)
+                : this._savedNewTabInAiChatFromPayload(data);
+        const fa = inChat ? 'fa-message' : 'fa-search';
+        return `<i class="fas ${fa} tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:13px;color:rgba(255,255,255,0.7);"></i>`;
+    }
+
+    escapeHtmlAttribute(value) {
+        return String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    }
+
+    /** Sidebar tab icon markup — previews, pinned restore, and live tabs share one path. */
+    tabFaviconIconHtml(data, tabId = null) {
+        if (!data) {
+            return '<img class="tab-favicon" src="" alt="" draggable="false" onerror="this.style.visibility=\'hidden\'">';
+        }
+        if (data.customIcon) {
+            if (data.customIconType === 'emoji') {
+                return `<span class="tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;">${this.escapeHtml(data.customIcon)}</span>`;
+            }
+            return `<i class="fas ${this.escapeHtml(data.customIcon)} tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;color:rgba(255,255,255,0.7);"></i>`;
+        }
+        const builtIn = this.builtInTabFaviconIconHtml(data, tabId);
+        if (builtIn) return builtIn;
+        const favicon = this.resolveTabFaviconForData(data, tabId);
+        if (favicon) {
+            return `<img class="tab-favicon" src="${this.escapeHtmlAttribute(favicon)}" alt="" draggable="false" style="visibility:visible">`;
+        }
+        return '<img class="tab-favicon" src="" alt="" draggable="false" onerror="this.style.visibility=\'hidden\'">';
+    }
+
+    _applyBuiltInTabFaviconElement(tabElement, tab, tabId) {
+        if (!tabElement || !tab || tab.customIcon || tab.url !== this.NEWTAB_URL) return false;
+        const iconHtml = this.builtInTabFaviconIconHtml(tab, tabId);
+        if (!iconHtml) return false;
+        const inChat =
+            tabId != null && typeof this.isTabInNtpAiChat === 'function'
+                ? this.isTabInNtpAiChat(tabId)
+                : this._savedNewTabInAiChatFromPayload(tab);
+        tab.favicon = inChat ? this.NTP_AI_CHAT_FAVICON : this.NTP_DEFAULT_FAVICON;
+        const faviconEl = tabElement.querySelector('.tab-favicon');
+        if (!faviconEl) return false;
+        const wantFa = inChat ? 'fa-message' : 'fa-search';
+        if (faviconEl.tagName === 'I' && faviconEl.classList.contains(wantFa)) return true;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = iconHtml;
+        const next = wrap.firstElementChild;
+        if (next) faviconEl.replaceWith(next);
+        return true;
+    }
+
+    _refreshBuiltInTabFavicons() {
+        for (const [tabId, tab] of this.tabs || []) {
+            if (!tab || tab.customIcon || tab.url !== this.NEWTAB_URL) continue;
+            const tabElement =
+                (typeof this._findTabElementInProfileScope === 'function'
+                    ? this._findTabElementInProfileScope(tabId)
+                    : null) || document.querySelector(`[data-tab-id="${tabId}"]`);
+            if (tabElement) this._applyBuiltInTabFaviconElement(tabElement, tab, tabId);
+        }
+    }
+
+    _buildNewTabAskMessageHtml(role, content) {
+        const isUser = role === 'user';
+        const avatarClass = isUser ? 'user' : 'assistant';
+        const avatarIcon = isUser ? 'fa-user' : 'fa-message';
+        const bubble = isUser
+            ? this.escapeHtml(String(content || ''))
+            : this.formatAiChatMarkdown(content);
+        return `
+            <div class="new-tab-ask-message ${avatarClass}">
+                <div class="new-tab-ask-avatar ${avatarClass}" aria-hidden="true"><i class="fas ${avatarIcon}"></i></div>
+                <div class="new-tab-ask-body">
+                    <div class="new-tab-ask-bubble">${bubble}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    _buildNewTabAskMessagesHtmlFromHistory(history) {
+        if (!Array.isArray(history) || !history.length) return '';
+        return history
+            .map((m) => this._buildNewTabAskMessageHtml(m.role, m.content))
+            .join('');
+    }
+
+    _ensureNewTabPageStateFromTabData(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab || tab.url !== this.NEWTAB_URL) return;
+        if (this._normalizeTabMapKey(this.currentTab) === this._normalizeTabMapKey(tabId)) {
+            this.saveNewTabPageStateToTab(tabId);
+            return;
+        }
+        if (Array.isArray(tab.newTabAskHistory) && tab.newTabAskHistory.length) {
+            tab.newTabPageState = {
+                inputValue: tab.newTabPageState?.inputValue || '',
+                inChat: true,
+                askMessagesHtml: this._buildNewTabAskMessagesHtmlFromHistory(tab.newTabAskHistory),
+                askMessageHistory: tab.newTabAskHistory.map((m) => ({ role: m.role, content: m.content }))
+            };
+            this.tabs.set(tabId, tab);
+            return;
+        }
+        if (tab.newTabPageState) return;
+    }
+
+    _flushNewTabPageStateBeforePersist() {
+        for (const tabId of this.tabs.keys()) {
+            this._ensureNewTabPageStateFromTabData(tabId);
+        }
     }
 
     /** Save current new-tab-page UI state to a tab (so we can restore when switching back). */
@@ -7561,9 +12079,11 @@ class AxisBrowser {
             ? tab.newTabAskHistory.map((m) => ({ role: m.role, content: m.content }))
             : this._extractNewTabAskHistoryFromDom();
         tab.newTabAskHistory = askMessageHistory;
+        const hasChatHistory = askMessageHistory.length > 0;
+        const hasChatDom = !!(askMessagesHtml && String(askMessagesHtml).trim());
         tab.newTabPageState = {
             inputValue,
-            inChat: this.isNewTabInChat(),
+            inChat: this.isNewTabInChat() || hasChatHistory || hasChatDom,
             askMessagesHtml,
             askMessageHistory
         };
@@ -7574,12 +12094,12 @@ class AxisBrowser {
     /** Snapshot new-tab state for close/undo (persists AI chat history when tab is closed). */
     _captureNewTabPageStateForUndo(tab, tabId, isCurrentTab) {
         if (!tab || tab.url !== this.NEWTAB_URL) return undefined;
-        if (isCurrentTab) this.saveNewTabPageStateToTab(tabId);
+        this._ensureNewTabPageStateFromTabData(tabId);
         const st = tab.newTabPageState;
         if (!st) return undefined;
         return {
             inputValue: st.inputValue || '',
-            inChat: !!st.inChat,
+            inChat: this._hasNewTabAiChatState(st, tab),
             askMessagesHtml: st.askMessagesHtml || '',
             askMessageHistory: Array.isArray(st.askMessageHistory) ? st.askMessageHistory : []
         };
@@ -7609,15 +12129,29 @@ class AxisBrowser {
     restoreNewTabPageStateFromTab(tabId) {
         const tab = this.tabs.get(tabId);
         if (!tab || !tab.newTabPageState) return;
+        this._newTabChatImages = [];
         const state = tab.newTabPageState;
         const input = document.getElementById('new-tab-input');
         const suggestionsContainer = document.getElementById('new-tab-suggestions');
         const askMessages = document.getElementById('new-tab-ask-messages');
-        const inChat = state.inChat === true || !!(state.askMessagesHtml && state.askMessagesHtml.trim());
+        const history =
+            Array.isArray(state.askMessageHistory) && state.askMessageHistory.length
+                ? state.askMessageHistory
+                : Array.isArray(tab.newTabAskHistory) && tab.newTabAskHistory.length
+                  ? tab.newTabAskHistory
+                  : [];
+        const inChat = this._hasNewTabAiChatState(state, tab);
+        let askMessagesHtml = state.askMessagesHtml || '';
+        if (inChat && !String(askMessagesHtml).trim() && history.length) {
+            askMessagesHtml = this._buildNewTabAskMessagesHtmlFromHistory(history);
+            state.askMessagesHtml = askMessagesHtml;
+            state.inChat = true;
+            tab.newTabPageState = state;
+        }
         if (input) input.value = state.inputValue || '';
         this.spotlightSelectedIndex = -1;
         if (suggestionsContainer) {
-            suggestionsContainer.classList.remove('hidden', 'loading', 'new-tab-suggestions-closing');
+            suggestionsContainer.classList.remove('hidden', 'new-tab-suggestions-closing');
             if (inChat) {
                 suggestionsContainer.innerHTML = '';
             } else {
@@ -7625,25 +12159,38 @@ class AxisBrowser {
             }
         }
         if (askMessages) {
-            askMessages.innerHTML = state.askMessagesHtml || '';
+            askMessages.innerHTML = askMessagesHtml;
+            askMessages.classList.toggle('hidden', !inChat);
         }
-        if (Array.isArray(state.askMessageHistory) && state.askMessageHistory.length) {
-            tab.newTabAskHistory = state.askMessageHistory.map((m) => ({ role: m.role, content: m.content }));
+        if (history.length) {
+            tab.newTabAskHistory = history.map((m) => ({ role: m.role, content: m.content }));
         } else {
             tab.newTabAskHistory = this._extractNewTabAskHistoryFromDom();
         }
         this.tabs.set(tabId, tab);
         if (inChat) {
-            void this.beginNewTabAiChatTransition({ animate: false });
+            void this.beginNewTabAiChatTransition({ animate: false, force: true });
+            this._scrollNewTabAskMessagesToBottom();
             this._focusNewTabInput();
         } else {
-            this.resetNewTabPageState();
+            const startView = document.getElementById('new-tab-start-view');
+            const chatView = document.getElementById('new-tab-ai-chat-view');
+            const page = document.getElementById('new-tab-page');
+            const searchWrapper = document.getElementById('new-tab-search-wrapper');
+            startView?.classList.remove('hidden');
+            chatView?.classList.add('hidden');
+            page?.classList.remove('ntp-ai-chat-mode', 'ntp-ai-chat-entering', 'ntp-ai-chat-exiting');
+            searchWrapper?.classList.remove('hidden');
+            this.mountNewTabSearchBarToStart();
+            this.setNewTabAiChatChromeVisible(false);
             if (input) input.value = state.inputValue || '';
             void this.updateNewTabSuggestions(state.inputValue || '');
+            this.syncNewTabInputChrome();
         }
         this.hideNewTabAskSetup();
         this.applyNewTabTabChrome(tabId);
         this.updateUrlBar(null);
+        this._ntpUiBoundTabId = this._normalizeTabMapKey(tabId);
     }
 
     updateNewTabPageVisibility(show) {
@@ -7656,35 +12203,73 @@ class AxisBrowser {
             if (show) {
                 // New-tab overlay is never an extension-store listing surface.
                 this.updateExtensionStoreHostBar('');
+                const ntpTabId = this._normalizeTabMapKey(this.currentTab);
+                const ntpNeedsPaint =
+                    ntpTabId == null ||
+                    this._ntpUiBoundTabId == null ||
+                    this._ntpUiBoundTabId !== ntpTabId;
                 if (this._resetNewTabPageOnShow) {
-                    this.resetNewTabPageState();
-                    if (this.currentTab != null) {
-                        const freshTab = this.tabs.get(this.currentTab);
-                        if (freshTab) {
-                            freshTab.newTabPageState = undefined;
-                            freshTab.newTabAskHistory = undefined;
-                            this.applyNewTabTabChrome(this.currentTab);
+                    const ntpTab =
+                        this.currentTab != null && this.tabs.has(this.currentTab)
+                            ? this.tabs.get(this.currentTab)
+                            : null;
+                    const hasSavedNtpState =
+                        ntpTab?.url === this.NEWTAB_URL &&
+                        (ntpTab.newTabPageState || this._hasNewTabAiChatState(null, ntpTab));
+                    if (ntpNeedsPaint) {
+                        if (hasSavedNtpState) {
+                            if (ntpTab.newTabPageState) {
+                                this.restoreNewTabPageStateFromTab(this.currentTab);
+                            } else {
+                                this._ensureNewTabPageStateFromTabData(this.currentTab);
+                                this.restoreNewTabPageStateFromTab(this.currentTab);
+                            }
+                        } else {
+                            this.resetNewTabPageState();
+                            if (this.currentTab != null) {
+                                const freshTab = this.tabs.get(this.currentTab);
+                                if (freshTab) {
+                                    freshTab.newTabPageState = undefined;
+                                    freshTab.newTabAskHistory = undefined;
+                                    this.applyNewTabTabChrome(this.currentTab);
+                                }
+                            }
                         }
                     }
                     this._resetNewTabPageOnShow = false;
-                } else if (this.currentTab && this.tabs.has(this.currentTab)) {
+                } else if (ntpNeedsPaint && this.currentTab && this.tabs.has(this.currentTab)) {
                     const tab = this.tabs.get(this.currentTab);
                     if (tab && tab.url === this.NEWTAB_URL) {
-                        this.restoreNewTabPageStateFromTab(this.currentTab);
+                        if (tab.newTabPageState) {
+                            this.restoreNewTabPageStateFromTab(this.currentTab);
+                        } else if (this._hasNewTabAiChatState(null, tab)) {
+                            this._ensureNewTabPageStateFromTabData(this.currentTab);
+                            this.restoreNewTabPageStateFromTab(this.currentTab);
+                        }
                     }
                 }
                 newTabPage.classList.remove('hidden');
                 if (!this.isNewTabInChat()) this.mountNewTabSearchBarToStart();
-                this.updateNewTabHero();
-                this._applyNewTabSurfaceChromeVars();
-                this._applyNewTabPageChrome();
+                if (ntpNeedsPaint) {
+                    this.updateNewTabHero();
+                    this._applyNewTabSurfaceChromeVars();
+                    this._applyNewTabPageChrome();
+                    this.syncNtpWidgetsVisibility();
+                    this.renderNtpWidgets();
+                }
                 this._syncNewTabWebviewUnderlay();
                 this._syncWebPanelVisualState();
-                requestAnimationFrame(() => {
-                    document.getElementById('new-tab-input')?.focus();
-                });
+                if (ntpTabId != null && activeTab?.url === this.NEWTAB_URL) {
+                    this._ntpUiBoundTabId = ntpTabId;
+                }
+                if (ntpNeedsPaint) {
+                    requestAnimationFrame(() => {
+                        document.getElementById('new-tab-input')?.focus();
+                    });
+                }
             } else {
                 newTabPage.classList.add('hidden');
+                this._ntpUiBoundTabId = null;
                 this._syncNewTabWebviewUnderlay();
                 this._syncWebPanelVisualState();
                 // Restore webview interactivity (was pointer-events: none for overlay)
@@ -7726,6 +12311,7 @@ class AxisBrowser {
 
         if (trulyNoTabs) {
             document.body.classList.add('chrome-no-tabs');
+            this._resetSiteThemeColorToSettings();
             this.updateNewTabPageVisibility(false);
             emptyState.classList.remove('hidden');
             if (emptyContent) emptyContent.classList.add('hidden');
@@ -7773,7 +12359,7 @@ class AxisBrowser {
                 wv.style.setProperty('background', 'transparent', 'important');
                 wv.classList.add('inactive');
             });
-
+            
             this._lastEmptyStateHadOpenTabs = false;
         } else {
             document.body.classList.remove('chrome-no-tabs');
@@ -7832,25 +12418,60 @@ class AxisBrowser {
         // The URL bar itself handles visibility based on whether a valid page is loaded
     }
 
-    switchToTabByIndex(index) {
-        const tabElements = document.querySelectorAll('.tab:not(.tab-favorite-host)');
-        if (index >= 0 && index < tabElements.length) {
-            const tabElement = tabElements[index];
-                const tabId = parseInt(tabElement.dataset.tabId, 10);
-            this.switchToTab(tabId);
+    /** Tabs in sidebar visual order for ⌘1–9 / Ctrl+1–9 (favorites grid, then pinned/unpinned rows). */
+    _getKeyboardSwitchableTabEntries() {
+        const entries = [];
+        if (!this.isIncognitoWindow && Array.isArray(this.favorites)) {
+            for (const favorite of this.favorites) {
+                if (favorite?.id) entries.push({ kind: 'favorite', favorite });
+            }
+        }
+        document.querySelectorAll('.tab:not(.tab-favorite-host)').forEach((el) => {
+            const tabId = this._normalizeTabMapKey(el.dataset?.tabId);
+            if (tabId != null && this.tabs.has(tabId)) {
+                entries.push({ kind: 'tab', tabId });
+            }
+        });
+        return entries;
+    }
+
+    _activateKeyboardSwitchableEntry(entry) {
+        if (!entry) return;
+        if (entry.kind === 'favorite') {
+            this.navigateFavorite(entry.favorite);
+        } else {
+            this.switchToTab(entry.tabId);
         }
     }
 
-    /** Cycle active tab by DOM order (sidebar / tab groups). */
+    switchToTabByIndex(index) {
+        const entries = this._getKeyboardSwitchableTabEntries();
+        if (entries.length === 0) return;
+        let targetIndex = index;
+        // ⌘9 / Ctrl+9 → last switchable target when there are more than nine (browser convention).
+        if (index === 8 && entries.length > 9) {
+            targetIndex = entries.length - 1;
+        }
+        if (targetIndex < 0 || targetIndex >= entries.length) return;
+        this._activateKeyboardSwitchableEntry(entries[targetIndex]);
+    }
+
+    /** Cycle active tab by sidebar visual order (favorites, then tab rows / groups). */
     switchToAdjacentTab(delta) {
-        const tabElements = Array.from(document.querySelectorAll('.tab:not(.tab-favorite-host)'));
-        if (tabElements.length === 0) return;
-        const ids = tabElements.map((el) => parseInt(el.dataset.tabId, 10));
-        let idx = ids.indexOf(this.currentTab);
+        const entries = this._getKeyboardSwitchableTabEntries();
+        if (entries.length === 0) return;
+        const cur = this._normalizeTabMapKey(this.currentTab);
+        let idx = entries.findIndex((entry) => {
+            if (entry.kind === 'favorite') {
+                const tid = this._resolveFavoriteRuntimeTabId(entry.favorite);
+                return tid != null && tid === cur;
+            }
+            return entry.tabId === cur;
+        });
         if (idx < 0) idx = 0;
-        const n = ids.length;
+        const n = entries.length;
         const nextIdx = (((idx + delta) % n) + n) % n;
-        this.switchToTab(ids[nextIdx]);
+        this._activateKeyboardSwitchableEntry(entries[nextIdx]);
     }
 
     /** Pinned empty slots are not a valid focus target; unpinned rows always are. */
@@ -7865,9 +12486,36 @@ class AxisBrowser {
         return !!t.webview;
     }
 
+    _recordTabActivation(rawTabId) {
+        const tabId = this._normalizeTabMapKey(rawTabId);
+        if (tabId == null || !this.tabs.has(tabId)) return;
+        this._recentTabStack = this._recentTabStack.filter((id) => id !== tabId);
+        this._recentTabStack.push(tabId);
+        if (this._recentTabStack.length > 64) {
+            this._recentTabStack = this._recentTabStack.slice(-64);
+        }
+    }
+
+    _removeTabFromRecentStack(rawTabId) {
+        const tabId = this._normalizeTabMapKey(rawTabId);
+        if (tabId == null) return;
+        this._recentTabStack = this._recentTabStack.filter((id) => id !== tabId);
+    }
+
+    /** Prefer the tab used immediately before `closedTabId`, skipping the closing tab itself. */
+    _findRecentTabToActivate(closedTabId) {
+        const closed = this._normalizeTabMapKey(closedTabId);
+        for (let i = this._recentTabStack.length - 1; i >= 0; i--) {
+            const id = this._recentTabStack[i];
+            if (id === closed) continue;
+            if (this._canFocusTabAsActive(id)) return id;
+        }
+        return null;
+    }
+
     /**
-     * Prefer the tab to the right of the closing tab, then to the left (Chrome-like),
-     * using flat DOM order for sidebar + tab groups.
+     * Spatial fallback when MRU has no candidate: tab to the right, then to the left.
+     * Uses flat DOM order for sidebar + tab groups.
      */
     _findNeighborTabToActivate(closedTabId) {
         const closed = this._normalizeTabMapKey(closedTabId);
@@ -7887,16 +12535,23 @@ class AxisBrowser {
     }
 
     /**
-     * After a tab is removed or demoted, pick the next active tab: neighbor, then last unpinned,
-     * then first remaining pinned with an open webview, else empty state.
+     * After a tab is removed or demoted, pick the next active tab: MRU, then neighbor,
+     * then last unpinned, then first remaining pinned with an open webview, else empty state.
      */
-    _applyFocusAfterTabClose(neighborPref) {
+    _applyFocusAfterTabClose(closedTabId, neighborPref) {
         const tryFocus = (raw) => {
             const id = this._normalizeTabMapKey(raw);
             if (id == null || !this.tabs.has(id) || !this._canFocusTabAsActive(id)) return false;
             this.switchToTab(id);
             return true;
         };
+
+        const closed = this._normalizeTabMapKey(closedTabId);
+        const recentPref = closed != null ? this._findRecentTabToActivate(closed) : null;
+        if (tryFocus(recentPref)) {
+            this._purgeStaleWebviewsInContainer();
+            return;
+        }
 
         if (tryFocus(neighborPref)) {
             this._purgeStaleWebviewsInContainer();
@@ -7967,6 +12622,91 @@ class AxisBrowser {
         return Number.isFinite(n) ? n : null;
     }
 
+    _getTabElement(tabId) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (id == null) return null;
+        const scoped = this._findTabElementInProfileScope(id);
+        if (scoped?.isConnected) {
+            this._tabElementById.set(id, scoped);
+            return scoped;
+        }
+        let el = this._tabElementById.get(id);
+        if (el?.isConnected) return el;
+        el = document.querySelector(`[data-tab-id="${id}"]`);
+        if (el) this._tabElementById.set(id, el);
+        else this._tabElementById.delete(id);
+        return el || null;
+    }
+
+    /** Visible loose tab row in `#tabs-container` (not group child, not favorite host). */
+    _resolveLooseSidebarTabElement(tabId, hint = null) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (id == null) return null;
+        const container = this.elements?.tabsContainer;
+        const isLooseRow = (el) =>
+            el &&
+            el.classList?.contains('tab') &&
+            !el.classList.contains('tab-favorite-host') &&
+            !el.closest('.tab-group') &&
+            el.parentElement === container &&
+            this._sidebarNodeOwnedByActiveProfile(el);
+
+        if (isLooseRow(hint) && this._normalizeTabMapKey(hint.dataset.tabId) === id) {
+            this._tabElementById.set(id, hint);
+            return hint;
+        }
+
+        const scoped = this._findTabElementInProfileScope(id);
+        if (isLooseRow(scoped)) {
+            this._tabElementById.set(id, scoped);
+            return scoped;
+        }
+
+        if (container) {
+            for (const child of container.children) {
+                if (!isLooseRow(child)) continue;
+                if (this._normalizeTabMapKey(child.dataset.tabId) === id) {
+                    this._tabElementById.set(id, child);
+                    return child;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    _forgetTabElement(tabId) {
+        this._tabElementById.delete(this._normalizeTabMapKey(tabId));
+    }
+
+    _maybeRenderFavoritesForActiveTab() {
+        const tid = this._normalizeTabMapKey(this.currentTab);
+        if (tid === this._lastFavoritesRenderTabId) return;
+        this._lastFavoritesRenderTabId = tid;
+        const grid = this.elements?.favoritesGrid;
+        if (grid?.querySelector('.favorite-item')) {
+            this._syncFavoriteActiveHighlight();
+            return;
+        }
+        this.renderFavorites();
+    }
+
+    /** Toggle `.active` on favorite chips without rebuilding the row (preserves accent colors). */
+    _syncFavoriteActiveHighlight() {
+        const activeTabId = this._normalizeTabMapKey(this.currentTab);
+        const grid = this.elements?.favoritesGrid;
+        if (!grid) return;
+        grid.querySelectorAll('.favorite-item').forEach((item) => {
+            const favId = item.dataset.favoriteId;
+            const fav = this.favorites.find((f) => f.id === favId);
+            const isActive =
+                activeTabId != null &&
+                fav &&
+                this._normalizeTabMapKey(fav.runtimeTabId) === activeTabId;
+            item.classList.toggle('active', !!isActive);
+        });
+    }
+
     /** Create a unique numeric tab id (optionally honoring a preferred id). */
     _createUniqueTabId(preferredId = null) {
         let id = this._normalizeTabMapKey(preferredId);
@@ -7992,6 +12732,11 @@ class AxisBrowser {
         const chatPanel = document.getElementById('ai-chat-panel');
         const contentArea = document.getElementById('content-area');
         if (!chatPanel) return;
+        if (!this.isAiFeaturesEnabled()) {
+            chatPanel.classList.add('hidden');
+            contentArea?.classList.remove('chat-open');
+            return;
+        }
         const tid = this._normalizeTabIdForChatState(this.currentTab);
         const wantOpen = tid != null && this.aiChatPanelOpenByTabId.get(tid) === true;
         if (wantOpen) {
@@ -8026,6 +12771,7 @@ class AxisBrowser {
         const tabElement = document.querySelector(`[data-tab-id="${tid}"]`);
         const tab = this.tabs.get(tid);
         const cur = this._normalizeTabMapKey(this.currentTab);
+        this._removeTabFromRecentStack(tid);
         
         // Check if this is a pinned tab
         const isPinned = tab && tab.pinned;
@@ -8042,12 +12788,13 @@ class AxisBrowser {
                 // Remove from tab groups first (sync may move the tab element)
                 this._removeTabIdFromAllTabGroups(tid, true);
                 // Re-query in case sync moved the element
-                const elToRemove = document.querySelector(`[data-tab-id="${tid}"]`);
+                const elToRemove = this._getTabElement(tid);
                 if (elToRemove) elToRemove.remove();
+                this._forgetTabElement(tid);
                 this.tabs.delete(tid);
                 
                 if (closingCurrent) {
-                    this._applyFocusAfterTabClose(neighborPref);
+                    this._applyFocusAfterTabClose(tid, neighborPref);
                 }
                 
                 // Save pinned tabs after removal and update separator immediately
@@ -8085,7 +12832,7 @@ class AxisBrowser {
             this.updatePinnedTabClosedState(tid);
             
             if (closingPinnedActive) {
-                this._applyFocusAfterTabClose(neighborPinnedPref);
+                this._applyFocusAfterTabClose(tid, neighborPinnedPref);
             }
             this.savePinnedTabs();
             this.updatePinnedSeparatorVisibility();
@@ -8112,21 +12859,26 @@ class AxisBrowser {
                 timestamp: Date.now()
             });
             // Push to undo stack so Cmd+Z can revert close
-            this.tabUndoStack.push({
-                type: 'close_tab',
-                data: {
+            const undoSnapshot =
+                typeof this._snapshotTabForUndo === 'function'
+                    ? this._snapshotTabForUndo(tid)
+                    : {
                     url: tab.url,
                     title: tab.title || 'Untitled',
                     customTitle: tab.customTitle,
-                    tabGroupId: tabGroupIdForUndo,
-                    newTabPageState
-                }
-            });
-            if (this.tabUndoStack.length > 15) this.tabUndoStack = this.tabUndoStack.slice(-15);
+                          tabGroupId: tabGroupIdForUndo,
+                          newTabPageState
+                      };
+            if (undoSnapshot) {
+                this._pushUndo({ type: 'close_tab', data: undoSnapshot });
+            }
             // Keep only the last 8 closed tabs (less RAM, recovery still works)
             if (this.closedTabs.length > 8) {
                 this.closedTabs = this.closedTabs.slice(0, 8);
             }
+            this._refreshNtpWidgetsByType('reopen');
+            this._refreshNtpWidgetsByType('stats');
+            this._refreshNtpWidgetsByType('pinned');
         }
         
         if (tab && tab.webview) {
@@ -8154,7 +12906,7 @@ class AxisBrowser {
         this.tabs.delete(tid);
         
         if (closingUnpinnedCurrent) {
-            this._applyFocusAfterTabClose(neighborUnpinnedPref);
+            this._applyFocusAfterTabClose(tid, neighborUnpinnedPref);
         } else if (cur != null && this.tabs.has(cur)) {
             this._prepareWebviewsForTabSwitch(cur);
         }
@@ -8162,81 +12914,349 @@ class AxisBrowser {
         this.applyAmbientFromSettings();
     }
 
-    clearUnpinnedTabs() {
+    _shouldRecoverUnpinnedTabsAfterCrash() {
+        return !this.isIncognitoWindow && this._lastSessionExitClean === false;
+    }
+
+    _setupUnpinnedTabsRecoveryPersistence() {
+        if (this.isIncognitoWindow) return;
+        if (this._unpinnedRecoveryInterval) clearInterval(this._unpinnedRecoveryInterval);
+        this._unpinnedRecoveryInterval = setInterval(() => {
+            void this._saveUnpinnedTabsRecovery();
+        }, 30000);
+        this._scheduleUnpinnedTabsRecoverySave();
+    }
+
+    _scheduleUnpinnedTabsRecoverySave() {
+        if (this.isIncognitoWindow) return;
+        if (this._unpinnedRecoverySaveTimer) clearTimeout(this._unpinnedRecoverySaveTimer);
+        this._unpinnedRecoverySaveTimer = setTimeout(() => {
+            this._unpinnedRecoverySaveTimer = null;
+            void this._saveUnpinnedTabsRecovery();
+        }, 1200);
+    }
+
+    async _saveUnpinnedTabsRecovery() {
+        if (this.isIncognitoWindow) return;
+        const payload = this._collectUnpinnedTabsPayload({ forRecovery: true });
+        this.settings.unpinnedTabsRecovery = payload;
+        await this.saveSetting('unpinnedTabsRecovery', payload);
+    }
+
+    /** Settings key: when unpinned tabs/groups are auto-cleared (`app-close` default). */
+    getUnpinnedClearMode() {
+        const mode = this.settings?.unpinnedClearMode;
+        if (mode === 'never' || mode === 'profile-switch' || mode === 'custom') return mode;
+        if (mode === '30m' || mode === '1h' || mode === '6h' || mode === '12h' || mode === '24h' || mode === '7d') return mode;
+        return 'app-close';
+    }
+
+    _unpinnedClearIntervalMs() {
+        const mode = this.getUnpinnedClearMode();
+        if (mode === 'custom') {
+            const mins = Math.min(10080, Math.max(1, Number(this.settings?.unpinnedClearCustomMinutes) || 60));
+            return mins * 60 * 1000;
+        }
+        const presetMinutes = {
+            '30m': 30,
+            '1h': 60,
+            '6h': 360,
+            '12h': 720,
+            '24h': 1440,
+            '7d': 10080
+        };
+        return presetMinutes[mode] ? presetMinutes[mode] * 60 * 1000 : null;
+    }
+
+    /**
+     * Whether unpinned tabs/groups should be written or restored for a persistence context.
+     * - `app-quit` / `startup`: honor “clear when the app closes” and timed/never policies
+     * - `profile-switch` / `session`: keep unpinned while Axis is open (default), unless the
+     *   user chose “when switching profiles”
+     */
+    _shouldPersistUnpinnedItems(context = 'app-quit') {
+        const mode = this.getUnpinnedClearMode();
+        if (mode === 'never' || mode === 'custom' || !!this._unpinnedClearIntervalMs()) return true;
+        if (mode === 'profile-switch') return false;
+        if (mode === 'app-close') {
+            return context === 'profile-switch' || context === 'session';
+        }
+        return false;
+    }
+
+    /** Strip unpinned groups when saving session state (app quit / profile switch). */
+    filterTabGroupsForUnpinnedPolicy(tabGroupsArray, context = 'app-quit') {
+        if (!Array.isArray(tabGroupsArray)) return [];
+        if (this._shouldPersistUnpinnedItems(context)) return tabGroupsArray;
+        const mode = this.getUnpinnedClearMode();
+        if (context === 'app-quit' && mode === 'app-close') {
+            return tabGroupsArray.filter((g) => g.pinned !== false);
+        }
+        if (context === 'profile-switch' && mode === 'profile-switch') {
+            return tabGroupsArray.filter((g) => g.pinned !== false);
+        }
+        return tabGroupsArray;
+    }
+
+    _setupUnpinnedClearTimer() {
+        if (this._unpinnedClearTimer) {
+            clearInterval(this._unpinnedClearTimer);
+            this._unpinnedClearTimer = null;
+        }
+        if (this._unpinnedClearListenersAttached) {
+            document.removeEventListener('visibilitychange', this._onUnpinnedClearVisibility);
+            window.removeEventListener('focus', this._onUnpinnedClearFocus);
+            this._unpinnedClearListenersAttached = false;
+        }
+        if (this.isIncognitoWindow || !this._unpinnedClearIntervalMs()) return;
+        this._unpinnedClearTimer = setInterval(() => this._maybeClearUnpinnedByInterval(), 60 * 1000);
+        document.addEventListener('visibilitychange', this._onUnpinnedClearVisibility);
+        window.addEventListener('focus', this._onUnpinnedClearFocus);
+        this._unpinnedClearListenersAttached = true;
+        this._maybeClearUnpinnedByInterval();
+    }
+
+    _onUnpinnedClearVisibility = () => {
+        if (document.visibilityState === 'visible') this._maybeClearUnpinnedByInterval();
+    };
+
+    _onUnpinnedClearFocus = () => {
+        this._maybeClearUnpinnedByInterval();
+    };
+
+    _maybeClearUnpinnedByInterval() {
+        if (this.isIncognitoWindow) return;
+        const intervalMs = this._unpinnedClearIntervalMs();
+        if (!intervalMs) return;
+        let lastAt = Number(this.settings?.unpinnedClearLastAt) || 0;
+        if (!lastAt) {
+            this._markUnpinnedClearTimestamp();
+            return;
+        }
+        if (Date.now() - lastAt < intervalMs) return;
+        this.clearAllUnpinnedItems({ reason: 'interval' });
+    }
+
+    _applyUnpinnedClearOnStartup() {
+        if (this.isIncognitoWindow) return;
+        if (this._shouldRecoverUnpinnedTabsAfterCrash()) return;
+        const mode = this.getUnpinnedClearMode();
+        if (mode === 'app-close') {
+            this.clearAllUnpinnedItems({ skipTimestamp: true });
+            return;
+        }
+        if (mode === 'never' || mode === 'profile-switch') return;
+        this._maybeClearUnpinnedByInterval();
+    }
+
+    _markUnpinnedClearTimestamp() {
+        const ts = Date.now();
+        this.settings.unpinnedClearLastAt = ts;
+        void this.saveSetting('unpinnedClearLastAt', ts);
+    }
+
+    /** Fully remove a tab without pinned-slot behavior, undo, or closed-tab recovery. */
+    _destroyTabSilently(rawTabId, { force = false } = {}) {
+        const tid = this._normalizeTabMapKey(rawTabId);
+        if (tid == null || !this.tabs.has(tid)) return;
+
+        const tab = this.tabs.get(tid);
+        if (!tab || tab.isFavoriteTab) return;
+        if (tab.pinned && !force) return;
+
+        const tidChat = this._normalizeTabIdForChatState(tid);
+        if (tidChat != null) this.aiChatPanelOpenByTabId.delete(tidChat);
+
+        if (this._sidebarMediaDock && this._normalizeTabMapKey(this._sidebarMediaDock.tabId) === tid) {
+            this.hideSidebarMediaDock();
+        }
+
+        this._removeTabIdFromAllTabGroups(tid, true, true);
+
+        if (tab.webview) {
+            try {
+                tab.isPlayingAudio = false;
+                this.cleanupWebviewListeners(tab.webview);
+                try { tab.webview.src = 'about:blank'; } catch (_) {}
+                if (tab.webview.parentNode) tab.webview.parentNode.removeChild(tab.webview);
+            } catch (e) {
+                console.error('Error removing webview:', e);
+            }
+        }
+
+        if (tab.isFavoriteTab) {
+            this._removeFavoriteTabHostElement(tid);
+        }
+
+        const tabElement = this._findTabElementInProfileScope(tid);
+        if (tabElement?.parentNode) tabElement.parentNode.removeChild(tabElement);
+
+        this.tabs.delete(tid);
+        this._removeTabFromRecentStack(tid);
+    }
+
+    /** Tab ids that count as unpinned for auto/manual clear (state + sidebar position). */
+    _collectUnpinnedTabIdsForClear() {
+        const ids = new Set();
+
+        for (const [tabId, tab] of this.tabs) {
+            if (!tab || tab.isFavoriteTab) continue;
+            if (!tab.pinned) {
+                ids.add(tabId);
+                continue;
+            }
+            if (tab.tabGroupId != null) {
+                const gKey = this.findTabGroupKey(tab.tabGroupId);
+                const g = gKey != null ? this.tabGroups.get(gKey) : null;
+                if (g && g.pinned === false) ids.add(tabId);
+            }
+        }
+
         const tabsContainer = this.elements.tabsContainer;
         const separator = this.elements.tabsSeparator;
-        if (!tabsContainer || !separator) return;
-        
-        // Get all unpinned tabs (tabs that appear after the separator)
+        if (tabsContainer && separator) {
         const allElements = Array.from(tabsContainer.children);
         const separatorIndex = allElements.indexOf(separator);
-        
-        // Collect unpinned tab IDs (never favorite runtime tabs — they are not "disposable" unpinned)
-        const unpinnedTabIds = [];
-        const collectTabId = (el) => {
-            const tabId = this._normalizeTabMapKey(el?.dataset?.tabId);
-            if (tabId == null) return;
-            const tab = this.tabs.get(tabId);
-            if (!tab || tab.pinned || tab.isFavoriteTab) return;
-            if (!unpinnedTabIds.includes(tabId)) unpinnedTabIds.push(tabId);
-        };
-
+            const collectFromEl = (el) => {
+                const tabId = this._normalizeTabMapKey(el?.dataset?.tabId);
+                if (tabId == null) return;
+                const tab = this.tabs.get(tabId);
+                if (!tab || tab.isFavoriteTab) return;
+                ids.add(tabId);
+            };
         for (let i = separatorIndex + 1; i < allElements.length; i++) {
             const el = allElements[i];
             if (el.classList.contains('tab')) {
-                collectTabId(el);
+                    collectFromEl(el);
             } else if (el.classList.contains('tab-group')) {
-                el.querySelectorAll('.tab').forEach((t) => collectTabId(t));
+                    const gid = el.dataset.tabGroupId;
+                    const gKey = gid != null ? this.findTabGroupKey(gid) : null;
+                    const g = gKey != null ? this.tabGroups.get(gKey) : null;
+                    if (g && g.pinned !== false) continue;
+                    el.querySelectorAll('.tab').forEach(collectFromEl);
+                }
             }
         }
-        
-        if (unpinnedTabIds.length === 0) {
-            return;
-        }
-        
-        // Close all unpinned tabs
-        unpinnedTabIds.forEach(tabId => {
-            this.closeTab(tabId);
-        });
-        
-        // Save state
-        this.savePinnedTabs();
-        this.saveTabGroups();
-        this._forceGuestLayoutSync();
+
+        return Array.from(ids);
     }
 
-    performTabUndo() {
-        // Don't steal Cmd+Z when user is typing in an input
-        const active = document.activeElement;
-        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+    clearAllUnpinnedItems(opts = {}) {
+        if (this.isIncognitoWindow) return;
+
+        const tabIdsToDestroy = this._collectUnpinnedTabIdsForClear();
+
+        const unpinnedGroupIds = Array.from(this.tabGroups.values())
+            .filter((g) => g.pinned === false)
+            .map((g) => g.id);
+
+        if (tabIdsToDestroy.length === 0 && unpinnedGroupIds.length === 0) {
+            if (opts.reason === 'interval') this._markUnpinnedClearTimestamp();
             return;
         }
-        if (this.tabUndoStack.length === 0) {
-            this.recoverClosedTab();
-            return;
-        }
-        const action = this.tabUndoStack.pop();
-        if (action.type === 'close_tab') {
-            const data = action.data;
-            const urlToLoad = this.sanitizeUrl(data.url) || data.url || 'https://www.google.com';
-            const newTabId = this.createNewTab(urlToLoad);
-            const tab = this.tabs.get(newTabId);
-            if (tab) {
-                this._applyRecoveredTabState(newTabId, data);
-                if (data.tabGroupId && this.tabGroups.has(data.tabGroupId)) {
-                    this.addTabToTabGroup(newTabId, data.tabGroupId, true);
-                }
-                const idx = this.closedTabs.findIndex(t => t.url === data.url && t.title === data.title);
-                if (idx >= 0) this.closedTabs.splice(idx, 1);
-                this.showNotification(`Undo: Recovered ${data.title}`, 'success');
+        
+        if (opts.manual && !opts.skipUndo && typeof this._snapshotClearUnpinnedBatch === 'function') {
+            const batch = this._snapshotClearUnpinnedBatch();
+            if (batch.tabs.length > 0 || batch.groups.length > 0) {
+                this._pushUndo({ type: 'clear_unpinned_batch', data: batch });
             }
-        } else if (action.type === 'add_to_group') {
-            this.removeTabFromTabGroup(action.tabId, action.tabGroupId, true);
-            this.showNotification('Undo: Tab removed from group', 'success');
-        } else if (action.type === 'remove_from_group') {
-            this.addTabToTabGroup(action.tabId, action.tabGroupId, true, action.indexInGroup);
-            this.showNotification('Undo: Tab put back in group', 'success');
         }
+
+        const cur = this._normalizeTabMapKey(this.currentTab);
+        const closingCurrent = cur != null && tabIdsToDestroy.some(
+            (id) => this._normalizeTabMapKey(id) === cur
+        );
+        const neighborPref = closingCurrent ? this._findNeighborTabToActivate(cur) : null;
+
+        this._suppressTabGroupsAutosave = true;
+        try {
+            tabIdsToDestroy.forEach((tabId) => this._destroyTabSilently(tabId, { force: true }));
+
+            unpinnedGroupIds.forEach((groupId) => {
+                this.tabGroups.delete(groupId);
+                const groupEl = document.querySelector(`[data-tab-group-id="${groupId}"]`);
+                if (groupEl?.parentNode) groupEl.remove();
+            });
+
+            this.syncSidebarFromTabGroups();
+        } finally {
+            this._suppressTabGroupsAutosave = false;
+        }
+
+        if (closingCurrent) {
+            this._applyFocusAfterTabClose(cur, neighborPref);
+        } else if (cur != null && this.tabs.has(cur)) {
+            this._prepareWebviewsForTabSwitch(cur);
+        }
+
+        this.updatePinnedSeparatorVisibility?.();
+        this.updateEmptyState?.();
+        this._syncAfterTabClose?.();
+        this._forceGuestLayoutSync?.();
+
+        if (opts.reason === 'interval') {
+            this._markUnpinnedClearTimestamp();
+        } else if (!opts.skipTimestamp) {
+            this._markUnpinnedClearTimestamp();
+        }
+        if (opts.skipPersist !== true) {
+            void this.savePinnedTabs();
+            void this.saveTabGroups();
+            void this.saveUnpinnedTabs();
+            void this.saveSetting('unpinnedTabsRecovery', []);
+            this.settings.unpinnedTabsRecovery = [];
+        }
+    }
+
+    clearUnpinnedTabs() {
+        this.clearAllUnpinnedItems({ manual: true });
+    }
+
+    /** Remove unpinned tabs/groups from a cached profile runtime snapshot. */
+    stripUnpinnedFromProfileRuntimeState(state) {
+        if (!state?.tabs || !state?.tabGroups) return state;
+        const tabs = new Map(state.tabs);
+        const tabGroups = new Map(state.tabGroups);
+
+        for (const [groupId, group] of [...tabGroups]) {
+            if (group?.pinned === false) tabGroups.delete(groupId);
+        }
+        for (const [tabId, tab] of [...tabs]) {
+            if (!tab || tab.pinned || tab.isFavoriteTab) continue;
+            tabs.delete(tabId);
+        }
+        for (const group of tabGroups.values()) {
+            if (!group?.tabIds) continue;
+            group.tabIds = group.tabIds.filter((id) => {
+                const key = this._normalizeTabMapKey(id);
+                return key != null && tabs.has(key);
+            });
+        }
+
+        let currentTab = state.currentTab;
+        const curKey = this._normalizeTabMapKey(currentTab);
+        if (curKey != null && !tabs.has(curKey)) {
+            currentTab = Array.from(tabs.keys()).find((id) => this._canFocusTabAsActive?.(id)) ?? null;
+        }
+
+        return { ...state, tabs, tabGroups, currentTab };
+    }
+
+    stripUnpinnedFromProfileRuntimeCache(profileId) {
+        if (!this._profileRuntime) return;
+        const id = String(profileId || this.profileId || 'personal');
+        let key = id;
+        if (!this._profileRuntime.has(key)) {
+            for (const k of this._profileRuntime.keys()) {
+                if (String(k) === id || String(k).toLowerCase() === id.toLowerCase()) {
+                    key = k;
+                    break;
+                }
+            }
+        }
+        const state = this._profileRuntime.get(key);
+        if (!state) return;
+        this._profileRuntime.set(key, this.stripUnpinnedFromProfileRuntimeState(state));
     }
 
     recoverClosedTab() {
@@ -8248,15 +13268,20 @@ class AxisBrowser {
         // Get the most recently closed tab
         const closedTab = this.closedTabs.shift();
         const urlToLoad = this.sanitizeUrl(closedTab.url) || closedTab.url || 'https://www.google.com';
+        const preserveNewTabState = !!closedTab.newTabPageState;
         
         // Create new tab and navigate directly to the closed tab's URL
-        const newTabId = this.createNewTab(urlToLoad);
+        const newTabId = this.createNewTab(urlToLoad, { preserveNewTabState });
         const tab = this.tabs.get(newTabId);
         
         if (tab) {
             this._applyRecoveredTabState(newTabId, closedTab);
             this.showNotification(`Recovered: ${closedTab.title}`, 'success');
         }
+        this._syncUndoShortcutState?.();
+        this._refreshNtpWidgetsByType('reopen');
+        this._refreshNtpWidgetsByType('stats');
+        this._refreshNtpWidgetsByType('pinned');
     }
 
     navigate(url, options = {}) {
@@ -8296,8 +13321,19 @@ class AxisBrowser {
 
         const isNewTabUrl = sanitizedUrl === this.NEWTAB_URL;
 
+        let webview = this.getActiveWebview();
+        if (!webview && tab && !isNewTabUrl) {
+            webview = this.createTabWebview(this.currentTab, this._settingsWebviewOptionsForTab(tab));
+            if (webview) {
+                tab.webview = webview;
+                this.tabs.set(this.currentTab, tab);
+            }
+        }
+        if (!isNewTabUrl && webview) {
+            this._prepareUrlBarThemeForNav(sanitizedUrl, webview);
+        }
+
         // Load URL in active webview
-        const webview = this.getActiveWebview();
         if (webview) {
             webview.src = sanitizedUrl;
 
@@ -8345,7 +13381,9 @@ class AxisBrowser {
             tab.url = sanitizedUrl;
             this.tabs.set(this.currentTab, tab);
         }
-        if (sanitizedUrl !== this.NEWTAB_URL) {
+        if (sanitizedUrl === this.NEWTAB_URL) {
+            this.updateNewTabPageVisibility(true);
+        } else {
             this.updateNewTabPageVisibility(false);
         }
         this.updateNavigationButtons();
@@ -8438,7 +13476,10 @@ class AxisBrowser {
         const stack = document.getElementById('webviews-container');
         const wrap = stack?.closest?.('.webview-container');
         const phaseRoot = wrap || stack;
+        let finished = false;
         const finishGesture = () => {
+            if (finished) return;
+            finished = true;
             phaseRoot.classList.remove(
                 'axis-nav--back-out',
                 'axis-nav--forward-out',
@@ -8481,8 +13522,9 @@ class AxisBrowser {
 
         phaseRoot.classList.add(outCls);
 
-        const outMs = 240;
-        const inMs = 300;
+        /** Navigate soon after the swipe; keep the edge pill up longer for feedback. */
+        const navigateMs = 40;
+        const indicatorMs = 440;
 
         window.setTimeout(() => {
             try {
@@ -8493,14 +13535,15 @@ class AxisBrowser {
             phaseRoot.classList.remove(outCls);
             window.requestAnimationFrame(() => {
                 phaseRoot.classList.add(inCls);
-                window.setTimeout(() => finishGesture(), inMs + 36);
             });
-        }, outMs);
+        }, navigateMs);
+
+        window.setTimeout(finishGesture, indicatorMs);
 
         window.setTimeout(() => {
             if (!this._axisNavGestureBusy) return;
             finishGesture();
-        }, 880);
+        }, indicatorMs + 160);
     }
 
     goBack() {
@@ -8569,6 +13612,9 @@ class AxisBrowser {
         }
 
         const webview = this.getActiveWebview();
+        if (sanitizedUrl !== this.NEWTAB_URL && webview) {
+            this._prepareUrlBarThemeForNav(sanitizedUrl, webview);
+        }
         
         if (webview) {
             webview.src = sanitizedUrl;
@@ -8583,8 +13629,31 @@ class AxisBrowser {
     }
 
     refresh() {
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+
+        if (tab?.url === this.NEWTAB_URL) {
+            if (this.isWebviewLoading) {
+                this.isWebviewLoading = false;
+                this.updateRefreshButton(false);
+                if (this.loadingBarTabId != null) {
+                    this.hideLoadingIndicator();
+                    this.loadingBarTabId = null;
+                }
+            }
+            // Shell UI only — keep search, suggestions, and AI chat; nothing to reload.
+            if (this.currentTab != null) {
+                this.saveNewTabPageStateToTab(this.currentTab);
+            }
+            return;
+        }
+
         const webview = this.getActiveWebview();
-        if (!webview) return;
+        if (!webview) {
+            if (tab && this._isSettingsTab(tab)) {
+                void this.loadSettingsInWebview(tab.settingsSection || null, this.currentTab);
+            }
+            return;
+        }
         
         if (this.isWebviewLoading) {
             try {
@@ -8596,7 +13665,6 @@ class AxisBrowser {
         }
         
         // Ensure current tab's webview is visible (fixes stuck grey when URL is correct but not painting)
-        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
         const tabHasRealUrl = tab && tab.url && tab.url !== 'about:blank' && tab.url !== this.NEWTAB_URL && tab.url !== 'axis://settings' && !tab.url.startsWith('axis:note://');
         if (tabHasRealUrl) {
             webview.style.opacity = '1';
@@ -9302,9 +14370,21 @@ class AxisBrowser {
                 // Apply setting changes immediately
                 if (key === 'sidebarPosition') {
                     this.applySidebarPosition();
-                } else if (key === 'themeColor' || key === 'gradientColor' || key === 'gradientEnabled' || key === 'gradientDirection' || key === 'uiTheme') {
+                } else if (
+                    key === 'themeColor' ||
+                    key === 'gradientColor' ||
+                    key === 'gradientEnabled' ||
+                    key === 'gradientDirection' ||
+                    key === 'uiTheme' ||
+                    key === 'siteThemeColor'
+                ) {
                     // Apply theme / light-dark shell immediately
+                    if (key === 'siteThemeColor' && value) {
+                        this._applyCurrentSiteThemeColor();
+                    } else {
                     this.applyCustomThemeFromSettings();
+                        if (key !== 'siteThemeColor') this._applyCurrentSiteThemeColor();
+                    }
                     const activeTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
                     if (activeTab && (activeTab.url === 'axis://settings' || activeTab.isSettings)) {
                         this.applyInternalShellUrlBarStyle();
@@ -9312,6 +14392,8 @@ class AxisBrowser {
                         this.applyInternalShellUrlBarStyle();
                     }
                     this.applyNewTabCustomization();
+                } else if (key === 'linkPreview') {
+                    this._applyLinkPreviewSetting();
                 }
                 // Theme mode and autoTheme changes will take effect on next page load
                 
@@ -9862,7 +14944,7 @@ class AxisBrowser {
             this.closePanelWithAnimation(downloadsPanel);
         }
         if (!securityPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(securityPanel);
+            this.closeSecurityPanel();
         }
         
         if (notesPanel.classList.contains('hidden')) {
@@ -10234,62 +15316,38 @@ class AxisBrowser {
         webview.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(errorHtml);
     }
 
-    renameTab(tabId, titleElement) {
+    renameTab(tabId, titleElement, options = {}) {
         const currentTitle = titleElement.textContent;
-        
-        // Get computed styles to match exactly
-        const computedStyle = window.getComputedStyle(titleElement);
-        
-        // Create input element with EXACT same flex properties as original
+        const tabElement = titleElement.closest('.tab');
+        const deferBlurMs = Math.max(0, Number(options.deferBlurMs) || 0);
+
         const input = document.createElement('input');
         input.type = 'text';
         input.value = currentTitle;
-        input.className = titleElement.className; // Copy all classes
-        input.style.cssText = `
-            flex: 1;
-            min-width: 0;
-            font-size: ${computedStyle.fontSize};
-            font-family: ${computedStyle.fontFamily};
-            font-weight: ${computedStyle.fontWeight};
-            line-height: ${computedStyle.lineHeight};
-            color: #fff;
-            background: transparent;
-            border: 1px solid #555;
-            border-radius: 8px;
-            padding: 0;
-            margin: 0;
-            outline: none;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            box-sizing: border-box;
-        `;
-        
-        // Replace title with input inline - this preserves flex layout
+        input.className = 'tab-title';
+        input.setAttribute('aria-label', 'Rename tab');
+
         if (titleElement && titleElement.parentNode) {
             titleElement.parentNode.replaceChild(input, titleElement);
         }
-        if (input) {
-            if (typeof input.focus === 'function') {
-                try {
-                    input.focus();
-                } catch (e) {
-                    // Ignore focus errors
-                }
-            }
-            if (typeof input.select === 'function') {
-                try {
-                    input.select();
-                } catch (e) {
-                    // Ignore select errors
-                }
-            }
-        }
+        tabElement?.classList.add('tab-renaming');
 
         let finished = false;
+        const focusRenameInput = () => {
+            if (finished) return;
+            try {
+                input.focus();
+                input.select();
+            } catch (e) {
+                // Ignore focus errors
+            }
+        };
+        requestAnimationFrame(focusRenameInput);
+
         const detach = () => {
             input.removeEventListener('blur', onBlur);
             input.removeEventListener('keydown', onKeydown);
+            tabElement?.classList.remove('tab-renaming');
         };
 
         const commitRename = () => {
@@ -10303,6 +15361,16 @@ class AxisBrowser {
             if (input.parentNode) input.parentNode.replaceChild(newTitleElement, input);
             const tab = this.tabs.get(tabId);
             if (tab) {
+                const previousTitle = tab.title || currentTitle;
+                const previousCustomTitle = tab.customTitle ?? null;
+                if (newTitle !== currentTitle && !this._suppressUndo) {
+                    this._pushUndo({
+                        type: 'rename_tab',
+                        tabId,
+                        previousTitle,
+                        previousCustomTitle
+                    });
+                }
                 tab.title = newTitle;
                 tab.customTitle = newTitle;
             }
@@ -10318,7 +15386,18 @@ class AxisBrowser {
             if (input.parentNode) input.parentNode.replaceChild(restored, input);
         };
 
-        const onBlur = () => commitRename();
+        let blurArmed = deferBlurMs === 0;
+        const armBlur = () => {
+            if (deferBlurMs > 0) {
+                setTimeout(() => {
+                    blurArmed = true;
+                }, deferBlurMs);
+            }
+        };
+        const onBlur = () => {
+            if (!blurArmed) return;
+            commitRename();
+        };
         const onKeydown = (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -10330,21 +15409,119 @@ class AxisBrowser {
         };
         input.addEventListener('blur', onBlur);
         input.addEventListener('keydown', onKeydown);
+        armBlur();
+    }
+
+    renameTabGroup(tabGroupId, titleElement, options = {}) {
+        if (!titleElement || titleElement.tagName === 'INPUT') return;
+        const currentTitle = titleElement.textContent;
+        const tabGroupElement = titleElement.closest('.tab-group');
+        const deferBlurMs = Math.max(0, Number(options.deferBlurMs) || 0);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentTitle;
+        input.className = 'tab-title';
+        input.setAttribute('aria-label', 'Rename tab group');
+
+        if (titleElement.parentNode) {
+            titleElement.parentNode.replaceChild(input, titleElement);
+        }
+        tabGroupElement?.classList.add('tab-renaming');
+
+        let finished = false;
+        const focusRenameInput = () => {
+            if (finished) return;
+            try {
+                input.focus();
+                input.select();
+            } catch (e) {
+                // Ignore focus errors
+            }
+        };
+        requestAnimationFrame(focusRenameInput);
+
+        const detach = () => {
+            input.removeEventListener('blur', onBlur);
+            input.removeEventListener('keydown', onKeydown);
+            tabGroupElement?.classList.remove('tab-renaming');
+        };
+
+        const commitRename = () => {
+            if (finished) return;
+            finished = true;
+            detach();
+            const newTitle = input.value.trim() || currentTitle;
+            const newTitleElement = document.createElement('span');
+            newTitleElement.className = 'tab-title';
+            newTitleElement.textContent = newTitle;
+            if (input.parentNode) input.parentNode.replaceChild(newTitleElement, input);
+            const gKey = this.findTabGroupKey(tabGroupId);
+            const tabGroup = gKey != null ? this.tabGroups.get(gKey) : null;
+            if (tabGroup) {
+                const previousName = tabGroup.name || currentTitle;
+                if (newTitle !== currentTitle && !this._suppressUndo) {
+                    this._pushUndo({
+                        type: 'rename_tab_group',
+                        groupId: gKey,
+                        previousName
+                    });
+                }
+                tabGroup.name = newTitle;
+                this.tabGroups.set(gKey, tabGroup);
+                void this.saveTabGroups();
+            }
+        };
+
+        const cancelRename = () => {
+            if (finished) return;
+            finished = true;
+            detach();
+            const restored = document.createElement('span');
+            restored.className = 'tab-title';
+            restored.textContent = currentTitle;
+            if (input.parentNode) input.parentNode.replaceChild(restored, input);
+        };
+
+        const onBlur = () => {
+            if (!blurArmed) return;
+            commitRename();
+        };
+        const onKeydown = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                commitRename();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelRename();
+            }
+        };
+        let blurArmed = deferBlurMs === 0;
+        const armBlur = () => {
+            if (deferBlurMs > 0) {
+                setTimeout(() => {
+                    blurArmed = true;
+                }, deferBlurMs);
+            }
+        };
+        input.addEventListener('blur', onBlur);
+        input.addEventListener('keydown', onKeydown);
+        armBlur();
     }
 
 
     updateSecurityIndicator() {
-        // Old security button removed - security icon is now in the new URL bar
-        // The new URL bar's updateUrlBar() function handles security icon updates
+        void this.refreshUrlBarSecurityState();
     }
 
     showNotification(message, type = 'info') {
-        // Notifications disabled - do nothing
+        // Notifications disabled — no on-screen toasts
         return;
     }
 
-    showToast(message) {
-        // Notifications disabled - do nothing
+    showToast(message, type = 'info') {
+        const toast = document.getElementById('axis-toast');
+        if (toast) toast.remove();
         return;
     }
 
@@ -10723,6 +15900,15 @@ class AxisBrowser {
             img.setAttribute('onerror', "this.style.visibility='hidden'");
             faviconEl.parentNode.replaceChild(img, faviconEl);
         }
+
+        if (tab.url === this.NEWTAB_URL) {
+            if (this._applyBuiltInTabFaviconElement(tabElement, tab, tabId)) return;
+            const favicon = this.resolveTabFaviconForData(tab, tabId) || this.NTP_DEFAULT_FAVICON;
+            tab.favicon = favicon;
+            img.style.visibility = 'visible';
+            img.src = favicon;
+            return;
+        }
         
         // Use cached favicon if available
         if (tab.favicon) {
@@ -10785,95 +15971,110 @@ class AxisBrowser {
         }
     }
     
-    // Start audio detection polling for a webview
-    startAudioDetection(tabId, webview) {
-        if (!webview) return;
-        
-        // Store interval reference on the webview for cleanup
-        if (webview.__audioCheckInterval) {
-            clearInterval(webview.__audioCheckInterval);
-        }
-        
-        // Poll to check if audio is playing (balance responsiveness vs idle work)
-        webview.__audioCheckInterval = setInterval(async () => {
+    // Event-driven audio indicator — no per-tab polling (polling kept background pages hot and leaked RAM).
+    bindWebviewAudioStateListener(tabId, webview) {
+        if (!webview || webview.__axisAudioStateBound) return;
+        const syncAudible = () => {
+            const tab = this.tabs.get(tabId);
+            if (!tab || !webview) return;
+            let isAudible = false;
             try {
-                const tab = this.tabs.get(tabId);
-                if (!tab || !webview) {
-                    clearInterval(webview.__audioCheckInterval);
-                    return;
-                }
-                
-                let isAudible = false;
-                
-                // Method 1: Try isCurrentlyAudible() - Electron API
                 if (typeof webview.isCurrentlyAudible === 'function') {
-                    try {
-                        isAudible = webview.isCurrentlyAudible();
-                    } catch (e) {
-                        // Fall through to method 2
-                    }
+                    isAudible = !!webview.isCurrentlyAudible();
                 }
-                
-                // Method 2: Check for playing media via JavaScript
-                if (!isAudible) {
-                    try {
-                        isAudible = await webview.executeJavaScript(`
-                            (function() {
-                                // Check video elements
-                                const videos = document.querySelectorAll('video');
-                                for (const v of videos) {
-                                    if (!v.paused && !v.muted && v.volume > 0) return true;
-                                }
-                                // Check audio elements
-                                const audios = document.querySelectorAll('audio');
-                                for (const a of audios) {
-                                    if (!a.paused && !a.muted && a.volume > 0) return true;
-                                }
-                                return false;
-                            })();
-                        `);
-                    } catch (e) {
-                        // Ignore JS execution errors
-                    }
-                }
-                
-                // Only update if state changed
-                if (tab.isPlayingAudio !== isAudible) {
-                    tab.isPlayingAudio = isAudible;
-                    this.updateTabAudioIndicator(tabId, isAudible);
+            } catch (_) {}
+            if (tab.isPlayingAudio !== isAudible) {
+                tab.isPlayingAudio = isAudible;
+                this.updateTabAudioIndicator(tabId, isAudible);
+                if (this._normalizeTabMapKey(this.currentTab) === tabId) {
                     this.applyAmbientFromSettings();
                 }
-            } catch (e) {
-                // Webview might be destroyed, clean up
-                if (webview.__audioCheckInterval) {
-                    clearInterval(webview.__audioCheckInterval);
-                }
             }
-        }, 750);
-        
-        // Clean up on webview destruction
-        webview.addEventListener('destroyed', () => {
-            if (webview.__audioCheckInterval) {
-                clearInterval(webview.__audioCheckInterval);
-            }
-        }, { once: true });
+        };
+        const bind = () => {
+            if (webview.__axisAudioStateBound) return;
+            try {
+                const wc = webview.getWebContents?.();
+                if (!wc || typeof wc.on !== 'function' || wc.isDestroyed?.()) return;
+                wc.on('audio-state-changed', syncAudible);
+                webview.__axisAudioStateBound = true;
+                webview.__axisAudioStateHandler = syncAudible;
+                webview.__axisAudioStateWc = wc;
+                syncAudible();
+            } catch (_) {}
+        };
+        bind();
+        webview.addEventListener('dom-ready', bind, { once: true });
+        webview.addEventListener('destroyed', () => this.stopAudioDetection(webview), { once: true });
+    }
+
+    // Legacy name kept for call sites that stop polling on teardown.
+    startAudioDetection(tabId, webview) {
+        this.bindWebviewAudioStateListener(tabId, webview);
     }
     
     // Stop audio detection for a webview
     stopAudioDetection(webview) {
-        if (webview && webview.__audioCheckInterval) {
+        if (!webview) return;
+        if (webview.__audioCheckInterval) {
             clearInterval(webview.__audioCheckInterval);
             webview.__audioCheckInterval = null;
         }
+        if (webview.__axisAudioStateHandler && webview.__axisAudioStateWc) {
+            try {
+                webview.__axisAudioStateWc.removeListener('audio-state-changed', webview.__axisAudioStateHandler);
+            } catch (_) {}
+            webview.__axisAudioStateHandler = null;
+            webview.__axisAudioStateWc = null;
+            webview.__axisAudioStateBound = false;
+        }
     }
 
-    togglePinTab(tabId, tabElement, pinBtn) {
+    togglePinTab(rawTabId, tabElement, pinBtn) {
         if (this.isIncognitoWindow) return;
+        const tabId = this._normalizeTabMapKey(rawTabId);
+        if (tabId == null) return;
         const tab = this.tabs.get(tabId);
         if (!tab) return;
-        
-        const wasPinned = tab.pinned || tabElement.classList.contains('pinned');
+
+        const el = this._resolveLooseSidebarTabElement(tabId, tabElement);
+        if (!el) return;
+
+        const wasPinned = tab.pinned || el.classList.contains('pinned');
         const isPinned = !wasPinned;
+
+        // Tab still inside a group — only "unpin" removes it to the loose unpinned list.
+        if (tab.tabGroupId != null) {
+            const gid = this.findTabGroupKey(tab.tabGroupId);
+            const group = gid != null ? this.tabGroups.get(gid) : null;
+            const stillInGroup = group && this._tabIdIsInGroup(group.tabIds, tabId);
+            if (stillInGroup) {
+                if (!isPinned) {
+                    const prevSavedLinkUrl = tab.savedLinkUrl || null;
+                    if (!this._suppressUndo) {
+                        this._pushUndo({ type: 'unpin_tab', tabId, savedLinkUrl: prevSavedLinkUrl });
+                    }
+                    tab.pinned = false;
+                    tab.savedLinkUrl = null;
+                    this.tabs.set(tabId, tab);
+                    this.removeTabFromTabGroup(tabId, gid);
+                    void this.savePinnedTabs();
+                }
+                return;
+            }
+            tab.tabGroupId = undefined;
+            this.tabs.set(tabId, tab);
+        }
+        
+        const prevSavedLinkUrl = tab.savedLinkUrl || null;
+
+        if (!this._suppressUndo) {
+            this._pushUndo(
+                isPinned
+                    ? { type: 'pin_tab', tabId }
+                    : { type: 'unpin_tab', tabId, savedLinkUrl: prevSavedLinkUrl }
+            );
+        }
         
         // Update tab data
         tab.pinned = isPinned;
@@ -10887,136 +16088,106 @@ class AxisBrowser {
         
         // Update visual state
         if (isPinned) {
-            tabElement.classList.add('pinned');
-            tabElement.classList.add('just-pinned');
-            setTimeout(() => tabElement.classList.remove('just-pinned'), 400);
+            el.classList.add('pinned');
+            el.classList.add('just-pinned');
+            setTimeout(() => el.classList.remove('just-pinned'), 400);
             // Setup close button hover behavior for pinned tab
-            this.setupPinnedTabCloseButton(tabElement, tabId);
+            this.setupPinnedTabCloseButton(el, tabId);
             // Update closed state based on webview presence
             this.updatePinnedTabClosedState(tabId);
         } else {
-            tabElement.classList.remove('pinned');
-            tabElement.classList.remove('closed'); // Remove closed class when unpinned
-            tabElement.classList.add('just-unpinned');
-            setTimeout(() => tabElement.classList.remove('just-unpinned'), 400);
+            el.classList.remove('pinned');
+            el.classList.remove('closed'); // Remove closed class when unpinned
+            el.classList.add('just-unpinned');
+            setTimeout(() => el.classList.remove('just-unpinned'), 400);
             // Remove close button hover behavior when unpinned
-            this.removePinnedTabCloseButton(tabElement);
+            this.removePinnedTabCloseButton(el);
         }
         
-        
-        // Move tab to correct section
-        this.organizeTabsByPinnedState();
+        // Rebuild pinned vs unpinned sidebar rows from tab state.
+        this._moveLooseTabToPinSection(el, isPinned);
+        this.syncSidebarFromTabGroups({ force: true });
+        const liveEl = this._resolveLooseSidebarTabElement(tabId) || el;
+        this._tabElementById.set(tabId, liveEl);
         this.savePinnedTabs();
+    }
+
+    /** Move a loose sidebar tab row above or below the pinned divider. */
+    _moveLooseTabToPinSection(tabEl, pinned) {
+        const container = this.elements?.tabsContainer;
+        const separator = this.elements?.tabsSeparator;
+        if (!container || !separator || !tabEl || tabEl.parentElement !== container) return false;
+        if (pinned) {
+            container.insertBefore(tabEl, separator);
+        } else {
+            const ref = this.elements?.sidebarNewTabBtn?.nextSibling ?? separator.nextSibling;
+            if (ref) container.insertBefore(tabEl, ref);
+            else container.appendChild(tabEl);
+        }
+        return true;
+    }
+
+    _isTabDomInPinnedSection(tabEl) {
+        const tabsContainer = this.elements.tabsContainer;
+        const separator = this.elements.tabsSeparator;
+        if (!tabsContainer || !separator || !tabEl || tabEl.parentElement !== tabsContainer) return false;
+        const sepIdx = tabsContainer.children.indexOf(separator);
+        const tabIdx = tabsContainer.children.indexOf(tabEl);
+        if (sepIdx < 0 || tabIdx < 0) return false;
+        return tabIdx < sepIdx;
+    }
+
+    _looseSidebarTabsMatchPinDom(tabs) {
+        for (const el of tabs) {
+            const tabId = this._normalizeTabMapKey(el.dataset.tabId);
+            if (tabId == null) continue;
+            const tab = this.tabs.get(tabId);
+            if (!tab) continue;
+            if (!!tab.pinned !== this._isTabDomInPinnedSection(el)) return false;
+        }
+        return true;
+    }
+
+    _syncTabPinFromDomPosition(tabEl, { save = true } = {}) {
+        const tabsContainer = this.elements.tabsContainer;
+        if (!tabsContainer || tabEl.parentElement !== tabsContainer) return;
+        const separator = this.elements.tabsSeparator;
+        if (!separator) return;
+
+        const tabId = this._normalizeTabMapKey(tabEl.dataset.tabId);
+        if (tabId == null) return;
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+
+        const shouldPin = this._isTabDomInPinnedSection(tabEl);
+        if (!!tab.pinned === shouldPin) {
+            if (save) {
+                void this.savePinnedTabs();
+                this._scheduleUnpinnedTabsRecoverySave();
+            }
+            return;
+        }
+
+        tab.pinned = shouldPin;
+        this.tabs.set(tabId, tab);
+        tabEl.classList.toggle('pinned', shouldPin);
+        if (shouldPin) {
+            this.setupPinnedTabCloseButton(tabEl, tabId);
+            this.updatePinnedTabClosedState(tabId);
+        } else {
+            tabEl.classList.remove('closed');
+            this.removePinnedTabCloseButton(tabEl);
+        }
+        if (save) {
+            void this.savePinnedTabs();
+            this._scheduleUnpinnedTabsRecoverySave();
+        }
     }
     
     organizeTabsByPinnedState() {
-        const tabsContainer = this.elements.tabsContainer;
-        const separator = this.elements.tabsSeparator;
-        if (!tabsContainer || !separator) return;
-        
-        // Get all tabs that are NOT in tab groups (preserve order)
-        const allChildren = Array.from(tabsContainer.children);
-        const tabs = allChildren.filter(el => 
-            el.classList.contains('tab') && 
-            el.id !== 'tabs-separator' &&
-            !el.classList.contains('tab-favorite-host') &&
-            !el.closest('.tab-group') // Exclude tabs inside tab groups
-        );
-
-        // FLIP: First - record current positions
-        const firstRects = new Map();
-        tabs.forEach(el => {
-            firstRects.set(el, el.getBoundingClientRect());
-        });
-        
-        // Get current order
-        const tabOrder = tabs.map(t => parseInt(t.dataset.tabId, 10));
-        
-        // Separate pinned and unpinned while preserving relative order
-        const pinnedTabs = [];
-        const unpinnedTabs = [];
-        
-        for (const tabId of tabOrder) {
-            const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
-            if (!tabElement) continue;
-            
-            // Skip tabs that are in tab groups
-            if (tabElement.closest('.tab-group')) continue;
-            
-            const tab = this.tabs.get(tabId);
-            if (tab && tab.pinned) {
-                pinnedTabs.push(tabElement);
-            } else {
-                unpinnedTabs.push(tabElement);
-            }
-        }
-        
-        // Remove all tabs temporarily (only those not in tab groups)
-        tabs.forEach(tab => {
-            if (tab.parentNode === tabsContainer) {
-                tab.remove();
-            }
-        });
-        
-        // Insert pinned tabs above separator (in order)
-        pinnedTabs.forEach(tab => {
-            tabsContainer.insertBefore(tab, separator);
-        });
-        
-        // Show/hide separator based on actual DOM content above it (tabs or tab groups)
-        this.updatePinnedSeparatorVisibility();
-        
-        // Insert unpinned tabs below separator, after "+ New Tab" button (in order)
-        const unpinnedRef = this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn.nextSibling : separator.nextSibling;
-        unpinnedTabs.forEach(tab => {
-            if (unpinnedRef) {
-                tabsContainer.insertBefore(tab, unpinnedRef);
-            } else {
-                tabsContainer.appendChild(tab);
-            }
-        });
-        
-        // Update closed state for all pinned tabs based on webview presence
-        pinnedTabs.forEach(tabElement => {
-            const tabId = parseInt(tabElement.dataset.tabId, 10);
-            if (tabId) {
-                this.updatePinnedTabClosedState(tabId);
-            }
-        });
-
-        // FLIP: Last - compute new positions and play animations
-        const allTabsAfter = Array.from(tabsContainer.querySelectorAll('.tab'));
-        allTabsAfter.forEach(el => {
-            const first = firstRects.get(el);
-            const last = el.getBoundingClientRect();
-            if (!first) return; // newly created tabs won't animate here
-            const deltaX = first.left - last.left;
-            const deltaY = first.top - last.top;
-            const deltaW = first.width / Math.max(1, last.width);
-            const deltaH = first.height / Math.max(1, last.height);
-
-            if (deltaX || deltaY || deltaW !== 1 || deltaH !== 1) {
-                el.style.transformOrigin = 'top left';
-                el.style.willChange = 'transform, opacity';
-                el.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(${deltaW}, ${deltaH})`;
-                el.style.opacity = '0.9';
-
-                // Force reflow to ensure the transform is applied before transitioning
-                // eslint-disable-next-line no-unused-expressions
-                el.offsetHeight;
-
-                el.style.transition = 'transform 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 220ms ease';
-                el.style.transform = '';
-                el.style.opacity = '';
-
-                const cleanup = () => {
-                    el.style.transition = '';
-                    el.style.willChange = '';
-                    el.removeEventListener('transitionend', cleanup);
-                };
-                el.addEventListener('transitionend', cleanup);
-            }
-        });
+        if (this._sidebarReorderDragActive) return;
+        this.syncSidebarFromTabGroups({ force: true });
+        this._scheduleUnpinnedTabsRecoverySave();
     }
     
     /** Sidebar tab/group nodes that affect pinned vs unpinned layout (not hidden favorite hosts). */
@@ -11025,7 +16196,7 @@ class AxisBrowser {
         if (el.classList.contains('tab-favorite-host')) return false;
         return el.classList.contains('tab') || el.classList.contains('tab-group');
     }
-
+    
     // Recompute whether the pinned/unpinned separator should be visible based on current DOM
     updatePinnedSeparatorVisibility() {
         const tabsContainer = this.elements.tabsContainer;
@@ -11251,6 +16422,7 @@ class AxisBrowser {
 
     async saveFavorites(forProfileId) {
         if (this.isIncognitoWindow) return;
+        if (this._profileScopedPersistBlocked?.('favorites')) return;
         const pid = String(forProfileId || this.profileId || 'personal')
             .toLowerCase()
             .replace(/[^a-z0-9_-]/g, '-') || 'personal';
@@ -11267,20 +16439,20 @@ class AxisBrowser {
             }))
             .filter((fav) => !!fav.url);
         const payload = compact.map(({ id, url, title, favicon, customIcon, customIconType, order }) => ({
-            id,
-            url,
-            title,
-            favicon,
-            customIcon,
-            customIconType,
-            order
+                id,
+                url,
+                title,
+                favicon,
+                customIcon,
+                customIconType,
+                order
         }));
         await window.electronAPI.setFavorites(payload, pid);
         if (pid === String(this.profileId || '').toLowerCase()) {
-            this.favorites = compact.map((row) => {
-                const prev = prevById.get(row.id);
-                return prev ? { ...row, runtimeTabId: prev.runtimeTabId } : { ...row };
-            });
+        this.favorites = compact.map((row) => {
+            const prev = prevById.get(row.id);
+            return prev ? { ...row, runtimeTabId: prev.runtimeTabId } : { ...row };
+        });
             if (this.settings) this.settings.favorites = payload;
         }
     }
@@ -11328,6 +16500,8 @@ class AxisBrowser {
             customIconType: tab.customIconType || null,
             order: this.favorites.length
         });
+        const added = this.favorites[this.favorites.length - 1];
+        this._pushUndo({ type: 'add_favorite', favoriteId: added.id });
         await this.saveFavorites();
         this.renderFavorites();
     }
@@ -11433,8 +16607,14 @@ class AxisBrowser {
 
     async removeFavorite(favoriteId) {
         const before = this.favorites.length;
-        const favorite = this.favorites.find((fav) => fav.id === favoriteId);
-        const runtimeTabId = this._normalizeTabMapKey(favorite?.runtimeTabId);
+        const index = this.favorites.findIndex((fav) => fav.id === favoriteId);
+        const favorite = index >= 0 ? this.favorites[index] : null;
+        if (!favorite) return;
+        const favoriteSnapshot = JSON.parse(JSON.stringify(favorite));
+        const runtimeTabId = this._normalizeTabMapKey(favorite.runtimeTabId);
+        if (!this._suppressUndo) {
+            this._pushUndo({ type: 'remove_favorite', favorite: favoriteSnapshot, index });
+        }
         this.favorites = this.favorites.filter((fav) => fav.id !== favoriteId);
         if (this.favorites.length === before) return;
         if (runtimeTabId != null && this.tabs.has(runtimeTabId)) {
@@ -11442,6 +16622,130 @@ class AxisBrowser {
         }
         await this.saveFavorites();
         this.renderFavorites();
+    }
+
+    /** Histogram-based dominant RGB from favicon pixels (skips neutral background when a logo color is present). */
+    _dominantColorFromFaviconImage(img) {
+        if (!img || !img.naturalWidth || !img.naturalHeight) return null;
+        try {
+            const size = 48;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            if (!ctx) return null;
+            ctx.drawImage(img, 0, 0, size, size);
+            const data = ctx.getImageData(0, 0, size, size).data;
+            const buckets = new Map();
+            for (let i = 0; i < data.length; i += 4) {
+                const pr = data[i];
+                const pg = data[i + 1];
+                const pb = data[i + 2];
+                const pa = data[i + 3];
+                if (pa < 100) continue;
+                const key = ((pr >> 3) << 10) | ((pg >> 3) << 5) | (pb >> 3);
+                let bucket = buckets.get(key);
+                if (!bucket) {
+                    bucket = { count: 0, r: 0, g: 0, b: 0 };
+                    buckets.set(key, bucket);
+                }
+                bucket.count += 1;
+                bucket.r += pr;
+                bucket.g += pg;
+                bucket.b += pb;
+            }
+            if (!buckets.size) return null;
+            const entries = [];
+            for (const bucket of buckets.values()) {
+                const r = Math.round(bucket.r / bucket.count);
+                const g = Math.round(bucket.g / bucket.count);
+                const b = Math.round(bucket.b / bucket.count);
+                const max = Math.max(r, g, b);
+                const min = Math.min(r, g, b);
+                const sat = max === 0 ? 0 : (max - min) / max;
+                entries.push({ count: bucket.count, r, g, b, sat });
+            }
+            entries.sort((a, b) => b.count - a.count);
+            let pick = entries[0];
+            if (pick.sat < 0.12 && entries.length > 1) {
+                const minChromatic = Math.max(6, Math.round(pick.count * 0.08));
+                const chromatic = entries.find((e) => e.sat >= 0.12 && e.count >= minChromatic);
+                if (chromatic) pick = chromatic;
+            }
+            return { r: pick.r, g: pick.g, b: pick.b };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    _setFavoriteItemAccentRgb(item, accent) {
+        if (!item || !accent) return;
+        item.style.setProperty('--favorite-accent-rgb', `${accent.r}, ${accent.g}, ${accent.b}`);
+    }
+
+    _favoriteAccentFallback(url) {
+        return this._sidebarMediaFallbackAccent(url || '', false);
+    }
+
+    async _resolveFavoriteAccentColor(favorite, domImg) {
+        if (favorite?.customIcon) {
+            return this._favoriteAccentFallback(favorite.url);
+        }
+        const cacheKey = favorite?.favicon || favorite?.url;
+        if (cacheKey && this._favoriteAccentCache.has(cacheKey)) {
+            return this._favoriteAccentCache.get(cacheKey);
+        }
+        let accent = domImg ? this._dominantColorFromFaviconImage(domImg) : null;
+        const faviconUrl = favorite?.favicon;
+        if (!accent && faviconUrl && (!domImg || domImg.src !== faviconUrl)) {
+            accent = await new Promise((resolve) => {
+                const probe = new Image();
+                probe.crossOrigin = 'anonymous';
+                probe.onload = () => resolve(this._dominantColorFromFaviconImage(probe));
+                probe.onerror = () => resolve(null);
+                probe.src = faviconUrl;
+            });
+        }
+        if (!accent && domImg?.src && domImg.src !== faviconUrl) {
+            accent = this._dominantColorFromFaviconImage(domImg);
+        }
+        if (!accent) accent = this._favoriteAccentFallback(favorite?.url);
+        if (cacheKey) this._favoriteAccentCache.set(cacheKey, accent);
+        return accent;
+    }
+
+    _applyFavoriteItemAccentColor(item, favorite) {
+        if (!item || !favorite) return;
+        const apply = (accent) => this._setFavoriteItemAccentRgb(item, accent);
+        const cacheKey = favorite.favicon || favorite.url;
+
+        if (favorite.customIcon) {
+            apply(this._favoriteAccentFallback(favorite.url));
+            return;
+        }
+        if (cacheKey && this._favoriteAccentCache.has(cacheKey)) {
+            apply(this._favoriteAccentCache.get(cacheKey));
+            return;
+        }
+
+        /* Host-tinted placeholder until favicon pixels are ready — avoids white shell-ink flash. */
+        apply(this._favoriteAccentFallback(favorite.url));
+
+        const domImg = item.querySelector('img.favorite-favicon');
+        const extract = () => {
+            void this._resolveFavoriteAccentColor(favorite, domImg).then((accent) => {
+                if (item.isConnected) apply(accent);
+            });
+        };
+        if (!domImg) {
+            extract();
+            return;
+        }
+        if (domImg.complete) extract();
+        else {
+            domImg.addEventListener('load', extract, { once: true });
+            domImg.addEventListener('error', extract, { once: true });
+        }
     }
 
     renderFavorites() {
@@ -11466,6 +16770,7 @@ class AxisBrowser {
             item.innerHTML = `
                 <span class="favorite-icon-wrap">${this.getFavoriteIconHtml(favorite)}</span>
             `;
+            this._applyFavoriteItemAccentColor(item, favorite);
             item.addEventListener('click', () => this.navigateFavorite(favorite));
             item.addEventListener('contextmenu', (e) => {
                 void this.showFavoriteContextMenu(e, favorite);
@@ -11480,11 +16785,16 @@ class AxisBrowser {
             grid.addEventListener('dragover', (e) => this.onFavoritesGridDragOver(e));
             grid.addEventListener('drop', (e) => this.onFavoritesGridDrop(e));
         }
+        this._lastFavoritesRenderTabId = this._normalizeTabMapKey(this.currentTab);
+        this._refreshNtpWidgetsByType?.('favorites');
     }
 
     onFavoriteDragStart(e, favoriteId) {
         const item = e.currentTarget;
         this._favoriteDrag = { id: favoriteId, droppedInside: false };
+        if (typeof this._cancelProfilePointerSwipe === 'function') {
+            this._cancelProfilePointerSwipe();
+        }
         item.classList.add('favorite-dragging');
         e.dataTransfer.effectAllowed = 'move';
         try {
@@ -11542,7 +16852,25 @@ class AxisBrowser {
         this.renderFavorites();
     }
     
+    _serializeNewTabPageStateForSave(tab) {
+        if (!tab || tab.url !== this.NEWTAB_URL) return undefined;
+        this._ensureNewTabPageStateFromTabData(tab.id);
+        const st = tab.newTabPageState;
+        if (!st) return undefined;
+        return {
+            inputValue: st.inputValue || '',
+            inChat: this._hasNewTabAiChatState(st, tab),
+            askMessagesHtml: st.askMessagesHtml || '',
+            askMessageHistory: Array.isArray(st.askMessageHistory)
+                ? st.askMessageHistory.map((m) => ({ role: m.role, content: m.content }))
+                : Array.isArray(tab.newTabAskHistory)
+                  ? tab.newTabAskHistory.map((m) => ({ role: m.role, content: m.content }))
+                  : []
+        };
+    }
+
     _collectPinnedTabsPayload() {
+        this._flushNewTabPageStateBeforePersist();
         const tabsContainer = this.elements.tabsContainer;
         if (!tabsContainer) return [];
 
@@ -11555,7 +16883,7 @@ class AxisBrowser {
             if (tabId == null) continue;
             const tab = this.tabs.get(tabId);
             if (tab && tab.pinned && !tab.isFavoriteTab && !tab.tabGroupId) {
-                pinnedTabs.push({
+                const payload = {
                     id: tabId,
                     url: tab.savedLinkUrl || tab.url,
                     title: tab.title,
@@ -11564,13 +16892,147 @@ class AxisBrowser {
                     customIconType: tab.customIconType || null,
                     customTitle: tab.customTitle || null,
                     order: pinnedOrder++
-                });
+                };
+                const newTabPageState = this._serializeNewTabPageStateForSave(tab);
+                if (newTabPageState) payload.newTabPageState = newTabPageState;
+                pinnedTabs.push(payload);
             }
         }
         return pinnedTabs;
     }
 
+    _serializeUnpinnedTabPayload(tabId, tab, order) {
+        const payload = {
+            id: tabId,
+            url: tab.url,
+            title: tab.title,
+            favicon: tab.favicon || null,
+            customIcon: tab.customIcon || null,
+            customIconType: tab.customIconType || null,
+            customTitle: tab.customTitle || null,
+            order
+        };
+        const newTabPageState = this._serializeNewTabPageStateForSave(tab);
+        if (newTabPageState) payload.newTabPageState = newTabPageState;
+        return payload;
+    }
+
+    /**
+     * Collect standalone unpinned tabs. Uses the tabs Map as source of truth (DOM order when
+     * present) so profile-switch parking / partial DOM never silently drops tabs.
+     */
+    _collectUnpinnedTabsPayload({ forRecovery = false, context = 'session' } = {}) {
+        if (!forRecovery && !this._shouldPersistUnpinnedItems(context)) return [];
+        this._flushNewTabPageStateBeforePersist();
+
+        const candidateIds = [];
+        for (const [rawId, tab] of this.tabs.entries()) {
+            const tabId = this._normalizeTabMapKey(rawId);
+            if (tabId == null || !tab) continue;
+            if (tab.pinned || tab.isFavoriteTab || tab.tabGroupId) continue;
+            candidateIds.push(tabId);
+        }
+        if (candidateIds.length === 0) return [];
+
+        const orderMap = new Map();
+        let domOrder = 0;
+        const tabsContainer = this.elements?.tabsContainer;
+        const separator = this.elements?.tabsSeparator;
+        if (tabsContainer && separator) {
+            const allChildren = Array.from(tabsContainer.children);
+            const separatorIndex = allChildren.indexOf(separator);
+            if (separatorIndex >= 0) {
+                for (let i = separatorIndex + 1; i < allChildren.length; i++) {
+                    const child = allChildren[i];
+                    if (!child?.classList?.contains('tab')) continue;
+                    const tabId = this._normalizeTabMapKey(child.dataset.tabId);
+                    if (tabId == null || !this.tabs.has(tabId)) continue;
+                    const tab = this.tabs.get(tabId);
+                    if (!tab || tab.pinned || tab.isFavoriteTab || tab.tabGroupId) continue;
+                    if (!orderMap.has(tabId)) orderMap.set(tabId, domOrder++);
+                }
+            }
+        }
+
+        candidateIds.sort((a, b) => {
+            const ao = orderMap.has(a) ? orderMap.get(a) : Number.MAX_SAFE_INTEGER;
+            const bo = orderMap.has(b) ? orderMap.get(b) : Number.MAX_SAFE_INTEGER;
+            if (ao !== bo) return ao - bo;
+            return String(a).localeCompare(String(b));
+        });
+
+        return candidateIds.map((tabId, index) =>
+            this._serializeUnpinnedTabPayload(tabId, this.tabs.get(tabId), index)
+        );
+    }
+
+    async saveUnpinnedTabs() {
+        const unpinnedTabs = this._collectUnpinnedTabsPayload({ context: 'session' });
+        this.settings.unpinnedTabs = unpinnedTabs;
+        await this.saveSetting('unpinnedTabs', unpinnedTabs);
+    }
+
+    async loadUnpinnedTabs(opts = {}) {
+        if (this.isIncognitoWindow) return;
+        const context = opts.context || 'startup';
+        const crashRecovery = this._shouldRecoverUnpinnedTabsAfterCrash();
+        const persistContext = context === 'startup' ? 'app-quit' : context;
+        if (!this._shouldPersistUnpinnedItems(persistContext) && !crashRecovery) return;
+        try {
+            const recoveryData = Array.isArray(this.settings.unpinnedTabsRecovery)
+                ? this.settings.unpinnedTabsRecovery
+                : [];
+            const persistedData = Array.isArray(this.settings.unpinnedTabs)
+                ? this.settings.unpinnedTabs
+                : [];
+            const unpinnedTabsData =
+                crashRecovery && recoveryData.length > 0 ? recoveryData : persistedData;
+            if (unpinnedTabsData.length === 0) return;
+
+            unpinnedTabsData.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+            for (const tabData of unpinnedTabsData) {
+                const tabId = this._createUniqueTabId(tabData.id);
+                if (this.tabs.has(tabId)) continue;
+                const inAiChat = this._savedNewTabInAiChatFromPayload(tabData);
+                const resolvedFavicon = tabData.customIcon
+                    ? null
+                    : this.resolveTabFaviconForData(tabData) ||
+                      (inAiChat ? this.NTP_AI_CHAT_FAVICON : null);
+
+                this.tabs.set(tabId, {
+                    id: tabId,
+                    url: tabData.url || null,
+                    title: inAiChat ? 'AI Chat' : (tabData.customTitle || tabData.title || 'New Tab'),
+                    customTitle: tabData.customTitle || null,
+                    favicon: resolvedFavicon || (inAiChat ? this.NTP_AI_CHAT_FAVICON : tabData.favicon || null),
+                    customIcon: tabData.customIcon || null,
+                    customIconType: tabData.customIconType || null,
+                    canGoBack: false,
+                    canGoForward: false,
+                    history: tabData.url ? [tabData.url] : [],
+                    historyIndex: tabData.url ? 0 : -1,
+                    pinned: false,
+                    tabGroupId: null,
+                    webview: null,
+                    ...(tabData.newTabPageState ? { newTabPageState: tabData.newTabPageState } : {}),
+                    ...(Array.isArray(tabData.newTabPageState?.askMessageHistory)
+                        ? { newTabAskHistory: tabData.newTabPageState.askMessageHistory.map((m) => ({
+                              role: m.role,
+                              content: m.content
+                          })) }
+                        : {})
+                });
+            }
+
+            this.syncSidebarFromTabGroups();
+        } catch (error) {
+            console.error('Failed to load unpinned tabs:', error);
+        }
+    }
+
     async savePinnedTabs() {
+        if (this._profileScopedPersistBlocked?.('pinnedTabs')) return;
         const pinnedTabs = this._collectPinnedTabsPayload();
         await this.saveSetting('pinnedTabs', pinnedTabs);
     }
@@ -11585,6 +17047,8 @@ class AxisBrowser {
             if (!tabsContainer || !separator) return;
 
             pinnedTabsData.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+            const pinnedFrag = document.createDocumentFragment();
             
             // Create pinned tabs in order
             for (const pinnedData of pinnedTabsData) {
@@ -11593,18 +17057,14 @@ class AxisBrowser {
                 tabElement.className = 'tab pinned';
                 tabElement.dataset.tabId = tabId;
                 
+                const inAiChat = this._savedNewTabInAiChatFromPayload(pinnedData);
                 // Use custom title if available, otherwise use saved title
-                const displayTitle = pinnedData.customTitle || pinnedData.title || 'New Tab';
-                
-                // Determine icon HTML based on type
-                let iconHTML = '<img class="tab-favicon" src="" alt="" draggable="false" onerror="this.style.visibility=\'hidden\'">';
-                if (pinnedData.customIcon) {
-                    if (pinnedData.customIconType === 'emoji') {
-                        iconHTML = `<span class="tab-favicon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;">${pinnedData.customIcon}</span>`;
-                    } else {
-                        iconHTML = `<i class="fas ${pinnedData.customIcon} tab-favicon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: rgba(255, 255, 255, 0.7);"></i>`;
-                    }
-                }
+                const displayTitle = pinnedData.customTitle || (inAiChat ? 'AI Chat' : (pinnedData.title || 'New Tab'));
+                const iconHTML = this.tabFaviconIconHtml(pinnedData);
+                const resolvedFavicon = pinnedData.customIcon
+                    ? null
+                    : this.resolveTabFaviconForData(pinnedData) ||
+                      (inAiChat ? this.NTP_AI_CHAT_FAVICON : null);
                 
                 tabElement.innerHTML = `
                     <div class="tab-content">
@@ -11625,7 +17085,7 @@ class AxisBrowser {
                     url: pinnedData.url || null,
                     title: displayTitle,
                     customTitle: pinnedData.customTitle || null, // Load custom title
-                    favicon: pinnedData.favicon || null, // Load cached favicon
+                    favicon: resolvedFavicon || (inAiChat ? this.NTP_AI_CHAT_FAVICON : pinnedData.favicon || null), // Load cached favicon
                     customIcon: pinnedData.customIcon || null, // Load custom icon
                     customIconType: pinnedData.customIconType || null, // Load icon type
                     canGoBack: false,
@@ -11634,14 +17094,22 @@ class AxisBrowser {
                     historyIndex: pinnedData.url ? 0 : -1,
                     pinned: true,
                     savedLinkUrl: pinnedData.url || null,
-                    webview: null // No webview initially - tab is closed
+                    webview: null, // No webview initially - tab is closed
+                    ...(pinnedData.newTabPageState ? { newTabPageState: pinnedData.newTabPageState } : {}),
+                    ...(Array.isArray(pinnedData.newTabPageState?.askMessageHistory)
+                        ? {
+                              newTabAskHistory: pinnedData.newTabPageState.askMessageHistory.map((m) => ({
+                                  role: m.role,
+                                  content: m.content
+                              }))
+                          }
+                        : {})
                 });
                 
                 // Mark as closed since it has no webview
                 tabElement.classList.add('closed');
                 
-                // Insert above separator
-                tabsContainer.insertBefore(tabElement, separator);
+                pinnedFrag.appendChild(tabElement);
                 
                 // Set up event listeners
                 this.setupTabEventListeners(tabElement, tabId);
@@ -11652,6 +17120,8 @@ class AxisBrowser {
                 // Update closed state (tabs loaded from saved state have no webview initially)
                 this.updatePinnedTabClosedState(tabId);
             }
+
+            tabsContainer.insertBefore(pinnedFrag, separator);
             
             // Don't automatically switch to pinned tabs on startup
             // User must click a tab to activate it
@@ -11696,7 +17166,12 @@ class AxisBrowser {
         /* Exit hover slide-over mode cleanly so fixed/keyframe state never leaks into the docked bar */
         sidebar.classList.remove('slide-out', 'slide-out-closing');
         sidebar.style.animation = '';
-        sidebar.style.background = '';
+        sidebar.style.removeProperty('background');
+        sidebar.style.removeProperty('backdrop-filter');
+        sidebar.style.removeProperty('-webkit-backdrop-filter');
+        sidebar.style.removeProperty('box-shadow');
+        sidebar.style.removeProperty('transform');
+        sidebar.style.removeProperty('--sidebar-reveal-width');
 
         sidebar.classList.toggle('hidden');
 
@@ -11708,6 +17183,36 @@ class AxisBrowser {
         if (!isHidden) {
             this.syncMacOSTrafficLayout();
         }
+    }
+
+    /** Window-wide sidebar side (left/right) — always read from the global store, not profile settings. */
+    syncSidebarPositionFromGlobal() {
+        try {
+            const pos = window.electronAPI?.getSidebarPosition?.();
+            if (pos === 'left' || pos === 'right') {
+                if (!this.settings || typeof this.settings !== 'object') this.settings = {};
+                this.settings.sidebarPosition = pos;
+            }
+        } catch (_) {}
+    }
+
+    /** Anchor a fixed popup under a URL bar control, keeping it on screen. */
+    positionUrlBarAnchoredPopup(panel, anchorEl) {
+        if (!panel || !anchorEl) return;
+        const rect = anchorEl.getBoundingClientRect();
+        const margin = 8;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+        const popupWidth = Math.min(340, viewportWidth - margin * 2);
+        panel.style.width = `${popupWidth}px`;
+        let left = rect.right - popupWidth;
+        if (left < margin) left = rect.left;
+        if (left + popupWidth + margin > viewportWidth) {
+            left = viewportWidth - popupWidth - margin;
+        }
+        left = Math.max(margin, left);
+        panel.style.left = `${left}px`;
+        panel.style.top = `${rect.bottom + margin}px`;
+        panel.style.right = 'auto';
     }
 
     toggleSidebarPosition() {
@@ -11723,14 +17228,16 @@ class AxisBrowser {
             // Move to left
             mainArea.classList.remove('sidebar-right');
             sidebar.classList.remove('sidebar-right');
-            this.saveSetting('sidebarPosition', 'left');
+            this.settings.sidebarPosition = 'left';
+            void this.saveSetting('sidebarPosition', 'left');
             if (positionText) positionText.textContent = 'Move Sidebar Right';
             if (contextText) contextText.textContent = 'Move Sidebar Right';
         } else {
             // Move to right
             mainArea.classList.add('sidebar-right');
             sidebar.classList.add('sidebar-right');
-            this.saveSetting('sidebarPosition', 'right');
+            this.settings.sidebarPosition = 'right';
+            void this.saveSetting('sidebarPosition', 'right');
             if (positionText) positionText.textContent = 'Move Sidebar Left';
             if (contextText) contextText.textContent = 'Move Sidebar Left';
         }
@@ -11749,7 +17256,8 @@ class AxisBrowser {
         const positionText = document.getElementById('sidebar-position-text');
         const contextText = document.getElementById('sidebar-position-context-text');
         
-        const position = this.settings?.sidebarPosition || 'left';
+        this.syncSidebarPositionFromGlobal();
+        const position = this.settings?.sidebarPosition === 'right' ? 'right' : 'left';
         
         if (position === 'right') {
             mainArea.classList.add('sidebar-right');
@@ -11763,6 +17271,13 @@ class AxisBrowser {
             if (contextText) contextText.textContent = 'Move Sidebar Right';
         }
         this.syncMacOSTrafficLayout();
+        if (typeof this._syncSidebarResizeHandleLayout === 'function') {
+            this._syncSidebarResizeHandleLayout();
+        }
+        const extPanel = document.getElementById('extensions-menu-panel');
+        if (extPanel && !extPanel.classList.contains('hidden')) {
+            this.positionExtensionsMenu();
+        }
     }
 
     isSidebarRight() {
@@ -11789,6 +17304,27 @@ class AxisBrowser {
             }
         };
 
+        const clearSlideOutSurfaceStyles = () => {
+            sidebar.style.removeProperty('background');
+            sidebar.style.removeProperty('backdrop-filter');
+            sidebar.style.removeProperty('-webkit-backdrop-filter');
+            sidebar.style.removeProperty('box-shadow');
+        };
+
+        /** Opaque-enough overlay surface (never the airy docked --sidebar-background). */
+        const applySlideOutSurface = () => {
+            const computedStyle = getComputedStyle(document.documentElement);
+            let bg = computedStyle.getPropertyValue('--sidebar-slide-out-background').trim();
+            if (!bg || bg === 'transparent') {
+                bg = document.body.classList.contains('light-theme')
+                    ? 'rgba(252, 252, 252, 0.94)'
+                    : 'rgba(28, 28, 28, 0.94)';
+            }
+            sidebar.style.setProperty('background', bg, 'important');
+            sidebar.style.setProperty('backdrop-filter', 'blur(40px) saturate(160%)', 'important');
+            sidebar.style.setProperty('-webkit-backdrop-filter', 'blur(40px) saturate(160%)', 'important');
+        };
+
         const finishSlideOutClose = () => {
             clearCloseFallback();
             /* Overlay already slid off; docked bar must snap with zero transition or
@@ -11797,7 +17333,7 @@ class AxisBrowser {
             sidebar.classList.remove('slide-out', 'slide-out-closing');
             sidebar.style.removeProperty('animation');
             sidebar.style.removeProperty('--sidebar-reveal-width');
-            sidebar.style.background = '';
+            clearSlideOutSurfaceStyles();
             sidebar.style.removeProperty('transform');
             void sidebar.offsetHeight;
             requestAnimationFrame(() => {
@@ -11831,18 +17367,13 @@ class AxisBrowser {
             if (w > 500) w = 500;
             sidebar.style.setProperty('--sidebar-reveal-width', `${w}px`);
 
+            applySlideOutSurface();
             sidebar.classList.add('slide-out');
 
             if (window.electronAPI?.setWindowButtonVisibility) {
                 window.electronAPI.setWindowButtonVisibility(true);
             }
             this.syncMacOSTrafficLayout();
-
-            const computedStyle = getComputedStyle(document.documentElement);
-            const sidebarBg = computedStyle.getPropertyValue('--sidebar-background').trim();
-            if (sidebarBg) {
-                sidebar.style.background = sidebarBg;
-            }
         };
 
         hoverArea.addEventListener('mouseenter', revealFromEdge);
@@ -11874,7 +17405,7 @@ class AxisBrowser {
                 if (sidebar.classList.contains('slide-out') || sidebar.classList.contains('slide-out-closing')) {
                     finishSlideOutClose();
                 }
-            }, 450);
+            }, 520);
 
             sidebar.classList.add('slide-out-closing');
         };
@@ -11915,6 +17446,24 @@ class AxisBrowser {
                 if (extPanel && !extPanel.classList.contains('hidden')) {
                     if (!extPanel.contains(e.target) && !(extBtn && extBtn.contains(e.target))) {
                         this.closeExtensionsMenu();
+                    }
+                }
+                const adblockPanel = document.getElementById('adblock-panel');
+                const adblockBtn = this.elements?.urlBarAdblock;
+                if (adblockPanel && !adblockPanel.classList.contains('hidden')) {
+                    if (!adblockPanel.contains(e.target) && !(adblockBtn && adblockBtn.contains(e.target))) {
+                        this.closeAdblockPanel();
+                    }
+                }
+                const securityPanel = document.getElementById('security-panel');
+                const securityBtn = this.elements?.urlBarSecurity;
+                const securityBackdrop = document.getElementById('security-panel-backdrop');
+                if (securityPanel && !securityPanel.classList.contains('hidden')) {
+                    const onPanel = securityPanel.contains(e.target);
+                    const onBtn = securityBtn && securityBtn.contains(e.target);
+                    const onBackdrop = securityBackdrop && securityBackdrop.contains(e.target);
+                    if (!onPanel && !onBtn && !onBackdrop) {
+                        this.closeSecurityPanel();
                     }
                 }
             },
@@ -12105,6 +17654,10 @@ class AxisBrowser {
     }
 
     async checkTextSelection() {
+        if (!this.isAiFeaturesEnabled()) {
+            this.hideAIButton();
+            return;
+        }
         const webview = this.getActiveWebview();
         if (!webview) {
             this.hideAIButton();
@@ -12163,6 +17716,7 @@ class AxisBrowser {
     }
 
     showAIButton(x, y) {
+        if (!this.isAiFeaturesEnabled()) return;
         const aiButton = document.getElementById('ai-selection-button');
         if (!aiButton) {
             return;
@@ -12214,6 +17768,7 @@ class AxisBrowser {
      * Show quoted selection in the bar above the message box and open main chat panel.
      */
     openChatWithQuotedSelection() {
+        if (!this.isAiFeaturesEnabled()) return;
         const selectedText = this.aiSelectionState?.text?.trim();
         if (!selectedText) return;
 
@@ -12327,6 +17882,7 @@ class AxisBrowser {
     }
 
     handleAICustomQuestion(question) {
+        if (!this.isAiFeaturesEnabled()) return;
         const selectedText = this.aiSelectionState.text;
         if (!selectedText || !question) return;
 
@@ -12348,76 +17904,20 @@ class AxisBrowser {
         responseArea.classList.remove('hidden');
 
         try {
-            if (!this.hasGroqApiKey()) {
-                throw new Error('Add your free Groq API key in Settings → AI Chat to use this feature.');
+            if (!this.hasAiApiKey()) {
+                throw new Error('Add an API key in Settings → AI Chat to use this feature.');
             }
-            const groqApiKey = this.getGroqApiKey();
-            
-            // Format the prompt with context
             const fullPrompt = `Context: "${context}"\n\nQuestion: ${prompt}\n\nPlease provide a helpful answer based on the context provided.`;
-            
-            // Try multiple models in order of preference
-            const modelsToTry = [
-                'llama-3.3-70b-versatile',
-                'llama-3.1-8b-instant',
-                'llama-3.1-70b-versatile',
-                'llama-3-70b-8192',
-                'mixtral-8x7b-32768'
-            ];
-            
-            let lastError = null;
-            let response = null;
-            let data = null;
-            
-            for (const model of modelsToTry) {
-                try {
-                    response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${groqApiKey}`
-                        },
-                        body: JSON.stringify({
-                            model: model,
-                            messages: [
+            const aiResponse = await this._completeAiChat(
+                [
                                 {
                                     role: 'system',
                                     content: 'You are a helpful AI assistant. Answer questions based on the provided context.'
                                 },
-                                {
-                                    role: 'user',
-                                    content: fullPrompt
-                                }
-                            ],
-                            max_tokens: 1024,
-                            temperature: 0.7
-                        })
-                    });
-                    
-                    if (response.ok) {
-                        data = await response.json();
-                        break; // Success, exit loop
-                    } else {
-                        const errorData = await response.json().catch(() => ({}));
-                        lastError = errorData.error?.message || `HTTP ${response.status}`;
-                        // Continue to next model
-                        continue;
-                    }
-                } catch (err) {
-                    lastError = err.message;
-                    continue; // Try next model
-                }
-            }
-            
-            if (!response || !response.ok || !data) {
-                throw new Error(`Groq API error: All models failed. Last error: ${lastError || 'Unknown error'}`);
-            }
-
-            const aiResponse = data.choices?.[0]?.message?.content || '';
-            
-            if (!aiResponse.trim()) {
-                throw new Error('Empty response from Groq');
-            }
+                    { role: 'user', content: fullPrompt }
+                ],
+                { maxTokens: 1024 }
+            );
 
             // Smoothly reveal the text
             this.smoothRevealText(responseContent, aiResponse.trim());
@@ -12427,9 +17927,9 @@ class AxisBrowser {
             }
         } catch (error) {
             console.error('AI API Error:', error);
-            const hint = this.hasGroqApiKey()
+            const hint = this.hasAiApiKey()
                 ? 'Please try again.'
-                : 'Open Settings → AI Chat to add your free Groq API key.';
+                : 'Open Settings → AI Chat to add an API key.';
             responseContent.textContent = `Error: ${error.message}\n\n${hint}`;
             responseContent.classList.add('revealing');
             submitBtn.disabled = false;
@@ -12471,25 +17971,493 @@ class AxisBrowser {
     }
 
     // AI Chat Panel Setup
+    getAiProviderState() {
+        if (typeof AxisAiProviders === 'undefined') {
+            const legacy = String(this.settings?.groqApiKey || this.aiChatApiKey || '').trim();
+            if (!legacy) return { aiProviders: [], activeAiProviderId: null };
+            const id = 'legacy-groq';
+            return {
+                aiProviders: [{ id, provider: 'groq', label: 'Groq', apiKey: legacy, model: '' }],
+                activeAiProviderId: id
+            };
+        }
+        return AxisAiProviders.normalizeSettings(this.settings);
+    }
+
+    getActiveAiProvider() {
+        if (typeof AxisAiProviders === 'undefined') {
+            const st = this.getAiProviderState();
+            return st.aiProviders[0] || null;
+        }
+        return AxisAiProviders.getActiveEntry(this.settings);
+    }
+
+    hasAiApiKey() {
+        const entry = this.getActiveAiProvider();
+        return !!(entry?.apiKey && String(entry.apiKey).trim());
+    }
+
+    getActiveAiProviderLabel() {
+        if (typeof AxisAiProviders === 'undefined') return 'API key';
+        return AxisAiProviders.displayName(this.getActiveAiProvider());
+    }
+
+    async _completeAiChat(messages, options = {}) {
+        const entry = this.getActiveAiProvider();
+        if (!entry?.apiKey) {
+            throw new Error('Add an API key in Settings → AI Chat to use this feature.');
+        }
+        if (typeof AxisAiProviders === 'undefined') {
+            throw new Error('AI providers module is unavailable.');
+        }
+        return AxisAiProviders.chatCompletion(entry, messages, options);
+    }
+
     getGroqApiKey() {
-        return String(this.settings?.groqApiKey || this.aiChatApiKey || '').trim();
+        return String(this.getActiveAiProvider()?.apiKey || '').trim();
     }
 
     hasGroqApiKey() {
-        return this.getGroqApiKey().length > 0;
+        return this.hasAiApiKey();
     }
 
     syncGroqApiKeyFromSettings() {
-        this.aiChatApiKey = this.getGroqApiKey();
+        this.syncAiProviderFromSettings();
+    }
+
+    syncAiProviderFromSettings() {
+        const entry = this.getActiveAiProvider();
+        this.aiChatApiKey = entry?.apiKey ? String(entry.apiKey).trim() : '';
         this.updateAIChatSetupState();
+        this._syncAiChatImageAttachUi();
+    }
+
+    activeProviderSupportsImages() {
+        if (typeof AxisAiProviders === 'undefined') return false;
+        return AxisAiProviders.providerSupportsImages(this.getActiveAiProvider());
+    }
+
+    _canUseAiChatImages() {
+        return (
+            this.isAiFeaturesEnabled() &&
+            this.hasAiApiKey() &&
+            this.activeProviderSupportsImages()
+        );
+    }
+
+    _aiChatImagesFor() {
+        return this._sidebarChatImages || [];
+    }
+
+    _setAiChatImages(images) {
+        this._sidebarChatImages = images;
+    }
+
+    async _compressAiChatImageForApi(dataUrl, fileName, originalMime) {
+        const maxDim = 1536;
+        const maxBytes = 4 * 1024 * 1024;
+        const mime = String(originalMime || '').toLowerCase();
+        if (mime === 'image/gif') {
+            const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+            if (!match) throw new Error('Could not read that image.');
+            const bytes = atob(match[2]).length;
+            if (bytes <= maxBytes) {
+                return {
+                    mimeType: match[1],
+                    base64: match[2],
+                    dataUrl,
+                    name: fileName
+                };
+            }
+            throw new Error('GIF images must be 4 MB or smaller.');
+        }
+
+        const img = await new Promise((resolve, reject) => {
+            const el = new Image();
+            el.onload = () => resolve(el);
+            el.onerror = () => reject(new Error('Could not read that image.'));
+            el.src = dataUrl;
+        });
+
+        let width = img.naturalWidth || img.width;
+        let height = img.naturalHeight || img.height;
+        if (!width || !height) throw new Error('Could not read that image.');
+        const scale = Math.min(1, maxDim / Math.max(width, height));
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Could not process that image.');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const tryExport = (type, quality) => {
+            try {
+                const url = canvas.toDataURL(type, quality);
+                const m = url.match(/^data:([^;]+);base64,(.+)$/);
+                if (!m) return null;
+                if (atob(m[2]).length > maxBytes) return null;
+                return { mimeType: m[1], base64: m[2], dataUrl: url };
+            } catch (_) {
+                return null;
+            }
+        };
+
+        let packed =
+            tryExport('image/webp', 0.82) ||
+            tryExport('image/jpeg', 0.86) ||
+            tryExport('image/jpeg', 0.72) ||
+            tryExport('image/jpeg', 0.58);
+
+        if (!packed) {
+            throw new Error('Image is too large after compression. Try a smaller file.');
+        }
+
+        return {
+            mimeType: packed.mimeType,
+            base64: packed.base64,
+            dataUrl: packed.dataUrl,
+            name: fileName
+        };
+    }
+
+    async readAiChatImageFile(file) {
+        const maxBytes = 8 * 1024 * 1024;
+        if (!file || !String(file.type || '').startsWith('image/')) {
+            throw new Error('Only JPEG, PNG, GIF, or WebP images can be attached.');
+        }
+        if (file.size > maxBytes) {
+            throw new Error('Each image must be 8 MB or smaller.');
+        }
+        const rawDataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onerror = () => reject(new Error('Could not read that image.'));
+            reader.readAsDataURL(file);
+        });
+        const fileName = String(file.name || 'image').slice(0, 120);
+        const packed = await this._compressAiChatImageForApi(rawDataUrl, fileName, file.type);
+        return {
+            id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            mimeType: packed.mimeType,
+            base64: packed.base64,
+            dataUrl: packed.dataUrl,
+            name: packed.name
+        };
+    }
+
+    _buildUserMessageImagesHtml(images) {
+        if (!Array.isArray(images) || !images.length) return '';
+        const imgs = images
+            .map(
+                (img) =>
+                    `<img class="ai-chat-attached-image" src="${this.escapeHtml(img.dataUrl)}" alt="${this.escapeHtml(img.name || 'Attached image')}" loading="lazy">`
+            )
+            .join('');
+        return `<div class="ai-chat-attached-images">${imgs}</div>`;
+    }
+
+    _renderAiChatAttachPreview(previewEl, images, onRemove) {
+        if (!previewEl) return;
+        previewEl.innerHTML = '';
+        if (!Array.isArray(images) || !images.length) {
+            previewEl.classList.add('hidden');
+            return;
+        }
+        previewEl.classList.remove('hidden');
+
+        const header = document.createElement('div');
+        header.className = 'ai-chat-attach-preview-header';
+        header.innerHTML = `<span class="ai-chat-attach-preview-label">${images.length} of ${this._aiChatMaxImages} attached</span>`;
+        previewEl.appendChild(header);
+
+        const row = document.createElement('div');
+        row.className = 'ai-chat-attach-preview-row';
+        images.forEach((img) => {
+            const chip = document.createElement('div');
+            chip.className = 'ai-chat-attach-chip';
+            const thumb = document.createElement('img');
+            thumb.src = img.dataUrl;
+            thumb.alt = img.name || 'Attached image';
+            chip.appendChild(thumb);
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'ai-chat-attach-chip-remove';
+            removeBtn.setAttribute('aria-label', `Remove ${img.name || 'image'}`);
+            removeBtn.innerHTML = '&times;';
+            removeBtn.addEventListener('click', () => onRemove(img.id));
+            chip.appendChild(removeBtn);
+            row.appendChild(chip);
+        });
+        previewEl.appendChild(row);
+    }
+
+    _syncAiChatImageAttachUi() {
+        const hasKey = this.hasAiApiKey() && this.isAiFeaturesEnabled();
+        const supports = this._canUseAiChatImages();
+        if (!supports) {
+            this._sidebarChatImages = [];
+            this._newTabChatImages = [];
+        }
+
+        document.getElementById('ai-chat-attach-btn')?.classList.toggle('hidden', !hasKey);
+        document.getElementById('new-tab-attach-btn')?.classList.toggle(
+            'hidden',
+            !(hasKey && this.isNewTabInChat())
+        );
+
+        const sidebarImages = this._sidebarChatImages || [];
+        this._renderAiChatAttachPreview(
+            document.getElementById('ai-chat-attach-preview'),
+            sidebarImages,
+            (id) => this._removeSidebarChatImage(id)
+        );
+
+        const newTabImages = this._newTabChatImages || [];
+        this._renderAiChatAttachPreview(
+            document.getElementById('new-tab-attach-preview'),
+            newTabImages,
+            (id) => this._removeNewTabChatImage(id)
+        );
+
+        document.getElementById('ai-chat-composer-chrome')?.classList.toggle(
+            'has-attachments',
+            sidebarImages.length > 0
+        );
+        document.getElementById('ai-chat-input-container')?.classList.toggle(
+            'has-attachments',
+            sidebarImages.length > 0
+        );
+        document.getElementById('new-tab-composer-chrome')?.classList.toggle(
+            'has-attachments',
+            newTabImages.length > 0
+        );
+
+        this.updateSidebarChatSendButtonState();
+        this.updateNewTabSendButtonState();
+    }
+
+    _removeNewTabChatImage(id) {
+        this._newTabChatImages = (this._newTabChatImages || []).filter((img) => img.id !== id);
+        this._syncAiChatImageAttachUi();
+    }
+
+    async _addNewTabChatImages(fileList) {
+        if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled()) return;
+        if (!this.activeProviderSupportsImages()) {
+            this.showNotification?.(
+                'Your active provider does not support images. Switch to a vision-capable key in Settings → AI Chat.',
+                'error'
+            );
+            return;
+        }
+        const files = Array.from(fileList || []).filter(
+            (f) => f && String(f.type || '').startsWith('image/')
+        );
+        if (!files.length) return;
+
+        const current = (this._newTabChatImages || []).slice();
+        const room = this._aiChatMaxImages - current.length;
+        if (room <= 0) {
+            this.showNotification?.(`You can attach up to ${this._aiChatMaxImages} images per message.`, 'error');
+            return;
+        }
+
+        let added = 0;
+        for (const file of files.slice(0, room)) {
+            try {
+                current.push(await this.readAiChatImageFile(file));
+                added++;
+            } catch (e) {
+                this.showNotification?.(e?.message || 'Could not attach image.', 'error');
+            }
+        }
+        if (added > 0) {
+            this._newTabChatImages = current;
+        }
+        this._syncAiChatImageAttachUi();
+    }
+
+    _removeSidebarChatImage(id) {
+        this._sidebarChatImages = (this._sidebarChatImages || []).filter((img) => img.id !== id);
+        this._syncAiChatImageAttachUi();
+    }
+
+    async _addSidebarChatImages(fileList) {
+        if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled()) return;
+        if (!this.activeProviderSupportsImages()) {
+            this.showNotification?.(
+                'Your active provider does not support images. Switch to a vision-capable key in Settings → AI Chat.',
+                'error'
+            );
+            return;
+        }
+        const files = Array.from(fileList || []).filter(
+            (f) => f && String(f.type || '').startsWith('image/')
+        );
+        if (!files.length) return;
+
+        const current = this._aiChatImagesFor().slice();
+        const room = this._aiChatMaxImages - current.length;
+        if (room <= 0) {
+            this.showNotification?.(`You can attach up to ${this._aiChatMaxImages} images per message.`, 'error');
+            return;
+        }
+
+        let added = 0;
+        for (const file of files.slice(0, room)) {
+            try {
+                current.push(await this.readAiChatImageFile(file));
+                added++;
+            } catch (e) {
+                this.showNotification?.(e?.message || 'Could not attach image.', 'error');
+            }
+        }
+        if (added > 0) {
+            this._setAiChatImages(current);
+        }
+        this._syncAiChatImageAttachUi();
+    }
+
+    _bindAiChatImageDrop(targetEl, options = {}) {
+        if (!targetEl || targetEl.dataset.axisAiImageDropBound === '1') return;
+        targetEl.dataset.axisAiImageDropBound = '1';
+
+        const chrome =
+            (options.chromeId && document.getElementById(options.chromeId)) ||
+            document.getElementById('ai-chat-composer-chrome');
+        const addFiles =
+            typeof options.addFiles === 'function'
+                ? options.addFiles
+                : (files) => this._addSidebarChatImages(files);
+
+        const setDropActive = (on) => {
+            chrome?.classList.toggle('ai-chat-drop-active', on);
+        };
+
+        targetEl.addEventListener('dragenter', (e) => {
+            if (!this._canUseAiChatImages()) return;
+            if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+            e.preventDefault();
+            setDropActive(true);
+        });
+        targetEl.addEventListener('dragover', (e) => {
+            if (!this._canUseAiChatImages()) return;
+            if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+            e.preventDefault();
+            setDropActive(true);
+        });
+        targetEl.addEventListener('dragleave', (e) => {
+            if (e.currentTarget.contains(e.relatedTarget)) return;
+            setDropActive(false);
+        });
+        targetEl.addEventListener('drop', (e) => {
+            setDropActive(false);
+            if (!this._canUseAiChatImages()) return;
+            const files = Array.from(e.dataTransfer?.files || []).filter((f) =>
+                String(f.type || '').startsWith('image/')
+            );
+            if (!files.length) return;
+            e.preventDefault();
+            e.stopPropagation();
+            void addFiles(files);
+        });
+    }
+
+    setupAiChatImageUpload() {
+        const sidebarBtn = document.getElementById('ai-chat-attach-btn');
+        const sidebarInput = document.getElementById('ai-chat-image-input');
+        const chatInput = document.getElementById('ai-chat-input');
+        const newTabBtn = document.getElementById('new-tab-attach-btn');
+        const newTabInput = document.getElementById('new-tab-image-input');
+        const newTabComposerInput = document.getElementById('new-tab-input');
+
+        sidebarBtn?.addEventListener('click', () => sidebarInput?.click());
+        newTabBtn?.addEventListener('click', () => newTabInput?.click());
+
+        sidebarInput?.addEventListener('change', () => {
+            void this._addSidebarChatImages(sidebarInput.files).finally(() => {
+                sidebarInput.value = '';
+            });
+        });
+
+        newTabInput?.addEventListener('change', () => {
+            void this._addNewTabChatImages(newTabInput.files).finally(() => {
+                newTabInput.value = '';
+            });
+        });
+
+        const onPasteSidebarImages = async (e) => {
+            if (!this._canUseAiChatImages()) return;
+            const items = Array.from(e.clipboardData?.items || []);
+            const imageFiles = items
+                .filter((item) => item.kind === 'file' && String(item.type || '').startsWith('image/'))
+                .map((item) => item.getAsFile())
+                .filter(Boolean);
+            if (!imageFiles.length) return;
+            e.preventDefault();
+            e.stopPropagation();
+            await this._addSidebarChatImages(imageFiles);
+        };
+
+        const onPasteNewTabImages = async (e) => {
+            if (!this._canUseAiChatImages() || !this.isNewTabInChat()) return;
+            const items = Array.from(e.clipboardData?.items || []);
+            const imageFiles = items
+                .filter((item) => item.kind === 'file' && String(item.type || '').startsWith('image/'))
+                .map((item) => item.getAsFile())
+                .filter(Boolean);
+            if (!imageFiles.length) return;
+            e.preventDefault();
+            e.stopPropagation();
+            await this._addNewTabChatImages(imageFiles);
+        };
+
+        chatInput?.addEventListener(
+            'paste',
+            (e) => {
+                void onPasteSidebarImages(e);
+            },
+            true
+        );
+
+        newTabComposerInput?.addEventListener(
+            'paste',
+            (e) => {
+                void onPasteNewTabImages(e);
+            },
+            true
+        );
+
+        chatInput?.addEventListener('input', () => this.updateSidebarChatSendButtonState());
+
+        this._bindAiChatImageDrop(chatInput);
+        this._bindAiChatImageDrop(document.getElementById('ai-chat-composer-chrome'), {
+            chromeId: 'ai-chat-composer-chrome',
+            addFiles: (files) => this._addSidebarChatImages(files)
+        });
+        this._bindAiChatImageDrop(newTabComposerInput, {
+            chromeId: 'new-tab-composer-chrome',
+            addFiles: (files) => this._addNewTabChatImages(files)
+        });
+        this._bindAiChatImageDrop(document.getElementById('new-tab-composer-chrome'), {
+            chromeId: 'new-tab-composer-chrome',
+            addFiles: (files) => this._addNewTabChatImages(files)
+        });
     }
 
     openAIChatSettings() {
         void this.openSettingsTab('ai');
     }
 
-    async openGroqKeySignup() {
-        const url = 'https://console.groq.com/keys';
+    async openAiProviderSignup(providerId) {
+        const def =
+            typeof AxisAiProviders !== 'undefined'
+                ? AxisAiProviders.getProviderDef(providerId || this.getActiveAiProvider()?.provider || 'groq')
+                : null;
+        const url = def?.signupUrl || 'https://console.groq.com/keys';
         try {
             if (window.electronAPI?.openExternalUrl) {
                 await window.electronAPI.openExternalUrl(url);
@@ -12499,8 +18467,13 @@ class AxisBrowser {
         void this.createNewTab(url);
     }
 
+    async openGroqKeySignup() {
+        return this.openAiProviderSignup('groq');
+    }
+
     updateAIChatSetupState() {
-        const hasKey = this.hasGroqApiKey();
+        const hasKey = this.hasAiApiKey();
+        const activeLabel = this.getActiveAiProviderLabel();
         const panel = document.getElementById('ai-chat-panel');
         const setup = document.getElementById('ai-chat-setup');
         const chatInput = document.getElementById('ai-chat-input');
@@ -12518,12 +18491,10 @@ class AxisBrowser {
             chatInput.tabIndex = hasKey ? 0 : -1;
             chatInput.placeholder = hasKey
                 ? 'Type your message...'
-                : 'Add your Groq API key in Settings to start chatting';
+                : 'Add an API key in Settings to start chatting';
             if (!hasKey) chatInput.value = '';
         }
         if (chatSend) {
-            chatSend.disabled = !hasKey;
-            chatSend.setAttribute('aria-disabled', hasKey ? 'false' : 'true');
             chatSend.tabIndex = hasKey ? 0 : -1;
         }
         chatInputContainer?.classList.toggle('hidden', !hasKey);
@@ -12535,6 +18506,56 @@ class AxisBrowser {
 
         if (!hasKey) {
             document.getElementById('new-tab-ask-setup')?.classList.add('hidden');
+        }
+        this.updateSidebarChatSendButtonState();
+        this._syncAiChatImageAttachUi();
+    }
+
+    /** Store default: on unless explicitly false. */
+    isAiFeaturesEnabled() {
+        return this.settings?.aiFeaturesEnabled !== false;
+    }
+
+    applyAiFeaturesVisibility() {
+        const on = this.isAiFeaturesEnabled();
+        document.documentElement.classList.toggle('axis-ai-features-disabled', !on);
+
+        const urlBarChat = this.elements?.urlBarChat || document.getElementById('url-bar-chat');
+        if (urlBarChat) {
+            urlBarChat.classList.toggle('hidden', !on);
+            urlBarChat.setAttribute('aria-hidden', on ? 'false' : 'true');
+        }
+
+        const selBtn = document.getElementById('ai-selection-button');
+        const selPopup = document.getElementById('ai-popup');
+        const chatPanel = document.getElementById('ai-chat-panel');
+        const contentArea = document.getElementById('content-area');
+
+        if (!on) {
+            selBtn?.classList.add('hidden');
+            selPopup?.classList.add('hidden');
+            this.hideAIPopup?.();
+            this.hideAIButton?.();
+            this.stopAISelectionPolling?.();
+
+            if (chatPanel) {
+                chatPanel.classList.add('hidden');
+                contentArea?.classList.remove('chat-open');
+                const tid = this._normalizeTabIdForChatState(this.currentTab);
+                if (tid != null) this.aiChatPanelOpenByTabId.set(tid, false);
+            }
+
+            const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+            if (tab?.url === this.NEWTAB_URL && this.isNewTabInChat()) {
+                this.resetNewTabPageState?.();
+            }
+        } else {
+            this.startAISelectionPolling?.();
+        }
+
+        const curTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (curTab?.url === this.NEWTAB_URL) {
+            this.applyNewTabCustomization();
         }
     }
 
@@ -12588,7 +18609,6 @@ class AxisBrowser {
 
         chatInput.addEventListener('beforeinput', blockLockedChatInput);
         chatInput.addEventListener('paste', blockLockedChatInput);
-        chatInput.addEventListener('drop', blockLockedChatInput);
 
         // Close chat on Escape key
         document.addEventListener('keydown', (e) => {
@@ -12607,17 +18627,19 @@ class AxisBrowser {
         }
         this.applyChatPanelWidth(this.getChatPanelWidth());
 
+        this.setupAiChatImageUpload();
+
         document.getElementById('ai-chat-setup-settings')?.addEventListener('click', () => {
             this.openAIChatSettings();
         });
         document.getElementById('ai-chat-setup-groq')?.addEventListener('click', () => {
-            void this.openGroqKeySignup();
+            void this.openAiProviderSignup();
         });
         document.getElementById('new-tab-ask-setup-settings')?.addEventListener('click', () => {
             this.openAIChatSettings();
         });
         document.getElementById('new-tab-ask-setup-groq')?.addEventListener('click', () => {
-            void this.openGroqKeySignup();
+            void this.openAiProviderSignup();
         });
 
         this.updateAIChatSetupState();
@@ -12724,6 +18746,7 @@ class AxisBrowser {
     }
 
     toggleAIChat() {
+        if (!this.isAiFeaturesEnabled()) return;
         const chatPanel = document.getElementById('ai-chat-panel');
         const contentArea = document.getElementById('content-area');
         
@@ -12738,6 +18761,7 @@ class AxisBrowser {
             }
             this._applyAiChatPanelChrome();
             this.updateAIChatSetupState();
+            this._syncAiChatImageAttachUi();
             // Focus input after open animation finishes
             const chatInput = document.getElementById('ai-chat-input');
             if (chatInput && this.hasGroqApiKey()) {
@@ -12756,12 +18780,19 @@ class AxisBrowser {
     }
 
     async sendChatMessage() {
+        if (!this.isAiFeaturesEnabled()) return;
         const chatInput = document.getElementById('ai-chat-input');
         const chatMessages = document.getElementById('ai-chat-messages');
         
         if (!chatInput || !chatMessages) return;
 
         const mainText = chatInput.value.trim();
+        const images = (this._sidebarChatImages || []).map((img) => ({
+            mimeType: img.mimeType,
+            base64: img.base64,
+            dataUrl: img.dataUrl,
+            name: img.name
+        }));
         let fullMessage;
         let quoteForDisplay = null;
         if (this.chatQuotedText) {
@@ -12771,25 +18802,34 @@ class AxisBrowser {
         } else {
             fullMessage = mainText;
         }
-        if (!fullMessage) return;
+        if (!fullMessage && !images.length) return;
 
-        if (!this.hasGroqApiKey()) {
+        if (!this.hasAiApiKey()) {
             this.updateAIChatSetupState();
+            return;
+        }
+        if (images.length && !this.activeProviderSupportsImages()) {
+            this.showNotification?.(
+                'Your active provider does not support images. Switch to a vision-capable key in Settings → AI Chat.',
+                'error'
+            );
             return;
         }
 
         // Clear input (fixed height – no resize)
         chatInput.value = '';
+        this._sidebarChatImages = [];
+        this._syncAiChatImageAttachUi();
 
         // Add user message (with optional quote box for display)
-        this.addChatMessage('user', fullMessage, false, { quote: quoteForDisplay, mainText });
+        this.addChatMessage('user', fullMessage, false, { quote: quoteForDisplay, mainText, images });
 
         // Add loading message
         const loadingId = this.addChatMessage('assistant', '', true);
 
         // Send to AI (full message including quote)
         try {
-            const response = await this.getChatAIResponse(fullMessage);
+            const response = await this.getChatAIResponse(fullMessage, { images });
             this.updateChatMessage(loadingId, response);
         } catch (error) {
             console.error('Chat AI Error:', error);
@@ -12815,17 +18855,32 @@ class AxisBrowser {
             `;
         } else {
             const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const { quote, mainText } = options;
+            const { quote, mainText, images } = options;
             let contentHtml;
             if (role === 'user' && quote != null && quote !== '') {
                 const quoteDisplay = this.escapeHtml(quote);
                 const bodyDisplay = this.escapeHtml((mainText != null ? mainText : '').trim());
+                const imagesHtml = this._buildUserMessageImagesHtml(images);
                 contentHtml = `
                     <div class="ai-chat-message-content">
                         <div class="ai-chat-message-quote">${quoteDisplay}</div>
+                        ${imagesHtml}
                         ${bodyDisplay ? `<div class="ai-chat-message-body">${bodyDisplay}</div>` : ''}
                     </div>
                 `;
+            } else if (role === 'user') {
+                const imagesHtml = this._buildUserMessageImagesHtml(images);
+                const bodyDisplay = this.escapeHtml(String(content || '').trim());
+                if (imagesHtml) {
+                    contentHtml = `
+                    <div class="ai-chat-message-content ai-chat-message-content--with-media">
+                        ${imagesHtml}
+                        ${bodyDisplay ? `<div class="ai-chat-message-body">${bodyDisplay}</div>` : ''}
+                    </div>
+                `;
+                } else {
+                    contentHtml = `<div class="ai-chat-message-content">${bodyDisplay}</div>`;
+                }
             } else if (role === 'assistant') {
                 contentHtml = `
                     <div class="ai-chat-message-content">${this.formatAiChatMarkdown(content)}</div>
@@ -12843,12 +18898,13 @@ class AxisBrowser {
 
         // Store message (full content for API/history) — skip loading placeholders
         if (!isLoading) {
-            this.aiChatMessages.push({
-                id: messageId,
-                role,
-                content,
-                timestamp: new Date().toISOString()
-            });
+        this.aiChatMessages.push({
+            id: messageId,
+            role,
+            content,
+                timestamp: new Date().toISOString(),
+                ...(options.images?.length ? { images: options.images } : {})
+        });
         }
 
         return messageId;
@@ -12923,14 +18979,25 @@ class AxisBrowser {
     }
 
     /** Build prior turns for Groq — drops loading placeholders and the current user line (re-added once). */
-    _getChatHistoryForApi(rawHistory, userMessage) {
+    _getChatHistoryForApi(rawHistory, userMessage, userImages) {
         const msgs = (Array.isArray(rawHistory) ? rawHistory : [])
-            .filter((m) => (m.role === 'user' || m.role === 'assistant') && String(m.content || '').trim());
+            .filter((m) => (m.role === 'user' || m.role === 'assistant') && (String(m.content || '').trim() || m.images?.length))
+            .map((m) => ({
+                role: m.role,
+                content: m.content,
+                ...(m.images?.length ? { images: m.images } : {})
+            }));
         while (msgs.length && msgs[msgs.length - 1].role === 'assistant' && !String(msgs[msgs.length - 1].content || '').trim()) {
             msgs.pop();
         }
-        if (msgs.length && msgs[msgs.length - 1].role === 'user' && msgs[msgs.length - 1].content === userMessage) {
-            msgs.pop();
+        if (msgs.length && msgs[msgs.length - 1].role === 'user') {
+            const last = msgs[msgs.length - 1];
+            const sameText = last.content === userMessage;
+            const lastHasImages = !!(last.images && last.images.length);
+            const newHasImages = !!(userImages && userImages.length);
+            if (sameText && lastHasImages === newHasImages) {
+                msgs.pop();
+            }
         }
         return msgs.slice(-20);
     }
@@ -12960,10 +19027,9 @@ class AxisBrowser {
     }
 
     async getChatAIResponse(userMessage, options = {}) {
-        if (!this.hasGroqApiKey()) {
-            throw new Error('Add your free Groq API key in Settings → AI Chat to start chatting.');
+        if (!this.hasAiApiKey()) {
+            throw new Error('Add an API key in Settings → AI Chat to start chatting.');
         }
-        const apiKey = this.getGroqApiKey();
 
         // Optional: include current page so the AI can read the page
         let pageContext = null;
@@ -12979,77 +19045,23 @@ class AxisBrowser {
         const rawHistory = options.history != null
             ? options.history
             : this.aiChatMessages;
-        const priorTurns = this._getChatHistoryForApi(rawHistory, userMessage);
+        const images = Array.isArray(options.images) ? options.images : [];
+        const priorTurns = this._getChatHistoryForApi(rawHistory, userMessage, images);
 
         const messages = [
             {
                 role: 'system',
                 content: systemWithPage
             },
-            ...priorTurns.map((msg) => ({
-                role: msg.role,
-                content: msg.content
-            })),
+            ...priorTurns,
             {
                 role: 'user',
-                content: userMessage
+                content: userMessage,
+                ...(images.length ? { images } : {})
             }
         ];
 
-        // Try multiple models in order of preference
-        const modelsToTry = [
-            'llama-3.3-70b-versatile',
-            'llama-3.1-8b-instant',
-            'llama-3.1-70b-versatile',
-            'llama-3-70b-8192',
-            'mixtral-8x7b-32768'
-        ];
-
-        let lastError = null;
-        let response = null;
-        let data = null;
-
-        for (const model of modelsToTry) {
-            try {
-                response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: model,
-                        messages: messages,
-                        max_tokens: 2048,
-                        temperature: 0.7
-                    })
-                });
-
-                if (response.ok) {
-                    data = await response.json();
-                    break; // Success, exit loop
-                } else {
-                    const errorData = await response.json().catch(() => ({}));
-                    lastError = errorData.error?.message || `HTTP ${response.status}`;
-                    continue; // Try next model
-                }
-            } catch (err) {
-                lastError = err.message;
-                continue; // Try next model
-            }
-        }
-
-        if (!response || !response.ok || !data) {
-            throw new Error(`Groq API error: All models failed. Last error: ${lastError || 'Unknown error'}`);
-        }
-
-        const aiResponse = data.choices?.[0]?.message?.content || '';
-
-        if (!aiResponse.trim()) {
-            throw new Error('Empty response from Groq');
-        }
-
-        return aiResponse.trim();
+        return this._completeAiChat(messages, { maxTokens: 2048 });
     }
 
     /** Render assistant Markdown (headings, lists, code, links) as safe HTML for chat bubbles. */
@@ -13244,29 +19256,15 @@ class AxisBrowser {
         }
     }
     
-    async showIconPicker(type) {
-        this._iconPickerType = type;
-        await window.electronAPI.showIconPicker(type);
-    }
-    
-    setupNativeEmojiPicker() {
-        // Listen for trigger from main process
-        window.electronAPI.onTriggerNativeEmojiPicker((type) => {
-            this._iconPickerType = type;
-            this.triggerNativeEmojiPicker();
-        });
-    }
-    
-    triggerNativeEmojiPicker() {
-        // Get the element to position the input relative to
+    _getIconPickerAnchorRect(type) {
         let targetElement = null;
-        if (this._iconPickerType === 'tab' && this.contextMenuTabId) {
+        if (type === 'tab' && this.contextMenuTabId) {
             targetElement = document.querySelector(`[data-tab-id="${this.contextMenuTabId}"]`);
-        } else if (this._iconPickerType === 'favorite' && this.contextMenuFavoriteId) {
+        } else if (type === 'favorite' && this.contextMenuFavoriteId) {
             const fid = String(this.contextMenuFavoriteId);
             const q = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(fid) : fid.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
             targetElement = document.querySelector(`#favorites-grid .favorite-item[data-favorite-id="${q}"]`);
-        } else if (this._iconPickerType === 'tab-group' && this.contextMenuTabGroupId != null) {
+        } else if (type === 'tab-group' && this.contextMenuTabGroupId != null) {
             const gid = this.findTabGroupKey(this.contextMenuTabGroupId);
             const q =
                 gid != null && typeof CSS !== 'undefined' && CSS.escape
@@ -13277,134 +19275,61 @@ class AxisBrowser {
             if (q) targetElement = document.querySelector(`[data-tab-group-id="${q}"]`);
         }
         
-        if (!targetElement) {
-            // Try to use current tab as fallback for tabs
-            if (this._iconPickerType === 'tab' && this.currentTab) {
+        if (!targetElement && type === 'tab' && this.currentTab) {
                 targetElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
-                if (targetElement) {
-                    this.contextMenuTabId = this.currentTab;
-                }
-            }
-            if (!targetElement) {
-                console.error('Target element not found for native emoji picker');
-                this._iconPickerType = null;
-                if (this.contextMenuFavoriteId) this.contextMenuFavoriteId = null;
-                return;
-            }
+            if (targetElement) this.contextMenuTabId = this.currentTab;
         }
-        
-        const rect = targetElement.getBoundingClientRect();
-        
-        // Create a temporary, nearly invisible input field positioned where we want the picker
-        let emojiInput = document.getElementById('native-emoji-input');
-        if (emojiInput) {
-            emojiInput.remove();
+
+        if (targetElement) return targetElement.getBoundingClientRect();
+
+        if (this._lastContextMenuPoint) {
+            const { x, y } = this._lastContextMenuPoint;
+            return { left: x, top: y, right: x, bottom: y, width: 0, height: 0 };
         }
-        
-        // Create a hidden textarea to receive emoji input
-        // The emoji picker is triggered by the main process using AppleScript
-        emojiInput = document.createElement('textarea');
-        emojiInput.id = 'native-emoji-input';
-        emojiInput.setAttribute('contenteditable', 'true');
-        emojiInput.style.cssText = `
-            position: fixed;
-            top: ${rect.bottom + 4}px;
-            left: ${rect.left + rect.width / 2}px;
-            width: 1px;
-            height: 1px;
-            opacity: 0.01;
-            pointer-events: auto;
-            z-index: 10001;
-            border: none;
-            outline: none;
-            background: transparent;
-            font-size: 16px;
-            color: transparent;
-            padding: 0;
-            margin: 0;
-            resize: none;
-            overflow: hidden;
-        `;
-        document.body.appendChild(emojiInput);
-        
-        // Listen for input changes (when user selects emoji/symbol from native picker)
-        const handleInput = (e) => {
-            const selected = emojiInput.value.trim();
-            if (selected) {
-                this.applySelectedIcon(selected);
-                // Clean up
-                emojiInput.value = '';
-                emojiInput.blur();
-                setTimeout(() => {
-                    if (emojiInput.parentNode) {
-                        emojiInput.remove();
-                    }
-                }, 100);
-            }
-        };
-        
-        emojiInput.addEventListener('input', handleInput);
-        emojiInput.addEventListener('change', handleInput);
-        
-        // Also listen for paste events (emoji picker sometimes uses paste)
-        emojiInput.addEventListener('paste', (e) => {
-            setTimeout(() => {
-                handleInput(e);
-            }, 10);
-        });
-        
-        // Focus the input immediately so it can receive emoji from the picker
-        // The main process triggers the emoji picker via AppleScript
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                emojiInput.focus();
-                emojiInput.select();
-                
-                // Keep it focused so it can receive the emoji
-                const keepFocused = () => {
-                    if (document.activeElement !== emojiInput && emojiInput.parentNode) {
-                        emojiInput.focus();
-                    }
-                };
-                
-                // Check focus periodically
-                const focusInterval = setInterval(keepFocused, 100);
-                
-                // Clean up after timeout
-                setTimeout(() => {
-                    clearInterval(focusInterval);
-                    emojiInput.removeEventListener('input', handleInput);
-                    emojiInput.removeEventListener('change', handleInput);
-                    emojiInput.removeEventListener('paste', handleInput);
-                    if (emojiInput.parentNode) {
-                        emojiInput.remove();
-                    }
-                    if (this._iconPickerType === 'favorite') {
-                        this.contextMenuFavoriteId = null;
-                    }
+
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        return { left: cx, top: cy, right: cx, bottom: cy, width: 0, height: 0 };
+    }
+
+    showIconPicker(type) {
+        this._iconPickerType = type;
+        const picker = window.AXIS_ICON_PICKER;
+        if (!picker?.open) {
+            console.error('Icon picker unavailable');
                     this._iconPickerType = null;
-                }, 60000); // 60 second timeout
-            });
+            return;
+        }
+        picker.open({
+            anchorRect: this._getIconPickerAnchorRect(type),
+            onSelect: ({ value, type: iconType }) => this.applySelectedIcon(value, iconType)
         });
     }
-    
-    applySelectedIcon(selected) {
-        // selected is an emoji or symbol from native macOS picker
-        const iconValue = selected.trim();
+
+    applySelectedIcon(selected, iconType = 'emoji') {
+        const iconValue = String(selected || '').trim();
         if (!iconValue) {
             if (this._iconPickerType === 'favorite') this.contextMenuFavoriteId = null;
             this._iconPickerType = null;
             return;
         }
+
+        const storedType = iconType === 'fa' ? 'fa' : 'emoji';
         
         if (this._iconPickerType === 'tab' && this.contextMenuTabId) {
             const tab = this.tabs.get(this.contextMenuTabId);
             if (tab) {
-                // Store emoji/symbol directly
+                if (!this._suppressUndo) {
+                    this._pushUndo({
+                        type: 'change_icon_tab',
+                        tabId: this.contextMenuTabId,
+                        previousIcon: tab.customIcon || null,
+                        previousIconType: tab.customIconType || null
+                    });
+                }
                 tab.customIcon = iconValue;
-                tab.customIconType = 'emoji'; // Mark as emoji/symbol
+                tab.customIconType = storedType;
                 this.tabs.set(this.contextMenuTabId, tab);
-                // Update the tab element
                 const tabElement = document.querySelector(`[data-tab-id="${this.contextMenuTabId}"]`);
                 if (tabElement) {
                     this.updateTabIcon(tabElement, this.contextMenuTabId);
@@ -13418,8 +19343,16 @@ class AxisBrowser {
             }
             const tabGroup = this.tabGroups.get(gid);
             if (tabGroup) {
+                if (!this._suppressUndo) {
+                    this._pushUndo({
+                        type: 'change_icon_tab_group',
+                        groupId: gid,
+                        previousIcon: tabGroup.icon || null,
+                        previousIconType: tabGroup.iconType || null
+                    });
+                }
                 tabGroup.icon = iconValue;
-                tabGroup.iconType = 'emoji';
+                tabGroup.iconType = storedType;
                 this.tabGroups.set(gid, tabGroup);
                 this.saveTabGroups();
                 this.renderTabGroups();
@@ -13427,13 +19360,21 @@ class AxisBrowser {
         } else if (this._iconPickerType === 'favorite' && this.contextMenuFavoriteId) {
             const fav = this.favorites.find((f) => f.id === this.contextMenuFavoriteId);
             if (fav) {
+                if (!this._suppressUndo) {
+                    this._pushUndo({
+                        type: 'change_icon_favorite',
+                        favoriteId: fav.id,
+                        previousIcon: fav.customIcon || null,
+                        previousIconType: fav.customIconType || null
+                    });
+                }
                 fav.customIcon = iconValue;
-                fav.customIconType = 'emoji';
+                fav.customIconType = storedType;
                 const rt = this._normalizeTabMapKey(fav.runtimeTabId);
                 if (rt != null && this.tabs.has(rt)) {
                     const tab = this.tabs.get(rt);
                     tab.customIcon = iconValue;
-                    tab.customIconType = 'emoji';
+                    tab.customIconType = storedType;
                     this.tabs.set(rt, tab);
                     const tabElement = document.querySelector(`[data-tab-id="${rt}"]`);
                     if (tabElement) this.updateTabIcon(tabElement, rt);
@@ -13538,15 +19479,9 @@ class AxisBrowser {
         // Focus the tab group name for editing when newly created
         setTimeout(() => {
             const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
-            if (tabGroupElement) {
-                const nameInput = tabGroupElement.querySelector('.tab-group-name-input');
-                if (nameInput) {
-                    nameInput.readOnly = false;
-                    nameInput.removeAttribute('tabindex');
-                    nameInput.style.pointerEvents = 'auto';
-                    nameInput.focus();
-                    nameInput.select();
-                }
+            const titleElement = tabGroupElement?.querySelector('.tab-title');
+            if (titleElement) {
+                this.renameTabGroup(tabGroupId, titleElement);
             }
         }, 100);
     }
@@ -13555,11 +19490,19 @@ class AxisBrowser {
         this.syncSidebarFromTabGroups();
     }
 
+    /** Refresh tab-group colors and open/closed chrome on existing sidebar nodes (no full reorder). */
+    _syncTabGroupsPresentationFromState() {
+        for (const group of this.tabGroups.values()) {
+            if (!group) continue;
+            this.getOrCreateGroupElement(group);
+        }
+    }
+
     createTabGroupElement(tabGroup) {
         const tabGroupElement = document.createElement('div');
-        tabGroupElement.className = 'tab-group';
+        tabGroupElement.className = 'tab-group pinned';
         tabGroupElement.dataset.tabGroupId = tabGroup.id;
-        if (tabGroup.pinned !== false) tabGroupElement.classList.add('pinned');
+        tabGroupElement.dataset.axisProfile = this._activeProfileDomKey();
 
         const color = tabGroup.color || '#FF6B6B';
         const rgb = this.hexToRgb(color);
@@ -13574,7 +19517,7 @@ class AxisBrowser {
                         ? `<span class="tab-favicon tab-group-icon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;">${tabGroup.icon || '📁'}</span>`
                         : `<i class="fas ${tabGroup.icon || 'fa-layer-group'} tab-favicon tab-group-icon"></i>`
                     }
-                    <input type="text" class="tab-group-name-input tab-title" value="${this.escapeHtml(tabGroup.name)}" placeholder="Tab Group name" readonly>
+                    <span class="tab-title">${this.escapeHtml(tabGroup.name || 'Tab Group')}</span>
                 </div>
                 <div class="tab-right">
                     <button class="tab-group-delete tab-close" title="Delete Tab Group"><i class="fas fa-times"></i></button>
@@ -13598,11 +19541,11 @@ class AxisBrowser {
         if (rgb) el.style.setProperty('--tab-group-color-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
         el.style.setProperty('--tab-group-color', color);
         el.dataset.color = color;
-        el.classList.toggle('pinned', tabGroup.pinned !== false);
+        el.classList.add('pinned');
 
         const tabLeft = el.querySelector('.tab-left');
-        const nameInput = el.querySelector('.tab-group-name-input');
-        if (!tabLeft || !nameInput) return;
+        const titleEl = el.querySelector('.tab-title');
+        if (!tabLeft || !titleEl) return;
 
         const nextIconHtml =
             tabGroup.iconType === 'emoji'
@@ -13612,126 +19555,73 @@ class AxisBrowser {
         const oldIcon = tabLeft.querySelector('.tab-group-icon');
         if (oldIcon) {
             oldIcon.outerHTML = nextIconHtml;
-        } else {
-            nameInput.insertAdjacentHTML('beforebegin', nextIconHtml);
+        } else if (titleEl) {
+            titleEl.insertAdjacentHTML('beforebegin', nextIconHtml);
         }
         const newIcon = tabLeft.querySelector('.tab-group-icon');
         if (newIcon) {
             newIcon.draggable = false;
         }
 
-        if (nameInput.readOnly) {
+        if (titleEl.tagName === 'SPAN') {
             const nextName = tabGroup.name || '';
-            if (nameInput.value !== nextName) {
-                nameInput.value = nextName;
+            if (titleEl.textContent !== nextName) {
+                titleEl.textContent = nextName;
             }
         }
     }
 
     setupTabGroupEventListeners(tabGroupElement, tabGroup) {
-        const nameInput = tabGroupElement.querySelector('.tab-group-name-input');
         const deleteBtn = tabGroupElement.querySelector('.tab-group-delete');
         const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
         const tabContent = tabGroupElement.querySelector('.tab-content');
 
-        // Disable HTML5 draggable - we now use custom smooth drag
         tabGroupElement.draggable = false;
-        
-        // Prevent child elements from being draggable
-        nameInput.draggable = false;
         deleteBtn.draggable = false;
         const tabGroupIcon = tabGroupElement.querySelector('.tab-group-icon');
         if (tabGroupIcon) {
             tabGroupIcon.draggable = false;
         }
-        
-        // Make input non-interactive when readonly to prevent focus
-        if (nameInput.readOnly) {
-            nameInput.style.pointerEvents = 'none';
-        }
-        
-        // Setup smooth drag for this tab group
+
         if (this.makeTabGroupSmoothDraggable) {
             this.makeTabGroupSmoothDraggable(tabGroupElement);
         }
-        
-        // Track click state to distinguish click from drag
+
         let clickStartPos = { x: 0, y: 0 };
         let clickStartTime = 0;
-        
+
         tabContent.addEventListener('mousedown', (e) => {
             clickStartPos = { x: e.clientX, y: e.clientY };
             clickStartTime = Date.now();
         });
-            
-        // Toggle tab group - click anywhere on the tab group tab (including the name)
+
         tabContent.addEventListener('click', (e) => {
-            // Don't toggle if clicking on delete button
             if (e.target.closest('.tab-group-delete')) {
                 return;
             }
-            
-            // Check if this was a drag (moved more than 5px)
+            if (tabGroupElement.classList.contains('tab-renaming')) {
+                return;
+            }
+
             const mouseMoved = Math.abs(e.clientX - clickStartPos.x) > 5 || Math.abs(e.clientY - clickStartPos.y) > 5;
             const timeSinceClick = Date.now() - clickStartTime;
-            
-            // If it was a drag, don't toggle
             if (mouseMoved && timeSinceClick > 100) {
                 return;
             }
-            
-            // If clicking on the input and it's readonly, just toggle (don't rename)
-            if (e.target.closest('.tab-group-name-input') && nameInput.readOnly) {
-                e.preventDefault();
-                e.stopPropagation();
-                nameInput.blur();
-                    this.toggleTabGroup(tabGroup.id);
-                return;
-            }
-            // If input is not readonly (being edited), don't toggle
-            if (e.target.closest('.tab-group-name-input') && !nameInput.readOnly) {
-                return;
-            }
-            e.stopPropagation();
-            // Blur input if it somehow got focused
-            if (nameInput.readOnly) {
-                nameInput.blur();
-            }
-                this.toggleTabGroup(tabGroup.id);
-        });
-        
-        // Prevent input from being focused when readonly
-        // Use tabindex to prevent keyboard focus, and blur handler for mouse focus
-        if (nameInput.readOnly) {
-            nameInput.setAttribute('tabindex', '-1');
-            nameInput.style.pointerEvents = 'none';
-        }
-        
-        // Prevent input from getting focus on click when readonly
-        nameInput.addEventListener('focus', (e) => {
-            if (nameInput.readOnly) {
-                // Immediately blur to prevent focus box - use requestAnimationFrame for immediate effect
-                requestAnimationFrame(() => {
-                    e.target.blur();
-                    e.target.style.pointerEvents = 'none';
-                });
-            }
-        }, true); // Use capture phase to catch it early
-        
-        // Also prevent focusin event
-        nameInput.addEventListener('focusin', (e) => {
-            if (nameInput.readOnly) {
-                e.preventDefault();
-                e.stopPropagation();
-                requestAnimationFrame(() => {
-                    e.target.blur();
-                    e.target.style.pointerEvents = 'none';
-                });
-            }
-        }, true);
 
-        // Right-click for context menu - use capture phase to run before sidebar handler.
-        // Tabs inside .tab-group-content must keep the tab context menu (don't intercept).
+            e.stopPropagation();
+            this.toggleTabGroup(tabGroup.id);
+        });
+
+        tabContent.addEventListener('dblclick', (e) => {
+            if (e.target.closest('.tab-group-delete')) return;
+            const titleElement = tabGroupElement.querySelector('.tab-title');
+            if (!titleElement || titleElement.tagName === 'INPUT') return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.renameTabGroup(tabGroup.id, titleElement);
+        });
+
         tabGroupElement.addEventListener('contextmenu', (e) => {
             const tabEl = e.target.closest('.tab');
             if (tabEl && tabGroupContent.contains(tabEl)) {
@@ -13739,34 +19629,10 @@ class AxisBrowser {
             }
             e.preventDefault();
             e.stopPropagation();
-            e.stopImmediatePropagation(); // Stop all other handlers
+            e.stopImmediatePropagation();
             this.showTabGroupContextMenu(e, tabGroup.id);
-        }, true); // Use capture phase
+        }, true);
 
-        // Rename tab group - only when input is made editable
-        nameInput.addEventListener('blur', () => {
-            const newName = nameInput.value.trim() || `Tab Group ${tabGroup.id}`;
-            tabGroup.name = newName;
-            this.tabGroups.set(tabGroup.id, tabGroup);
-            this.saveTabGroups();
-            // Make it readonly again
-            nameInput.readOnly = true;
-            nameInput.setAttribute('tabindex', '-1');
-            nameInput.style.pointerEvents = 'none';
-        });
-
-        nameInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                nameInput.blur();
-            }
-            if (e.key === 'Escape') {
-                nameInput.value = tabGroup.name;
-                nameInput.blur();
-            }
-        });
-
-        // Delete tab group - make it always visible but styled
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             e.preventDefault();
@@ -13936,8 +19802,7 @@ class AxisBrowser {
         if (!tab || !tabGroup) return;
 
         if (!skipUndo) {
-            this.tabUndoStack.push({ type: 'add_to_group', tabId, tabGroupId: resolvedId });
-            if (this.tabUndoStack.length > 15) this.tabUndoStack = this.tabUndoStack.slice(-15);
+            this._pushUndo({ type: 'add_to_group', tabId, tabGroupId: resolvedId });
         }
 
         for (const [id, tg] of this.tabGroups) {
@@ -13949,14 +19814,14 @@ class AxisBrowser {
                     this.tabGroups.delete(id);
                     document.querySelector(`[data-tab-group-id="${id}"]`)?.remove();
                 } else {
-                    tg.open = false;
-                    if (this.settings?.autoCollapseEmptyTabGroup !== false) {
-                        this._pendingEmptyGroupCollapseId = id;
-                    }
-                    this.tabGroups.set(id, tg);
+                tg.open = false;
+                if (this.settings?.autoCollapseEmptyTabGroup !== false) {
+                    this._pendingEmptyGroupCollapseId = id;
                 }
+                    this.tabGroups.set(id, tg);
+            }
             } else {
-                this.tabGroups.set(id, tg);
+            this.tabGroups.set(id, tg);
             }
         }
 
@@ -13972,7 +19837,7 @@ class AxisBrowser {
         this.tabGroups.set(resolvedId, tabGroup);
 
         tab.tabGroupId = resolvedId;
-        tab.pinned = tabGroup.pinned !== false;
+        tab.pinned = true;
         this.tabs.set(tabId, tab);
 
         this.syncSidebarFromTabGroups();
@@ -14040,7 +19905,7 @@ class AxisBrowser {
      * @param {boolean} skipUndo
      * @param {number|string|null} onlyGroupId When set, only touch that group.
      */
-    _removeTabIdFromTabGroups(rawTabId, skipUndo = false, onlyGroupId = null) {
+    _removeTabIdFromTabGroups(rawTabId, skipUndo = false, onlyGroupId = null, skipSync = false) {
         const tid = this._normalizeTabMapKey(rawTabId);
         if (tid == null) return false;
 
@@ -14054,14 +19919,13 @@ class AxisBrowser {
             if (!this._tabIdIsInGroup(tabGroup.tabIds, tid)) continue;
 
             const indexInGroup = tabGroup.tabIds.findIndex((id) => this._normalizeTabMapKey(id) === tid);
-            if (!skipUndo && indexInGroup !== -1) {
-                this.tabUndoStack.push({
+        if (!skipUndo && indexInGroup !== -1) {
+                this._pushUndo({
                     type: 'remove_from_group',
                     tabId: tid,
                     tabGroupId: groupKey,
                     indexInGroup
                 });
-                if (this.tabUndoStack.length > 15) this.tabUndoStack = this.tabUndoStack.slice(-15);
             }
 
             tabGroup.tabIds = tabGroup.tabIds.filter((id) => this._normalizeTabMapKey(id) !== tid);
@@ -14073,8 +19937,8 @@ class AxisBrowser {
                 this.tabs.set(tid, tab);
             }
 
-            if (tabGroup.tabIds.length === 0) {
-                tabGroup.open = false;
+        if (tabGroup.tabIds.length === 0) {
+            tabGroup.open = false;
                 if (tabGroup.hadTabs) {
                     this._deleteTabGroupFromMapAndDom(groupKey);
                 } else {
@@ -14085,14 +19949,14 @@ class AxisBrowser {
             }
         }
 
-        if (changed) {
-            this.syncSidebarFromTabGroups();
+        if (changed && !skipSync) {
+        this.syncSidebarFromTabGroups();
         }
         return changed;
     }
 
-    _removeTabIdFromAllTabGroups(rawTabId, skipUndo = false) {
-        return this._removeTabIdFromTabGroups(rawTabId, skipUndo, null);
+    _removeTabIdFromAllTabGroups(rawTabId, skipUndo = false, skipSync = false) {
+        return this._removeTabIdFromTabGroups(rawTabId, skipUndo, null, skipSync);
     }
 
     removeTabFromTabGroup(tabId, tabGroupId, skipUndo = false) {
@@ -14111,7 +19975,7 @@ class AxisBrowser {
             const tab = tabId != null ? this.tabs.get(tabId) : null;
             if (tab) {
                 tab.tabGroupId = undefined;
-                tab.pinned = tabGroup.pinned !== false;
+                tab.pinned = true;
                 this.tabs.set(tabId, tab);
             }
         });
@@ -14125,6 +19989,7 @@ class AxisBrowser {
     }
 
     _buildTabGroupsSavePayload() {
+        this._flushNewTabPageStateBeforePersist();
         this._pruneAllTabGroupsTabIds();
         return Array.from(this.tabGroups.values()).map(tabGroup => {
             const tabIds = tabGroup.tabIds
@@ -14133,14 +19998,17 @@ class AxisBrowser {
             const tabs = tabIds.map(tabId => {
                 const tab = this.tabs.get(tabId);
                 if (!tab) return null;
-                return {
-                    id: tabId,
-                    url: tab.url || null,
-                    title: tab.title || 'New Tab',
-                    favicon: tab.favicon || null
-                };
+                const saved = {
+                        id: tabId,
+                        url: tab.url || null,
+                        title: tab.title || 'New Tab',
+                        favicon: tab.favicon || null
+                    };
+                const newTabPageState = this._serializeNewTabPageStateForSave(tab);
+                if (newTabPageState) saved.newTabPageState = newTabPageState;
+                return saved;
             }).filter(t => t !== null);
-
+            
             return {
                 id: tabGroup.id,
                 name: tabGroup.name,
@@ -14158,21 +20026,42 @@ class AxisBrowser {
     }
 
     async saveTabGroups() {
+        if (this._profileScopedPersistBlocked?.('tabGroups')) return;
         const tabGroupsArray = this._buildTabGroupsSavePayload();
         await this.saveSetting('tabGroups', tabGroupsArray);
     }
 
     /** Called from main via executeJavaScript when quit is confirmed (never during beforeunload). */
-    flushSessionStatePayload() {
+    flushSessionStatePayload(context = 'app-quit') {
         if (this.isIncognitoWindow) return { incognito: true };
         try {
+            const mode = this.getUnpinnedClearMode();
+            if (
+                context === 'app-quit' &&
+                mode === 'app-close' &&
+                !this._shouldPersistUnpinnedItems('app-quit')
+            ) {
+                this.clearAllUnpinnedItems({ skipPersist: true, skipTimestamp: true });
+            }
+            this._flushNewTabPageStateBeforePersist();
             this._pruneAllTabGroupsTabIds();
             this._removeEmptyTabGroupsWithHadTabs();
-            const tabGroups = this._buildTabGroupsSavePayload();
+            let tabGroups = this._buildTabGroupsSavePayload();
+            tabGroups = this.filterTabGroupsForUnpinnedPolicy(tabGroups, context);
             const pinnedTabs = this._collectPinnedTabsPayload();
+            const unpinnedTabs = this._shouldPersistUnpinnedItems(context)
+                ? this._collectUnpinnedTabsPayload({ context })
+                : [];
             this.settings.tabGroups = tabGroups;
             this.settings.pinnedTabs = pinnedTabs;
-            return { incognito: false, tabGroups, pinnedTabs };
+            this.settings.unpinnedTabs = unpinnedTabs;
+            return {
+                incognito: false,
+                tabGroups,
+                pinnedTabs,
+                unpinnedTabs,
+                clearUnpinnedRecovery: context === 'app-quit'
+            };
         } catch (e) {
             console.error('flushSessionStatePayload failed:', e);
             return { incognito: true };
@@ -14191,6 +20080,7 @@ class AxisBrowser {
                 const hadTabs =
                     tabGroupData.hadTabs === true || savedTabIds.length > 0 || savedTabs.length > 0;
 
+                const groupPinned = tabGroupData.pinned !== false;
                 const group = {
                     id: tabGroupData.id,
                     name: tabGroupData.name || `Tab Group ${index + 1}`,
@@ -14198,7 +20088,7 @@ class AxisBrowser {
                     open: tabGroupData.open !== false,
                     order: typeof tabGroupData.order === 'number' ? tabGroupData.order : index,
                     color: tabGroupData.color || '#FF6B6B',
-                    pinned: tabGroupData.pinned !== false,
+                    pinned: groupPinned,
                     icon: tabGroupData.icon || null,
                     iconType: tabGroupData.iconType || null,
                     hadTabs
@@ -14208,18 +20098,28 @@ class AxisBrowser {
                     if (!saved || saved.id == null) return;
                     const tabId = this._normalizeTabMapKey(saved.id);
                     if (tabId == null || this.tabs.has(tabId)) return;
+                    const inAiChat = this._savedNewTabInAiChatFromPayload(saved);
                     this.tabs.set(tabId, {
                         id: tabId,
                         url: saved.url || null,
-                        title: saved.title || 'New Tab',
-                        favicon: saved.favicon || null,
+                        title: inAiChat ? 'AI Chat' : (saved.title || 'New Tab'),
+                        favicon: inAiChat ? this.NTP_AI_CHAT_FAVICON : (saved.favicon || null),
                         canGoBack: false,
                         canGoForward: false,
                         history: saved.url ? [saved.url] : [],
                         historyIndex: saved.url ? 0 : -1,
-                        pinned: group.pinned,
+                        pinned: groupPinned,
                         tabGroupId: group.id,
-                        webview: null
+                        webview: null,
+                        ...(saved.newTabPageState ? { newTabPageState: saved.newTabPageState } : {}),
+                        ...(Array.isArray(saved.newTabPageState?.askMessageHistory)
+                            ? {
+                                  newTabAskHistory: saved.newTabPageState.askMessageHistory.map((m) => ({
+                                      role: m.role,
+                                      content: m.content
+                                  }))
+                              }
+                            : {})
                     });
                 });
 
@@ -14243,7 +20143,7 @@ class AxisBrowser {
                     const tab = this.tabs.get(tabId);
                     if (!tab) return;
                     tab.tabGroupId = group.id;
-                    tab.pinned = group.pinned;
+                    tab.pinned = groupPinned;
                     this.tabs.set(tabId, tab);
                 });
             });
@@ -14265,21 +20165,27 @@ class AxisBrowser {
     _findTabElementInProfileScope(tabId) {
         const poolId = this._axisProfileDomPoolId(this.profileId);
         const sel = `[data-tab-id="${tabId}"]`;
-        return (
-            document.querySelector(`#tabs-container ${sel}`) ||
-            document.getElementById(poolId)?.querySelector(sel) ||
-            null
-        );
+        const candidates = [
+            document.querySelector(`#tabs-container ${sel}`),
+            document.getElementById(poolId)?.querySelector(sel)
+        ].filter(Boolean);
+        for (const el of candidates) {
+            if (this._sidebarNodeOwnedByActiveProfile(el)) return el;
+        }
+        return null;
     }
 
     _findTabGroupElementInProfileScope(groupId) {
         const poolId = this._axisProfileDomPoolId(this.profileId);
         const sel = `[data-tab-group-id="${groupId}"]`;
-        return (
-            document.querySelector(`#tabs-container ${sel}`) ||
-            document.getElementById(poolId)?.querySelector(sel) ||
-            null
-        );
+        const candidates = [
+            document.querySelector(`#tabs-container ${sel}`),
+            document.getElementById(poolId)?.querySelector(sel)
+        ].filter(Boolean);
+        for (const el of candidates) {
+            if (this._sidebarNodeOwnedByActiveProfile(el)) return el;
+        }
+        return null;
     }
 
     /**
@@ -14311,17 +20217,20 @@ class AxisBrowser {
 
     getOrCreateTabElement(tabId) {
         const existing = this._findTabElementInProfileScope(tabId);
-        if (existing) return existing;
+        if (existing) {
+            existing.dataset.axisProfile = this._activeProfileDomKey();
+            return existing;
+        }
         const tab = this.tabs.get(tabId);
         if (!tab) return null;
+        if (tab.isFavoriteTab) {
+            return this._ensureFavoriteTabHostElement(tabId);
+        }
         const tabElement = document.createElement('div');
         tabElement.className = 'tab' + (tab.pinned ? ' pinned' : '');
         tabElement.dataset.tabId = tabId;
-        const iconHtml = tab.customIcon
-            ? (tab.customIconType === 'emoji'
-                ? `<span class="tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;">${tab.customIcon || ''}</span>`
-                : `<i class="fas ${tab.customIcon} tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;color:rgba(255,255,255,0.7);"></i>`)
-            : '<img class="tab-favicon" src="" alt="" draggable="false" onerror="this.style.visibility=\'hidden\'">';
+        tabElement.dataset.axisProfile = this._activeProfileDomKey();
+        const iconHtml = this.tabFaviconIconHtml(tab, tabId);
         tabElement.innerHTML = `
             <div class="tab-content">
                 <div class="tab-left">${iconHtml}
@@ -14338,12 +20247,157 @@ class AxisBrowser {
         return tabElement;
     }
 
-    syncSidebarFromTabGroups() {
+    _countExpectedSidebarDomNodes() {
+        let looseTabs = 0;
+        for (const tab of this.tabs.values()) {
+            if (!tab || tab.isFavoriteTab || tab.hiddenInSidebar || tab.tabGroupId) continue;
+            looseTabs++;
+        }
+        return { looseTabs, groups: this.tabGroups.size };
+    }
+
+    _countSidebarDomNodesForProfile(profileId) {
+        const domKey = this._activeProfileDomKey(profileId);
+        let looseTabs = 0;
+        let groups = 0;
+        const countRoot = (root) => {
+            if (!root) return;
+            for (const el of root.children) {
+                if (el.dataset?.axisProfile && el.dataset.axisProfile !== domKey) continue;
+                if (el.classList.contains('tab-group')) {
+                    groups++;
+                } else if (
+                    el.classList.contains('tab') &&
+                    !el.classList.contains('tab-favorite-host')
+                ) {
+                    looseTabs++;
+                }
+            }
+        };
+        countRoot(this.elements?.tabsContainer || document.getElementById('tabs-container'));
+        const poolId = this._axisProfileDomPoolId?.(profileId);
+        if (poolId) countRoot(document.getElementById(poolId));
+        return { looseTabs, groups };
+    }
+
+    /** True when pooled + visible sidebar nodes match the in-memory tab/group maps. */
+    _sidebarDomMatchesState(profileId = this.profileId) {
+        const expected = this._countExpectedSidebarDomNodes();
+        const actual = this._countSidebarDomNodesForProfile(profileId);
+        return (
+            expected.looseTabs === actual.looseTabs && expected.groups === actual.groups
+        );
+    }
+
+    _persistPayloadLooksValid(captured, state) {
+        if (!captured || !state?.tabs) return !!captured;
+        const snapCount = Array.from(state.tabs.values()).filter(
+            (t) => t && !t.isFavoriteTab
+        ).length;
+        const pin = Array.isArray(captured.pinnedTabs) ? captured.pinnedTabs.length : 0;
+        const unp = Array.isArray(captured.unpinnedTabs) ? captured.unpinnedTabs.length : 0;
+        const grpTabs = (Array.isArray(captured.tabGroups) ? captured.tabGroups : []).reduce(
+            (n, g) => n + (Array.isArray(g?.tabIds) ? g.tabIds.length : 0),
+            0
+        );
+        const capCount = pin + unp + grpTabs;
+        if (snapCount > 0 && capCount === 0) return false;
+        return true;
+    }
+
+    _sortLooseUnpinnedTabIds(ids) {
+        const saved = Array.isArray(this.settings?.unpinnedTabs) ? this.settings.unpinnedTabs : [];
+        const orderById = new Map();
+        saved.forEach((row, index) => {
+            const id = this._normalizeTabMapKey(row?.id);
+            if (id == null) return;
+            orderById.set(id, typeof row.order === 'number' ? row.order : index);
+        });
+        return [...ids].sort((a, b) => {
+            const ao = orderById.has(a) ? orderById.get(a) : Number.MAX_SAFE_INTEGER;
+            const bo = orderById.has(b) ? orderById.get(b) : Number.MAX_SAFE_INTEGER;
+            if (ao !== bo) return ao - bo;
+            return String(a).localeCompare(String(b));
+        });
+    }
+
+    /** Pinned-section order from the live sidebar DOM (tabs + groups above the divider). */
+    _readPinnedSidebarOrderFromDom() {
+        const container = this.elements.tabsContainer;
+        const separator = this.elements.tabsSeparator;
+        if (!container || !separator || separator.parentNode !== container) return [];
+
+        const children = Array.from(container.children);
+        const sepIdx = children.indexOf(separator);
+        if (sepIdx < 0) return [];
+
+        const order = [];
+        for (let i = 0; i < sepIdx; i++) {
+            const el = children[i];
+            if (el.classList.contains('tab')) {
+                const tabId = this._normalizeTabMapKey(el.dataset.tabId);
+                if (tabId == null) continue;
+                const tab = this.tabs.get(tabId);
+                if (tab && !tab.tabGroupId && tab.pinned) {
+                    order.push({ type: 'tab', id: tabId });
+                }
+            } else if (el.classList.contains('tab-group')) {
+                const gKey = el.dataset.tabGroupId != null ? this.findTabGroupKey(el.dataset.tabGroupId) : null;
+                if (gKey == null) continue;
+                const group = this.tabGroups.get(gKey);
+                if (group) order.push({ type: 'group', id: group.id });
+            }
+        }
+        return order;
+    }
+
+    _syncTabGroupOrdersFromPinnedOrder(pinnedOrder) {
+        if (!Array.isArray(pinnedOrder) || pinnedOrder.length === 0) return;
+        let groupOrd = 0;
+        for (const item of pinnedOrder) {
+            if (item.type !== 'group') continue;
+            const gKey = this.findTabGroupKey(item.id);
+            if (gKey == null) continue;
+            const group = this.tabGroups.get(gKey);
+            if (!group) continue;
+            group.order = groupOrd++;
+            this.tabGroups.set(gKey, group);
+        }
+    }
+
+    /** Tab groups always live above the pinned/unpinned separator with pinned tabs. */
+    _normalizeTabGroupsPinnedOnly() {
+        let changed = false;
+        for (const [groupKey, group] of this.tabGroups) {
+            if (!group) continue;
+            if (group.pinned !== true) {
+                group.pinned = true;
+                changed = true;
+            }
+            for (const rawTabId of group.tabIds || []) {
+                const tabId = this._normalizeTabMapKey(rawTabId);
+                if (tabId == null) continue;
+                const tab = this.tabs.get(tabId);
+                if (tab && !tab.pinned) {
+                    tab.pinned = true;
+                    this.tabs.set(tabId, tab);
+                    changed = true;
+                }
+            }
+            this.tabGroups.set(groupKey, group);
+        }
+        return changed;
+    }
+
+    syncSidebarFromTabGroups(opts = {}) {
+        if (this._sidebarReorderDragActive && !opts.force) return;
         const container = this.elements.tabsContainer;
         const separator = this.elements.tabsSeparator;
         const newTabBtn = this.elements.sidebarNewTabBtn;
         if (!container || !separator) return;
 
+        this._purgeOrphanSidebarNodes?.();
+        this._normalizeTabGroupsPinnedOnly();
         this._pruneAllTabGroupsTabIds();
 
         // Remove any group elements whose group was deleted (e.g. after deleteTabGroup)
@@ -14356,29 +20410,43 @@ class AxisBrowser {
 
         const loosePinnedIds = Array.from(this.tabs.keys()).filter(id => {
             const t = this.tabs.get(id);
-            return t && !t.tabGroupId && t.pinned;
+            return t && !t.tabGroupId && t.pinned && !t.isFavoriteTab;
         });
         const looseUnpinnedIds = Array.from(this.tabs.keys()).filter(id => {
             const t = this.tabs.get(id);
-            return t && !t.tabGroupId && !t.pinned;
+            return t && !t.tabGroupId && !t.pinned && !t.isFavoriteTab;
         });
 
-        const pinnedGroups = Array.from(this.tabGroups.values())
-            .filter(g => g.pinned !== false)
-            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-        const unpinnedGroups = Array.from(this.tabGroups.values())
-            .filter(g => g.pinned === false)
-            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        const pinnedGroups = Array.from(this.tabGroups.values()).sort(
+            (a, b) => (a.order ?? 0) - (b.order ?? 0)
+        );
 
-        // Build order from state only: loose tabs first, then groups in order
-        const pinnedOrder = [
+        const domPinnedOrder = this._readPinnedSidebarOrderFromDom();
+        const fallbackPinnedOrder = [
             ...loosePinnedIds.map(id => ({ type: 'tab', id })),
             ...pinnedGroups.map(g => ({ type: 'group', id: g.id }))
         ];
-        const unpinnedOrder = [
-            ...unpinnedGroups.map(g => ({ type: 'group', id: g.id })),
-            ...looseUnpinnedIds.map(id => ({ type: 'tab', id }))
-        ];
+        let pinnedOrder = fallbackPinnedOrder;
+        if (domPinnedOrder.length > 0) {
+            const seenTabs = new Set(
+                domPinnedOrder.filter((item) => item.type === 'tab').map((item) => item.id)
+            );
+            const seenGroups = new Set(
+                domPinnedOrder.filter((item) => item.type === 'group').map((item) => item.id)
+            );
+            pinnedOrder = [...domPinnedOrder];
+            for (const id of loosePinnedIds) {
+                if (!seenTabs.has(id)) pinnedOrder.push({ type: 'tab', id });
+            }
+            for (const group of pinnedGroups) {
+                if (!seenGroups.has(group.id)) pinnedOrder.push({ type: 'group', id: group.id });
+            }
+        }
+        this._syncTabGroupOrdersFromPinnedOrder(pinnedOrder);
+        const unpinnedOrder = this._sortLooseUnpinnedTabIds(looseUnpinnedIds).map((id) => ({
+            type: 'tab',
+            id
+        }));
 
         const pinnedNodes = [];
         pinnedOrder.forEach(item => {
@@ -14396,38 +20464,28 @@ class AxisBrowser {
 
         const unpinnedNodes = [];
         unpinnedOrder.forEach(item => {
-            if (item.type === 'tab') {
                 const el = this.getOrCreateTabElement(item.id);
                 if (el) unpinnedNodes.push(el);
-            } else {
-                const g = this.tabGroups.get(Number(item.id)) || this.tabGroups.get(item.id);
-                if (g) {
-                    const groupEl = this.getOrCreateGroupElement(g);
-                    if (groupEl) unpinnedNodes.push(groupEl);
-                }
-            }
         });
 
         [].concat(pinnedNodes, unpinnedNodes).forEach(node => {
             if (node.parentNode) node.remove();
         });
 
-        let ref = separator;
-        pinnedNodes.forEach(node => {
-            container.insertBefore(node, ref);
-            ref = node;
-        });
+        const pinnedFrag = document.createDocumentFragment();
+        pinnedNodes.forEach((node) => pinnedFrag.appendChild(node));
+        container.insertBefore(pinnedFrag, separator);
 
         const afterNewTab = newTabBtn ? newTabBtn.nextSibling : separator.nextSibling;
-        ref = afterNewTab || null;
-        unpinnedNodes.forEach(node => {
-            if (ref) container.insertBefore(node, ref);
-            else container.appendChild(node);
-            ref = node;
-        });
+        const unpinnedFrag = document.createDocumentFragment();
+        unpinnedNodes.forEach((node) => unpinnedFrag.appendChild(node));
+        if (afterNewTab) container.insertBefore(unpinnedFrag, afterNewTab);
+        else container.appendChild(unpinnedFrag);
         
         // Separator visibility is based on actual DOM content above it
         this.updatePinnedSeparatorVisibility();
+        this._syncFavoriteTabsUi?.();
+        this._refreshSidebarDragHandlers?.();
         if (!this._suppressTabGroupsAutosave) void this.saveTabGroups();
     }
 
@@ -14450,17 +20508,17 @@ class AxisBrowser {
             group.tabIds.forEach(tabId => {
                 const tab = this.tabs.get(tabId);
                 if (tab) {
-                    tab.pinned = group.pinned !== false;
+                    tab.pinned = true;
                     this.tabs.set(tabId, tab);
                 }
                 let tabEl = existingTabEls.find(t => parseInt(t.dataset.tabId, 10) === tabId);
                 if (!tabEl) tabEl = this.getOrCreateTabElement(tabId);
                 if (tabEl && tabEl.parentNode !== container) {
-                    tabEl.classList.toggle('pinned', group.pinned !== false);
+                    tabEl.classList.add('pinned');
                     container.appendChild(tabEl);
                     if (this.makeTabDraggable) this.makeTabDraggable(tabEl);
                 } else if (tabEl && tabEl.parentNode === container) {
-                    tabEl.classList.toggle('pinned', group.pinned !== false);
+                    tabEl.classList.add('pinned');
                 }
             });
             if (group.tabIds.length === 0) {
@@ -14490,6 +20548,7 @@ class AxisBrowser {
 
         if (el && content) {
             this.syncTabGroupElementHeader(el, group);
+            el.dataset.axisProfile = this._activeProfileDomKey();
             ensureContentOrder(content);
             return el;
         }
@@ -14506,6 +20565,7 @@ class AxisBrowser {
         this.hideSidebarContextMenu();
 
         this.contextMenuTabGroupId = this.findTabGroupKey(tabGroupId);
+        this._lastContextMenuPoint = { x: e.clientX, y: e.clientY };
         const g = this.contextMenuTabGroupId != null ? this.tabGroups.get(this.contextMenuTabGroupId) : null;
         const hasCustomIcon = !!(g?.icon && String(g.icon).trim());
 
@@ -14518,102 +20578,19 @@ class AxisBrowser {
     }
 
     renameCurrentTabGroup() {
-        if (this.contextMenuTabGroupId) {
-            const tabGroupElement = document.querySelector(`[data-tab-group-id="${this.contextMenuTabGroupId}"]`);
-            if (tabGroupElement) {
-                const nameInput = tabGroupElement.querySelector('.tab-group-name-input');
-                if (nameInput) {
-                    const currentName = nameInput.value;
-                    
-                    // Get computed styles to match exactly
-                    const computedStyle = window.getComputedStyle(nameInput);
-                    
-                    // Create input element with EXACT same flex properties as original
-                    const input = document.createElement('input');
-                    input.type = 'text';
-                    input.value = currentName;
-                    input.className = nameInput.className; // Copy all classes
-                    input.style.cssText = `
-                        flex: 1;
-                        min-width: 0;
-                        font-size: ${computedStyle.fontSize};
-                        font-family: ${computedStyle.fontFamily};
-                        font-weight: ${computedStyle.fontWeight};
-                        line-height: ${computedStyle.lineHeight};
-                        color: #fff;
-                        background: transparent;
-                        border: 1px solid #555;
-                        border-radius: 8px;
-                        padding: 0;
-                        margin: 0;
-                        outline: none;
-                        white-space: nowrap;
-                        overflow: hidden;
-                        text-overflow: ellipsis;
-                        box-sizing: border-box;
-                    `;
-                    
-                    // Replace nameInput with input inline - this preserves flex layout
-                    if (nameInput && nameInput.parentNode) {
-                        nameInput.parentNode.replaceChild(input, nameInput);
-                    }
-                    if (input) {
-                        if (typeof input.focus === 'function') {
-                            try {
-                                input.focus();
-                            } catch (e) {
-                                // Ignore focus errors
-                            }
-                        }
-                        if (typeof input.select === 'function') {
-                            try {
-                                input.select();
-                            } catch (e) {
-                                // Ignore select errors
-                            }
-                        }
-                    }
-                    
-                    const finishRename = () => {
-                        const newName = input.value.trim() || currentName;
-                        
-                        // Restore the nameInput element
-                        const newNameInput = document.createElement('input');
-                        newNameInput.type = 'text';
-                        newNameInput.className = 'tab-group-name-input tab-title';
-                        newNameInput.value = newName;
-                        newNameInput.readOnly = true;
-                        input.parentNode.replaceChild(newNameInput, input);
-                        
-                        // Update tab group data
-                        const tabGroup = this.tabGroups.get(this.contextMenuTabGroupId);
-                        if (tabGroup) {
-                            tabGroup.name = newName;
-                            this.tabGroups.set(this.contextMenuTabGroupId, tabGroup);
-                            this.saveTabGroups();
-                        }
-                    };
-                    
-                    input.addEventListener('blur', finishRename);
-                    input.addEventListener('keypress', (e) => {
-                        if (e.key === 'Enter') {
-                            finishRename();
-                        }
-                    });
-                    input.addEventListener('keydown', (e) => {
-                        if (e.key === 'Escape') {
-                            finishRename();
-                        }
-                    });
-                }
-            }
+        if (!this.contextMenuTabGroupId) return;
+        const tabGroupElement = document.querySelector(`[data-tab-group-id="${this.contextMenuTabGroupId}"]`);
+        const titleElement = tabGroupElement?.querySelector('.tab-title');
+        if (titleElement && titleElement.tagName !== 'INPUT') {
+            this.renameTabGroup(this.contextMenuTabGroupId, titleElement, { deferBlurMs: 250 });
         }
     }
 
     deleteCurrentTabGroup() {
         const id = this.contextMenuTabGroupId;
         if (id == null) return;
-        const tabGroup = this.tabGroups.get(Number(id)) || this.tabGroups.get(id);
+        const gKey = this.findTabGroupKey(id);
+        const tabGroup = gKey != null ? this.tabGroups.get(gKey) : null;
         if (!tabGroup) return;
         if (!confirm(`Delete tab group "${tabGroup.name}"? Tabs will be moved back to the sidebar.`)) return;
         this.deleteTabGroup(tabGroup.id);
@@ -14624,7 +20601,7 @@ class AxisBrowser {
             return;
         }
 
-        const originalTabGroup = this.tabGroups.get(this.contextMenuTabGroupId);
+        const originalTabGroup = this.tabGroups.get(this.findTabGroupKey(this.contextMenuTabGroupId));
         if (!originalTabGroup) {
             return;
         }
@@ -14639,7 +20616,9 @@ class AxisBrowser {
             open: originalTabGroup.open,
             order: this.tabGroups.size,
             color: originalTabGroup.color || '#FF6B6B',
-            pinned: originalTabGroup.pinned !== false,
+            icon: originalTabGroup.icon || null,
+            iconType: originalTabGroup.iconType || null,
+            pinned: true,
             hadTabs: false,
             tabs: []
         };
@@ -14649,38 +20628,37 @@ class AxisBrowser {
         originalTabGroup.tabIds.forEach(tabId => {
             const originalTab = this.tabs.get(tabId);
             if (originalTab) {
-                // Get URL from tab data or webview
-                let urlToDuplicate = originalTab.url;
-                
-                if (!urlToDuplicate || urlToDuplicate === 'about:blank') {
-                    const webview = originalTab.webview;
-                    if (webview) {
-                        try {
-                            urlToDuplicate = webview.getURL();
-                        } catch (e) {
-                            console.error('Error getting URL from webview:', e);
-                        }
+                const urlToDuplicate = this._getTabLivePageUrl(originalTab);
+                if (!urlToDuplicate || urlToDuplicate === 'about:blank') return;
+
+                let newTabId = null;
+                if (urlToDuplicate === this.NEWTAB_URL) {
+                    newTabId = this.createNewTab(this.NEWTAB_URL, { preserveNewTabState: true, skipActivate: true });
+                    const newTab = newTabId != null ? this.tabs.get(newTabId) : null;
+                    if (newTab && originalTab.newTabPageState) {
+                        newTab.newTabPageState = JSON.parse(JSON.stringify(originalTab.newTabPageState));
+                        this.tabs.set(newTabId, newTab);
                     }
+                } else {
+                    const sanitized = this.sanitizeUrl(urlToDuplicate);
+                    if (!sanitized) return;
+                    newTabId = this.createNewTab(sanitized, { skipActivate: true });
                 }
 
-                // Only duplicate if we have a valid URL
-                if (urlToDuplicate && urlToDuplicate !== 'about:blank' && urlToDuplicate.startsWith('http')) {
-                    // Create new tab
-                    const newTabId = this.createNewTab(urlToDuplicate);
-                    if (newTabId) {
-                        newTabIds.push(newTabId);
-                        
-                        // Get the newly created tab to save its data
-                        const newTab = this.tabs.get(newTabId);
-                        if (newTab) {
-                            // Store tab data for persistence
-                            newTabGroup.tabs.push({
-                                id: newTabId,
-                                url: newTab.url || urlToDuplicate,
-                                title: newTab.title || originalTab.title || 'New Tab',
-                                favicon: newTab.favicon || originalTab.favicon || null
-                            });
-                        }
+                if (newTabId) {
+                    newTabIds.push(newTabId);
+                    this._copyTabPresentationToDuplicate(originalTab, newTabId);
+
+                    // Get the newly created tab to save its data
+                    const newTab = this.tabs.get(newTabId);
+                    if (newTab) {
+                        // Store tab data for persistence
+                        newTabGroup.tabs.push({
+                            id: newTabId,
+                            url: newTab.url || urlToDuplicate,
+                            title: newTab.title || originalTab.title || 'New Tab',
+                            favicon: newTab.favicon || originalTab.favicon || null
+                        });
                     }
                 }
             }
@@ -14694,7 +20672,7 @@ class AxisBrowser {
         newTabIds.forEach(tabId => {
             const tab = this.tabs.get(tabId);
             if (tab) {
-                tab.pinned = newTabGroup.pinned !== false;
+                tab.pinned = true;
                 tab.tabGroupId = newTabGroupId;
                 this.tabs.set(tabId, tab);
             }
@@ -14762,7 +20740,8 @@ class AxisBrowser {
             canUpdateSavedLink: !!savedLinkInfo,
             savedLinkKind: savedLinkInfo?.kind || ''
         };
-        this.contextMenuTabId = tabId;
+        this.contextMenuTabId = this._normalizeTabMapKey(tabId);
+        this._lastContextMenuPoint = { x: e.clientX, y: e.clientY };
         await window.electronAPI.showTabContextMenu(e.clientX, e.clientY, tabInfo);
     }
 
@@ -14774,6 +20753,7 @@ class AxisBrowser {
         this.hideSidebarContextMenu();
         this.hideTabGroupContextMenu();
         this.contextMenuFavoriteId = favorite.id;
+        this._lastContextMenuPoint = { x: e.clientX, y: e.clientY };
         const hasCustomIcon = !!(favorite.customIcon && String(favorite.customIcon).trim());
         const savedLinkInfo = this._getFavoriteSavedLinkInfo(favorite);
         if (!window.electronAPI?.showFavoriteContextMenu) {
@@ -14796,67 +20776,83 @@ class AxisBrowser {
             const tabElement = document.querySelector(`[data-tab-id="${this.contextMenuTabId}"]`);
             if (tabElement) {
                 const titleElement = tabElement.querySelector('.tab-title');
-                this.renameTab(this.contextMenuTabId, titleElement);
+                this.renameTab(this.contextMenuTabId, titleElement, { deferBlurMs: 250 });
             }
         }
     }
 
     togglePinCurrentTab() {
-        if (this.contextMenuTabId) {
-            const tabElement = document.querySelector(`[data-tab-id="${this.contextMenuTabId}"]`);
-            if (tabElement) {
-                this.togglePinTab(this.contextMenuTabId, tabElement, null);
-            }
+        const tabId = this._normalizeTabMapKey(this.contextMenuTabId);
+        if (tabId == null) return;
+        const tabElement = this._resolveLooseSidebarTabElement(tabId);
+        if (tabElement) {
+            this.togglePinTab(tabId, tabElement, null);
         }
     }
 
     duplicateCurrentTab() {
         try {
-            // Get the tab to duplicate (from context menu or current tab)
-            const tabId = this.contextMenuTabId || this.currentTab;
-            if (!tabId) {
-                console.error('No tab to duplicate');
-                this.showToast('Error: No tab to duplicate');
-                return;
-            }
-            
+            const tabId = this._normalizeTabMapKey(this.contextMenuTabId || this.currentTab);
+            if (tabId == null) return;
+
             const tab = this.tabs.get(tabId);
-            if (!tab) {
-                console.error('Tab not found:', tabId);
-                this.showToast('Error: Tab not found');
-                return;
-            }
-            
-            // Get URL from tab data first, then try webview
-            let urlToDuplicate = tab.url;
-            
-            // If no URL in tab data, try getting it from the tab's webview
+            if (!tab) return;
+
+            const urlToDuplicate = this._getTabLivePageUrl(tab);
             if (!urlToDuplicate || urlToDuplicate === 'about:blank') {
-                const webview = tab.webview;
-                if (webview) {
-                    try {
-                        urlToDuplicate = webview.getURL();
-                    } catch (e) {
-                        console.error('Error getting URL from webview:', e);
-                    }
-                }
-            }
-            
-            // Validate the URL
-            if (!urlToDuplicate || urlToDuplicate === 'about:blank' || !urlToDuplicate.startsWith('http')) {
-                this.showToast('Cannot duplicate: No valid URL');
                 return;
             }
 
-            // Create a new tab with the URL
-            const newTabId = this.createNewTab(urlToDuplicate);
-            
-            // Show success message
-            this.showNotification('Tab duplicated', 'success');
-            
+            if (urlToDuplicate === this.NEWTAB_URL) {
+                const newTabId = this.createNewTab(this.NEWTAB_URL, { preserveNewTabState: true });
+                const newTab = this.tabs.get(newTabId);
+                if (newTab && tab.newTabPageState) {
+                    newTab.newTabPageState = JSON.parse(JSON.stringify(tab.newTabPageState));
+                    this.tabs.set(newTabId, newTab);
+                }
+                this._copyTabPresentationToDuplicate(tab, newTabId);
+                return;
+            }
+
+            if (urlToDuplicate === 'axis://settings') {
+                void this.openSettingsTab(tab.settingsSection || null);
+                return;
+            }
+
+            const sanitized = this.sanitizeUrl(urlToDuplicate);
+            if (!sanitized) {
+                return;
+            }
+
+            const newTabId = this.createNewTab(sanitized);
+            this._copyTabPresentationToDuplicate(tab, newTabId);
         } catch (error) {
             console.error('Error in duplicateCurrentTab:', error);
-            this.showToast('Error duplicating tab: ' + error.message);
+        }
+    }
+
+    _copyTabPresentationToDuplicate(sourceTab, newTabId) {
+        const newTab = this.tabs.get(newTabId);
+        if (!sourceTab || !newTab) return;
+        if (sourceTab.customTitle) {
+            newTab.customTitle = sourceTab.customTitle;
+            newTab.title = sourceTab.customTitle;
+        }
+        if (sourceTab.customIcon) {
+            newTab.customIcon = sourceTab.customIcon;
+            newTab.customIconType = sourceTab.customIconType;
+        }
+        this.tabs.set(newTabId, newTab);
+        const tabElement = document.querySelector(`[data-tab-id="${newTabId}"]`);
+        if (tabElement) {
+            const titleElement = tabElement.querySelector('.tab-title');
+            if (titleElement && newTab.customTitle) {
+                titleElement.textContent = newTab.customTitle;
+            }
+            if (newTab.customIcon) {
+                this.updateTabIcon(tabElement, newTabId);
+            }
+            this.updateTabTooltip(newTabId);
         }
     }
 
@@ -14868,22 +20864,12 @@ class AxisBrowser {
 
     toggleTabMute(tabId) {
         const tab = this.tabs.get(tabId);
-        if (!tab || !tab.webview) return;
-        
-        try {
-            if (tab.isMuted) {
-                tab.webview.setAudioMuted(false);
-                tab.isMuted = false;
-            } else {
-                tab.webview.setAudioMuted(true);
-                tab.isMuted = true;
-            }
-            // Update the audio indicator to show correct state
-            this.updateTabAudioIndicator(tabId, tab.isPlayingAudio);
-            this.applyAmbientFromSettings();
-        } catch (error) {
-            console.error('Failed to toggle tab mute:', error);
-        }
+        if (!tab) return;
+
+        tab.isMuted = !tab.isMuted;
+        this.tabs.set(tabId, tab);
+        this._applyTabMuteState(tabId);
+        this.applyAmbientFromSettings();
     }
 
     async showSidebarContextMenu(e) {
@@ -15017,6 +21003,7 @@ class AxisBrowser {
             this.hideTabContextMenu();
         this.hideSidebarContextMenu();
         this.hideTabGroupContextMenu();
+        this._emojiContextEditableEl = null;
         
         const ctx = this.webviewContextInfo || {};
         const menuTabId = this._contextMenuSourceTabId;
@@ -15173,7 +21160,7 @@ class AxisBrowser {
     }
 
     selectAll() {
-        const webview = this.getActiveWebview();
+        const webview = this.getContextMenuWebview();
         if (!webview) return;
         try {
             webview.focus();
@@ -15199,7 +21186,7 @@ class AxisBrowser {
     }
 
     cut() {
-        const webview = this.getActiveWebview();
+        const webview = this.getContextMenuWebview();
         if (!webview) return;
         try {
             webview.focus();
@@ -15216,7 +21203,7 @@ class AxisBrowser {
     }
 
     copy() {
-        const webview = this.getActiveWebview();
+        const webview = this.getContextMenuWebview();
         if (!webview) return;
         try {
             webview.focus();
@@ -15422,7 +21409,7 @@ class AxisBrowser {
     }
 
     paste() {
-        const webview = this.getActiveWebview();
+        const webview = this.getContextMenuWebview();
         if (!webview) return;
         try {
             webview.focus();
@@ -15503,7 +21490,7 @@ class AxisBrowser {
             return;
         }
 
-        const webview = this.getActiveWebview();
+        const webview = this.getContextMenuWebview();
         if (!webview) return;
         void this.pastePlainIntoWebview(webview, text);
     }
@@ -15996,24 +21983,10 @@ class AxisBrowser {
         }
 
         this.closeExtensionsMenu();
+        this.closeAdblockPanel();
         await this.populateDownloadsPopupList(list);
 
-        // Position popup under the downloads button
-        const rect = button.getBoundingClientRect();
-        const margin = 8;
-        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-        const popupWidth = Math.min(340, viewportWidth - margin * 2);
-
-        popup.style.width = `${popupWidth}px`;
-
-        let left = rect.left;
-        if (left + popupWidth + margin > viewportWidth) {
-            left = viewportWidth - popupWidth - margin;
-        }
-        if (left < margin) left = margin;
-
-        popup.style.left = `${left}px`;
-        popup.style.top = `${rect.bottom + margin}px`;
+        this.positionUrlBarAnchoredPopup(popup, button);
 
         popup.classList.remove('hidden');
 
@@ -16178,7 +22151,7 @@ class AxisBrowser {
             this.closePanelWithAnimation(settingsPanel);
         }
         if (!securityPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(securityPanel);
+            this.closeSecurityPanel();
         }
         
         if (downloadsPanel.classList.contains('hidden')) {
@@ -16216,20 +22189,7 @@ class AxisBrowser {
     positionExtensionsMenu() {
         const panel = document.getElementById('extensions-menu-panel');
         const btn = document.getElementById('url-bar-extensions');
-        if (!panel || !btn) return;
-        const rect = btn.getBoundingClientRect();
-        const margin = 8;
-        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-        const popupWidth = Math.min(340, viewportWidth - margin * 2);
-        panel.style.width = `${popupWidth}px`;
-        let left = rect.left;
-        if (left + popupWidth + margin > viewportWidth) {
-            left = viewportWidth - popupWidth - margin;
-        }
-        if (left < margin) left = margin;
-        panel.style.left = `${left}px`;
-        panel.style.top = `${rect.bottom + margin}px`;
-        panel.style.right = 'auto';
+        this.positionUrlBarAnchoredPopup(panel, btn);
     }
 
     closeExtensionsMenu() {
@@ -16255,6 +22215,7 @@ class AxisBrowser {
         if (dp && !dp.classList.contains('hidden')) {
             this.hideDownloadsPopup();
         }
+        this.closeAdblockPanel();
 
         const settingsPanel = document.getElementById('settings-panel');
         const downloadsPanel = document.getElementById('downloads-panel');
@@ -16269,7 +22230,7 @@ class AxisBrowser {
             this.closePanelWithAnimation(downloadsPanel);
         }
         if (securityPanel && !securityPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(securityPanel);
+            this.closeSecurityPanel();
         }
         if (notesPanel && !notesPanel.classList.contains('hidden')) {
             this.closePanelWithAnimation(notesPanel);
@@ -16939,7 +22900,7 @@ class AxisBrowser {
             }
         };
         if (fill) {
-            setTimeout(done, 200);
+            setTimeout(done, 120);
         } else {
             done();
         }
@@ -17018,6 +22979,7 @@ class AxisBrowser {
 
         syncSidebarResizeHandleLayout();
         window.addEventListener('resize', syncSidebarResizeHandleLayout);
+        this._syncSidebarResizeHandleLayout = syncSidebarResizeHandleLayout;
         if (typeof ResizeObserver !== 'undefined') {
             const layoutObserver = new ResizeObserver(() => syncSidebarResizeHandleLayout());
             layoutObserver.observe(contentArea);
@@ -17159,9 +23121,15 @@ class AxisBrowser {
     }
 
     setupTabDragDrop() {
+        if (typeof this._tabDragDropTeardown === 'function') {
+            this._tabDragDropTeardown();
+        }
+
         const tabsContainer = this.elements.tabsContainer;
         const separator = this.elements.tabsSeparator;
         if (!tabsContainer || !separator) return;
+
+        this._sidebarReorderDragActive = false;
 
         let drag = null;
         let isDragging = false;
@@ -17235,11 +23203,11 @@ class AxisBrowser {
 
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
-            document.removeEventListener('mouseleave', onMouseLeave);
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             drag = null;
             isDragging = false;
+            this._sidebarReorderDragActive = false;
         };
 
         // Get live siblings list (tabs and tab groups, excluding separator and drop indicator)
@@ -17248,6 +23216,143 @@ class AxisBrowser {
                 (el.classList.contains('tab') || el.classList.contains('tab-group')) &&
                 !el.classList.contains('tab-drag-drop-indicator')
             );
+        };
+
+        const appendUnpinnedVirtualSlot = (container, positions, siblings) => {
+            const sep = this.elements.tabsSeparator;
+            if (!sep || sep.parentNode !== container) {
+                return { hasUnpinnedSlot: false, separatorCenter: null, firstUnpinnedIndex: -1, sepIdx: -1 };
+            }
+            const children = Array.from(container.children);
+            const sepIdx = children.indexOf(sep);
+            const sepRect = sep.getBoundingClientRect();
+            const separatorCenter = sepRect.top + sepRect.height / 2;
+            const nt = this.elements.sidebarNewTabBtn;
+            const unpinnedFloor = (nt && nt.parentNode === container)
+                ? children.indexOf(nt)
+                : sepIdx;
+            const firstUnpinnedIndex = siblings.findIndex(s => children.indexOf(s) > unpinnedFloor);
+            const lastGeom = positions.length > 0 ? positions[positions.length - 1] : null;
+            const virtualTop = (firstUnpinnedIndex < 0)
+                ? sepRect.bottom
+                : (lastGeom ? lastGeom.top + lastGeom.height : sepRect.bottom);
+            positions.push({ el: null, top: virtualTop, height: 0, center: virtualTop + 8 });
+            return { hasUnpinnedSlot: true, separatorCenter, firstUnpinnedIndex, sepIdx };
+        };
+
+        const buildSiblingDomIndex = (container, siblings) => {
+            const map = new Map();
+            const children = Array.from(container.children);
+            for (const s of siblings) map.set(s, children.indexOf(s));
+            return map;
+        };
+
+        /** Pinned block, separator, + New Tab, then unpinned — metrics for crossing that gap. */
+        const computeBandMetrics = (positions, fu) => {
+            const sep = this.elements.tabsSeparator;
+            const nt = this.elements.sidebarNewTabBtn;
+            if (!sep) return null;
+            const sepRect = sep.getBoundingClientRect();
+            const ntRect = nt?.getBoundingClientRect();
+            if (fu < 0) return null;
+            if (fu === 0) {
+                const unpinnedTop = positions[0]?.top ?? sepRect.bottom;
+                return {
+                    pinnedBottom: sepRect.top,
+                    unpinnedTop,
+                    slotMidY: (sepRect.top + unpinnedTop) / 2,
+                    bandTop: sepRect.top,
+                    bandBottom: ntRect ? ntRect.bottom : sepRect.bottom,
+                    separatorCenter: sepRect.top + sepRect.height / 2,
+                };
+            }
+            if (!positions[fu] || !positions[fu - 1]) return null;
+            const pinnedBottom = positions[fu - 1].top + positions[fu - 1].height;
+            const unpinnedTop = positions[fu].top;
+            return {
+                pinnedBottom,
+                unpinnedTop,
+                slotMidY: (pinnedBottom + unpinnedTop) / 2,
+                bandTop: sepRect.top,
+                bandBottom: ntRect ? ntRect.bottom : sepRect.bottom,
+                separatorCenter: sepRect.top + sepRect.height / 2,
+            };
+        };
+
+        const childDomIndex = (container, el) => Array.from(container.children).indexOf(el);
+
+        /** Insert tab/tab-group in main sidebar respecting separator and + New Tab. */
+        const insertMainListDrop = (element, container, remaining, dropIndex, dropVirtualEnd, dropInPinnedSection, fuPin, sep, unpinnedAnchor) => {
+            if (dropVirtualEnd) {
+                const floorEl = unpinnedAnchor || sep;
+                const floorIdx = floorEl ? childDomIndex(container, floorEl) : -1;
+                let insertAfter = null;
+                for (let r = remaining.length - 1; r >= 0; r--) {
+                    const idx = childDomIndex(container, remaining[r]);
+                    if (idx > floorIdx) {
+                        insertAfter = remaining[r];
+                        break;
+                    }
+                }
+                if (insertAfter) {
+                    insertAfter.insertAdjacentElement('afterend', element);
+                } else if (unpinnedAnchor) {
+                    unpinnedAnchor.insertAdjacentElement('afterend', element);
+                } else if (sep) {
+                    sep.insertAdjacentElement('afterend', element);
+                } else {
+                    container.appendChild(element);
+                }
+                return;
+            }
+
+            const sepIdx = sep ? childDomIndex(container, sep) : -1;
+            const floorIdx = unpinnedAnchor ? childDomIndex(container, unpinnedAnchor) : sepIdx;
+
+            if (dropInPinnedSection && sep && sepIdx >= 0) {
+                const pinnedRemaining = remaining.filter(el => {
+                    const idx = childDomIndex(container, el);
+                    return idx >= 0 && idx < sepIdx;
+                });
+                const dest = Math.max(0, Math.min(dropIndex, pinnedRemaining.length));
+                if (dest < pinnedRemaining.length) {
+                    container.insertBefore(element, pinnedRemaining[dest]);
+                } else {
+                    sep.insertAdjacentElement('beforebegin', element);
+                }
+                return;
+            }
+
+            if (!dropInPinnedSection && floorIdx >= 0) {
+                const unpinnedRemaining = remaining.filter(el => childDomIndex(container, el) > floorIdx);
+                const unpinnedDest = Math.max(0, Math.min(dropIndex - Math.max(fuPin, 0), unpinnedRemaining.length));
+                if (unpinnedDest < unpinnedRemaining.length) {
+                    container.insertBefore(element, unpinnedRemaining[unpinnedDest]);
+                } else if (unpinnedRemaining.length > 0) {
+                    unpinnedRemaining[unpinnedRemaining.length - 1].insertAdjacentElement('afterend', element);
+                } else if (unpinnedAnchor) {
+                    unpinnedAnchor.insertAdjacentElement('afterend', element);
+                } else if (sep) {
+                    sep.insertAdjacentElement('afterend', element);
+                } else {
+                    container.appendChild(element);
+                }
+                return;
+            }
+
+            const dest = Math.max(0, Math.min(dropIndex, remaining.length));
+            if (dest < remaining.length) {
+                container.insertBefore(element, remaining[dest]);
+            } else {
+                const last = remaining[remaining.length - 1];
+                if (last) {
+                    last.insertAdjacentElement('afterend', element);
+                } else if (unpinnedAnchor) {
+                    unpinnedAnchor.insertAdjacentElement('afterend', element);
+                } else {
+                    container.appendChild(element);
+                }
+            }
         };
         
         // Snapshot positions of all siblings at the current moment
@@ -17280,30 +23385,29 @@ class AxisBrowser {
             const draggedPos = positions[dragIndex];
             if (!draggedPos || draggedPos.height <= 0) return null;
 
+            const gapStr = container.ownerDocument?.defaultView
+                ? container.ownerDocument.defaultView.getComputedStyle(container).gap || ''
+                : '';
+            const containerGap = parseInt(String(gapStr).trim(), 10) || 4;
+            const tabListTop = tabsContainer.getBoundingClientRect().top;
+            const siblingDomIndex = buildSiblingDomIndex(container, siblings);
+
             // Virtual slot below separator + separator boundary for accurate pinned/unpinned crossing
             let hasUnpinnedSlot = false;
             let separatorCenter = null;
             let firstUnpinnedIndex = -1;
+            let sepIdx = -1;
             if (container.id === 'tabs-container') {
-                const sep = this.elements.tabsSeparator;
-                if (sep && sep.parentNode === container) {
-                    const sepRect = sep.getBoundingClientRect();
-                    separatorCenter = sepRect.top + sepRect.height / 2;
-                    const children = Array.from(container.children);
-                    const sepIdx = children.indexOf(sep);
-                    if (sepIdx >= 0) firstUnpinnedIndex = siblings.findIndex(s => children.indexOf(s) > sepIdx);
-                    // Virtual “end” slot must sit *below the last* tab/group in the list. Using separator Y here
-                    // made every midpoint vs. the last row wrong, so bottom drags targeted the wrong index and
-                    // finishDrag inserted after “+ New Tab” (top of unpinned) instead of after the last tab.
-                    const lastGeom = positions.length > 0 ? positions[positions.length - 1] : null;
-                    const virtualTop = (firstUnpinnedIndex < 0)
-                        ? sepRect.bottom
-                        : (lastGeom ? lastGeom.top + lastGeom.height : sepRect.bottom);
-                    const virtualGap = 8;
-                    positions.push({ el: null, top: virtualTop, height: 0, center: virtualTop + virtualGap });
-                    hasUnpinnedSlot = true;
-                }
+                const slotMeta = appendUnpinnedVirtualSlot(container, positions, siblings);
+                hasUnpinnedSlot = slotMeta.hasUnpinnedSlot;
+                separatorCenter = slotMeta.separatorCenter;
+                firstUnpinnedIndex = slotMeta.firstUnpinnedIndex;
+                sepIdx = slotMeta.sepIdx;
             }
+
+            const bandMetrics = container.id === 'tabs-container'
+                ? computeBandMetrics(positions, firstUnpinnedIndex)
+                : null;
 
             element.style.pointerEvents = 'none';
 
@@ -17325,6 +23429,11 @@ class AxisBrowser {
                 initialSiblingCount: siblings.length,
                 dropIndex: dragIndex,
                 dropVirtualEnd: false,
+                dropInPinnedSection: container.id === 'tabs-container' && (
+                    type === 'tab-group'
+                        ? true
+                        : type === 'tab' && (firstUnpinnedIndex < 0 ? true : dragIndex < firstUnpinnedIndex)
+                ),
                 siblings,
                 positions,
                 draggedHeight: draggedPos.height,
@@ -17336,6 +23445,11 @@ class AxisBrowser {
                 scrollLock: scrollLock ?? '',
                 separatorCenter,
                 firstUnpinnedIndex,
+                sepIdx,
+                containerGap,
+                tabListTop,
+                siblingDomIndex,
+                bandMetrics,
                 lastTarget: dragIndex,
                 smoothedSiblingShifts: new Map(),
                 smoothedSepShift: 0,
@@ -17345,18 +23459,112 @@ class AxisBrowser {
             };
         };
 
+        const recaptureDragPositions = () => {
+            if (!drag || !drag.active || !drag.element || !drag.container) return;
+            const container = drag.container;
+            const element = drag.element;
+            const siblings = getSiblings(container);
+            const dragIndex = siblings.indexOf(element);
+            if (dragIndex < 0) return;
+
+            for (const el of siblings) {
+                if (el !== element && el.parentElement === container) {
+                    el.style.removeProperty('transform');
+                    el.style.transition = '';
+                }
+            }
+            if (container.id === 'tabs-container') clearPinnedUnpinnedBandTransforms();
+            element.style.removeProperty('transform');
+            void container.offsetHeight;
+
+            const positions = snapshotPositions(siblings);
+            let hasUnpinnedSlot = false;
+            let separatorCenter = null;
+            let firstUnpinnedIndex = -1;
+            let sepIdx = -1;
+            if (container.id === 'tabs-container') {
+                const slotMeta = appendUnpinnedVirtualSlot(container, positions, siblings);
+                hasUnpinnedSlot = slotMeta.hasUnpinnedSlot;
+                separatorCenter = slotMeta.separatorCenter;
+                firstUnpinnedIndex = slotMeta.firstUnpinnedIndex;
+                sepIdx = slotMeta.sepIdx;
+            }
+
+            const draggedPos = positions[dragIndex];
+            drag.siblings = siblings;
+            drag.dragIndex = dragIndex;
+            drag.positions = positions;
+            drag.currentTarget = dragIndex;
+            drag.lastTarget = dragIndex;
+            drag.dropIndex = dragIndex;
+            drag.dropVirtualEnd = false;
+            drag.hasUnpinnedSlot = hasUnpinnedSlot;
+            drag.separatorCenter = separatorCenter;
+            drag.firstUnpinnedIndex = firstUnpinnedIndex;
+            drag.sepIdx = sepIdx;
+            drag.siblingDomIndex = buildSiblingDomIndex(container, siblings);
+            drag.bandMetrics = container.id === 'tabs-container'
+                ? computeBandMetrics(positions, firstUnpinnedIndex)
+                : null;
+            drag.smoothedSiblingShifts.clear();
+            drag.smoothedSepShift = 0;
+            drag._slideSmoothLastT = 0;
+            if (draggedPos) {
+                drag.draggedHeight = draggedPos.height;
+                drag.draggedPosCenter = draggedPos.center;
+                drag.mouseOffsetFromCenter = lastMouseY - draggedPos.center;
+            }
+        };
+
         const SEPARATOR_HYSTERESIS_PX = 3;
         // Sibling / separator slide easing (per second, higher = snappier). CSS transitions fight per-frame
         // transform updates; exp-smoothing gives clean motion without fighting the pointer-driven drag row.
         const DRAG_SLIDE_SMOOTH_PER_SEC = 38;
 
-        // Target index from slot boundaries; use separator center at pinned/unpinned boundary to avoid glitch
+        // Target index from slot boundaries; pinned / band / unpinned are separate regions.
         const getTargetIndex = (draggedCenter, positions, _dragIndex, opts) => {
             if (!positions.length) return 0;
-            const sepCenter = opts && opts.separatorCenter;
-            const firstUnpinned = opts && opts.firstUnpinnedIndex;
-            const useSeparatorBoundary = sepCenter != null && firstUnpinned > 0 && firstUnpinned < positions.length;
+            const fu = opts?.firstUnpinnedIndex ?? -1;
+            const bm = opts?.bandMetrics;
+            const sepCenter = opts?.separatorCenter;
+            const hasVirtualSlot = !!opts?.hasVirtualSlot;
+            const lastRealIdx = hasVirtualSlot ? positions.length - 2 : positions.length - 1;
+            const virtualIdx = hasVirtualSlot ? positions.length - 1 : -1;
 
+            if (fu >= 0 && bm) {
+                if (draggedCenter < bm.bandTop) {
+                    if (fu === 0) return 0;
+                    for (let i = 0; i < fu; i++) {
+                        let upperBound;
+                        if (i < fu - 1) {
+                            upperBound = (positions[i].top + positions[i].height + positions[i + 1].top) / 2;
+                        } else {
+                            upperBound = bm.bandTop;
+                        }
+                        if (draggedCenter < upperBound) return i;
+                    }
+                    return fu - 1;
+                }
+                if (draggedCenter < bm.unpinnedTop) {
+                    const split = sepCenter != null ? sepCenter : bm.separatorCenter ?? bm.slotMidY;
+                    return draggedCenter < split ? fu - 1 : fu;
+                }
+                for (let i = fu; i <= lastRealIdx; i++) {
+                    let upperBound;
+                    if (i < lastRealIdx) {
+                        upperBound = (positions[i].top + positions[i].height + positions[i + 1].top) / 2;
+                    } else if (virtualIdx >= 0 && positions[virtualIdx]) {
+                        upperBound = positions[virtualIdx].center;
+                    } else {
+                        upperBound = Infinity;
+                    }
+                    if (draggedCenter < upperBound) return i;
+                }
+                return virtualIdx >= 0 ? virtualIdx : lastRealIdx;
+            }
+
+            const firstUnpinned = fu;
+            const useSeparatorBoundary = sepCenter != null && firstUnpinned >= 0 && firstUnpinned < positions.length;
             for (let i = 0; i < positions.length; i++) {
                 let upperBound;
                 if (useSeparatorBoundary && i === firstUnpinned - 1) {
@@ -17371,14 +23579,12 @@ class AxisBrowser {
             return positions.length - 1;
         };
 
-        const applySeparatorHysteresis = (target, draggedCenter, drag) => {
-            if (target == null || drag.separatorCenter == null || drag.firstUnpinnedIndex == null) return target;
-            const sep = drag.separatorCenter;
+        const applySeparatorHysteresis = (target, draggedCenter, sepCenter, drag) => {
+            if (target == null || sepCenter == null || drag.firstUnpinnedIndex == null) return target;
+            const sep = sepCenter;
             const fu = drag.firstUnpinnedIndex;
             if (fu <= 0 || !drag.positions || fu >= drag.positions.length) return target;
             const last = drag.lastTarget;
-            const inPinned = target < fu;
-            const inUnpinned = target >= fu;
             if (last !== undefined && (target === fu - 1 || target === fu)) {
                 if (last === fu - 1 && target === fu && draggedCenter <= sep + SEPARATOR_HYSTERESIS_PX) return fu - 1;
                 if (last === fu && target === fu - 1 && draggedCenter >= sep - SEPARATOR_HYSTERESIS_PX) return fu;
@@ -17534,6 +23740,7 @@ class AxisBrowser {
                         clearPinnedUnpinnedBandTransforms();
                     }
                     drag.isHorizontalDrag = false;
+                    recaptureDragPositions();
                 } else {
                     if (drag.previewBox) {
                         const boxWidth = 240, boxHeight = 180;
@@ -17554,7 +23761,7 @@ class AxisBrowser {
             if (typeof drag.draggedPosCenter === 'number') {
                 const half = drag.draggedHeight * 0.5;
                 const pad = 2;
-                const tabListTop = tabsContainer.getBoundingClientRect().top;
+                const tabListTop = drag.tabListTop ?? tabsContainer.getBoundingClientRect().top;
                 if (container.classList.contains('tab-group-content')) {
                     const cr = container.getBoundingClientRect();
                     const minC = Math.max(cr.top, tabListTop) + half + pad;
@@ -17566,6 +23773,15 @@ class AxisBrowser {
                 } else if (container.id === 'tabs-container') {
                     const minTopCenter = tabListTop + half + pad;
                     draggedCenter = Math.max(minTopCenter, draggedCenter);
+                    const effectiveSepCenter = drag.separatorCenter != null
+                        ? drag.separatorCenter + (drag.smoothedSepShift || 0)
+                        : null;
+                    if (drag.type === 'tab-group' && effectiveSepCenter != null) {
+                        const maxCenter = effectiveSepCenter - half - pad;
+                        if (maxCenter >= minTopCenter) {
+                            draggedCenter = Math.min(maxCenter, draggedCenter);
+                        }
+                    }
                     slideOffsetY = draggedCenter - drag.draggedPosCenter;
                 }
             }
@@ -17573,16 +23789,46 @@ class AxisBrowser {
             // Slide: compositor-friendly move (!important beats inactive-tab rules)
             drag.element.style.setProperty('transform', `translate3d(0, ${slideOffsetY}px, 0)`, 'important');
 
+            const effectiveSepCenter = drag.separatorCenter != null
+                ? drag.separatorCenter + (drag.smoothedSepShift || 0)
+                : null;
+            const bm = drag.bandMetrics;
+            const sepEl = this.elements.tabsSeparator;
+            const ntEl = this.elements.sidebarNewTabBtn;
+            let liveBandTop = bm?.bandTop ?? 0;
+            let liveBandBottom = bm?.bandBottom ?? liveBandTop;
+            if (bm && sepEl) {
+                const sepRect = sepEl.getBoundingClientRect();
+                const ntRect = ntEl?.getBoundingClientRect();
+                liveBandTop = sepRect.top;
+                liveBandBottom = ntRect ? ntRect.bottom : sepRect.bottom;
+            }
+            const liveBandMetrics = bm
+                ? { ...bm, bandTop: liveBandTop, bandBottom: liveBandBottom }
+                : null;
+            const inPinnedBlock = !!(liveBandMetrics && draggedCenter < liveBandTop);
+            const inBandZone = !!(liveBandMetrics && draggedCenter >= liveBandTop
+                && draggedCenter < liveBandMetrics.unpinnedTop);
+            const inUnpinnedBlock = !!(liveBandMetrics && draggedCenter >= liveBandMetrics.unpinnedTop);
             // Target index from dragged visual center; use separator boundary when crossing pinned/unpinned
-            const targetOpts = (drag.separatorCenter != null && drag.firstUnpinnedIndex >= 0)
-                ? { separatorCenter: drag.separatorCenter, firstUnpinnedIndex: drag.firstUnpinnedIndex }
+            const targetOpts = drag.firstUnpinnedIndex >= 0
+                ? {
+                    separatorCenter: effectiveSepCenter,
+                    firstUnpinnedIndex: drag.firstUnpinnedIndex,
+                    bandMetrics: liveBandMetrics,
+                    hasVirtualSlot: drag.hasUnpinnedSlot,
+                }
                 : undefined;
             let target = getTargetIndex(draggedCenter, drag.positions, drag.dragIndex, targetOpts);
-            target = applySeparatorHysteresis(target, draggedCenter, drag);
+            if (!inBandZone) {
+                target = applySeparatorHysteresis(target, draggedCenter, effectiveSepCenter, drag);
+            }
+            if (drag.type === 'tab-group' && container.id === 'tabs-container' && drag.firstUnpinnedIndex >= 0) {
+                const fuClamp = drag.firstUnpinnedIndex;
+                if (target >= fuClamp) target = Math.max(0, fuClamp - 1);
+            }
             const n = drag.positions.length;
-            const safeTarget = n <= 1 ? drag.dragIndex : Math.max(0, Math.min(target, n - 1));
-            drag.currentTarget = safeTarget;
-            drag.lastTarget = safeTarget;
+            let safeTarget = n <= 1 ? drag.dragIndex : Math.max(0, Math.min(target, n - 1));
 
             // Use live siblings every frame so we always transform the actual DOM nodes
             const currentSiblings = getSiblings(container);
@@ -17592,10 +23838,69 @@ class AxisBrowser {
                 finishDrag();
                 return;
             }
+
+            let effectiveTarget = numSiblings <= 0 ? 0 : Math.max(0, Math.min(safeTarget, numSiblings - 1));
+            const fu = drag.firstUnpinnedIndex;
+            const maxIdx = Math.max(0, numSiblings - 1);
+            const lastRealSiblingIdx = drag.hasUnpinnedSlot ? n - 2 : n - 1;
+            const virtualSlotIdx = drag.hasUnpinnedSlot ? n - 1 : -1;
+            if (container.id === 'tabs-container' && liveBandMetrics) {
+                if (fu === 0) {
+                    if (inPinnedBlock) {
+                        safeTarget = 0;
+                        effectiveTarget = 0;
+                    } else if (inUnpinnedBlock) {
+                        safeTarget = Math.max(0, Math.min(safeTarget, maxIdx));
+                        effectiveTarget = safeTarget;
+                    } else if (inBandZone) {
+                        if (effectiveSepCenter != null && draggedCenter < effectiveSepCenter) {
+                            safeTarget = 0;
+                            effectiveTarget = 0;
+                        } else {
+                            safeTarget = Math.max(0, Math.min(safeTarget, maxIdx));
+                            effectiveTarget = safeTarget;
+                        }
+                    }
+                } else if (fu > 0) {
+                if (inPinnedBlock) {
+                    safeTarget = Math.max(0, Math.min(safeTarget, fu - 1));
+                    effectiveTarget = safeTarget;
+                } else if (inUnpinnedBlock) {
+                    if (virtualSlotIdx >= 0 && safeTarget >= virtualSlotIdx) {
+                        safeTarget = virtualSlotIdx;
+                        effectiveTarget = Math.min(lastRealSiblingIdx, maxIdx);
+                    } else {
+                        safeTarget = Math.max(fu, Math.min(safeTarget, maxIdx));
+                        effectiveTarget = safeTarget;
+                    }
+                } else if (inBandZone) {
+                    if (currentDragIdx >= fu && effectiveSepCenter != null && draggedCenter < effectiveSepCenter) {
+                        safeTarget = fu - 1;
+                        effectiveTarget = fu - 1;
+                    } else if (currentDragIdx < fu && effectiveSepCenter != null && draggedCenter >= effectiveSepCenter) {
+                        safeTarget = fu;
+                        effectiveTarget = Math.min(fu, maxIdx);
+                    } else if (currentDragIdx < fu) {
+                        safeTarget = Math.min(safeTarget, fu - 1);
+                        effectiveTarget = Math.min(effectiveTarget, fu - 1);
+                    } else {
+                        safeTarget = Math.max(fu, safeTarget);
+                        effectiveTarget = Math.max(fu, effectiveTarget);
+                    }
+                }
+                }
+            }
+
+            drag.currentTarget = effectiveTarget;
+            drag.lastTarget = effectiveTarget;
+
             const posLen = drag.positions.length;
             const lastEntry = posLen > 0 ? drag.positions[posLen - 1] : null;
             const lastIsVirtual = !!(drag.hasUnpinnedSlot && lastEntry && lastEntry.el === null);
-            const dropVirtualEnd = !!(lastIsVirtual && safeTarget === posLen - 1);
+            const dropVirtualEnd =
+                drag.type === 'tab-group' && drag.firstUnpinnedIndex >= 0
+                    ? false
+                    : !!(lastIsVirtual && safeTarget === posLen - 1);
             let dropIndex = drag.dragIndex;
             if (!dropVirtualEnd) {
                 dropIndex = numSiblings <= 0 ? 0 : Math.max(0, Math.min(safeTarget, numSiblings - 1));
@@ -17603,12 +23908,27 @@ class AxisBrowser {
             drag.dropIndex = dropIndex;
             drag.dropVirtualEnd = dropVirtualEnd;
 
-            const effectiveTarget = numSiblings <= 0 ? 0 : Math.max(0, Math.min(safeTarget, numSiblings - 1));
-            const gapStr = container.ownerDocument && container.ownerDocument.defaultView
-                ? container.ownerDocument.defaultView.getComputedStyle(container).gap || ''
-                : '';
-            const gap = parseInt(String(gapStr).trim(), 10) || 4;
+            if (container.id === 'tabs-container') {
+                if (drag.type === 'tab-group') {
+                    drag.dropInPinnedSection = true;
+                } else if (drag.type === 'tab') {
+                    if (dropVirtualEnd) {
+                        drag.dropInPinnedSection = false;
+                    } else if (fu < 0) {
+                        drag.dropInPinnedSection = true;
+                    } else if (fu === 0) {
+                        drag.dropInPinnedSection = inPinnedBlock || (inBandZone && effectiveTarget === 0);
+                    } else {
+                        drag.dropInPinnedSection = effectiveTarget < fu;
+                    }
+                }
+            }
+
+            const gap = drag.containerGap ?? 4;
             const shiftHeight = drag.draggedHeight + gap;
+            const crossingIntoUnpinned = fu > 0 && currentDragIdx < fu && effectiveTarget >= fu;
+            const crossingIntoPinned = fu > 0 && currentDragIdx >= fu && effectiveTarget < fu;
+            const boundaryActive = crossingIntoUnpinned || crossingIntoPinned;
 
             const nowSmooth = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
             const dtSec = drag._slideSmoothLastT
@@ -17618,8 +23938,9 @@ class AxisBrowser {
             const slideAlpha = 1 - Math.exp(-DRAG_SLIDE_SMOOTH_PER_SEC * dtSec);
 
             const shiftMap = drag.smoothedSiblingShifts;
+            const siblingSet = new Set(currentSiblings);
             for (const key of shiftMap.keys()) {
-                if (!currentSiblings.includes(key)) shiftMap.delete(key);
+                if (!siblingSet.has(key)) shiftMap.delete(key);
             }
 
             // Shift siblings around the dragged item — eased toward target each frame (smooth, no CSS transition fight)
@@ -17630,6 +23951,15 @@ class AxisBrowser {
                 let targetShift = 0;
                 if (effectiveTarget < currentDragIdx && i >= effectiveTarget && i < currentDragIdx) targetShift = shiftHeight;
                 else if (effectiveTarget > currentDragIdx && i > currentDragIdx && i <= effectiveTarget) targetShift = -shiftHeight;
+
+                // Budge the row on the far side of separator/+ New Tab only on a real section cross.
+                if (boundaryActive && fu > 0) {
+                    if (crossingIntoUnpinned && i === fu) {
+                        targetShift = -shiftHeight;
+                    } else if (crossingIntoPinned && i === fu - 1) {
+                        targetShift = shiftHeight;
+                    }
+                }
 
                 let smooth = shiftMap.get(el);
                 if (smooth === undefined) smooth = 0;
@@ -17645,45 +23975,58 @@ class AxisBrowser {
                     el.style.setProperty('transform', `translate3d(0, ${y}px, 0)`, 'important');
                 }
             }
-            // Separator: same vertical shift as the row at the pinned/unpinned boundary. When the first
-            // unpinned row *is* the dragged item, the old “first sibling after sep” logic skipped (j ===
-            // currentDragIdx), so the separator stayed put until drop — use the last pinned row’s shift.
+            // Separator + “+ New Tab” move for pinned↔unpinned crosses, not for unpinned-only reorder.
             if (container.id === 'tabs-container') {
                 const sep = this.elements.tabsSeparator;
-                if (sep && sep.parentNode === container) {
-                    const children = Array.from(container.children);
-                    const sepIdx = children.indexOf(sep);
-                    let anchorJ = -1;
-                    for (let j = 0; j < numSiblings; j++) {
-                        if (children.indexOf(currentSiblings[j]) > sepIdx) {
-                            anchorJ = j;
-                            break;
-                        }
-                    }
-                    const sepShiftForIndex = (j) => {
-                        if (j < 0 || j === currentDragIdx) return 0;
-                        if (effectiveTarget < currentDragIdx && j >= effectiveTarget && j < currentDragIdx) return shiftHeight;
-                        if (effectiveTarget > currentDragIdx && j > currentDragIdx && j <= effectiveTarget) return -shiftHeight;
-                        return 0;
-                    };
+                if (sep && sep.parentNode === container && drag.sepIdx >= 0) {
+                    const purelyUnpinnedReorder = fu >= 0
+                        && currentDragIdx >= fu
+                        && effectiveTarget >= fu;
+                    const purelyPinnedReorder = fu > 0
+                        && currentDragIdx < fu
+                        && effectiveTarget < fu;
+
                     let sepTarget = 0;
-                    if (anchorJ >= 0) {
-                        const fu = drag.firstUnpinnedIndex;
-                        if (anchorJ === currentDragIdx && typeof fu === 'number' && fu > 0) {
-                            sepTarget = sepShiftForIndex(fu - 1);
-                        } else if (anchorJ !== currentDragIdx) {
-                            sepTarget = sepShiftForIndex(anchorJ);
+                    if (!purelyUnpinnedReorder && !purelyPinnedReorder) {
+                        if (crossingIntoUnpinned) {
+                            sepTarget = -shiftHeight;
+                        } else if (crossingIntoPinned) {
+                            sepTarget = shiftHeight;
+                        } else {
+                            let anchorJ = -1;
+                            const domIndex = drag.siblingDomIndex;
+                            for (let j = 0; j < numSiblings; j++) {
+                                const idx = domIndex?.get(currentSiblings[j]) ?? -1;
+                                if (idx > drag.sepIdx) {
+                                    anchorJ = j;
+                                    break;
+                                }
+                            }
+                            const sepShiftForIndex = (j) => {
+                                if (j < 0 || j === currentDragIdx) return 0;
+                                if (effectiveTarget < currentDragIdx && j >= effectiveTarget && j < currentDragIdx) return shiftHeight;
+                                if (effectiveTarget > currentDragIdx && j > currentDragIdx && j <= effectiveTarget) return -shiftHeight;
+                                return 0;
+                            };
+                            if (anchorJ >= 0) {
+                                if (anchorJ === currentDragIdx && fu > 0) {
+                                    sepTarget = sepShiftForIndex(fu - 1);
+                                } else if (anchorJ !== currentDragIdx) {
+                                    sepTarget = sepShiftForIndex(anchorJ);
+                                }
+                            }
                         }
                     }
-                    let sepSmooth = drag.smoothedSepShift;
-                    sepSmooth += (sepTarget - sepSmooth) * slideAlpha;
-                    if (Math.abs(sepTarget - sepSmooth) < 0.4) sepSmooth = sepTarget;
-                    drag.smoothedSepShift = sepSmooth;
-                    if (Math.abs(sepSmooth) < 0.08 && sepTarget === 0) {
+
+                    if (purelyUnpinnedReorder || purelyPinnedReorder) {
                         drag.smoothedSepShift = 0;
                         clearPinnedUnpinnedBandTransforms();
+                    } else if (sepTarget !== 0) {
+                        drag.smoothedSepShift = sepTarget;
+                        setPinnedUnpinnedBandShift(sepTarget);
                     } else {
-                        setPinnedUnpinnedBandShift(sepSmooth);
+                        drag.smoothedSepShift = 0;
+                        clearPinnedUnpinnedBandTransforms();
                     }
                 }
             }
@@ -17701,6 +24044,8 @@ class AxisBrowser {
             const { element, type, container, dragIndex } = drag;
             const dropVirtualEnd = !!drag.dropVirtualEnd;
             const dropIndex = drag.dropIndex != null ? drag.dropIndex : dragIndex;
+            const dropInPinnedSection = !!drag.dropInPinnedSection;
+            const fuPinAtDrop = drag.firstUnpinnedIndex;
             const reorderNeeded = dropVirtualEnd || dropIndex !== dragIndex;
             const scrollLockToRestore = drag.scrollLock;
             isDragging = false;
@@ -17716,7 +24061,6 @@ class AxisBrowser {
 
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
-            document.removeEventListener('mouseleave', onMouseLeave);
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
 
@@ -17743,6 +24087,12 @@ class AxisBrowser {
             element.style.opacity = '';
             element.style.pointerEvents = '';
 
+            if (type === 'tab-group' && element) {
+                element.querySelectorAll('input.tab-title').forEach((inp) => {
+                    inp.style.removeProperty('pointer-events');
+                });
+            }
+
             // Reorder if drop index changed (dropIndex is final index among n siblings; DOM insert matches visuals)
             if (reorderNeeded) {
                 element.remove();
@@ -17757,23 +24107,26 @@ class AxisBrowser {
                 const sep = container.id === 'tabs-container' ? this.elements.tabsSeparator : container.querySelector('.tabs-separator');
                 const unpinnedAnchor = container.id === 'tabs-container' && this.elements.sidebarNewTabBtn ? this.elements.sidebarNewTabBtn : sep;
 
-                if (drag.hasUnpinnedSlot && dropVirtualEnd) {
-                    // Empty unpinned: only virtual target is “after + New Tab”. Otherwise virtual means “after last row”.
-                    if (drag.firstUnpinnedIndex < 0 && unpinnedAnchor) {
-                        unpinnedAnchor.insertAdjacentElement('afterend', element);
-                    } else if (remaining.length > 0) {
-                        remaining[remaining.length - 1].insertAdjacentElement('afterend', element);
-                    } else if (unpinnedAnchor) {
-                        unpinnedAnchor.insertAdjacentElement('afterend', element);
-                    } else if (sep) {
-                        sep.insertAdjacentElement('afterend', element);
-                    } else {
-                        container.appendChild(element);
-                    }
+                if (container.id === 'tabs-container') {
+                    const dropPinned =
+                        type === 'tab-group' ? true : dropInPinnedSection;
+                    insertMainListDrop(
+                        element, container, remaining, dropIndex, dropVirtualEnd,
+                        dropPinned, fuPinAtDrop, sep, unpinnedAnchor
+                    );
                 } else if (dropVirtualEnd) {
-                    const last = remaining[remaining.length - 1];
-                    if (last) {
-                        last.insertAdjacentElement('afterend', element);
+                    const floorEl = unpinnedAnchor || sep;
+                    const floorIdx = floorEl ? childDomIndex(container, floorEl) : -1;
+                    let insertAfter = null;
+                    for (let r = remaining.length - 1; r >= 0; r--) {
+                        const idx = childDomIndex(container, remaining[r]);
+                        if (idx > floorIdx) {
+                            insertAfter = remaining[r];
+                            break;
+                        }
+                    }
+                    if (insertAfter) {
+                        insertAfter.insertAdjacentElement('afterend', element);
                     } else if (unpinnedAnchor) {
                         unpinnedAnchor.insertAdjacentElement('afterend', element);
                     } else if (sep) {
@@ -17797,33 +24150,9 @@ class AxisBrowser {
                     }
                 }
                 
-                if (type === 'tab' && container.classList.contains('tabs-container')) {
-                    const tabId = parseInt(element.dataset.tabId, 10);
-                    if (!isNaN(tabId)) {
-                        const tab = this.tabs.get(tabId);
-                        if (tab && tab.tabGroupId) {
-                            const prevKey = this.findTabGroupKey(tab.tabGroupId);
-                            const prevGroup = prevKey != null ? this.tabGroups.get(prevKey) : null;
-                            if (prevGroup) {
-                                prevGroup.tabIds = prevGroup.tabIds.filter(
-                                    (id) => this._normalizeTabMapKey(id) !== tabId
-                                );
-                                if (prevGroup.tabIds.length === 0 && prevGroup.hadTabs) {
-                                    this._deleteTabGroupFromMapAndDom(prevKey);
-                                } else {
-                                    this.tabGroups.set(prevKey, prevGroup);
-                                }
-                            }
-                            tab.tabGroupId = undefined;
-                            this.tabs.set(tabId, tab);
-                        }
-                    }
-                    requestAnimationFrame(() => {
-                        this.updateTabPinState(element);
-                    });
-                }
                 if (type === 'tab-group' && container.id === 'tabs-container') {
-                    this.updateTabGroupPinState(element);
+                    this._normalizeTabGroupsPinnedOnly();
+                    this.syncSidebarFromTabGroups({ force: true });
                 }
                 if (type === 'tab' && container.classList.contains('tab-group-content')) {
                     const tabGroupEl = container.closest('.tab-group');
@@ -17839,7 +24168,7 @@ class AxisBrowser {
                                 const tab = this.tabs.get(tabId);
                                 if (tab) {
                                     tab.tabGroupId = tabGroupId;
-                                    tab.pinned = tabGroup.pinned !== false;
+                                    tab.pinned = true;
                                     this.tabs.set(tabId, tab);
                                 }
                             });
@@ -17855,36 +24184,69 @@ class AxisBrowser {
                             if (newTabIds.length === 0 && tabGroup.hadTabs) {
                                 this._deleteTabGroupFromMapAndDom(tabGroupId);
                             } else {
-                                tabGroup.tabIds = newTabIds;
+                            tabGroup.tabIds = newTabIds;
                                 if (newTabIds.length > 0) tabGroup.hadTabs = true;
-                                this.tabGroups.set(tabGroupId, tabGroup);
+                            this.tabGroups.set(tabGroupId, tabGroup);
                             }
                         }
                     }
                 }
                 
                 requestAnimationFrame(() => {
-                    void this.savePinnedTabs();
                     void this.saveTabGroups();
                 });
             }
+
+            if (type === 'tab' && container.id === 'tabs-container') {
+                const tabId = this._normalizeTabMapKey(element.dataset.tabId);
+                if (reorderNeeded && tabId != null) {
+                    const tab = this.tabs.get(tabId);
+                    if (tab && tab.tabGroupId) {
+                        const prevKey = this.findTabGroupKey(tab.tabGroupId);
+                        const prevGroup = prevKey != null ? this.tabGroups.get(prevKey) : null;
+                        if (prevGroup) {
+                            prevGroup.tabIds = prevGroup.tabIds.filter(
+                                (id) => this._normalizeTabMapKey(id) !== tabId
+                            );
+                            if (prevGroup.tabIds.length === 0 && prevGroup.hadTabs) {
+                                this._deleteTabGroupFromMapAndDom(prevKey);
+                            } else {
+                                this.tabGroups.set(prevKey, prevGroup);
+                            }
+                        }
+                        tab.tabGroupId = undefined;
+                        this.tabs.set(tabId, tab);
+                    }
+                }
+                if (reorderNeeded && tabId != null) {
+                    const shouldPin = dropInPinnedSection;
+                    const tab = this.tabs.get(tabId);
+                    if (tab && !!tab.pinned !== shouldPin) {
+                        tab.pinned = shouldPin;
+                        this.tabs.set(tabId, tab);
+                        element.classList.toggle('pinned', shouldPin);
+                        if (shouldPin) {
+                            this.setupPinnedTabCloseButton(element, tabId);
+                            this.updatePinnedTabClosedState(tabId);
+                        } else {
+                            element.classList.remove('closed');
+                            this.removePinnedTabCloseButton(element);
+                        }
+                    }
+                }
+                void this.savePinnedTabs();
+                this._scheduleUnpinnedTabsRecoverySave();
+                if (reorderNeeded) {
+                    this.updatePinnedSeparatorVisibility();
+                }
+            }
             
             if (type === 'tab-group' && element) {
-                const input = element.querySelector('.tab-group-name-input');
-                if (input) {
-                    input.style.pointerEvents = '';
-                }
+                /* tab groups use span titles; nothing to restore after drag */
             }
-            
+
+            this._sidebarReorderDragActive = false;
             drag = null;
-        };
-        
-        const onMouseLeave = (e) => {
-            if (e.target === document.body || e.target === document.documentElement) {
-                if (drag && drag.active) {
-                    finishDrag();
-                }
-            }
         };
         
         const onMove = (e) => {
@@ -17917,7 +24279,6 @@ class AxisBrowser {
             if (e && e.button !== 0) return;
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
-            document.removeEventListener('mouseleave', onMouseLeave);
             if (drag && drag.active) {
                 finishDrag();
             } else {
@@ -17938,6 +24299,10 @@ class AxisBrowser {
                 if (!drag) return false;
                 
                 isDragging = true;
+                this._sidebarReorderDragActive = true;
+                if (typeof this._cancelProfilePointerSwipe === 'function') {
+                    this._cancelProfilePointerSwipe();
+                }
                 
                 element.classList.add('smooth-dragging');
                 document.body.style.cursor = 'grabbing';
@@ -17949,7 +24314,6 @@ class AxisBrowser {
                 }
                 document.addEventListener('mousemove', onMove, { passive: false });
                 document.addEventListener('mouseup', onUp);
-                document.addEventListener('mouseleave', onMouseLeave);
                 
                 return true;
             } catch (error) {
@@ -17959,60 +24323,38 @@ class AxisBrowser {
             }
         };
                 
-        // Update pin state after drag
+        // Sync pin flag from sidebar DOM position (after drag — DOM order is already correct).
         this.updateTabPinState = (tabEl) => {
-            const sep = this.elements.tabsSeparator;
-            if (!sep || sep.offsetParent === null) return;
-            
-            const tabId = parseInt(tabEl.dataset.tabId, 10);
-            const tab = this.tabs.get(tabId);
-            if (!tab) return;
-            
-            const tabRect = tabEl.getBoundingClientRect();
-            const sepRect = sep.getBoundingClientRect();
-            const isAbove = tabRect.top + tabRect.height / 2 < sepRect.top;
-            
-            if (isAbove && !tab.pinned) {
-                tab.pinned = true;
-                this.tabs.set(tabId, tab);
-                tabEl.classList.add('pinned');
-                this.organizeTabsByPinnedState();
-            } else if (!isAbove && tab.pinned) {
-                tab.pinned = false;
-                this.tabs.set(tabId, tab);
-                tabEl.classList.remove('pinned');
-                this.organizeTabsByPinnedState();
-            }
+            this._syncTabPinFromDomPosition(tabEl);
         };
 
-        // Update tab group pin state after drag (pinned = above separator, unpinned = below)
-        this.updateTabGroupPinState = (tabGroupEl) => {
-            const sep = this.elements.tabsSeparator;
-            if (!sep || !tabGroupEl || !tabGroupEl.classList.contains('tab-group')) return;
-            const groupId = parseInt(tabGroupEl.dataset.tabGroupId, 10);
-            const group = this.tabGroups.get(groupId);
-            if (!group) return;
-            const groupRect = tabGroupEl.getBoundingClientRect();
-            const sepRect = sep.getBoundingClientRect();
-            const isAbove = groupRect.top + groupRect.height / 2 < sepRect.top;
-            const shouldBePinned = isAbove;
-            if (group.pinned === shouldBePinned) return;
-            group.pinned = shouldBePinned;
-            this.tabGroups.set(groupId, group);
-            if (shouldBePinned) tabGroupEl.classList.add('pinned'); else tabGroupEl.classList.remove('pinned');
-            group.tabIds.forEach(tabId => {
-                const tab = this.tabs.get(tabId);
-                if (tab) {
-                    tab.pinned = shouldBePinned;
-                    this.tabs.set(tabId, tab);
-                }
-            });
-            if (this.saveTabGroups) this.saveTabGroups();
+        // Tab groups stay in the pinned section — pin state is not toggled by drag position.
+        this.updateTabGroupPinState = () => {
+            this._normalizeTabGroupsPinnedOnly();
+            this.syncSidebarFromTabGroups();
+        };
+
+        const detachTabDragHandler = (tab) => {
+            if (tab?._axisTabDragDown) {
+                tab.removeEventListener('mousedown', tab._axisTabDragDown);
+                delete tab._axisTabDragDown;
+            }
+            delete tab?._dragSetup;
+        };
+
+        const detachTabGroupDragHandler = (tabGroup) => {
+            if (tabGroup?._axisTabGroupDragDown) {
+                const header = tabGroup.querySelector('.tab-content');
+                if (header) header.removeEventListener('mousedown', tabGroup._axisTabGroupDragDown);
+                delete tabGroup._axisTabGroupDragDown;
+            }
+            delete tabGroup?._dragSetup;
         };
 
         // Setup tab for dragging
         const setupTabDrag = (tab) => {
-            if (!tab || tab._dragSetup) return;
+            if (!tab) return;
+            detachTabDragHandler(tab);
             tab._dragSetup = true;
             tab.draggable = false;
             
@@ -18097,6 +24439,7 @@ class AxisBrowser {
                 document.addEventListener('mouseup', upHandler);
             };
             
+            tab._axisTabDragDown = handleMouseDown;
             tab.addEventListener('mousedown', handleMouseDown, { passive: false });
         };
         
@@ -18104,7 +24447,8 @@ class AxisBrowser {
         
         // Setup tab group for dragging
         const setupTabGroupDrag = (tabGroup) => {
-            if (!tabGroup || tabGroup._dragSetup) return;
+            if (!tabGroup) return;
+            detachTabGroupDragHandler(tabGroup);
             tabGroup._dragSetup = true;
             tabGroup.draggable = false;
             
@@ -18130,8 +24474,7 @@ class AxisBrowser {
                 }
                 
                 // Don't drag if clicking on the name input (unless it's readonly)
-                const input = tabGroup.querySelector('.tab-group-name-input');
-                if (input && !input.readOnly && e.target.closest('.tab-group-name-input')) {
+                if (tabGroup.classList.contains('tab-renaming') && e.target.closest('.tab-title')) {
                     return;
                 }
                 
@@ -18163,10 +24506,10 @@ class AxisBrowser {
                         dragging = true;
                         cleanup();
                         
-                        // Blur input if it exists
-                        if (input) {
-                            input.blur();
-                            input.style.pointerEvents = 'none';
+                        const renameInput = tabGroup.querySelector('input.tab-title');
+                        if (renameInput) {
+                            renameInput.blur();
+                            renameInput.style.pointerEvents = 'none';
                         }
                         
                         // Start the drag with current mouse position
@@ -18204,10 +24547,23 @@ class AxisBrowser {
                 document.addEventListener('mouseup', upHandler);
             };
             
+            tabGroup._axisTabGroupDragDown = handleMouseDown;
             header.addEventListener('mousedown', handleMouseDown, { passive: false });
         };
 
         this.makeTabGroupSmoothDraggable = setupTabGroupDrag;
+
+        this._refreshSidebarDragHandlers = () => {
+            if (!tabsContainer) return;
+            tabsContainer.querySelectorAll(':scope > .tab').forEach((el) => {
+                if (el.classList.contains('tab-favorite-host')) return;
+                setupTabDrag(el);
+            });
+            tabsContainer.querySelectorAll(':scope > .tab-group').forEach((el) => {
+                setupTabGroupDrag(el);
+                el.querySelectorAll('.tab-group-content .tab').forEach(setupTabDrag);
+            });
+        };
         
         // Initialize existing elements
         document.querySelectorAll('.tabs-container > .tab').forEach(setupTabDrag);
@@ -18234,9 +24590,17 @@ class AxisBrowser {
         });
 
         observer.observe(tabsContainer, { childList: true, subtree: true });
-        
-        // Store observer
+
         this._dragObserver = observer;
+        this._tabDragDropTeardown = () => {
+            if (this._dragObserver) {
+                this._dragObserver.disconnect();
+                this._dragObserver = null;
+            }
+            forceCleanup();
+            tabsContainer.querySelectorAll('.tab').forEach(detachTabDragHandler);
+            tabsContainer.querySelectorAll('.tab-group').forEach(detachTabGroupDragHandler);
+        };
     }
 
     moveTab(fromIndex, toIndex) {
@@ -18286,6 +24650,22 @@ class AxisBrowser {
         }
     }
 
+    scheduleTrackPageInHistory(tabId) {
+        if (this.isIncognitoWindow) return;
+        const tid = this._normalizeTabMapKey(tabId ?? this.currentTab);
+        if (tid == null) return;
+        const key = String(tid);
+        const existing = this._historyTrackTimers.get(key);
+        if (existing) clearTimeout(existing);
+        const timer = setTimeout(() => {
+            this._historyTrackTimers.delete(key);
+            if (this._normalizeTabMapKey(this.currentTab) === tid) {
+                void this.trackPageInHistory();
+            }
+        }, 1500);
+        this._historyTrackTimers.set(key, timer);
+    }
+
     async trackPageInHistory() {
         if (this.isIncognitoWindow) return;
         try {
@@ -18313,138 +24693,300 @@ class AxisBrowser {
                 title: title || url,
                 favicon: favicon
             });
+            this._ntpFetchCache?.delete('recent:history');
+            this._refreshNtpWidgetsByType('recent');
         } catch (error) {
             console.error('Failed to track page in history:', error);
         }
     }
 
-    toggleSecurity() {
-        const securityPanel = document.getElementById('security-panel');
+    getSecurityPageContext() {
+        const wv = this.getActiveWebview();
+        let webContentsId = 0;
+        let pageUrl = '';
+        let pageHostname = '';
+        try {
+            if (wv && typeof wv.getWebContentsId === 'function') {
+                webContentsId = wv.getWebContentsId() || 0;
+            }
+            pageUrl = wv && typeof wv.getURL === 'function' ? wv.getURL() || '' : '';
+            if (pageUrl) {
+                pageHostname = new URL(pageUrl).hostname || '';
+            }
+        } catch (_) {}
+        return { webContentsId, pageUrl, pageHostname };
+    }
+
+    _syncUrlBarSecurityIcon(currentUrl) {
+        const btn = this.elements?.urlBarSecurity;
+        if (!btn || !currentUrl) return;
+        if (this._activeSecurityInfo?.origin) {
+            try {
+                const currentOrigin = new URL(currentUrl).origin;
+                if (currentOrigin === this._activeSecurityInfo.origin) {
+                    this.applyUrlBarSecurityState(this._activeSecurityInfo);
+                    return;
+                }
+            } catch (_) {}
+        }
+        if (currentUrl.startsWith('https://')) {
+            this.applyUrlBarSecurityState({ state: 'secure' });
+        } else if (currentUrl.startsWith('http://')) {
+            this.applyUrlBarSecurityState({ state: 'insecure' });
+        } else {
+            this.applyUrlBarSecurityState({ state: 'local' });
+        }
+    }
+
+    applyUrlBarSecurityState(info) {
+        const btn = this.elements?.urlBarSecurity;
+        if (!btn) return;
+        const icon = btn.querySelector('i');
+        if (!icon) return;
+        btn.classList.remove('url-bar-security--warning');
+        const state = info?.state || 'unknown';
+        icon.classList.remove('fa-lock', 'fa-unlock', 'fa-circle-info', 'fa-triangle-exclamation');
+        if (state === 'secure') {
+            icon.classList.add('fa-lock');
+        } else if (state === 'warning') {
+            icon.classList.add('fa-triangle-exclamation');
+            btn.classList.add('url-bar-security--warning');
+        } else if (state === 'insecure') {
+            icon.classList.add('fa-unlock');
+        } else {
+            icon.classList.add('fa-circle-info');
+        }
+    }
+
+    async refreshUrlBarSecurityState(tabId = this.currentTab) {
+        const tab = this.tabs.get(tabId);
+        const wv = tab?.webview;
+        if (!wv || tabId !== this.currentTab) return;
+        let pageUrl = '';
+        try {
+            pageUrl = wv.getURL() || '';
+        } catch (_) {
+            return;
+        }
+        if (!pageUrl || pageUrl.startsWith('about:') || pageUrl.startsWith('axis:') || pageUrl.startsWith('data:')) {
+            this.applyUrlBarSecurityState({ state: 'local' });
+            return;
+        }
+        try {
+            const url = new URL(pageUrl);
+            if (url.protocol === 'http:') {
+                this.applyUrlBarSecurityState({ state: 'insecure' });
+                return;
+            }
+            if (url.protocol !== 'https:') {
+                this.applyUrlBarSecurityState({ state: 'local' });
+                return;
+            }
+        } catch (_) {
+            this.applyUrlBarSecurityState({ state: 'unknown' });
+            return;
+        }
+        let webContentsId = 0;
+        try {
+            webContentsId = wv.getWebContentsId() || 0;
+        } catch (_) {}
+        try {
+            const info = await window.electronAPI.getPageSecurityInfo({
+                webContentsId,
+                pageUrl,
+            });
+            this._activeSecurityInfo = info;
+            if (tabId === this.currentTab) {
+                this.applyUrlBarSecurityState(info);
+            }
+        } catch (_) {
+            this.applyUrlBarSecurityState({ state: 'secure' });
+        }
+    }
+
+    _renderSecurityCertChain(chain) {
+        const container = document.getElementById('security-cert-chain');
+        const wrap = document.getElementById('security-panel-chain-wrap');
+        if (!container || !wrap) return;
+        container.replaceChildren();
+        if (!Array.isArray(chain) || chain.length < 2) {
+            wrap.classList.add('hidden');
+            return;
+        }
+        wrap.classList.remove('hidden');
+        const displayChain = chain.slice().reverse();
+        displayChain.forEach((cert, displayIdx) => {
+            const row = document.createElement('div');
+            row.className = 'security-cert-chain-item';
+            row.setAttribute('role', 'listitem');
+            row.dataset.depth = String(Math.min(displayIdx, 3));
+            row.innerHTML = `<i class="fas fa-certificate" aria-hidden="true"></i><span>${this.escapeHtml(cert.subjectName || cert.commonName || 'Certificate')}</span>`;
+            container.appendChild(row);
+        });
+    }
+
+    renderSecurityPanel(info) {
+        const loading = document.getElementById('security-panel-loading');
+        const factsEl = document.getElementById('security-panel-facts');
+        const heading = document.getElementById('security-panel-heading');
+        const subheading = document.getElementById('security-panel-subheading');
+        const statusIcon = document.getElementById('security-panel-status-icon');
+
+        if (loading) loading.classList.add('hidden');
+        if (heading) heading.textContent = info?.title || 'Security';
+        if (subheading) subheading.textContent = info?.subtitle || '';
+
+        if (statusIcon) {
+            statusIcon.classList.remove(
+                'security-panel-status-icon--secure',
+                'security-panel-status-icon--warning',
+                'security-panel-status-icon--insecure',
+                'security-panel-status-icon--local'
+            );
+            const icon = statusIcon.querySelector('i');
+            let modifier = 'security-panel-status-icon--local';
+            let iconClass = 'fa-circle-info';
+            if (info?.state === 'secure') {
+                modifier = 'security-panel-status-icon--secure';
+                iconClass = 'fa-lock';
+            } else if (info?.state === 'warning') {
+                modifier = 'security-panel-status-icon--warning';
+                iconClass = 'fa-triangle-exclamation';
+            } else if (info?.state === 'insecure') {
+                modifier = 'security-panel-status-icon--insecure';
+                iconClass = 'fa-unlock';
+            }
+            statusIcon.classList.add(modifier);
+            if (icon) icon.className = `fas ${iconClass}`;
+        }
+
+        if (factsEl) {
+            factsEl.replaceChildren();
+            const rows = Array.isArray(info?.facts) ? info.facts : [];
+            if (!rows.length && info?.hostname) {
+                rows.push({ label: 'Site', value: info.hostname });
+            }
+            rows.forEach(({ label, value }) => {
+                if (!label || value == null || value === '') return;
+                const dt = document.createElement('dt');
+                dt.textContent = label;
+                const dd = document.createElement('dd');
+                dd.textContent = String(value);
+                factsEl.appendChild(dt);
+                factsEl.appendChild(dd);
+            });
+        }
+
+        this._renderSecurityCertChain(info?.chain || []);
+    }
+
+    async fetchSecurityInfo() {
+        const ctx = this.getSecurityPageContext();
+        let info = {
+            state: 'unknown',
+            title: 'Security',
+            subtitle: 'Unable to determine security status for this page.',
+            chain: [],
+        };
+        try {
+            info = await window.electronAPI.getPageSecurityInfo({
+                webContentsId: ctx.webContentsId,
+                pageUrl: ctx.pageUrl,
+            });
+        } catch (_) {}
+        this._activeSecurityInfo = info;
+        return info;
+    }
+
+    async refreshSecurityPanel() {
+        const panel = document.getElementById('security-panel');
+        if (!panel || panel.classList.contains('hidden')) return;
+        const info = await this.fetchSecurityInfo();
+        this.renderSecurityPanel(info);
+        this.applyUrlBarSecurityState(info);
+    }
+
+    positionSecurityPanel() {
+        const panel = document.getElementById('security-panel');
+        const btn = this.elements?.urlBarSecurity;
+        if (!panel || !btn) return;
+        const rect = btn.getBoundingClientRect();
+        const margin = 8;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+        const popupWidth = Math.min(380, viewportWidth - margin * 2);
+        panel.style.width = `${popupWidth}px`;
+        let left = rect.right - popupWidth;
+        if (left < margin) left = rect.left;
+        if (left + popupWidth + margin > viewportWidth) {
+            left = viewportWidth - popupWidth - margin;
+        }
+        left = Math.max(margin, left);
+        panel.style.left = `${left}px`;
+        panel.style.top = `${rect.bottom + margin}px`;
+        panel.style.right = 'auto';
+    }
+
+    closeSecurityPanel() {
+        const panel = document.getElementById('security-panel');
+        const backdrop = document.getElementById('security-panel-backdrop');
+        if (backdrop) {
+            backdrop.classList.add('hidden');
+            backdrop.setAttribute('aria-hidden', 'true');
+        }
+        document.body.classList.remove('security-panel-open');
+        if (panel) panel.classList.add('hidden');
+    }
+
+    async toggleSecurity() {
+        const panel = document.getElementById('security-panel');
+        if (!panel) return;
+        if (!panel.classList.contains('hidden')) {
+            this.closeSecurityPanel();
+            return;
+        }
+
+        const dp = document.getElementById('downloads-popup');
+        if (dp && !dp.classList.contains('hidden')) {
+            this.hideDownloadsPopup();
+        }
+        this.closeExtensionsMenu();
+        this.closeAdblockPanel();
+
         const settingsPanel = document.getElementById('settings-panel');
         const downloadsPanel = document.getElementById('downloads-panel');
-        const backdrop = document.getElementById('modal-backdrop');
-
-        this.closeExtensionsMenu();
-        
-        // Close other panels with animation
-        if (!settingsPanel.classList.contains('hidden')) {
+        if (settingsPanel && !settingsPanel.classList.contains('hidden')) {
             this.closePanelWithAnimation(settingsPanel);
         }
-        if (!downloadsPanel.classList.contains('hidden')) {
+        if (downloadsPanel && !downloadsPanel.classList.contains('hidden')) {
             this.closePanelWithAnimation(downloadsPanel);
         }
-        
-        if (securityPanel.classList.contains('hidden')) {
-            // Update security info first
-            this.updateSecurityInfo();
-            
-            // Show backdrop
-            if (backdrop) {
-                backdrop.classList.remove('hidden');
-                backdrop.style.opacity = '0';
-                backdrop.style.transition = 'opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1)';
-                requestAnimationFrame(() => {
-                    backdrop.style.opacity = '1';
-                });
-            }
-            
-            // Show panel with animation
-            securityPanel.classList.remove('hidden');
-            securityPanel.style.opacity = '0';
-            securityPanel.style.transform = 'translate(-50%, -48%) scale(0.95)';
-            
-            requestAnimationFrame(() => {
-                securityPanel.style.transition = 'opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)';
-                securityPanel.style.opacity = '1';
-                securityPanel.style.transform = 'translate(-50%, -50%) scale(1)';
-            });
-            
-        } else {
-            // Use consistent close animation
-            this.closePanelWithAnimation(securityPanel);
+
+        const loading = document.getElementById('security-panel-loading');
+        const factsEl = document.getElementById('security-panel-facts');
+        if (loading) loading.classList.remove('hidden');
+        if (factsEl) factsEl.replaceChildren();
+
+        this.positionSecurityPanel();
+        const backdrop = document.getElementById('security-panel-backdrop');
+        if (backdrop) {
+            backdrop.classList.remove('hidden');
+            backdrop.setAttribute('aria-hidden', 'false');
         }
+        document.body.classList.add('security-panel-open');
+        panel.classList.remove('hidden');
+
+        const info = await this.fetchSecurityInfo();
+        this.renderSecurityPanel(info);
+        this.applyUrlBarSecurityState(info);
     }
 
     updateSecurityInfo() {
-        const webview = this.getActiveWebview();
-        if (!webview) return;
-        const url = webview.getURL();
-        const title = webview.getTitle();
-        
-        try {
-            const urlObj = new URL(url);
-            const protocol = urlObj.protocol;
-            const hostname = urlObj.hostname;
-            
-            // Update security icon and status
-            const securityIcon = document.getElementById('security-icon');
-            const securityTitle = document.getElementById('security-title');
-            const securitySubtitle = document.getElementById('security-subtitle');
-            const securityWebsite = document.getElementById('security-website');
-            const securityCertificate = document.getElementById('security-certificate');
-            const securityEncryption = document.getElementById('security-encryption');
-            const securityConnection = document.getElementById('security-connection');
-            
-            if (protocol === 'https:') {
-                securityIcon.className = 'fas fa-lock';
-                securityIcon.style.color = '#4CAF50';
-                securityTitle.textContent = 'Secure Connection';
-                securitySubtitle.textContent = 'Your connection is encrypted';
-                securityWebsite.textContent = hostname;
-                securityCertificate.textContent = 'Valid';
-                securityEncryption.textContent = 'TLS 1.3';
-                securityConnection.textContent = 'Secure';
-            } else if (protocol === 'http:') {
-                securityIcon.className = 'fas fa-unlock';
-                securityIcon.style.color = '#ff9800';
-                securityTitle.textContent = 'Not Secure';
-                securitySubtitle.textContent = 'Your connection is not encrypted';
-                securityWebsite.textContent = hostname;
-                securityCertificate.textContent = 'None';
-                securityEncryption.textContent = 'None';
-                securityConnection.textContent = 'Not Secure';
-            } else {
-                securityIcon.className = 'fas fa-info-circle';
-                securityIcon.style.color = '#666';
-                securityTitle.textContent = 'Local Page';
-                securitySubtitle.textContent = 'This is a local or system page';
-                securityWebsite.textContent = hostname || 'Local';
-                securityCertificate.textContent = 'N/A';
-                securityEncryption.textContent = 'N/A';
-                securityConnection.textContent = 'Local';
-            }
-        } catch (error) {
-            // Handle invalid URLs
-            const securityIcon = document.getElementById('security-icon');
-            const securityTitle = document.getElementById('security-title');
-            const securitySubtitle = document.getElementById('security-subtitle');
-            
-            securityIcon.className = 'fas fa-info-circle';
-            securityIcon.style.color = '#666';
-            securityTitle.textContent = 'Unknown';
-            securitySubtitle.textContent = 'Unable to determine security status';
-        }
-    }
-
-    viewCertificate() {
-        const webview = this.getActiveWebview();
-        if (!webview) return;
-        const url = webview.getURL();
-        
-        if (url && url.startsWith('https:')) {
-            // Open certificate viewer in new tab
-            this.createNewTab(`chrome://net-internals/#hsts`);
-            this.showNotification('Certificate details opened in new tab', 'info');
-        } else {
-            this.showNotification('No certificate available for this page', 'warning');
-        }
+        void this.refreshSecurityPanel();
     }
 
     openSecuritySettings() {
-        // Close security panel and open settings
-        this.toggleSecurity();
-        this.toggleSettings();
-        this.showNotification('Security settings opened', 'info');
+        this.closeSecurityPanel();
+        void this.openSettingsTab('customization');
     }
 
     closeAllPopups() {
@@ -18460,7 +25002,7 @@ class AxisBrowser {
             this.closePanelWithAnimation(downloadsPanel);
         }
         if (securityPanel && !securityPanel.classList.contains('hidden')) {
-            this.closePanelWithAnimation(securityPanel);
+            this.closeSecurityPanel();
         }
         if (notesPanel && !notesPanel.classList.contains('hidden')) {
             this.closePanelWithAnimation(notesPanel);
@@ -20163,6 +26705,277 @@ class AxisBrowser {
         await this.refreshEmbeddedShortcutsEditor(webview);
         this.showNotification('Keyboard shortcuts reset to defaults', 'success');
     }
+
+    _isLinkPreviewEnabled() {
+        return this.settings?.linkPreview !== false;
+    }
+
+    _applyLinkPreviewSetting() {
+        if (!this._isLinkPreviewEnabled()) {
+            this._hideLinkStatusNow();
+        }
+    }
+
+    setupLinkStatusBar() {
+        const layer = this.elements?.linkStatusLayer;
+        const hitLeft = this.elements?.linkStatusHitLeft;
+        const hitRight = this.elements?.linkStatusHitRight;
+        if (!layer || layer.dataset.bound === '1') return;
+        layer.dataset.bound = '1';
+
+        const onDockEnter = () => {
+            if (this._linkStatusDockLeaveTimer) {
+                clearTimeout(this._linkStatusDockLeaveTimer);
+                this._linkStatusDockLeaveTimer = null;
+            }
+            this._onLinkStatusDockEnter();
+        };
+        const onDockLeave = () => {
+            if (this._linkStatusDockLeaveTimer) clearTimeout(this._linkStatusDockLeaveTimer);
+            this._linkStatusDockLeaveTimer = setTimeout(() => {
+                this._linkStatusDockLeaveTimer = null;
+                const overLeft = hitLeft?.matches(':hover');
+                const overRight = hitRight?.matches(':hover');
+                if (!overLeft && !overRight) this._onLinkStatusDockLeave();
+            }, 48);
+        };
+
+        for (const hit of [hitLeft, hitRight]) {
+            if (!hit) continue;
+            hit.addEventListener('mouseenter', onDockEnter);
+            hit.addEventListener('mouseleave', onDockLeave);
+        }
+
+        document.querySelectorAll('#webviews-container webview').forEach((wv) => {
+            const tid = wv.dataset?.tabId;
+            if (tid != null) this._ensureWebviewLinkStatusListener(wv, tid);
+        });
+    }
+
+    _onLinkStatusDockEnter() {
+        this._linkStatusInDockZone = true;
+        this._cancelLinkStatusHide();
+        this._cancelLinkStatusFade();
+        this.elements?.linkStatusLayer?.classList.remove('is-leaving');
+        this._dockLinkStatusRight();
+    }
+
+    _onLinkStatusDockLeave() {
+        this._linkStatusInDockZone = false;
+        this._undockLinkStatusLeft();
+        if (!this._linkStatusTargetUrl) this._scheduleLinkStatusHide();
+    }
+
+    _dockLinkStatusRight() {
+        const el = this.elements?.linkStatus;
+        if (!el) return;
+        this._linkStatusDockRight = true;
+        el.classList.add('is-right');
+    }
+
+    _undockLinkStatusLeft() {
+        const layer = this.elements?.linkStatusLayer;
+        const el = this.elements?.linkStatus;
+        if (!el || !layer || layer.classList.contains('hidden')) return;
+        this._linkStatusDockRight = false;
+        el.classList.remove('is-right');
+    }
+
+    _sanitizeLinkStatusUrl(raw) {
+        const value = String(raw || '').trim();
+        if (!value) return '';
+        try {
+            const parsed = new URL(value);
+            if (parsed.protocol === 'javascript:' || parsed.protocol === 'about:') return '';
+            return value;
+        } catch (_) {
+            if (/^javascript:/i.test(value)) return '';
+            return value;
+        }
+    }
+
+    _handleLinkStatusTargetUrl(tabKey, rawUrl) {
+        if (!this._isLinkPreviewEnabled()) {
+            this._hideLinkStatusNow();
+            return;
+        }
+        if (this._normalizeTabMapKey(this.currentTab) !== tabKey) return;
+        const url = this._sanitizeLinkStatusUrl(rawUrl);
+        this._linkStatusTargetUrl = url;
+
+        if (!url) {
+            this._cancelLinkStatusShow();
+            this._scheduleLinkStatusHide();
+            return;
+        }
+
+        this._cancelLinkStatusHide();
+        if (
+            url === this._linkStatusVisibleUrl &&
+            !this.elements?.linkStatusLayer?.classList.contains('hidden') &&
+            !this.elements?.linkStatusLayer?.classList.contains('is-leaving')
+        ) {
+            return;
+        }
+        this._scheduleLinkStatusShow(url, tabKey);
+    }
+
+    _bindWebviewLinkStatusListener(webview, handler) {
+        if (!webview || !handler) return;
+        if (webview.__eventHandlers?.updateTargetUrl) {
+            try {
+                webview.removeEventListener('update-target-url', webview.__eventHandlers.updateTargetUrl);
+            } catch (_) {}
+        }
+        webview.__eventHandlers = webview.__eventHandlers || {};
+        webview.__eventHandlers.updateTargetUrl = handler;
+        webview.__axisLinkStatusBound = true;
+        webview.addEventListener('update-target-url', handler);
+    }
+
+    _ensureWebviewLinkStatusListener(webview, tabId) {
+        if (!webview || webview.__axisLinkStatusBound) return;
+        const tabKey = this._normalizeTabMapKey(tabId);
+        const handler = (e) => {
+            this._handleLinkStatusTargetUrl(tabKey, (e && e.url) || '');
+        };
+        this._bindWebviewLinkStatusListener(webview, handler);
+    }
+
+    _formatLinkStatusUrl(href) {
+        if (!href) return '';
+        try {
+            return decodeURI(String(href));
+        } catch (_) {
+            return String(href);
+        }
+    }
+
+    _cancelLinkStatusShow() {
+        if (this._linkStatusShowTimer) {
+            clearTimeout(this._linkStatusShowTimer);
+            this._linkStatusShowTimer = null;
+        }
+    }
+
+    _cancelLinkStatusHide() {
+        if (this._linkStatusHideTimer) {
+            clearTimeout(this._linkStatusHideTimer);
+            this._linkStatusHideTimer = null;
+        }
+    }
+
+    _cancelLinkStatusFade() {
+        if (this._linkStatusFadeTimer) {
+            clearTimeout(this._linkStatusFadeTimer);
+            this._linkStatusFadeTimer = null;
+        }
+        const layer = this.elements?.linkStatusLayer;
+        const el = this.elements?.linkStatus;
+        layer?.classList.remove('is-leaving');
+        el?.classList.remove('is-leaving');
+    }
+
+    _scheduleLinkStatusShow(url, tabKey) {
+        this._cancelLinkStatusShow();
+        this._linkStatusShowTimer = setTimeout(() => {
+            this._linkStatusShowTimer = null;
+            if (this._linkStatusTargetUrl !== url) return;
+            if (this._normalizeTabMapKey(this.currentTab) !== tabKey) return;
+            this._presentLinkStatus(url);
+        }, 90);
+    }
+
+    _scheduleLinkStatusHide() {
+        if (this._linkStatusInDockZone) return;
+        this._cancelLinkStatusHide();
+        this._linkStatusHideTimer = setTimeout(() => {
+            this._linkStatusHideTimer = null;
+            if (this._linkStatusTargetUrl || this._linkStatusInDockZone) return;
+            this._fadeOutLinkStatus();
+        }, 1000);
+    }
+
+    _presentLinkStatus(url) {
+        const layer = this.elements?.linkStatusLayer;
+        const el = this.elements?.linkStatus;
+        const text = this.elements?.linkStatusText;
+        if (!layer || !el || !text || !url) return;
+        const wasHidden = layer.classList.contains('hidden');
+        this._cancelLinkStatusFade();
+        this._linkStatusVisibleUrl = url;
+        const display = this._formatLinkStatusUrl(url);
+        if (text.textContent !== display) {
+            text.textContent = display;
+            text.title = display;
+        }
+        layer.classList.remove('hidden', 'is-leaving');
+        el.classList.remove('hidden', 'is-leaving');
+        if (wasHidden) {
+            this._linkStatusDockRight = false;
+            el.classList.remove('is-right');
+        } else if (!this._linkStatusDockRight) {
+            el.classList.remove('is-right');
+        }
+    }
+
+    _fadeOutLinkStatus() {
+        const layer = this.elements?.linkStatusLayer;
+        const el = this.elements?.linkStatus;
+        if (!layer || !el || layer.classList.contains('hidden') || layer.classList.contains('is-leaving')) {
+            return;
+        }
+
+        this._cancelLinkStatusFade();
+        const finish = () => {
+            this._cancelLinkStatusFade();
+            layer.classList.remove('is-leaving');
+            layer.classList.add('hidden');
+            el.classList.remove('is-leaving', 'is-right');
+            el.classList.add('hidden');
+            this._linkStatusDockRight = false;
+            this._linkStatusInDockZone = false;
+            this._linkStatusVisibleUrl = '';
+            if (!this._linkStatusTargetUrl) {
+                this._linkStatusTargetUrl = '';
+            }
+        };
+
+        const onEnd = (e) => {
+            if (e.target !== el || e.propertyName !== 'opacity') return;
+            el.removeEventListener('transitionend', onEnd);
+            finish();
+        };
+
+        layer.classList.add('is-leaving');
+        el.classList.add('is-leaving');
+        el.addEventListener('transitionend', onEnd);
+        this._linkStatusFadeTimer = setTimeout(() => {
+            el.removeEventListener('transitionend', onEnd);
+            finish();
+        }, 320);
+    }
+
+    _hideLinkStatusNow() {
+        this._cancelLinkStatusShow();
+        this._cancelLinkStatusHide();
+        this._cancelLinkStatusFade();
+        if (this._linkStatusDockLeaveTimer) {
+            clearTimeout(this._linkStatusDockLeaveTimer);
+            this._linkStatusDockLeaveTimer = null;
+        }
+        this._linkStatusDockRight = false;
+        this._linkStatusInDockZone = false;
+        const layer = this.elements?.linkStatusLayer;
+        const el = this.elements?.linkStatus;
+        if (!layer || !el) return;
+        layer.classList.add('hidden');
+        layer.classList.remove('is-leaving');
+        el.classList.add('hidden');
+        el.classList.remove('is-right', 'is-leaving');
+        this._linkStatusVisibleUrl = '';
+        this._linkStatusTargetUrl = '';
+    }
     
     // URL Bar Setup - themed bar that matches website colors
     setupUrlBar() {
@@ -20208,15 +27021,29 @@ class AxisBrowser {
         
         // Ad blocker toggle (EasyList + EasyPrivacy-style rules via main process)
         if (el.urlBarAdblock) {
-            el.urlBarAdblock.addEventListener('click', async () => {
-                const next = !this.isAdBlockerEnabled();
-                await this.saveSetting('adBlockerEnabled', next);
-                try {
-                    window.electronAPI.sendSettingsUpdated();
-                } catch (_) {}
-                this.syncAdBlockerUrlBarState();
+            el.urlBarAdblock.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void this.toggleAdblockPanel();
             });
         }
+        document.getElementById('adblock-panel-close')?.addEventListener('click', () => this.closeAdblockPanel());
+        document.getElementById('adblock-panel-backdrop')?.addEventListener('click', () => this.closeAdblockPanel());
+        document.getElementById('adblock-panel-global-btn')?.addEventListener('click', () => {
+            void this.toggleAdBlockerGlobalFromPanel();
+        });
+        document.getElementById('adblock-panel-site-btn')?.addEventListener('click', () => {
+            void this.toggleAdBlockerSiteFromPanel();
+        });
+        window.addEventListener('resize', () => {
+            const p = document.getElementById('adblock-panel');
+            if (p && !p.classList.contains('hidden')) this.positionAdblockPanel();
+            const sp = document.getElementById('security-panel');
+            if (sp && !sp.classList.contains('hidden')) this.positionSecurityPanel();
+        });
+        window.electronAPI?.onAdblockStatsUpdated?.(() => {
+            void this.refreshAdblockPanel();
+        });
 
         if (el.urlBarExtensions) {
             el.urlBarExtensions.addEventListener('click', (event) => {
@@ -20335,6 +27162,7 @@ class AxisBrowser {
                 el.urlBarInput.addEventListener('contextmenu', async (e) => {
                     e.preventDefault();
                     const input = e.currentTarget;
+                    this._emojiContextEditableEl = input;
                     const hasSelection = input.selectionStart != null && input.selectionEnd != null && input.selectionStart !== input.selectionEnd;
                     await window.electronAPI?.showUrlBarContextMenu?.(e.clientX, e.clientY, {
                         isEditable: true,
@@ -20369,15 +27197,32 @@ class AxisBrowser {
         }
     }
 
-    /** After a tab switch, URL bar tint updates without CSS fade; call again after sync styling or extract. */
+    /** After a tab switch tint update, URL bar changes without CSS fade. */
     _releaseUrlBarInstantThemeAfterTabSwitchIfNeeded() {
         if (!this._urlBarInstantThemeTabSwitch) return;
         this._urlBarInstantThemeTabSwitch = false;
+        if (!this._urlBarNavThemeSnap) {
+            this._removeUrlBarInstantThemeClass();
+        }
+    }
+
+    /** After navigation finishes, allow URL bar cross-fades again. */
+    _releaseUrlBarNavThemeSnapIfNeeded() {
+        if (!this._urlBarNavThemeSnap) return;
+        this._urlBarNavThemeSnap = false;
+        if (!this._urlBarInstantThemeTabSwitch) {
+            this._removeUrlBarInstantThemeClass();
+        }
+    }
+
+    _removeUrlBarInstantThemeClass() {
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
+                if (!this._urlBarNavThemeSnap && !this._urlBarInstantThemeTabSwitch) {
                 urlBar.classList.remove('url-bar--instant-theme');
+                }
             });
         });
     }
@@ -20448,7 +27293,7 @@ class AxisBrowser {
         if (!cwsId && !amoKey) {
             return;
         }
-        const dismissToken = amoKey ? `amo:${amoKey.toLowerCase()}` : cwsId;
+            const dismissToken = amoKey ? `amo:${amoKey.toLowerCase()}` : cwsId;
         await this._runExtensionStoreInstall(listingUrl, {
             webview: this.getActiveWebview(),
             dismissToken,
@@ -20460,21 +27305,136 @@ class AxisBrowser {
         void this.refreshExtensionStoreListingUi(currentUrl);
     }
 
+    /** Navigation + URL display only — no theme extraction or shell repaint (used after tab switch). */
+    _updateUrlBarNavigationState(webview, tab) {
+        const el = this.elements;
+        if (!el?.webviewUrlBar || !tab) return;
+
+        if (tab.url === this.NEWTAB_URL) {
+            el.webviewUrlBar.classList.remove('hidden');
+            if (el.urlBarInput) el.urlBarInput.value = '';
+            if (el.urlBarDisplay) el.urlBarDisplay.textContent = '';
+            if (el.urlBarBack) el.urlBarBack.disabled = true;
+            if (el.urlBarForward) el.urlBarForward.disabled = true;
+            if (el.urlBarCwsInstall) {
+                el.urlBarCwsInstall.classList.add('hidden');
+                el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
+            }
+            return;
+        }
+
+        if (tab.url === 'axis://settings' || tab.isSettings) {
+            el.webviewUrlBar.classList.remove('hidden');
+            const settingsWv = tab.webview;
+            if (el.urlBarInput) el.urlBarInput.value = 'axis://settings';
+            if (el.urlBarDisplay) el.urlBarDisplay.textContent = 'Settings';
+            if (el.urlBarBack) el.urlBarBack.disabled = !settingsWv || !settingsWv.canGoBack();
+            if (el.urlBarForward) el.urlBarForward.disabled = !settingsWv || !settingsWv.canGoForward();
+            if (el.urlBarCwsInstall) {
+                el.urlBarCwsInstall.classList.add('hidden');
+                el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
+            }
+            this.updateExtensionStoreHostBar('');
+            return;
+        }
+
+        if (!webview) {
+            el.webviewUrlBar.classList.add('hidden');
+            return;
+        }
+
+        let currentUrl = '';
+        let pageTitle = '';
+        try {
+            currentUrl = webview.getURL();
+            pageTitle = webview.getTitle() || '';
+        } catch (_) {}
+
+        const isSpecialPage =
+            currentUrl &&
+            (currentUrl.startsWith('chrome://') ||
+                currentUrl.startsWith('chrome-extension://') ||
+                currentUrl.startsWith('axis://') ||
+                currentUrl.startsWith('axis:note://'));
+
+        if (isSpecialPage) {
+            el.webviewUrlBar.classList.add('hidden');
+            this.updateExtensionStoreHostBar('');
+            return;
+        }
+
+        el.webviewUrlBar.classList.remove('hidden');
+
+        if (el.urlBarSecurity) {
+            this._syncUrlBarSecurityIcon(currentUrl);
+            void this.refreshUrlBarSecurityState();
+        }
+
+        if (el.urlBarBack) el.urlBarBack.disabled = !webview.canGoBack();
+        if (el.urlBarForward) el.urlBarForward.disabled = !webview.canGoForward();
+
+        void this.refreshExtensionStoreListingUi(currentUrl);
+
+        if (el.urlBarInput) el.urlBarInput.value = currentUrl;
+
+        if (el.urlBarDisplay) {
+            const alwaysFull = !!this.settings?.alwaysShowFullUrl;
+            if (alwaysFull) {
+                el.urlBarDisplay.textContent = currentUrl || 'New Tab';
+            } else {
+                try {
+                    const url = new URL(currentUrl);
+                    const domain = url.hostname.replace(/^www\./, '');
+                    let parts = [`<span class="url-domain">${domain}</span>`];
+                    if (pageTitle && pageTitle.length > 0 && pageTitle !== domain) {
+                        let title = pageTitle.replace(new RegExp(domain.split('.')[0], 'gi'), '').trim();
+                        title = title.replace(/^[\s\-\|\/\:]+/, '').trim();
+                        if (title.length > 0) {
+                            if (title.length > 50) title = title.substring(0, 47) + '...';
+                            parts.push(`<span class="url-path">${title}</span>`);
+                        }
+                    } else if (url.pathname && url.pathname !== '/') {
+                        const pathParts = url.pathname.split('/').filter((p) => p.length > 0);
+                        if (pathParts.length > 0) {
+                            let pathDisplay = pathParts
+                                .slice(0, 2)
+                                .map((p) => {
+                                    try {
+                                        return decodeURIComponent(p).replace(/[-_]/g, ' ');
+                                    } catch (_) {
+                                        return p;
+                                    }
+                                })
+                                .join(' / ');
+                            if (pathDisplay.length > 40) pathDisplay = pathDisplay.substring(0, 37) + '...';
+                            parts.push(`<span class="url-path">${pathDisplay}</span>`);
+                        }
+                    }
+                    el.urlBarDisplay.innerHTML = parts.join('<span class="url-separator">/</span>');
+                } catch (_) {
+                    el.urlBarDisplay.textContent = currentUrl || 'New Tab';
+                }
+            }
+        }
+
+        if (this.currentTab) this.updateTabTooltip(this.currentTab);
+    }
+
     // Update the URL bar display and theme
     // opts.skipExtractTheme: when true, do not run extractUrlBarTheme (caller will await it — avoids races on rapid settings toggles)
     updateUrlBar(webview, opts = {}) {
         if (this.splitView) {
             this.updateSplitPanesUrlBars();
-            this.renderFavorites();
+            this._maybeRenderFavoritesForActiveTab();
             return;
         }
         const el = this.elements;
         if (!el || !el.webviewUrlBar) {
-            this.renderFavorites();
+            this._maybeRenderFavoritesForActiveTab();
             return;
         }
         // Favorites “active” dot tracks `currentTab` only — must run before NTP / special-page early returns that skip URL chrome work.
-        this.renderFavorites();
+        this._maybeRenderFavoritesForActiveTab();
 
         // New tab page: show URL bar but hide action buttons (copy, security, chat)
         const currentTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
@@ -20577,16 +27537,8 @@ class AxisBrowser {
         
         // Update security icon based on URL
         if (el.urlBarSecurity) {
-            const icon = el.urlBarSecurity.querySelector('i');
-            if (icon) {
-                if (currentUrl.startsWith('https://')) {
-                    icon.classList.remove('fa-unlock', 'fa-lock-open', 'fa-globe');
-                    icon.classList.add('fa-lock');
-                } else {
-                    icon.classList.remove('fa-lock', 'fa-lock-open', 'fa-globe');
-                    icon.classList.add('fa-unlock');
-                }
-            }
+            this._syncUrlBarSecurityIcon(currentUrl);
+            void this.refreshUrlBarSecurityState();
         }
         
         // Update navigation button states
@@ -20665,16 +27617,27 @@ class AxisBrowser {
         
         // Extract theme color from website
         if (!opts.skipExtractTheme) {
-            this._voidGuestTask(this.extractUrlBarTheme(webview));
+            if (this.settings?.transparentSites) {
+                this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
+            } else {
+                this._voidGuestTask(this.extractUrlBarTheme(webview));
+            }
         } else if (!opts.keepInstantTheme) {
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         }
     }
     
     // Apply app theme to URL bar (for regular website tabs — not NTP / Settings)
-    applyAppThemeToUrlBar() {
+    applyAppThemeToUrlBar(opts = {}) {
+        if (this.settings?.transparentSites) {
+            this.applyTransparentSitesUrlBarStyle(opts);
+            return;
+        }
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
+        if (!opts.skipShellReset) {
+            this._resetSiteThemeColorToSettings();
+        }
         if (this._isInternalShellUrlBar(urlBar)) {
             this.applyInternalShellUrlBarStyle();
             return;
@@ -20684,54 +27647,9 @@ class AxisBrowser {
         const gradientEnabled = this.settings?.gradientEnabled && gradientColor;
         const gradientDirection = this.settings?.gradientDirection || '135deg';
 
-        let scForBar = null;
         let shellDarkChrome = this.isIncognitoWindow || this.isDarkColor(themeColor);
-        if (!this.isIncognitoWindow) {
-            if (this.settings?.transparentSites) {
-                scForBar = this.getShellChromeStyle();
-                const gaP = this.getThemeAwareGlassAlpha(themeColor, scForBar.glassAlpha);
-                const surfT = this.approximateGlassSurfaceHex(themeColor, gaP);
-                const surfG = gradientEnabled
-                    ? this.approximateGlassSurfaceHex(
-                          gradientColor,
-                          this.getThemeAwareGlassAlpha(gradientColor, scForBar.glassAlpha)
-                      )
-                    : null;
-                const blended = surfG ? this.mixHexColors(surfT, surfG, 0.5) : surfT;
-                shellDarkChrome = this.isDarkColor(blended);
-            } else if (gradientEnabled) {
-                shellDarkChrome = this.isDarkColor(this.mixHexColors(themeColor, gradientColor, 0.5));
-            }
-        }
-
-        if (this.settings?.transparentSites) {
-            const sc = scForBar || this.getShellChromeStyle();
-            urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
-            urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
-            urlBar.classList.toggle('dark-mode', shellDarkChrome);
-            const gaP = this.getThemeAwareGlassAlpha(themeColor, sc.glassAlpha);
-            const gaG = gradientEnabled ? this.getThemeAwareGlassAlpha(gradientColor, sc.glassAlpha) : gaP;
-            const bgColor = gradientEnabled
-                ? this.smoothGradient(
-                    gradientDirection,
-                    this.hexToRgba(themeColor, gaP),
-                    this.hexToRgba(gradientColor, gaG)
-                )
-                : this.hexToRgba(themeColor, gaP);
-            urlBar.style.setProperty('--url-bar-bg', bgColor);
-            if (shellDarkChrome) {
-                urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
-                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
-                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.14)');
-            } else {
-                urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.12)');
-                urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
-                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.55)');
-                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.08)');
-            }
-            this.applyChatPanelTheme(urlBar);
-            return;
+        if (!this.isIncognitoWindow && gradientEnabled) {
+            shellDarkChrome = this.isDarkColor(this.mixHexColors(themeColor, gradientColor, 0.5));
         }
 
         urlBar.style.removeProperty('backdrop-filter');
@@ -20753,10 +27671,51 @@ class AxisBrowser {
             urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.1)');
         }
         this.applyChatPanelTheme(urlBar);
-        if (!this.settings?.transparentSites) {
-            this._syncWebPanelVisualState();
-            this._syncWebviewCanvasColor(this.settings?.themeColor || '#1a1a1a');
+        this._syncWebPanelVisualState();
+        this._syncWebviewCanvasColor(this.settings?.themeColor || '#1a1a1a');
+    }
+
+    /** Transparent sites: see-through URL bar with frosted blur — theme shows through like New Tab. */
+    applyTransparentSitesUrlBarStyle(opts = {}) {
+        const urlBar = this.elements?.webviewUrlBar;
+        if (!urlBar) return;
+        if (!opts.skipShellReset) {
+            this._resetSiteThemeColorToSettings();
         }
+        if (this._isInternalShellUrlBar(urlBar)) {
+            this.applyInternalShellUrlBarStyle();
+            return;
+        }
+        const themeColor = this.settings?.themeColor || '#1a1a1a';
+        const gradientColor = this.settings?.gradientColor || '#2a2a2a';
+        const gradientEnabled = this.settings?.gradientEnabled && gradientColor;
+        let shellDarkChrome = this.isIncognitoWindow || this.isDarkColor(themeColor);
+        if (!this.isIncognitoWindow && gradientEnabled) {
+            shellDarkChrome = this.isDarkColor(this.mixHexColors(themeColor, gradientColor, 0.5));
+        } else if (!this.isIncognitoWindow && this.isLightUiTheme()) {
+            shellDarkChrome = false;
+        }
+
+        urlBar.style.setProperty('background', 'transparent', 'important');
+        urlBar.style.setProperty('--url-bar-bg', 'transparent');
+        urlBar.style.removeProperty('backdrop-filter');
+        urlBar.style.removeProperty('-webkit-backdrop-filter');
+        urlBar.classList.toggle('dark-mode', shellDarkChrome);
+
+        if (shellDarkChrome) {
+            urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
+            urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
+            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+        } else {
+            urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.08)');
+            urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.88)');
+            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
+            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.06)');
+        }
+        this.applyChatPanelTheme(urlBar);
+        this._syncWebPanelVisualState();
+        this._clearWebviewCanvasColor();
     }
 
     /** NTP / AI chat top bar: transparent — single frosted layer is #new-tab-page beneath (z-index 50). */
@@ -20766,14 +27725,21 @@ class AxisBrowser {
         urlBar.style.setProperty('--url-bar-bg', 'transparent');
         urlBar.style.removeProperty('backdrop-filter');
         urlBar.style.removeProperty('-webkit-backdrop-filter');
-        urlBar.classList.add('dark-mode');
+        const lightUi = this.isLightUiTheme();
+        urlBar.classList.toggle('dark-mode', !lightUi);
         urlBar.style.setProperty('--url-bar-border', 'transparent');
-        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
-        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+        if (lightUi) {
+            urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.88)');
+            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
+            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.06)');
+        } else {
+            urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
+            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+        }
     }
 
-    /** New tab + Settings URL bar — always dark frosted chrome, unaffected by `uiTheme`. */
+    /** New tab URL bar follows light/dark appearance; Settings stays dark frosted. */
     applyInternalShellUrlBarStyle() {
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar || !urlBar.classList.contains('url-bar-internal-shell')) return;
@@ -20787,29 +27753,89 @@ class AxisBrowser {
     }
     
     _clearUrlBarThemeRefineTimer() {
-        if (this._urlBarThemeRefineTimer) {
-            clearTimeout(this._urlBarThemeRefineTimer);
+        if (this._urlBarThemeRefineTimer != null) {
+            cancelAnimationFrame(this._urlBarThemeRefineTimer);
             this._urlBarThemeRefineTimer = null;
         }
     }
 
     /** One delayed re-extract so late-painted headers / meta updates can correct the URL bar tint. */
-    _scheduleUrlBarThemeRefine(webview) {
+    _scheduleUrlBarThemeRefine(webview, opts = {}) {
         this._clearUrlBarThemeRefineTimer();
-        if (!webview) return;
+        if (!webview || this.settings?.transparentSites) return;
         const wv = webview;
-        this._urlBarThemeRefineTimer = setTimeout(() => {
+        this._urlBarThemeRefineTimer = requestAnimationFrame(() => {
+            this._urlBarThemeRefineTimer = requestAnimationFrame(() => {
             this._urlBarThemeRefineTimer = null;
             if (this.getActiveWebview() !== wv) return;
             const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
             if (!tab || tab.url === this.NEWTAB_URL || tab.url === 'axis://settings' || tab.isSettings) return;
-            void this.extractUrlBarTheme(wv, { refine: true });
-        }, 480);
+            void this.extractUrlBarTheme(wv, { refine: true, afterRestore: !!opts.afterRestore });
+            });
+        });
+    }
+
+    _applyUrlBarColorInfo(colorInfo, urlBar, opts = {}) {
+        if (!colorInfo || !urlBar) return false;
+
+        const { r, g, b, source } = colorInfo;
+        const isDefaultOrError = source === 'default' || source === 'error';
+        if (isDefaultOrError) return false;
+        const webview = this.getActiveWebview();
+        if (!this._shouldAcceptUrlBarTheme(colorInfo, webview, opts)) return false;
+
+        if (this.settings?.transparentSites) {
+            this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
+            return true;
+        }
+
+        const rr = Math.max(0, Math.min(255, Math.round(r)));
+        const gg = Math.max(0, Math.min(255, Math.round(g)));
+        const bb = Math.max(0, Math.min(255, Math.round(b)));
+        const pageHex = `#${[rr, gg, bb].map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+        this._syncWebPanelVisualState();
+        this._syncWebviewCanvasColor(pageHex);
+
+        urlBar.style.removeProperty('backdrop-filter');
+        urlBar.style.removeProperty('-webkit-backdrop-filter');
+        const bgColor = `rgba(${rr}, ${gg}, ${bb}, 1)`;
+        const pageBgDark = this.isDarkColor(pageHex);
+
+        if (pageBgDark) {
+            urlBar.classList.add('dark-mode');
+            urlBar.style.setProperty('--url-bar-bg', bgColor);
+            urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.14)');
+            urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
+            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.16)');
+        } else {
+            urlBar.classList.remove('dark-mode');
+            urlBar.style.setProperty('--url-bar-bg', bgColor);
+            urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.06)');
+            urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
+            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
+            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.06)');
+        }
+        this.applyChatPanelTheme(urlBar);
+        this._applySiteThemeColorFromRgb({ r: rr, g: gg, b: bb }, source || 'extract');
+        if (webview) {
+            try {
+                webview.__axisThemePageKey = this._urlStablePageKey(webview.getURL() || '');
+            } catch (_) {
+                webview.__axisThemePageKey = '';
+            }
+            webview.__axisThemeSourceRank = this._urlBarThemeSourceRank(source || 'extract');
+        }
+        if (this.currentTab != null) {
+            this._commitUrlBarThemeToTab(this.currentTab, { r: rr, g: gg, b: bb }, source || 'extract');
+        }
+        return true;
     }
 
     // Extract website theme color and apply to URL bar
     async extractUrlBarTheme(webview, opts = {}) {
         if (!webview) return;
+        if (this._profileSwipeThemeActive) return;
         
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
@@ -20817,11 +27843,97 @@ class AxisBrowser {
             return;
         }
 
+        if (this.settings?.transparentSites) {
+            this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
+            if (!opts.early) {
+                this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
+            }
+            return;
+        }
+
+        const isEarly = !!opts.early;
+        const isRefine = !!opts.refine;
+        if (!isEarly) {
         this._clearUrlBarThemeRefineTimer();
-        const seq = ++this._urlBarThemeSeq;
+        }
+        const seqAtStart = this._urlBarThemeSeq;
+        const seq = isEarly ? seqAtStart : ++this._urlBarThemeSeq;
+
+        const earlyThemeScript = `
+                (function() {
+                    try {
+                        function parseColor(str) {
+                            if (!str || str === 'transparent' || str === 'rgba(0, 0, 0, 0)') return null;
+                            if (str.startsWith('#')) {
+                                var hex = str;
+                                if (hex.length === 4) {
+                                    hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+                                }
+                                if (hex.length === 7) {
+                                    return {
+                                        r: parseInt(hex.slice(1, 3), 16),
+                                        g: parseInt(hex.slice(3, 5), 16),
+                                        b: parseInt(hex.slice(5, 7), 16)
+                                    };
+                                }
+                            }
+                            var match = str.match(/[\\d.]+/g);
+                            if (match && match.length >= 3) {
+                                var r = Math.round(parseFloat(match[0]));
+                                var g = Math.round(parseFloat(match[1]));
+                                var b = Math.round(parseFloat(match[2]));
+                                var a = match.length >= 4 ? parseFloat(match[3]) : 1;
+                                if (a < 0.1) return null;
+                                return { r, g, b };
+                            }
+                            return null;
+                        }
+                        function getBrightness(rgb) {
+                            return (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+                        }
+                        function getEffectiveBg(el) {
+                            var cur = el;
+                            while (cur && cur.nodeType === 1) {
+                                if (cur.tagName === 'IFRAME') return null;
+                                var bg = parseColor(window.getComputedStyle(cur).backgroundColor);
+                                if (bg && (bg.r + bg.g + bg.b) > 28) return bg;
+                                cur = cur.parentElement;
+                            }
+                            return null;
+                        }
+                        var themeMeta = document.querySelector('meta[name="theme-color"]');
+                        if (themeMeta && themeMeta.content) {
+                            var metaColor = parseColor(themeMeta.content);
+                            if (metaColor) {
+                                return { r: metaColor.r, g: metaColor.g, b: metaColor.b, brightness: getBrightness(metaColor), source: 'meta' };
+                            }
+                        }
+                        var bodyBg = parseColor(window.getComputedStyle(document.body).backgroundColor);
+                        var htmlBg = parseColor(window.getComputedStyle(document.documentElement).backgroundColor);
+                        var surface = bodyBg || htmlBg;
+                        if (surface) {
+                            return { r: surface.r, g: surface.g, b: surface.b, brightness: getBrightness(surface), source: 'surface' };
+                        }
+                        var vw = window.innerWidth || document.documentElement.clientWidth || 800;
+                        var els;
+                        try { els = document.elementsFromPoint(Math.floor(vw * 0.5), 8); } catch (e) { els = null; }
+                        if (els && els.length) {
+                            for (var i = 0; i < Math.min(els.length, 8); i++) {
+                                var bg = getEffectiveBg(els[i]);
+                                if (bg) {
+                                    return { r: bg.r, g: bg.g, b: bg.b, brightness: getBrightness(bg), source: 'topvote' };
+                                }
+                            }
+                        }
+                        return { r: 250, g: 250, b: 250, brightness: 250, source: 'default' };
+                    } catch (e) {
+                        return { r: 250, g: 250, b: 250, brightness: 250, source: 'error' };
+                    }
+                })();
+            `;
         
         try {
-            const colorInfo = await webview.executeJavaScript(`
+            const colorInfo = await webview.executeJavaScript(isRefine ? `
                 (function() {
                     try {
                         function parseColor(str) {
@@ -21053,124 +28165,77 @@ class AxisBrowser {
                         return { r: 250, g: 250, b: 250, brightness: 250, source: 'error' };
                     }
                 })();
-            `);
+            ` : earlyThemeScript);
 
-            if (seq !== this._urlBarThemeSeq) return;
+            if (isEarly && seqAtStart !== this._urlBarThemeSeq) return;
+            if (!isEarly && seq !== this._urlBarThemeSeq) return;
             if (this.getActiveWebview() !== webview) return;
+
+            const earlyTrusted =
+                colorInfo &&
+                (colorInfo.source === 'meta' ||
+                    colorInfo.source === 'meta-inline' ||
+                    colorInfo.source === 'header');
+            if (isEarly && !earlyTrusted) return;
             
+            if (this._isUrlBarThemeHeldForWebview(webview)) {
             if (colorInfo) {
-                const { r, g, b, source } = colorInfo;
-                const isDefaultOrError = source === 'default' || source === 'error';
-                const rr = Math.max(0, Math.min(255, Math.round(r)));
-                const gg = Math.max(0, Math.min(255, Math.round(g)));
-                const bb = Math.max(0, Math.min(255, Math.round(b)));
-                const pageHex = `#${[rr, gg, bb].map((c) => c.toString(16).padStart(2, '0')).join('')}`;
-                const canvasHex = isDefaultOrError ? '#121212' : pageHex;
-                this._syncWebPanelVisualState();
-                this._syncWebviewCanvasColor(canvasHex);
-
-                if (this.settings?.transparentSites) {
-                    const sc = this.getShellChromeStyle();
-                    urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
-                    urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
-
-                    let bgColor;
-                    let barDarkMode;
-                    if (isDefaultOrError) {
-                        barDarkMode = true;
-                        const nh = '#0e0f12';
-                        const tintA = this.getThemeAwareGlassAlpha(nh, sc.glassAlpha);
-                        bgColor = this.hexToRgba(nh, tintA);
-                    } else {
-                        const tintA = this.getThemeAwareGlassAlpha(pageHex, sc.glassAlpha);
-                        const surf = this.approximateGlassSurfaceHex(pageHex, tintA);
-                        barDarkMode = this.isDarkColor(surf);
-                        bgColor = `rgba(${rr}, ${gg}, ${bb}, ${Math.min(0.995, tintA)})`;
-                    }
-
-                    if (barDarkMode) {
-                        urlBar.classList.add('dark-mode');
-                        urlBar.style.setProperty('--url-bar-bg', bgColor);
-                        urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
-                        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-                        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
-                        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.14)');
-                    } else {
-                        urlBar.classList.remove('dark-mode');
-                        urlBar.style.setProperty('--url-bar-bg', bgColor);
-                        urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.08)');
-                        urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.88)');
-                        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
-                        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.08)');
-                    }
-                    this.applyChatPanelTheme(urlBar);
-                } else {
-                    urlBar.style.removeProperty('backdrop-filter');
-                    urlBar.style.removeProperty('-webkit-backdrop-filter');
-                    const bgColor = `rgba(${rr}, ${gg}, ${bb}, 1)`;
-                    const pageBgDark = this.isDarkColor(pageHex);
-
-                    if (pageBgDark) {
-                        urlBar.classList.add('dark-mode');
-                        urlBar.style.setProperty('--url-bar-bg', bgColor);
-                        urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.14)');
-                        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-                        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.6)');
-                        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.16)');
-                    } else {
-                        urlBar.classList.remove('dark-mode');
-                        urlBar.style.setProperty('--url-bar-bg', bgColor);
-                        urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.06)');
-                        urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.9)');
-                        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
-                        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.06)');
-                    }
-                    this.applyChatPanelTheme(urlBar);
+                    this._stageUrlBarThemeForWebview(webview, {
+                        kind: 'rgb',
+                        rgb: { r: colorInfo.r, g: colorInfo.g, b: colorInfo.b },
+                        source: colorInfo.source || 'extract'
+                    });
                 }
-                if (!opts.refine) {
+                return;
+            }
+
+            const isDefaultOrError =
+                colorInfo &&
+                (colorInfo.source === 'default' || colorInfo.source === 'error');
+            if (isDefaultOrError) {
+                if (!isEarly) {
+                    this.applyAppThemeToUrlBar({ skipShellReset: true });
+                    this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
+                }
+                return;
+            }
+            
+            if (colorInfo && this._applyUrlBarColorInfo(colorInfo, urlBar)) {
+                let cacheUrl = '';
+                try {
+                    cacheUrl = webview.getURL() || '';
+                } catch (_) {}
+                if (cacheUrl) {
+                    this._cacheUrlBarThemeForUrl(cacheUrl, {
+                        r: colorInfo.r,
+                        g: colorInfo.g,
+                        b: colorInfo.b,
+                        source: colorInfo.source || 'extract'
+                    });
+                }
+                if (!isRefine && !isEarly) {
                     this._scheduleUrlBarThemeRefine(webview);
                 }
-                this._persistUrlBarChromeToTab(this.currentTab);
             }
+            if (!isEarly) {
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
-        } catch (e) {
-            if (seq !== this._urlBarThemeSeq) return;
-            if (this.getActiveWebview() !== webview) return;
-            if (this.settings?.transparentSites) {
-                urlBar.classList.add('dark-mode');
-                const sc = this.getShellChromeStyle();
-                urlBar.style.setProperty('backdrop-filter', sc.backdropMain);
-                urlBar.style.setProperty('-webkit-backdrop-filter', sc.backdropMain);
-                const nh = '#0e0f12';
-                const ta = this.getThemeAwareGlassAlpha(nh, sc.glassAlpha);
-                const bg = this.hexToRgba(nh, ta);
-                urlBar.style.setProperty('--url-bar-bg', bg);
-                urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.12)');
-                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
-                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.14)');
-                this.applyChatPanelTheme(urlBar);
-            } else {
-                urlBar.classList.remove('dark-mode');
-                urlBar.style.removeProperty('backdrop-filter');
-                urlBar.style.removeProperty('-webkit-backdrop-filter');
-                urlBar.style.setProperty('--url-bar-bg', 'rgba(250, 250, 250, 0.95)');
-                this._syncWebviewCanvasColor('#fafafa');
-                this.applyChatPanelTheme(urlBar);
             }
+        } catch (e) {
+            if (isEarly && seqAtStart !== this._urlBarThemeSeq) return;
+            if (!isEarly && seq !== this._urlBarThemeSeq) return;
+            if (this.getActiveWebview() !== webview) return;
+            if (isEarly) return;
+            this.applyAppThemeToUrlBar({ skipShellReset: true });
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         }
     }
 
-    /** AI chat panel — dark frosted glass, independent of page / URL bar theming. */
+    /** AI chat panel — frosted glass; follows Appearance light/dark for ink and surfaces. */
     applyChatPanelTheme(urlBar) {
         const sc = this.getNewTabSurfaceChromeStyle();
         const container = urlBar && urlBar.closest ? urlBar.closest('.webview-container') : null;
         if (container) {
-            container.style.setProperty('--chat-panel-bg', sc.aiPanelBg);
-            container.style.setProperty('--chat-panel-border', 'rgba(255, 255, 255, 0.1)');
-            container.style.setProperty('--chat-panel-text', 'rgba(255, 255, 255, 0.96)');
-            container.style.setProperty('--chat-panel-text-muted', 'rgba(255, 255, 255, 0.55)');
+            this._applyAiChatChromeVarsTo(container, sc);
         }
         this._applyAiChatPanelChrome();
     }
@@ -21306,7 +28371,7 @@ class AxisBrowser {
     }
     
     async checkAndShowPIP(tabId, webview) {
-        if (!webview) return;
+        if (!webview) return false;
         
         try {
             // Check if there's a playing video and request native PIP
@@ -21323,6 +28388,9 @@ class AxisBrowser {
                                         await document.exitPictureInPicture();
                                     }
                                     await v.requestPictureInPicture();
+                                    if (v.paused) {
+                                        try { await v.play(); } catch (_) {}
+                                    }
                                     return { success: true, videoIndex: i };
                                 }
                             } catch (e) {
@@ -21338,11 +28406,14 @@ class AxisBrowser {
                 this.pipTabId = tabId;
                 this.pipVideoIndex = result.videoIndex;
                 this.pipWebview = webview;
+                this._ensureBackgroundMediaPlayback(webview, this.tabs.get(tabId));
                 this.startPIPLeaveCheck();
+                return true;
             }
         } catch (e) {
             // Ignore errors - PIP may not be supported
         }
+        return false;
     }
     
     async showPIP(tabId, webview, videoIndex = 0) {
@@ -21905,6 +28976,7 @@ class AxisBrowser {
                 this.pipTabId = tabId;
                 this.pipVideoIndex = idx;
                 this.pipWebview = wv;
+                this._ensureBackgroundMediaPlayback(wv, this.tabs.get(tabId));
                 this.startPIPLeaveCheck();
             }
         } catch (_) {}
@@ -22004,6 +29076,8 @@ class AxisBrowser {
             if (!payload) return;
             if (payload.type === 'card' && payload.number && payload.cardholder) {
                 void this.handleVaultSaveOffer(webview, payload);
+            } else if (payload.type === 'address' && payload.fullName && payload.addressLine1) {
+                void this.handleVaultSaveOffer(webview, payload);
             } else if (payload.username && payload.password) {
                 void this.handleVaultSaveOffer(webview, { ...payload, type: 'login' });
             }
@@ -22038,6 +29112,8 @@ class AxisBrowser {
         const webview = this.findWebviewByGuestContentsId(guestWebContentsId) || this.getActiveWebview();
         if (channel === 'axis-vault-save-offer' && payload) {
             if (payload.type === 'card' && payload.number && payload.cardholder) {
+                void this.handleVaultSaveOffer(webview, payload);
+            } else if (payload.type === 'address' && payload.fullName && payload.addressLine1) {
                 void this.handleVaultSaveOffer(webview, payload);
             } else if (payload.username && payload.password) {
                 void this.handleVaultSaveOffer(webview, { ...payload, type: 'login' });
@@ -22088,6 +29164,7 @@ class AxisBrowser {
             const scanJs = this._vaultPageScanJs;
             let login = null;
             let card = null;
+            let address = null;
             const visit = async (frame) => {
                 if (!frame) return;
                 try {
@@ -22101,6 +29178,9 @@ class AxisBrowser {
                     }
                     if (!card && result?.card?.number && result.card.cardholder) {
                         card = { ...result.card, type: 'card' };
+                    }
+                    if (!address && result?.address?.fullName && result.address.addressLine1) {
+                        address = { ...result.address, type: 'address' };
                     }
                 } catch (_) {}
                 let kids = [];
@@ -22123,13 +29203,18 @@ class AxisBrowser {
                     const result = await webview.executeJavaScript(scanJs, true);
                     if (result?.login?.username && result.login.password) login = result.login;
                     if (result?.card?.number && result.card.cardholder) card = result.card;
+                    if (result?.address?.fullName && result.address.addressLine1) address = result.address;
                 }
             } catch (_) {}
             if (login) {
                 await this.handleVaultSaveOffer(webview, login);
                 return;
             }
-            if (card) await this.handleVaultSaveOffer(webview, card);
+            if (card) {
+                await this.handleVaultSaveOffer(webview, card);
+                return;
+            }
+            if (address) await this.handleVaultSaveOffer(webview, address);
         } catch (_) {}
     }
 
@@ -22149,6 +29234,7 @@ class AxisBrowser {
         }, 7000);
         if (this._vaultAutofillPollTimer) clearInterval(this._vaultAutofillPollTimer);
         this._vaultAutofillPollTimer = setInterval(() => {
+            if (document.visibilityState === 'hidden') return;
             const wv = this.getActiveWebview();
             if (!wv) return;
             let url = '';
@@ -22157,7 +29243,7 @@ class AxisBrowser {
             } catch (_) {}
             if (!/^https?:/i.test(url)) return;
             void this.pollVaultAutofillFocus(wv).catch(() => {});
-        }, 280);
+        }, 1200);
     }
 
     async executeInGuestFrames(webview, js, userGesture = false) {
@@ -22197,7 +29283,7 @@ class AxisBrowser {
     }
 
     getVaultAutofillUiTheme() {
-        return this.settings?.uiTheme === 'light' && !this.isIncognitoWindow ? 'light' : 'dark';
+        return this.getEffectiveUiTheme();
     }
 
     async syncVaultAutofillUiTheme(webview) {
@@ -22288,7 +29374,8 @@ class AxisBrowser {
             const status = await window.electronAPI.vaultStatus();
             if (status?.autofillEnabled === false) return;
         } catch (_) {}
-        const kind = payload.kind === 'card' ? 'card' : 'login';
+        const kind =
+            payload.kind === 'card' ? 'card' : payload.kind === 'address' ? 'address' : 'login';
         let items = [];
         try {
             const res = await window.electronAPI.vaultFillCandidates({
@@ -22297,7 +29384,12 @@ class AxisBrowser {
                 pageUrl: payload.pageUrl || '',
                 usernameHint: payload.usernameHint || ''
             });
-            items = kind === 'card' ? res?.cards || [] : res?.logins || [];
+            items =
+                kind === 'card'
+                    ? res?.cards || []
+                    : kind === 'address'
+                      ? res?.addresses || []
+                      : res?.logins || [];
         } catch (_) {
             return;
         }
@@ -22492,7 +29584,8 @@ class AxisBrowser {
 
     async handleVaultAutofillQuery(webview, payload) {
         if (!webview || !payload) return;
-        const kind = payload.kind === 'card' ? 'card' : 'login';
+        const kind =
+            payload.kind === 'card' ? 'card' : payload.kind === 'address' ? 'address' : 'login';
         let items = Array.isArray(payload.items) ? payload.items : [];
         if (!items.length) {
             try {
@@ -22503,7 +29596,12 @@ class AxisBrowser {
                     usernameHint: payload.usernameHint || ''
                 });
                 if (!res?.ok) return;
-                items = kind === 'card' ? res.cards || [] : res.logins || [];
+                items =
+                    kind === 'card'
+                        ? res.cards || []
+                        : kind === 'address'
+                          ? res.addresses || []
+                          : res.logins || [];
             } catch (_) {
                 return;
             }
@@ -22537,6 +29635,15 @@ class AxisBrowser {
                     e.preventDefault();
                     this.hideVaultAutofillPanel();
                     void this.applyVaultAutofillLogin(webview, row.id);
+                });
+            } else if (kind === 'address') {
+                const label = row.label || row.fullName || 'Address';
+                const sub = row.summary || row.addressLine1 || '';
+                btn.innerHTML = `<span class="vault-autofill-item-title">${this.escapeHtml(label)}</span><span class="vault-autofill-item-sub">${this.escapeHtml(sub)}</span>`;
+                btn.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    this.hideVaultAutofillPanel();
+                    void this.applyVaultAutofillAddress(webview, row.id);
                 });
             } else {
                 const label = row.label || row.cardholder || 'Card';
@@ -22573,10 +29680,21 @@ class AxisBrowser {
         } catch (_) {}
     }
 
+    async applyVaultAutofillAddress(webview, id) {
+        if (!webview || !id) return;
+        try {
+            const address = await window.electronAPI.vaultGetAddressForFill(id);
+            webview.send('axis-vault-apply-address', address);
+        } catch (_) {}
+    }
+
     _vaultOfferKey(payload) {
         if (!payload) return '';
         if (payload.type === 'card') {
             return `card:${payload.origin}:${String(payload.number || '').slice(-4)}`;
+        }
+        if (payload.type === 'address') {
+            return `address:${payload.origin}:${payload.postalCode}:${payload.addressLine1}`;
         }
         const pass = payload.password || '';
         return `login:${payload.origin}:${payload.username}:${pass.length}`;
@@ -22588,7 +29706,7 @@ class AxisBrowser {
         const prechecked = !!payload.vaultSavePrechecked;
         const cred = { ...payload };
         delete cred.vaultSavePrechecked;
-        if (cred.type !== 'card' && !prechecked) {
+        if (cred.type !== 'card' && cred.type !== 'address' && !prechecked) {
             try {
                 const gate = await window.electronAPI.vaultShouldOfferLoginSave({
                     origin: cred.origin,
@@ -22634,23 +29752,36 @@ class AxisBrowser {
         const userEl = document.getElementById('vault-save-user');
         const cardRow = document.getElementById('vault-save-card-row');
         const cardEl = document.getElementById('vault-save-card');
+        const addressRow = document.getElementById('vault-save-address-row');
+        const addressEl = document.getElementById('vault-save-address');
         const isCard = payload.type === 'card';
+        const isAddress = payload.type === 'address';
         let host = payload.origin || '';
         try {
             host = new URL(host).hostname || host;
         } catch (_) {}
         modal.setAttribute('data-ui-theme', this.getVaultAutofillUiTheme());
         if (title) {
-            title.textContent = isCard ? 'Save this card?' : 'Save password?';
+            title.textContent = isCard
+                ? 'Save this card?'
+                : isAddress
+                  ? 'Save this address?'
+                  : 'Save password?';
         }
         if (siteEl) siteEl.textContent = host || '—';
-        if (userRow) userRow.classList.toggle('hidden', isCard);
+        if (userRow) userRow.classList.toggle('hidden', isCard || isAddress);
         if (cardRow) cardRow.classList.toggle('hidden', !isCard);
-        if (userEl && !isCard) userEl.textContent = payload.username || '—';
+        if (addressRow) addressRow.classList.toggle('hidden', !isAddress);
+        if (userEl && !isCard && !isAddress) userEl.textContent = payload.username || '—';
         if (cardEl && isCard) {
             const label = payload.masked || '••••';
             const who = payload.cardholder || '';
             cardEl.textContent = who ? `${label} · ${who}` : label;
+        }
+        if (addressEl && isAddress) {
+            const who = payload.fullName || '';
+            const summary = payload.summary || payload.addressLine1 || '';
+            addressEl.textContent = who && summary ? `${who} · ${summary}` : who || summary || '—';
         }
         modal.classList.remove('hidden');
         this._setVaultModalOverlay(true);
@@ -22675,6 +29806,21 @@ class AxisBrowser {
                     billingZip: payload.billingZip || ''
                 });
                 this.showNotification('Card saved', 'success');
+            } else if (payload.type === 'address') {
+                await window.electronAPI.vaultSaveAddress({
+                    label: payload.label || '',
+                    fullName: payload.fullName,
+                    organization: payload.organization || '',
+                    addressLine1: payload.addressLine1,
+                    addressLine2: payload.addressLine2 || '',
+                    city: payload.city,
+                    state: payload.state || '',
+                    postalCode: payload.postalCode,
+                    country: payload.country || '',
+                    phone: payload.phone || '',
+                    email: payload.email || ''
+                });
+                this.showNotification('Address saved', 'success');
             } else {
                 await window.electronAPI.vaultCaptureLogin(payload);
                 this.showNotification('Password saved', 'success');
@@ -22761,6 +29907,10 @@ class AxisBrowser {
 
 if (typeof AxisProfileSwipe !== 'undefined') {
     AxisProfileSwipe.attach(AxisBrowser.prototype);
+}
+
+if (typeof AxisUndo !== 'undefined') {
+    AxisUndo.attach(AxisBrowser.prototype);
 }
 
 // Initialize the browser when DOM is loaded
