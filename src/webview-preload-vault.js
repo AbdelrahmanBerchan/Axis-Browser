@@ -82,7 +82,65 @@
       if (ac.includes('cc-csc') || name.includes('cvv') || name.includes('cvc') || id.includes('cvv')) {
         return 'cc-csc';
       }
+      if (
+        ac === 'street-address' ||
+        ac === 'address-line1' ||
+        ac.includes('street-address') ||
+        name.includes('address1') ||
+        name.includes('street') ||
+        id.includes('street') ||
+        id.includes('address1')
+      ) {
+        return 'addr-line1';
+      }
+      if (ac === 'address-line2' || name.includes('address2') || name.includes('apt') || id.includes('address2')) {
+        return 'addr-line2';
+      }
+      if (
+        ac === 'address-level1' ||
+        name === 'state' ||
+        name.includes('province') ||
+        id.includes('state') ||
+        id.includes('province')
+      ) {
+        return 'addr-state';
+      }
+      if (ac === 'address-level2' || name === 'city' || id.includes('city')) {
+        return 'addr-city';
+      }
+      if (
+        ac === 'postal-code' ||
+        ac.includes('postal') ||
+        name.includes('zip') ||
+        name.includes('postal') ||
+        id.includes('zip') ||
+        id.includes('postal')
+      ) {
+        return 'addr-postal';
+      }
+      if (ac === 'country' || ac === 'country-name' || name === 'country' || id.includes('country')) {
+        return 'addr-country';
+      }
+      if (ac === 'organization' || name.includes('company') || name.includes('organization') || id.includes('company')) {
+        return 'addr-org';
+      }
+      if (ac === 'name' && !ac.includes('cc-')) {
+        return 'addr-name';
+      }
       return null;
+    }
+
+    function isAddressFieldKind(k) {
+      return (
+        k === 'addr-line1' ||
+        k === 'addr-line2' ||
+        k === 'addr-state' ||
+        k === 'addr-city' ||
+        k === 'addr-postal' ||
+        k === 'addr-country' ||
+        k === 'addr-org' ||
+        k === 'addr-name'
+      );
     }
 
     function allVisibleInputs() {
@@ -203,6 +261,37 @@
       };
     }
 
+    function scanAddressCredentials() {
+      const inputs = allVisibleInputs();
+      const fields = {};
+      for (const el of inputs) {
+        const k = inputKind(el);
+        if (!k || !isAddressFieldKind(k)) continue;
+        const val = String(el.value || '').trim();
+        if (!val) continue;
+        if (!fields[k]) fields[k] = val;
+      }
+      if (!fields['addr-line1'] || !fields['addr-city'] || !fields['addr-postal'] || !fields['addr-name']) {
+        return null;
+      }
+      return {
+        type: 'address',
+        origin: pageOrigin(),
+        label: '',
+        fullName: fields['addr-name'],
+        organization: fields['addr-org'] || '',
+        addressLine1: fields['addr-line1'],
+        addressLine2: fields['addr-line2'] || '',
+        city: fields['addr-city'],
+        state: fields['addr-state'] || '',
+        postalCode: fields['addr-postal'],
+        country: fields['addr-country'] || '',
+        phone: '',
+        email: '',
+        summary: `${fields['addr-line1']}, ${fields['addr-city']}`
+      };
+    }
+
     function credentialsMatchRecentAutofill(creds) {
       const mark = window.__axisVaultLastAutofill;
       if (!mark || Date.now() - mark.at > 120000) return false;
@@ -252,6 +341,10 @@
       return `card:${creds.origin || pageOrigin()}:${creds.number.slice(-4)}`;
     }
 
+    function saveOfferKeyForAddress(creds) {
+      return `address:${creds.origin || pageOrigin()}:${creds.postalCode}:${creds.addressLine1}`;
+    }
+
     async function offerLoginSave(creds) {
       if (!creds || !creds.username || !creds.password) return;
       if (credentialsMatchRecentAutofill(creds)) return;
@@ -277,11 +370,29 @@
       notifyHost('axis-vault-save-offer', { ...creds, vaultSavePrechecked: true });
     }
 
+    async function offerAddressSave(creds) {
+      if (!creds || !creds.fullName || !creds.addressLine1) return;
+      const key = saveOfferKeyForAddress(creds);
+      if (shouldSkipDuplicateSaveOffer(key)) return;
+      let offer = true;
+      try {
+        const gate = await ipcRenderer.invoke('axis-vault-should-offer-address-save', creds);
+        offer = gate?.offer !== false;
+      } catch (_) {
+        offer = true;
+      }
+      if (!offer) return;
+      markSaveOfferSent(key);
+      notifyHost('axis-vault-save-offer', { ...creds, vaultSavePrechecked: true });
+    }
+
     function tryOfferSaves() {
       const login = scanLoginCredentials();
       if (login) void offerLoginSave(login);
       const card = scanCardCredentials();
       if (card) offerCardSave(card);
+      const address = scanAddressCredentials();
+      if (address) void offerAddressSave(address);
     }
 
     function scheduleSaveOfferAfterTyping() {
@@ -338,7 +449,7 @@
         scheduleSaveOfferAfterTyping();
         return;
       }
-      if (k === 'username' || k === 'cc-number' || k === 'cc-csc') {
+      if (k === 'username' || k === 'cc-number' || k === 'cc-csc' || isAddressFieldKind(k)) {
         scheduleSaveOfferAfterTyping();
       }
     }
@@ -429,6 +540,23 @@
       }
     }
 
+    function fillAddress(address, anchorEl) {
+      const root = anchorEl && anchorEl.form ? anchorEl.form : document;
+      const inputs = root.querySelectorAll ? Array.from(root.querySelectorAll('input')) : [];
+      for (const el of inputs) {
+        if (!isVisibleInput(el)) continue;
+        const k = inputKind(el);
+        if (k === 'addr-name') setFieldValue(el, address.fullName);
+        else if (k === 'addr-org') setFieldValue(el, address.organization);
+        else if (k === 'addr-line1') setFieldValue(el, address.addressLine1);
+        else if (k === 'addr-line2') setFieldValue(el, address.addressLine2);
+        else if (k === 'addr-city') setFieldValue(el, address.city);
+        else if (k === 'addr-state') setFieldValue(el, address.state);
+        else if (k === 'addr-postal') setFieldValue(el, address.postalCode);
+        else if (k === 'addr-country') setFieldValue(el, address.country);
+      }
+    }
+
     function isLikelyUsernameField(el) {
       if (inputKind(el) === 'username') return true;
       const t = (el.type || 'text').toLowerCase();
@@ -463,7 +591,8 @@
         k === 'cc-number' ||
         k === 'cc-name' ||
         k === 'cc-exp' ||
-        k === 'cc-csc'
+        k === 'cc-csc' ||
+        isAddressFieldKind(k)
       );
     }
 
@@ -612,6 +741,41 @@
       autofillAnchor = anchorEl;
     }
 
+    function showAddressAutofillMenu(anchorEl, addresses) {
+      hideAutofillMenu();
+      if (!addresses.length) return;
+      ensureVaultAutofillStyles();
+      const menu = document.createElement('ul');
+      menu.className = 'axis-vault-autofill-menu';
+      menu.id = 'axis-vault-autofill-menu';
+      menu.setAttribute('data-axis-theme', window.__axisVaultUiTheme === 'dark' ? 'dark' : 'light');
+      for (const addr of addresses) {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'axis-vault-autofill-item';
+        const title = document.createElement('span');
+        title.className = 'axis-vault-autofill-item-title';
+        title.textContent = addr.label || addr.fullName || 'Address';
+        const sub = document.createElement('span');
+        sub.className = 'axis-vault-autofill-item-sub';
+        sub.textContent = addr.summary || addr.addressLine1 || '';
+        btn.appendChild(title);
+        btn.appendChild(sub);
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          hideAutofillMenu();
+          fillAddress(addr, anchorEl);
+        });
+        li.appendChild(btn);
+        menu.appendChild(li);
+      }
+      document.documentElement.appendChild(menu);
+      positionAutofillMenu(menu, anchorEl);
+      autofillMenuEl = menu;
+      autofillAnchor = anchorEl;
+    }
+
     async function requestAutofillMenu(el) {
       const kind = resolveFieldKind(el);
       if (!kind) {
@@ -673,6 +837,29 @@
           autofillHideTimer = null;
         }
         showCardAutofillMenu(el, res.items);
+        return;
+      }
+
+      if (isAddressFieldKind(kind)) {
+        query.kind = 'address';
+        notifyHost('axis-vault-autofill-request', query);
+        let res;
+        try {
+          res = await ipcRenderer.invoke('axis-vault-autofill-query', query);
+        } catch (_) {
+          hideAutofillMenu();
+          return;
+        }
+        if (reqId !== autofillRequestGen) return;
+        if (!res || !res.ok || !res.items || !res.items.length) {
+          hideAutofillMenu();
+          return;
+        }
+        if (autofillHideTimer) {
+          clearTimeout(autofillHideTimer);
+          autofillHideTimer = null;
+        }
+        showAddressAutofillMenu(el, res.items);
       }
     }
 
@@ -690,7 +877,13 @@
         const el = e.target;
         if (!isVisibleInput(el)) return;
         const k = resolveFieldKind(el) || inputKind(el);
-        if (k === 'username' || k === 'password' || k === 'cc-number' || k === 'cc-csc') {
+        if (
+          k === 'username' ||
+          k === 'password' ||
+          k === 'cc-number' ||
+          k === 'cc-csc' ||
+          isAddressFieldKind(k)
+        ) {
           if (autofillInputTimer) clearTimeout(autofillInputTimer);
           autofillInputTimer = setTimeout(() => {
             autofillInputTimer = null;
@@ -734,7 +927,8 @@
           k === 'cc-number' ||
           k === 'cc-name' ||
           k === 'cc-exp' ||
-          k === 'cc-csc'
+          k === 'cc-csc' ||
+          isAddressFieldKind(k)
         ) {
           void tryAutofillOnFocus(el);
         } else {
@@ -768,7 +962,7 @@
           dismissAutofillIfNotNeeded();
         }, 150);
         const k = inputKind(el);
-        if (k === 'password' || k === 'cc-csc' || k === 'cc-number') {
+        if (k === 'password' || k === 'cc-csc' || k === 'cc-number' || isAddressFieldKind(k)) {
           scheduleSaveOfferAfterLeavingFields();
         }
       },
@@ -796,7 +990,13 @@
         const el = e.target;
         if (!isVisibleInput(el)) return;
         const k = inputKind(el);
-        if (k === 'password' || k === 'cc-csc' || k === 'cc-number' || k === 'username') {
+        if (
+          k === 'password' ||
+          k === 'cc-csc' ||
+          k === 'cc-number' ||
+          k === 'username' ||
+          isAddressFieldKind(k)
+        ) {
           scheduleSaveOfferAfterLeavingFields();
         }
       },
@@ -812,6 +1012,7 @@
         autofillHideTimer = null;
       }
       if (data.kind === 'card') showCardAutofillMenu(el, data.items);
+      else if (data.kind === 'address') showAddressAutofillMenu(el, data.items);
       else showLoginAutofillMenu(el, data.items);
     });
 
@@ -829,6 +1030,14 @@
         document.querySelector('input[autocomplete*="cc-number"]') ||
         allVisibleInputs().find((el) => inputKind(el) === 'cc-number');
       fillCard(card, anchor);
+    });
+
+    ipcRenderer.on('axis-vault-apply-address', (_ev, address) => {
+      if (!address) return;
+      const anchor =
+        document.querySelector('input[autocomplete*="street-address"],input[autocomplete*="address-line1"]') ||
+        allVisibleInputs().find((el) => inputKind(el) === 'addr-line1');
+      fillAddress(address, anchor);
     });
 
     ipcRenderer.on('axis-vault-scan-now', () => {
