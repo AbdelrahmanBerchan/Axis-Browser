@@ -7,8 +7,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  /** Window-wide sidebar side (left/right) — same for every profile. */
+  getSidebarPosition: () => ipcRenderer.sendSync('axis-get-sidebar-position'),
   /** Sync; used by standalone `settings.html` before first paint so theme never follows the OS. */
   getSettingsWindowBootstrap: () => ipcRenderer.sendSync('axis-settings-window-bootstrap'),
+  getSystemUiTheme: () => ipcRenderer.invoke('get-system-ui-theme'),
+  onSystemUiThemeChanged: (callback) => {
+    const handler = (_event, theme) => callback(theme);
+    ipcRenderer.on('system-ui-theme-changed', handler);
+    return () => ipcRenderer.removeListener('system-ui-theme-changed', handler);
+  },
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
   /** Sync write before quit — avoids losing tab groups when async setSetting does not finish. */
   flushSessionSync: (payload) => ipcRenderer.sendSync('axis-flush-session-sync', payload),
@@ -23,6 +31,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   printPage: (webContentsId) => ipcRenderer.invoke('print-page', webContentsId),
   getExtensions: () => ipcRenderer.invoke('get-extensions'),
+  getAdblockStats: (opts) => ipcRenderer.invoke('axis-get-adblock-stats', opts || {}),
+  resetAdblockPageStats: (webContentsId, pageUrl) =>
+    ipcRenderer.invoke('axis-reset-adblock-page-stats', { webContentsId, pageUrl }),
+  setAdblockSiteException: (hostname, disabled) =>
+    ipcRenderer.invoke('axis-set-adblock-site-exception', { hostname, disabled: !!disabled }),
+  getPageSecurityInfo: (opts) => ipcRenderer.invoke('axis-get-page-security-info', opts || {}),
+  onAdblockStatsUpdated: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('axis-adblock-stats-updated', handler);
+    return () => ipcRenderer.removeListener('axis-adblock-stats-updated', handler);
+  },
   getStoreListingInstallStatus: (rawUrl) =>
     ipcRenderer.invoke('get-store-listing-install-status', rawUrl),
   installExtension: () => ipcRenderer.invoke('install-extension'),
@@ -30,6 +49,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('install-extension-from-web-store', rawInput),
   installExtensionCrx: () => ipcRenderer.invoke('install-extension-crx'),
   getWebviewCwsPreloadPath: () => ipcRenderer.invoke('get-webview-cws-preload-path'),
+  getWebviewLightPreloadPath: () => ipcRenderer.invoke('get-webview-light-preload-path'),
   setExtensionEnabled: (id, enabled) => ipcRenderer.invoke('set-extension-enabled', id, enabled),
   removeExtension: (id) => ipcRenderer.invoke('remove-extension', id),
   openExtensionOptions: (id) => ipcRenderer.invoke('open-extension-options', id),
@@ -70,12 +90,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onCloseTab: (callback) => ipcRenderer.on('close-tab', callback),
   onRequestQuit: (callback) => ipcRenderer.on('request-quit', callback),
   onBrowserShortcut: (callback) => ipcRenderer.on('browser-shortcut', (event, action) => callback(action)),
+  setAxisUndoPending: (pending) => ipcRenderer.send('axis-undo-pending', !!pending),
   onAxisHostNavGesture: (callback) => {
     const handler = (_event, action) => {
       if (action === 'back' || action === 'forward') callback(action);
     };
     ipcRenderer.on('axis-host-nav-gesture', handler);
     return () => ipcRenderer.removeListener('axis-host-nav-gesture', handler);
+  },
+  onThemeColorHeader: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('axis-theme-color-header', handler);
+    return () => ipcRenderer.removeListener('axis-theme-color-header', handler);
   },
   onHostResizeLive: (callback) => ipcRenderer.on('axis-host-resize-live', () => callback()),
   onHostResizeSettled: (callback) => ipcRenderer.on('axis-host-resize-settled', () => callback()),
@@ -100,6 +126,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openOrFocusPersonalWindow: () => ipcRenderer.invoke('open-or-focus-personal-window'),
   getProfiles: () => ipcRenderer.invoke('get-profiles'),
   getProfileBootstrap: (profileId) => ipcRenderer.invoke('get-profile-bootstrap', profileId),
+  getAxisSessionRecovery: () => ipcRenderer.invoke('get-axis-session-recovery'),
   createProfile: (payload) => ipcRenderer.invoke('create-profile', payload),
   updateProfile: (payload) => ipcRenderer.invoke('update-profile', payload),
   reorderProfiles: (orderedIds) => ipcRenderer.invoke('reorder-profiles', orderedIds),
@@ -120,7 +147,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Sidebar favorites
   getFavorites: (profileId) => ipcRenderer.invoke('get-favorites', profileId),
   setFavorites: (items, profileId) => ipcRenderer.invoke('set-favorites', items, profileId),
+  persistOutgoingProfile: (profileId, captured) =>
+    ipcRenderer.invoke('persist-outgoing-profile', profileId, captured),
   fetchFaviconBytes: (url) => ipcRenderer.invoke('axis-fetch-favicon-bytes', url),
+  fetchText: (url) => ipcRenderer.invoke('axis-fetch-text', url),
   showFavoriteContextMenu: (x, y, info) => ipcRenderer.invoke('show-favorite-context-menu', x, y, info),
   onFavoriteContextMenuAction: (callback) =>
     ipcRenderer.on('favorite-context-menu-action', (event, action, data) => callback(action, data)),
@@ -146,6 +176,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vaultGetCard: (id) => ipcRenderer.invoke('axis-vault-get-card', id),
   vaultSaveCard: (entry) => ipcRenderer.invoke('axis-vault-save-card', entry),
   vaultDeleteCard: (id) => ipcRenderer.invoke('axis-vault-delete-card', id),
+  vaultListAddresses: () => ipcRenderer.invoke('axis-vault-list-addresses'),
+  vaultGetAddress: (id) => ipcRenderer.invoke('axis-vault-get-address', id),
+  vaultSaveAddress: (entry) => ipcRenderer.invoke('axis-vault-save-address', entry),
+  vaultDeleteAddress: (id) => ipcRenderer.invoke('axis-vault-delete-address', id),
+  vaultGetAddressForFill: (id) => ipcRenderer.invoke('axis-vault-get-address-for-fill', id),
+  vaultShouldOfferAddressSave: (payload) => ipcRenderer.invoke('axis-vault-should-offer-address-save', payload),
   vaultCaptureLogin: (payload) => ipcRenderer.invoke('axis-vault-capture-login', payload),
   vaultShouldOfferLoginSave: (payload) => ipcRenderer.invoke('axis-vault-should-offer-login-save', payload),
   vaultFillCandidates: (payload) => ipcRenderer.invoke('axis-vault-fill-candidates', payload),
@@ -177,7 +213,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Performance monitoring
   getPerformanceMetrics: () => ipcRenderer.invoke('get-performance-metrics'),
-  getTabMemoryUsage: (tabId) => ipcRenderer.invoke('get-tab-memory-usage', tabId),
   
   // Sidebar context menu
   showSidebarContextMenu: (x, y, isRight) => ipcRenderer.invoke('show-sidebar-context-menu', x, y, isRight),
@@ -196,6 +231,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // URL bar context menu
   showUrlBarContextMenu: (x, y, contextInfo) => ipcRenderer.invoke('show-urlbar-context-menu', x, y, contextInfo),
   onUrlBarContextMenuAction: (callback) => ipcRenderer.on('urlbar-context-menu-action', (event, action, data) => callback(action, data)),
+
+  // Shell text fields (search, chat, find, rename, …)
+  showEditableContextMenu: (x, y, contextInfo) =>
+    ipcRenderer.invoke('show-editable-context-menu', x, y, contextInfo),
+  onRefocusEditableForEmoji: (callback) =>
+    ipcRenderer.on('axis-refocus-editable-for-emoji', () => callback()),
   
   // Tab context menu
   showTabContextMenu: (x, y, tabInfo) => ipcRenderer.invoke('show-tab-context-menu', x, y, tabInfo),
