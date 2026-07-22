@@ -46,40 +46,151 @@
       return true;
     }
 
+    function formHasPassword(el) {
+      try {
+        const form = el && el.form;
+        if (form && form.querySelector('input[type="password"]')) return true;
+        return !!document.querySelector('input[type="password"]');
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function formHasAddressHints(el) {
+      try {
+        const root = (el && el.form) || document;
+        const nodes = root.querySelectorAll
+          ? root.querySelectorAll('input, select, textarea')
+          : [];
+        for (const node of nodes) {
+          const ac = String(node.autocomplete || '').toLowerCase();
+          const name = String(node.name || '').toLowerCase();
+          const id = String(node.id || '').toLowerCase();
+          if (
+            ac.includes('street-address') ||
+            ac.includes('address-line') ||
+            ac.includes('postal-code') ||
+            ac === 'address-level1' ||
+            ac === 'address-level2' ||
+            name.includes('address') ||
+            name.includes('zip') ||
+            name.includes('postal') ||
+            id.includes('address') ||
+            id.includes('zip') ||
+            id.includes('postal')
+          ) {
+            return true;
+          }
+        }
+      } catch (_) {}
+      return false;
+    }
+
+    function isVisibleFillable(el) {
+      if (!el || el.disabled || el.readOnly) return false;
+      const tag = el.tagName;
+      if (tag === 'SELECT' || tag === 'TEXTAREA') {
+        try {
+          const r = el.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) return false;
+        } catch (_) {}
+        return true;
+      }
+      return isVisibleInput(el);
+    }
+
     function inputKind(el) {
       const t = (el.type || 'text').toLowerCase();
       const ac = (el.autocomplete || '').toLowerCase();
       const name = (el.name || '').toLowerCase();
       const id = (el.id || '').toLowerCase();
+      const ph = String(el.placeholder || '').toLowerCase();
+      const aria = String(el.getAttribute('aria-label') || '').toLowerCase();
+      const stable = String(
+        el.getAttribute('data-elements-stable-field-name') || el.getAttribute('data-tid') || ''
+      ).toLowerCase();
       if (t === 'password' || ac.includes('password') || name.includes('password') || id.includes('password')) {
         return 'password';
       }
       if (
-        t === 'email' ||
-        ac.includes('username') ||
-        ac === 'email' ||
-        name.includes('user') ||
-        name.includes('login') ||
-        name === 'email' ||
-        id.includes('user') ||
-        id.includes('login')
-      ) {
-        return 'username';
-      }
-      if (
         ac.includes('cc-number') ||
         ac === 'cc-number' ||
+        stable === 'cardnumber' ||
+        stable.includes('cardnumber') ||
         (name.includes('card') && name.includes('number')) ||
         (id.includes('card') && id.includes('number')) ||
-        (t === 'tel' && (el.maxLength >= 15 || el.inputMode === 'numeric'))
+        name.includes('cardnumber') ||
+        id.includes('cardnumber') ||
+        aria.includes('card number') ||
+        ph.includes('card number')
       ) {
         return 'cc-number';
       }
-      if (ac.includes('cc-name') || name.includes('cardholder') || name.includes('cc-name') || id.includes('cardholder')) {
+      if (
+        ac.includes('cc-name') ||
+        name.includes('cardholder') ||
+        name.includes('cc-name') ||
+        id.includes('cardholder') ||
+        id.includes('cc-name') ||
+        aria.includes('name on card') ||
+        aria.includes('cardholder') ||
+        ((name.includes('name') || id.includes('name')) &&
+          (name.includes('card') || id.includes('card') || ac.includes('cc-')))
+      ) {
         return 'cc-name';
       }
-      if (ac.includes('cc-exp') || name.includes('exp') || id.includes('exp')) return 'cc-exp';
-      if (ac.includes('cc-csc') || name.includes('cvv') || name.includes('cvc') || id.includes('cvv')) {
+      if (
+        ac === 'cc-exp-month' ||
+        name.includes('exp-month') ||
+        name.includes('expmonth') ||
+        id.includes('exp-month') ||
+        id.includes('expmonth') ||
+        stable.includes('cardexpirymonth')
+      ) {
+        return 'cc-exp-month';
+      }
+      if (
+        ac === 'cc-exp-year' ||
+        name.includes('exp-year') ||
+        name.includes('expyear') ||
+        id.includes('exp-year') ||
+        id.includes('expyear') ||
+        stable.includes('cardexpiryyear')
+      ) {
+        return 'cc-exp-year';
+      }
+      if (
+        ac.includes('cc-exp') ||
+        stable === 'cardexpiry' ||
+        stable.includes('cardexpiry') ||
+        aria.includes('expir') ||
+        (ph.includes('mm') && ph.includes('yy')) ||
+        ((name.includes('exp') || id.includes('exp')) &&
+          (name.includes('card') ||
+            id.includes('card') ||
+            ac.includes('cc-') ||
+            name.includes('expir') ||
+            id.includes('expir') ||
+            ph.includes('expir') ||
+            aria.includes('expir')))
+      ) {
+        return 'cc-exp';
+      }
+      if (
+        ac.includes('cc-csc') ||
+        name.includes('cvv') ||
+        name.includes('cvc') ||
+        name.includes('cid') ||
+        id.includes('cvv') ||
+        id.includes('cvc') ||
+        ph.includes('cvv') ||
+        ph.includes('cvc') ||
+        aria.includes('cvc') ||
+        aria.includes('cvv') ||
+        aria.includes('security code') ||
+        stable.includes('cardcvc') ||
+        stable === 'cvc'
+      ) {
         return 'cc-csc';
       }
       if (
@@ -87,25 +198,38 @@
         ac === 'address-line1' ||
         ac.includes('street-address') ||
         name.includes('address1') ||
+        name.includes('address_1') ||
+        name.includes('addr1') ||
         name.includes('street') ||
         id.includes('street') ||
-        id.includes('address1')
+        id.includes('address1') ||
+        id.includes('address_1')
       ) {
         return 'addr-line1';
       }
-      if (ac === 'address-line2' || name.includes('address2') || name.includes('apt') || id.includes('address2')) {
+      if (
+        ac === 'address-line2' ||
+        name.includes('address2') ||
+        name.includes('address_2') ||
+        name.includes('addr2') ||
+        name.includes('apt') ||
+        name.includes('suite') ||
+        id.includes('address2') ||
+        id.includes('address_2')
+      ) {
         return 'addr-line2';
       }
       if (
         ac === 'address-level1' ||
         name === 'state' ||
         name.includes('province') ||
+        name.includes('region') ||
         id.includes('state') ||
         id.includes('province')
       ) {
         return 'addr-state';
       }
-      if (ac === 'address-level2' || name === 'city' || id.includes('city')) {
+      if (ac === 'address-level2' || name === 'city' || name.includes('city') || id.includes('city')) {
         return 'addr-city';
       }
       if (
@@ -124,6 +248,28 @@
       if (ac === 'organization' || name.includes('company') || name.includes('organization') || id.includes('company')) {
         return 'addr-org';
       }
+      if (ac === 'given-name' || name.includes('firstname') || name.includes('first_name') || name.includes('fname') || id.includes('firstname') || id.includes('first-name')) {
+        return 'addr-name-given';
+      }
+      if (ac === 'family-name' || name.includes('lastname') || name.includes('last_name') || name.includes('lname') || id.includes('lastname') || id.includes('last-name')) {
+        return 'addr-name-family';
+      }
+      if (ac === 'tel' || ac.includes('tel') || t === 'tel' || name.includes('phone') || id.includes('phone') || ph.includes('phone')) {
+        if (!formHasPassword(el) || formHasAddressHints(el)) return 'addr-phone';
+      }
+      if (t === 'email' || ac === 'email' || name === 'email' || id.includes('email')) {
+        if (formHasPassword(el) && !formHasAddressHints(el)) return 'username';
+        return 'addr-email';
+      }
+      if (
+        ac.includes('username') ||
+        name.includes('user') ||
+        name.includes('login') ||
+        id.includes('user') ||
+        id.includes('login')
+      ) {
+        return 'username';
+      }
       if (ac === 'name' && !ac.includes('cc-')) {
         return 'addr-name';
       }
@@ -139,7 +285,11 @@
         k === 'addr-postal' ||
         k === 'addr-country' ||
         k === 'addr-org' ||
-        k === 'addr-name'
+        k === 'addr-name' ||
+        k === 'addr-name-given' ||
+        k === 'addr-name-family' ||
+        k === 'addr-phone' ||
+        k === 'addr-email'
       );
     }
 
@@ -474,8 +624,22 @@
 
     function setFieldValue(el, value) {
       if (!el || value == null) return;
+      const str = String(value);
       el.focus();
-      el.value = String(value);
+      if (el.tagName === 'SELECT') {
+        const options = Array.from(el.options || []);
+        let match = options.find((o) => String(o.value).toLowerCase() === str.toLowerCase());
+        if (!match) {
+          match = options.find((o) => String(o.textContent || '').trim().toLowerCase() === str.toLowerCase());
+        }
+        if (!match && str.length === 2) {
+          match = options.find((o) => String(o.value).toLowerCase().startsWith(str.toLowerCase()));
+        }
+        if (match) el.value = match.value;
+        else el.value = str;
+      } else {
+        el.value = str;
+      }
       el.setAttribute(FILLED_FLAG, '1');
       dispatchInputEvents(el);
     }
@@ -522,11 +686,24 @@
       });
     }
 
+    function fillableFields(root) {
+      const scope = root && root.querySelectorAll ? root : document;
+      return Array.from(scope.querySelectorAll('input, select, textarea')).filter(isVisibleFillable);
+    }
+
+    function splitFullName(fullName) {
+      const parts = String(fullName || '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+      if (!parts.length) return { given: '', family: '' };
+      if (parts.length === 1) return { given: parts[0], family: '' };
+      return { given: parts[0], family: parts.slice(1).join(' ') };
+    }
+
     function fillCard(card, anchorEl) {
       const root = anchorEl && anchorEl.form ? anchorEl.form : document;
-      const inputs = root.querySelectorAll ? Array.from(root.querySelectorAll('input')) : [];
-      for (const el of inputs) {
-        if (!isVisibleInput(el)) continue;
+      for (const el of fillableFields(root)) {
         const k = inputKind(el);
         if (k === 'cc-number') setFieldValue(el, card.number);
         else if (k === 'cc-name') setFieldValue(el, card.cardholder);
@@ -536,17 +713,24 @@
               ? `${card.expMonth}/${String(card.expYear).slice(-2)}`
               : '';
           setFieldValue(el, exp);
+        } else if (k === 'cc-exp-month') setFieldValue(el, card.expMonth);
+        else if (k === 'cc-exp-year') {
+          const y = String(card.expYear || '');
+          const wantsShort = el.maxLength === 2 || String(el.getAttribute('placeholder') || '').includes('YY');
+          setFieldValue(el, wantsShort && y.length >= 2 ? y.slice(-2) : y);
         } else if (k === 'cc-csc') setFieldValue(el, card.cvv);
+        else if (k === 'addr-postal' && card.billingZip) setFieldValue(el, card.billingZip);
       }
     }
 
     function fillAddress(address, anchorEl) {
       const root = anchorEl && anchorEl.form ? anchorEl.form : document;
-      const inputs = root.querySelectorAll ? Array.from(root.querySelectorAll('input')) : [];
-      for (const el of inputs) {
-        if (!isVisibleInput(el)) continue;
+      const names = splitFullName(address.fullName);
+      for (const el of fillableFields(root)) {
         const k = inputKind(el);
         if (k === 'addr-name') setFieldValue(el, address.fullName);
+        else if (k === 'addr-name-given') setFieldValue(el, names.given);
+        else if (k === 'addr-name-family') setFieldValue(el, names.family);
         else if (k === 'addr-org') setFieldValue(el, address.organization);
         else if (k === 'addr-line1') setFieldValue(el, address.addressLine1);
         else if (k === 'addr-line2') setFieldValue(el, address.addressLine2);
@@ -554,6 +738,8 @@
         else if (k === 'addr-state') setFieldValue(el, address.state);
         else if (k === 'addr-postal') setFieldValue(el, address.postalCode);
         else if (k === 'addr-country') setFieldValue(el, address.country);
+        else if (k === 'addr-phone') setFieldValue(el, address.phone);
+        else if (k === 'addr-email') setFieldValue(el, address.email);
       }
     }
 
@@ -583,7 +769,7 @@
     }
 
     function isCredentialInput(el) {
-      if (!isVisibleInput(el)) return false;
+      if (!isVisibleFillable(el)) return false;
       const k = resolveFieldKind(el);
       return (
         k === 'username' ||
@@ -591,6 +777,8 @@
         k === 'cc-number' ||
         k === 'cc-name' ||
         k === 'cc-exp' ||
+        k === 'cc-exp-month' ||
+        k === 'cc-exp-year' ||
         k === 'cc-csc' ||
         isAddressFieldKind(k)
       );
@@ -600,7 +788,9 @@
       const path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
       for (let i = 0; i < path.length; i++) {
         const node = path[i];
-        if (node && node.tagName === 'INPUT' && isVisibleInput(node)) return node;
+        if (!node || !node.tagName) continue;
+        if (node.tagName === 'INPUT' && isVisibleInput(node)) return node;
+        if ((node.tagName === 'SELECT' || node.tagName === 'TEXTAREA') && isVisibleFillable(node)) return node;
       }
       return null;
     }
@@ -720,10 +910,10 @@
         btn.type = 'button';
         btn.className = 'axis-vault-autofill-item';
         const title = document.createElement('span');
-        title.className = 'axis-vault-autofill-item-title';
+        title.className = 'axis-af-title';
         title.textContent = card.label || card.cardholder || 'Card';
         const sub = document.createElement('span');
-        sub.className = 'axis-vault-autofill-item-sub';
+        sub.className = 'axis-af-sub';
         sub.textContent = card.masked || `•••• ${String(card.number || '').slice(-4)}`;
         btn.appendChild(title);
         btn.appendChild(sub);
@@ -755,10 +945,10 @@
         btn.type = 'button';
         btn.className = 'axis-vault-autofill-item';
         const title = document.createElement('span');
-        title.className = 'axis-vault-autofill-item-title';
+        title.className = 'axis-af-title';
         title.textContent = addr.label || addr.fullName || 'Address';
         const sub = document.createElement('span');
-        sub.className = 'axis-vault-autofill-item-sub';
+        sub.className = 'axis-af-sub';
         sub.textContent = addr.summary || addr.addressLine1 || '';
         btn.appendChild(title);
         btn.appendChild(sub);
@@ -817,7 +1007,14 @@
         return;
       }
 
-      if (kind === 'cc-number' || kind === 'cc-name' || kind === 'cc-exp' || kind === 'cc-csc') {
+      if (
+        kind === 'cc-number' ||
+        kind === 'cc-name' ||
+        kind === 'cc-exp' ||
+        kind === 'cc-exp-month' ||
+        kind === 'cc-exp-year' ||
+        kind === 'cc-csc'
+      ) {
         query.kind = 'card';
         notifyHost('axis-vault-autofill-request', query);
         let res;
@@ -875,12 +1072,16 @@
       'input',
       (e) => {
         const el = e.target;
-        if (!isVisibleInput(el)) return;
+        if (!isVisibleFillable(el)) return;
         const k = resolveFieldKind(el) || inputKind(el);
         if (
           k === 'username' ||
           k === 'password' ||
           k === 'cc-number' ||
+          k === 'cc-name' ||
+          k === 'cc-exp' ||
+          k === 'cc-exp-month' ||
+          k === 'cc-exp-year' ||
           k === 'cc-csc' ||
           isAddressFieldKind(k)
         ) {
@@ -903,7 +1104,7 @@
           autofillHideTimer = null;
         }
         const el = inputFromFocusEvent(e) || e.target;
-        if (!isVisibleInput(el) || !isCredentialInput(el)) {
+        if (!isVisibleFillable(el) || !isCredentialInput(el)) {
           dismissAutofillIfNotNeeded();
           return;
         }
@@ -916,7 +1117,7 @@
       'click',
       (e) => {
         const el = e.target;
-        if (!isVisibleInput(el)) {
+        if (!isVisibleFillable(el)) {
           dismissAutofillIfNotNeeded();
           return;
         }
@@ -927,6 +1128,8 @@
           k === 'cc-number' ||
           k === 'cc-name' ||
           k === 'cc-exp' ||
+          k === 'cc-exp-month' ||
+          k === 'cc-exp-year' ||
           k === 'cc-csc' ||
           isAddressFieldKind(k)
         ) {
@@ -1006,7 +1209,7 @@
     ipcRenderer.on('axis-vault-show-autofill', (_ev, data) => {
       if (!data || !Array.isArray(data.items) || !data.items.length) return;
       const el = document.activeElement;
-      if (!el || !isVisibleInput(el)) return;
+      if (!el || !isVisibleFillable(el)) return;
       if (autofillHideTimer) {
         clearTimeout(autofillHideTimer);
         autofillHideTimer = null;
