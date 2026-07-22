@@ -29,7 +29,16 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
   }
 
   function vis(el) {
-    if (!el || el.tagName !== 'INPUT' || el.disabled || el.readOnly) return false;
+    if (!el || el.disabled || el.readOnly) return false;
+    const tag = el.tagName;
+    if (tag === 'SELECT' || tag === 'TEXTAREA') {
+      try {
+        const r = el.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) return false;
+      } catch (_) { return false; }
+      return true;
+    }
+    if (tag !== 'INPUT') return false;
     const t = (el.type || 'text').toLowerCase();
     if (t === 'hidden' || t === 'submit' || t === 'button' || t === 'reset' || t === 'file') return false;
     try {
@@ -40,13 +49,71 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
   }
 
   function kind(el) {
+    if (!el) return null;
     const t = (el.type || 'text').toLowerCase();
     const ac = (el.autocomplete || '').toLowerCase();
     const name = (el.name || '').toLowerCase();
     const id = (el.id || '').toLowerCase();
+    const ph = String(el.placeholder || '').toLowerCase();
+    const aria = String(el.getAttribute('aria-label') || '').toLowerCase();
+    const stable = String(el.getAttribute('data-elements-stable-field-name') || el.getAttribute('data-tid') || '').toLowerCase();
     if (t === 'password' || ac.includes('password') || name.includes('password') || id.includes('password')) return 'password';
-    if (t === 'email' || ac.includes('username') || ac === 'email' || name.includes('user') || name.includes('login') || name === 'email' || id.includes('user') || id.includes('login')) return 'username';
+    if (
+      ac.includes('cc-number') || ac === 'cc-number' ||
+      stable === 'cardnumber' || stable.includes('cardnumber') ||
+      (name.includes('card') && name.includes('number')) || (id.includes('card') && id.includes('number')) ||
+      name.includes('cardnumber') || id.includes('cardnumber') ||
+      aria.includes('card number') || aria === 'number' && (ph.includes('card') || name.includes('card')) ||
+      ph.includes('card number')
+    ) return 'cc-number';
+    if (
+      ac.includes('cc-name') || name.includes('cardholder') || name.includes('cc-name') ||
+      id.includes('cardholder') || id.includes('cc-name') || aria.includes('name on card') || aria.includes('cardholder')
+    ) return 'cc-name';
+    if (
+      ac === 'cc-exp-month' || name.includes('expmonth') || name.includes('exp-month') ||
+      id.includes('expmonth') || id.includes('exp-month') || stable.includes('cardexpirymonth')
+    ) return 'cc-exp-month';
+    if (
+      ac === 'cc-exp-year' || name.includes('expyear') || name.includes('exp-year') ||
+      id.includes('expyear') || id.includes('exp-year') || stable.includes('cardexpiryyear')
+    ) return 'cc-exp-year';
+    if (
+      ac.includes('cc-exp') || stable === 'cardexpiry' || stable.includes('cardexpiry') ||
+      aria.includes('expir') || ph.includes('mm') && ph.includes('yy') ||
+      ((name.includes('exp') || id.includes('exp') || ph.includes('expir')) &&
+        (name.includes('card') || id.includes('card') || ac.includes('cc-') || name.includes('expir') || id.includes('expir') || aria.includes('expir') || stable.includes('expir')))
+    ) return 'cc-exp';
+    if (
+      ac.includes('cc-csc') || name.includes('cvv') || name.includes('cvc') || id.includes('cvv') ||
+      id.includes('cvc') || ph.includes('cvv') || ph.includes('cvc') || aria.includes('cvc') ||
+      aria.includes('cvv') || aria.includes('security code') || stable.includes('cardcvc') || stable === 'cvc'
+    ) return 'cc-csc';
+    if (ac === 'street-address' || ac === 'address-line1' || ac.includes('street-address') || name.includes('address1') || name.includes('street') || id.includes('street') || id.includes('address1')) return 'addr-line1';
+    if (ac === 'address-line2' || name.includes('address2') || name.includes('apt') || id.includes('address2')) return 'addr-line2';
+    if (ac === 'address-level1' || name === 'state' || name.includes('province') || id.includes('state')) return 'addr-state';
+    if (ac === 'address-level2' || name === 'city' || id.includes('city')) return 'addr-city';
+    if (ac === 'postal-code' || ac.includes('postal') || name.includes('zip') || name.includes('postal') || id.includes('zip') || id.includes('postal')) return 'addr-postal';
+    if (ac === 'country' || ac === 'country-name' || name === 'country' || id.includes('country')) return 'addr-country';
+    if (ac === 'organization' || name.includes('company') || id.includes('company')) return 'addr-org';
+    if (ac === 'given-name' || name.includes('firstname') || name.includes('first_name') || id.includes('firstname')) return 'addr-name-given';
+    if (ac === 'family-name' || name.includes('lastname') || name.includes('last_name') || id.includes('lastname')) return 'addr-name-family';
+    if (ac === 'name' && !ac.includes('cc-')) return 'addr-name';
+    if (ac === 'tel' || t === 'tel' || name.includes('phone') || id.includes('phone')) return 'addr-phone';
+    if (t === 'email' || ac === 'email' || name === 'email' || id.includes('email')) {
+      if (document.querySelector('input[type="password"]')) return 'username';
+      return 'addr-email';
+    }
+    if (ac.includes('username') || name.includes('user') || name.includes('login') || id.includes('user') || id.includes('login')) return 'username';
     return null;
+  }
+
+  function isCardKind(k) {
+    return k === 'cc-number' || k === 'cc-name' || k === 'cc-exp' || k === 'cc-exp-month' || k === 'cc-exp-year' || k === 'cc-csc';
+  }
+
+  function isAddressKind(k) {
+    return k === 'addr-line1' || k === 'addr-line2' || k === 'addr-state' || k === 'addr-city' || k === 'addr-postal' || k === 'addr-country' || k === 'addr-org' || k === 'addr-name' || k === 'addr-name-given' || k === 'addr-name-family' || k === 'addr-phone' || k === 'addr-email';
   }
 
   function likelyUser(el) {
@@ -65,9 +132,21 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     return kind(el) || (likelyUser(el) ? 'username' : null);
   }
 
-  function credKind(el) {
+  function fillKind(el) {
     const k = resolveKind(el);
-    return k === 'username' || k === 'password' ? k : null;
+    if (k === 'username' || k === 'password' || isCardKind(k) || isAddressKind(k)) return k;
+    return null;
+  }
+
+  function credKind(el) {
+    return fillKind(el);
+  }
+
+  function offerKindFromField(k) {
+    if (isCardKind(k)) return 'card';
+    if (isAddressKind(k)) return 'address';
+    if (k === 'username' || k === 'password') return 'login';
+    return null;
   }
 
   function findUserForPass(pass) {
@@ -98,7 +177,8 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     const path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
     for (let i = 0; i < path.length; i++) {
       const n = path[i];
-      if (n && n.tagName === 'INPUT' && vis(n)) return n;
+      if (!n || !n.tagName) continue;
+      if ((n.tagName === 'INPUT' || n.tagName === 'SELECT' || n.tagName === 'TEXTAREA') && vis(n)) return n;
     }
     return null;
   }
@@ -115,8 +195,6 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     const m = document.getElementById(MENU_ID);
     if (m && m.parentNode) m.parentNode.removeChild(m);
     api.menuAnchor = null;
-    api.focusedField = null;
-    api.focusKey = '';
   }
 
   function shouldKeepAutofillMenu() {
@@ -124,9 +202,8 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     if (!menu) return false;
     const active = document.activeElement;
     if (active && menu.contains(active)) return true;
-    if (active && active.tagName === 'INPUT' && vis(active)) {
-      if (credKind(active) || likelyUser(active)) return true;
-    }
+    if (active && vis(active) && (fillKind(active) || likelyUser(active))) return true;
+    if (api.menuAnchor && document.contains(api.menuAnchor) && fillKind(api.menuAnchor)) return true;
     return false;
   }
 
@@ -231,7 +308,60 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     };
   }
 
-  function showMenu(anchor, items) {
+  function fillableFields(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    return Array.from(scope.querySelectorAll('input, select, textarea')).filter(vis);
+  }
+
+  function splitFullName(fullName) {
+    const parts = String(fullName || '').trim().split(/\\s+/).filter(Boolean);
+    if (!parts.length) return { given: '', family: '' };
+    if (parts.length === 1) return { given: parts[0], family: '' };
+    return { given: parts[0], family: parts.slice(1).join(' ') };
+  }
+
+  function fillCard(card, anchor) {
+    anchor = anchor || api.menuAnchor || api.focusAnchor;
+    const root = anchor && anchor.form ? anchor.form : document;
+    for (const el of fillableFields(root)) {
+      const k = kind(el);
+      if (k === 'cc-number') setVal(el, card.number);
+      else if (k === 'cc-name') setVal(el, card.cardholder);
+      else if (k === 'cc-exp') {
+        const exp = card.expMonth && card.expYear ? (card.expMonth + '/' + String(card.expYear).slice(-2)) : '';
+        setVal(el, exp);
+      } else if (k === 'cc-exp-month') setVal(el, card.expMonth);
+      else if (k === 'cc-exp-year') {
+        const y = String(card.expYear || '');
+        const wantsShort = el.maxLength === 2 || String(el.getAttribute('placeholder') || '').toLowerCase().includes('yy');
+        setVal(el, wantsShort && y.length >= 2 ? y.slice(-2) : y);
+      } else if (k === 'cc-csc') setVal(el, card.cvv);
+      else if (k === 'addr-postal' && card.billingZip) setVal(el, card.billingZip);
+    }
+  }
+
+  function fillAddress(address, anchor) {
+    anchor = anchor || api.menuAnchor || api.focusAnchor;
+    const root = anchor && anchor.form ? anchor.form : document;
+    const names = splitFullName(address.fullName);
+    for (const el of fillableFields(root)) {
+      const k = kind(el);
+      if (k === 'addr-name') setVal(el, address.fullName);
+      else if (k === 'addr-name-given') setVal(el, names.given);
+      else if (k === 'addr-name-family') setVal(el, names.family);
+      else if (k === 'addr-org') setVal(el, address.organization);
+      else if (k === 'addr-line1') setVal(el, address.addressLine1);
+      else if (k === 'addr-line2') setVal(el, address.addressLine2);
+      else if (k === 'addr-city') setVal(el, address.city);
+      else if (k === 'addr-state') setVal(el, address.state);
+      else if (k === 'addr-postal') setVal(el, address.postalCode);
+      else if (k === 'addr-country') setVal(el, address.country);
+      else if (k === 'addr-phone') setVal(el, address.phone);
+      else if (k === 'addr-email') setVal(el, address.email);
+    }
+  }
+
+  function showMenu(anchor, items, offerKind) {
     hideMenu();
     anchor = anchor || api.focusAnchor;
     if (!anchor || !vis(anchor) || !items || !items.length) return;
@@ -240,6 +370,7 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     menu.id = MENU_ID;
     menu.setAttribute('role', 'listbox');
     menu.setAttribute('data-axis-theme', uiTheme());
+    menu.setAttribute('data-axis-kind', offerKind || 'login');
     for (const row of items) {
       const li = document.createElement('li');
       const btn = document.createElement('button');
@@ -247,23 +378,49 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
       btn.setAttribute('role', 'option');
       const title = document.createElement('span');
       title.className = 'axis-af-title';
-      const username = row.username || '';
-      title.textContent = username || row.title || 'Saved account';
-      btn.appendChild(title);
-      const subText = row.title && row.title !== username ? row.title : '';
-      if (subText) {
-        const sub = document.createElement('span');
-        sub.className = 'axis-af-sub';
-        sub.textContent = subText;
+      const sub = document.createElement('span');
+      sub.className = 'axis-af-sub';
+      if (offerKind === 'card') {
+        title.textContent = row.label || row.cardholder || 'Card';
+        sub.textContent = row.masked || ('•••• ' + String(row.number || '').slice(-4));
+        btn.appendChild(title);
         btn.appendChild(sub);
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          hideMenu();
+          if (row.number) fillCard(row, anchor);
+          else api.pendingPickId = row.id;
+        });
+      } else if (offerKind === 'address') {
+        title.textContent = row.label || row.fullName || 'Address';
+        sub.textContent = row.summary || row.addressLine1 || '';
+        btn.appendChild(title);
+        if (sub.textContent) btn.appendChild(sub);
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          hideMenu();
+          if (row.addressLine1 || row.fullName) fillAddress(row, anchor);
+          else api.pendingPickId = row.id;
+        });
+      } else {
+        const username = row.username || '';
+        title.textContent = username || row.title || 'Saved account';
+        btn.appendChild(title);
+        const subText = row.title && row.title !== username ? row.title : '';
+        if (subText) {
+          sub.textContent = subText;
+          btn.appendChild(sub);
+        }
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          hideMenu();
+          if (row.password) fillLogin(row, anchor);
+          else api.pendingPickId = row.id;
+        });
       }
-      btn.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        hideMenu();
-        if (row.password) fillLogin(row, anchor);
-        else api.pendingPickId = row.id;
-      });
       li.appendChild(btn);
       menu.appendChild(li);
     }
@@ -282,12 +439,17 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     menuAnchor: null,
     showMenu,
     hideMenu,
-    fillLogin
+    fillLogin,
+    fillCard,
+    fillAddress,
+    fillKind,
+    isCardKind,
+    isAddressKind
   };
   window.__axisVault = api;
 
   function noteFocus(el) {
-    const k = credKind(el);
+    const k = fillKind(el) || (likelyUser(el) ? 'username' : null);
     if (!k) {
       api.focusedField = null;
       api.focusKey = '';
@@ -295,21 +457,22 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
       return;
     }
     api.focusAnchor = el;
+    const offer = offerKindFromField(k) || 'login';
     const userEl = k === 'password' ? findUserForPass(el) : el;
     api.focusedField = {
-      kind: 'login',
+      kind: offer,
       origin: location.origin || '',
       pageUrl: location.href,
-      usernameHint: userEl ? String(userEl.value || '').trim() : '',
+      usernameHint: offer === 'login' && userEl ? String(userEl.value || '').trim() : '',
       fieldKind: k
     };
-    api.focusKey = k + ':' + (el.id || el.name || '') + ':' + location.href;
+    api.focusKey = offer + ':' + k + ':' + (el.id || el.name || '') + ':' + location.href;
     api.focusAt = Date.now();
   }
 
   document.addEventListener('focusin', (e) => {
     const el = inputFromEvent(e) || e.target;
-    if (!vis(el) || (!credKind(el) && !likelyUser(el))) {
+    if (!vis(el) || (!fillKind(el) && !likelyUser(el))) {
       dismissAutofillMenuIfNeeded();
       return;
     }
@@ -322,7 +485,7 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
       dismissAutofillMenuIfNeeded();
       return;
     }
-    if (credKind(el) || likelyUser(el)) noteFocus(el);
+    if (fillKind(el) || likelyUser(el)) noteFocus(el);
     else dismissAutofillMenuIfNeeded();
   }, true);
 
@@ -331,7 +494,7 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     if (!menu) return;
     if (menu.contains(e.target)) return;
     const el = inputFromEvent(e);
-    if (el && vis(el) && (credKind(el) || likelyUser(el))) return;
+    if (el && vis(el) && (fillKind(el) || likelyUser(el))) return;
     setTimeout(dismissAutofillMenuIfNeeded, 0);
   }, true);
 
@@ -359,29 +522,41 @@ const AXIS_VAULT_AUTOFILL_PROBE_JS = `(function(){
     return { pick: id };
   }
   const f = v.focusedField;
-  if (!f) return null;
-  if (document.getElementById('axis-vault-autofill-menu')) {
+  const menu = document.getElementById('axis-vault-autofill-menu');
+  if (menu) {
     const active = document.activeElement;
-    const menu = document.getElementById('axis-vault-autofill-menu');
-    const onMenu = menu && active && menu.contains(active);
-    const onCred =
-      active &&
-      active.tagName === 'INPUT' &&
-      (function () {
-        const t = (active.type || 'text').toLowerCase();
-        const ac = (active.autocomplete || '').toLowerCase();
-        if (t === 'password' || ac.includes('password')) return true;
-        if (t === 'email' || ac.includes('username') || ac === 'email') return true;
-        return false;
-      })();
-    if (!onMenu && !onCred) {
+    const onMenu = active && menu.contains(active);
+    const onFillField = (function () {
+      if (!active || !v) return false;
+      if (active === v.focusAnchor || active === v.menuAnchor) return true;
+      try {
+        if (typeof v.fillKind === 'function' && v.fillKind(active)) return true;
+      } catch (_) {}
+      const t = (active.type || 'text').toLowerCase();
+      const ac = (active.autocomplete || '').toLowerCase();
+      const name = (active.name || '').toLowerCase();
+      const id = (active.id || '').toLowerCase();
+      const aria = String(active.getAttribute('aria-label') || '').toLowerCase();
+      if (t === 'password' || ac.includes('password')) return true;
+      if (t === 'email' || ac.includes('username') || ac === 'email') return true;
+      if (ac.includes('cc-') || name.includes('card') || id.includes('card') || name.includes('cvv') || name.includes('cvc') || aria.includes('card') || aria.includes('cvc') || aria.includes('expir')) return true;
+      if (ac.includes('address') || ac.includes('postal') || name.includes('address') || name.includes('zip') || name.includes('city') || name.includes('state')) return true;
+      return false;
+    })();
+    if (!onMenu && !onFillField) {
       v.hideMenu && v.hideMenu();
-      return null;
+    } else {
+      return {
+        focus: f || { kind: menu.getAttribute('data-axis-kind') || 'login', origin: location.origin || '', pageUrl: location.href },
+        focusKey: v.focusKey || '',
+        focusAt: v.focusAt || Date.now(),
+        menuOpen: true
+      };
     }
-    return { focus: f, focusKey: v.focusKey || '', menuOpen: true };
   }
+  if (!f) return null;
   if (Date.now() - (v.focusAt || 0) > 8000) return null;
-  return { focus: f, focusKey: v.focusKey || '' };
+  return { focus: f, focusKey: v.focusKey || '', focusAt: v.focusAt || 0 };
   } catch (_) { return null; }
 })()`;
 
@@ -399,21 +574,30 @@ function buildVaultAutofillThemeJs(theme) {
   return `window.__axisVaultUiTheme=${JSON.stringify(th)};`;
 }
 
-function buildVaultAutofillShowMenuJs(items, theme) {
+function buildVaultAutofillShowMenuJs(items, theme, kind) {
   const json = JSON.stringify(Array.isArray(items) ? items : []);
   const th = theme === 'light' ? 'light' : 'dark';
+  const offer =
+    kind === 'card' ? 'card' : kind === 'address' ? 'address' : 'login';
   return `(function(){
     window.__axisVaultUiTheme=${JSON.stringify(th)};
     var v=window.__axisVault;
-    if(!v)return;
+    if(!v||!v.showMenu)return;
     var el=v.focusAnchor;
-    if(!el||el.tagName!=="INPUT"||el.disabled){
+    if(!el||!document.contains(el)){
       el=document.activeElement;
     }
-    if(!el||el.tagName!=="INPUT"){
-      el=document.querySelector('input[type="password"],input[autocomplete*="password"],input[type="email"]');
+    if(!el)return;
+    var fk=typeof v.fillKind==='function'?v.fillKind(el):null;
+    var want=${JSON.stringify(offer)};
+    if(want==='card'){
+      if(!(v.isCardKind&&v.isCardKind(fk)))return;
+    } else if(want==='address'){
+      if(!(v.isAddressKind&&v.isAddressKind(fk)))return;
+    } else if(fk&&((v.isCardKind&&v.isCardKind(fk))||(v.isAddressKind&&v.isAddressKind(fk)))){
+      return;
     }
-    if(el)v.showMenu(el,${json});
+    v.showMenu(el,${json},want);
   })()`;
 }
 
