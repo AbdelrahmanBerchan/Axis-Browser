@@ -293,17 +293,17 @@ function createAxisVault(app, _store, profileId = 'personal') {
 
   function normalizeAddressEntry(entry, existing = null) {
     const fullName = String(entry.fullName || existing?.fullName || '').trim();
+    const organization = String(entry.organization || existing?.organization || '').trim();
     const addressLine1 = String(entry.addressLine1 || existing?.addressLine1 || '').trim();
     const city = String(entry.city || existing?.city || '').trim();
     const postalCode = String(entry.postalCode || existing?.postalCode || '').trim();
-    if (!fullName) throw new Error('Full name is required');
+    if (!fullName && !organization) throw new Error('Full name is required');
     if (!addressLine1) throw new Error('Street address is required');
-    if (!city) throw new Error('City is required');
-    if (!postalCode) throw new Error('ZIP / postal code is required');
+    if (!city && !postalCode) throw new Error('City or ZIP / postal code is required');
     return {
       label: String(entry.label || existing?.label || '').trim(),
-      fullName,
-      organization: String(entry.organization || existing?.organization || '').trim(),
+      fullName: fullName || organization,
+      organization,
       addressLine1,
       addressLine2: String(entry.addressLine2 || existing?.addressLine2 || '').trim(),
       city,
