@@ -2,13 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { execFileSync } = require('child_process');
-
-let DatabaseSync = null;
-try {
-  DatabaseSync = require('node:sqlite').DatabaseSync;
-} catch (_) {}
+const { querySqliteDb, pathExists } = require('./axis-import-sqlite');
 
 const CHROMIUM_WEBSTORE_LOCATIONS = new Set([1, 2, 3, 6, 9, 10]);
 const CHROMIUM_UNPACKED_LOCATION = 4;
@@ -24,14 +19,6 @@ const BROWSER_PROCESS_HINTS = {
   firefox: ['firefox', 'Firefox']
 };
 
-function pathExists(p) {
-  try {
-    return !!p && fs.existsSync(p);
-  } catch (_) {
-    return false;
-  }
-}
-
 function readJsonFile(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -40,35 +27,21 @@ function readJsonFile(filePath) {
   }
 }
 
-function querySqliteDb(dbPath, sql, params = []) {
-  if (!DatabaseSync || !pathExists(dbPath)) return [];
-  const tmp = path.join(os.tmpdir(), `axis-extra-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-  try {
-    fs.copyFileSync(dbPath, tmp);
-    try {
-      fs.copyFileSync(`${dbPath}-wal`, `${tmp}-wal`);
-    } catch (_) {}
-    try {
-      fs.copyFileSync(`${dbPath}-shm`, `${tmp}-shm`);
-    } catch (_) {}
-    const db = new DatabaseSync(tmp, { readonly: true });
-    const stmt = db.prepare(sql);
-    const rows = params.length > 0 ? stmt.all(...params) : stmt.all();
-    db.close();
-    return rows;
-  } catch (_) {
-    return [];
-  } finally {
-    try {
-      fs.unlinkSync(tmp);
-    } catch (_) {}
-    try {
-      fs.unlinkSync(`${tmp}-wal`);
-    } catch (_) {}
-    try {
-      fs.unlinkSync(`${tmp}-shm`);
-    } catch (_) {}
+function resolveExtensionFolder(rawPath, profilePath, userDataPath) {
+  let folder = String(rawPath || '').trim();
+  if (!folder) return null;
+  if (path.isAbsolute(folder) && pathExists(path.join(folder, 'manifest.json'))) return folder;
+
+  const candidates = [
+    path.join(profilePath, folder),
+    path.join(userDataPath || path.dirname(profilePath), folder),
+    path.join(profilePath, 'Extensions', folder),
+    path.join(userDataPath || path.dirname(profilePath), 'Extensions', folder)
+  ];
+  for (const candidate of candidates) {
+    if (pathExists(path.join(candidate, 'manifest.json'))) return candidate;
   }
+  return null;
 }
 
 function normalizeOrigin(url) {
@@ -127,7 +100,7 @@ function readChromiumSitePermissions(profilePath) {
 }
 
 function readFirefoxSitePermissions(profilePath) {
-  const rows = querySqliteDb(
+  const { rows } = querySqliteDb(
     path.join(profilePath, 'permissions.sqlite'),
     `SELECT origin, type, permission FROM moz_perms WHERE type IN (1, 2)`
   );
@@ -188,12 +161,11 @@ function readChromiumExtensions(profilePath, userDataPath) {
       String(meta.manifest?.name || meta.name || id).trim() || id;
 
     if (location === CHROMIUM_UNPACKED_LOCATION) {
-      let folder = String(meta.path || '').trim();
-      if (folder && !path.isAbsolute(folder)) {
-        folder = path.join(userDataPath || path.dirname(profilePath), folder);
-      }
-      if (folder && pathExists(path.join(folder, 'manifest.json'))) {
+      const folder = resolveExtensionFolder(meta.path, profilePath, userDataPath);
+      if (folder) {
         unpacked.push({ id, name, enabled, folder });
+      } else if (meta.path) {
+        extensions.push({ id: id.toLowerCase(), name, enabled });
       }
       continue;
     }
@@ -224,7 +196,27 @@ function readChromiumExtensions(profilePath, userDataPath) {
     }
   }
 
-  return { webStore: extensions, unpacked };
+  return { webStore: extensions, unpacked, warnings: [] };
+}
+
+function readChromiumExtensionsWithWarnings(profilePath, userDataPath) {
+  const result = readChromiumExtensions(profilePath, userDataPath);
+  const warnings = [];
+  const total = (result.webStore?.length || 0) + (result.unpacked?.length || 0);
+  if (total === 0) {
+    const extDir = path.join(profilePath, 'Extensions');
+    if (pathExists(extDir)) {
+      try {
+        const count = fs.readdirSync(extDir).filter((name) => isValidChromiumExtensionId(name)).length;
+        if (count > 0) {
+          warnings.push(
+            `${count} extension folder${count === 1 ? '' : 's'} were found but could not be matched to enabled extensions in preferences.`
+          );
+        }
+      } catch (_) {}
+    }
+  }
+  return { ...result, warnings };
 }
 
 function readFirefoxExtensions(profilePath) {
@@ -300,7 +292,9 @@ function extractBrowserExtras(source, options = {}) {
 
   if (importExtensions) {
     if (source.browserEngine === 'chromium') {
-      extensions = readChromiumExtensions(source.profilePath, source.userDataPath);
+      const ext = readChromiumExtensionsWithWarnings(source.profilePath, source.userDataPath);
+      extensions = ext;
+      warnings.push(...(ext.warnings || []));
     } else if (source.browserEngine === 'firefox') {
       extensions = readFirefoxExtensions(source.profilePath);
     }
