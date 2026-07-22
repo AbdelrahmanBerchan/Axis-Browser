@@ -276,27 +276,83 @@ function readChromiumLogins(profilePath, userDataPath, browserId) {
   return logins;
 }
 
+/** Chromium Autofill FieldType ints used in address_*_type_tokens. */
+const CHROMIUM_ADDR_TYPES = {
+  NAME_FIRST: 3,
+  NAME_MIDDLE: 4,
+  NAME_LAST: 5,
+  NAME_FULL: 7,
+  EMAIL_ADDRESS: 9,
+  PHONE_HOME_WHOLE_NUMBER: 14,
+  ADDRESS_HOME_LINE1: 30,
+  ADDRESS_HOME_LINE2: 31,
+  ADDRESS_HOME_CITY: 33,
+  ADDRESS_HOME_STATE: 34,
+  ADDRESS_HOME_ZIP: 35,
+  ADDRESS_HOME_COUNTRY: 36,
+  COMPANY_NAME: 60,
+  ADDRESS_HOME_STREET_ADDRESS: 77,
+  ADDRESS_HOME_DEPENDENT_LOCALITY: 81,
+  ADDRESS_HOME_LINE3: 83
+};
+
+function addressDedupeKey(addr) {
+  return `${String(addr.fullName || '').toLowerCase()}\0${String(addr.addressLine1 || '').toLowerCase()}\0${String(addr.postalCode || '').toLowerCase()}`;
+}
+
+function isImportableAddress(addr) {
+  if (!addr) return false;
+  const hasName = !!(addr.fullName || addr.organization);
+  const hasStreet = !!addr.addressLine1;
+  const hasPlace = !!(addr.city || addr.postalCode);
+  return hasName && hasStreet && hasPlace;
+}
+
+function pushUniqueAddress(list, seen, addr) {
+  if (!isImportableAddress(addr)) return;
+  const key = addressDedupeKey(addr);
+  if (seen.has(key)) return;
+  seen.add(key);
+  list.push(addr);
+}
+
 function readChromiumCards(profilePath, userDataPath, browserId) {
   const webDataDb = path.join(profilePath, 'Web Data');
   if (!pathExists(webDataDb)) return [];
   const keys = buildChromiumDecryptKeys(userDataPath || path.dirname(profilePath), browserId);
   if (!keys.key16 && !keys.key32) return [];
 
-  const rows = querySqliteDb(
+  let rows = querySqliteDb(
     webDataDb,
-    `SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted, nickname
+    `SELECT guid, name_on_card, expiration_month, expiration_year, card_number_encrypted,
+            nickname, billing_address_id
      FROM credit_cards`
   );
+  if (!rows.length) {
+    rows = querySqliteDb(
+      webDataDb,
+      `SELECT name_on_card, expiration_month, expiration_year, card_number_encrypted, nickname
+       FROM credit_cards`
+    );
+  }
+
+  const zipByGuid = new Map();
+  try {
+    for (const a of collectChromiumAddresses(profilePath, { keepGuid: true })) {
+      if (a._guid && a.postalCode) zipByGuid.set(a._guid, a.postalCode);
+    }
+  } catch (_) {}
 
   const cards = [];
   for (const row of rows) {
     const number = decryptChromiumBlob(row.card_number_encrypted, keys).replace(/\D/g, '');
     if (!/^\d{13,19}$/.test(number)) continue;
-    const cardholder = String(row.name_on_card || '').trim();
-    if (!cardholder) continue;
+    let cardholder = String(row.name_on_card || '').trim();
+    if (!cardholder) cardholder = `Card •••• ${number.slice(-4)}`;
     const expMonth = String(row.expiration_month || '').padStart(2, '0');
     const expYear = String(row.expiration_year || '').trim();
-    if (!expMonth || !expYear) continue;
+    if (!/^\d{1,2}$/.test(String(row.expiration_month || '')) || !expYear) continue;
+    const billingId = String(row.billing_address_id || '').trim();
     cards.push({
       label: String(row.nickname || '').trim(),
       cardholder,
@@ -304,22 +360,56 @@ function readChromiumCards(profilePath, userDataPath, browserId) {
       expMonth,
       expYear,
       cvv: '',
-      billingZip: ''
+      billingZip: billingId ? zipByGuid.get(billingId) || '' : ''
     });
   }
   return cards;
 }
 
-function readChromiumAddresses(profilePath) {
-  const webDataDb = path.join(profilePath, 'Web Data');
-  if (!pathExists(webDataDb)) return [];
+function mapLegacyChromiumAddressRow(row, nameRow, emailRow, phoneRow) {
+  let fullName = nameRow ? String(nameRow.full_name || '').trim() : '';
+  if (!fullName && nameRow) {
+    fullName = [nameRow.first_name, nameRow.middle_name, nameRow.last_name]
+      .map((part) => String(part || '').trim())
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  }
 
+  const streetRaw = String(row.street_address || '').trim();
+  const streetLines = streetRaw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const addressLine1 = streetLines[0] || '';
+  let addressLine2 = streetLines.slice(1).join(', ').trim();
+  const dependent = String(row.dependent_locality || '').trim();
+  if (dependent && addressLine2) addressLine2 = `${addressLine2}, ${dependent}`;
+  else if (dependent) addressLine2 = dependent;
+
+  return {
+    _guid: String(row.guid || '').trim(),
+    label: String(row.label || '').trim(),
+    fullName,
+    organization: String(row.company_name || '').trim(),
+    addressLine1,
+    addressLine2,
+    city: String(row.city || '').trim(),
+    state: String(row.state || '').trim(),
+    postalCode: String(row.zipcode || '').trim(),
+    country: String(row.country_code || '').trim(),
+    phone: phoneRow ? String(phoneRow.number || '').trim() : '',
+    email: emailRow ? String(emailRow.email || '').trim() : ''
+  };
+}
+
+function readChromiumLegacyAddresses(webDataDb, addresses, seen) {
   const profiles = querySqliteDb(
     webDataDb,
     `SELECT guid, company_name, street_address, dependent_locality, city, state, zipcode, country_code, label
      FROM autofill_profiles`
   );
-  if (!profiles.length) return [];
+  if (!profiles.length) return;
 
   const names = querySqliteDb(
     webDataDb,
@@ -341,55 +431,111 @@ function readChromiumAddresses(profilePath) {
     if (row?.guid && !phoneByGuid.has(row.guid)) phoneByGuid.set(row.guid, row);
   }
 
-  const addresses = [];
-  const seen = new Set();
   for (const row of profiles) {
-    const nameRow = nameByGuid.get(row.guid);
-    let fullName = nameRow ? String(nameRow.full_name || '').trim() : '';
-    if (!fullName && nameRow) {
-      fullName = [nameRow.first_name, nameRow.middle_name, nameRow.last_name]
-        .map((part) => String(part || '').trim())
-        .filter(Boolean)
-        .join(' ')
-        .trim();
-    }
+    const mapped = mapLegacyChromiumAddressRow(
+      row,
+      nameByGuid.get(row.guid),
+      emailByGuid.get(row.guid),
+      phoneByGuid.get(row.guid)
+    );
+    pushUniqueAddress(addresses, seen, mapped);
+  }
+}
 
-    const streetRaw = String(row.street_address || '').trim();
-    const streetLines = streetRaw
+function tokensToAddress(guid, label, tokenMap) {
+  const get = (type) => String(tokenMap.get(type) || '').trim();
+  let fullName = get(CHROMIUM_ADDR_TYPES.NAME_FULL);
+  if (!fullName) {
+    fullName = [
+      get(CHROMIUM_ADDR_TYPES.NAME_FIRST),
+      get(CHROMIUM_ADDR_TYPES.NAME_MIDDLE),
+      get(CHROMIUM_ADDR_TYPES.NAME_LAST)
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  }
+
+  let addressLine1 = get(CHROMIUM_ADDR_TYPES.ADDRESS_HOME_LINE1);
+  let addressLine2 = get(CHROMIUM_ADDR_TYPES.ADDRESS_HOME_LINE2);
+  const line3 = get(CHROMIUM_ADDR_TYPES.ADDRESS_HOME_LINE3);
+  if (line3) addressLine2 = [addressLine2, line3].filter(Boolean).join(', ');
+
+  const streetBlock = get(CHROMIUM_ADDR_TYPES.ADDRESS_HOME_STREET_ADDRESS);
+  if (!addressLine1 && streetBlock) {
+    const lines = streetBlock
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean);
-    const addressLine1 = streetLines[0] || '';
-    let addressLine2 = streetLines.slice(1).join(', ').trim();
-    const dependent = String(row.dependent_locality || '').trim();
-    if (dependent && addressLine2) addressLine2 = `${addressLine2}, ${dependent}`;
-    else if (dependent) addressLine2 = dependent;
-
-    const city = String(row.city || '').trim();
-    const postalCode = String(row.zipcode || '').trim();
-    if (!fullName || !addressLine1 || !city || !postalCode) continue;
-
-    const key = `${fullName.toLowerCase()}\0${addressLine1.toLowerCase()}\0${postalCode.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const emailRow = emailByGuid.get(row.guid);
-    const phoneRow = phoneByGuid.get(row.guid);
-    addresses.push({
-      label: String(row.label || '').trim(),
-      fullName,
-      organization: String(row.company_name || '').trim(),
-      addressLine1,
-      addressLine2,
-      city,
-      state: String(row.state || '').trim(),
-      postalCode,
-      country: String(row.country_code || '').trim(),
-      phone: phoneRow ? String(phoneRow.number || '').trim() : '',
-      email: emailRow ? String(emailRow.email || '').trim() : ''
-    });
+    addressLine1 = lines[0] || '';
+    if (!addressLine2) addressLine2 = lines.slice(1).join(', ');
   }
-  return addresses;
+
+  const dependent = get(CHROMIUM_ADDR_TYPES.ADDRESS_HOME_DEPENDENT_LOCALITY);
+  if (dependent) {
+    addressLine2 = addressLine2 ? `${addressLine2}, ${dependent}` : dependent;
+  }
+
+  return {
+    _guid: String(guid || '').trim(),
+    label: String(label || '').trim(),
+    fullName,
+    organization: get(CHROMIUM_ADDR_TYPES.COMPANY_NAME),
+    addressLine1,
+    addressLine2,
+    city: get(CHROMIUM_ADDR_TYPES.ADDRESS_HOME_CITY),
+    state: get(CHROMIUM_ADDR_TYPES.ADDRESS_HOME_STATE),
+    postalCode: get(CHROMIUM_ADDR_TYPES.ADDRESS_HOME_ZIP),
+    country: get(CHROMIUM_ADDR_TYPES.ADDRESS_HOME_COUNTRY),
+    phone: get(CHROMIUM_ADDR_TYPES.PHONE_HOME_WHOLE_NUMBER),
+    email: get(CHROMIUM_ADDR_TYPES.EMAIL_ADDRESS)
+  };
+}
+
+function readChromiumTokenAddresses(webDataDb, metaTable, tokensTable, addresses, seen) {
+  const metas = querySqliteDb(webDataDb, `SELECT guid, label FROM ${metaTable}`);
+  if (!metas.length) return;
+  const tokens = querySqliteDb(webDataDb, `SELECT guid, type, value FROM ${tokensTable}`);
+  const byGuid = new Map();
+  for (const row of tokens) {
+    if (!row?.guid || row.type == null) continue;
+    if (!byGuid.has(row.guid)) byGuid.set(row.guid, new Map());
+    const map = byGuid.get(row.guid);
+    const type = Number(row.type);
+    const value = String(row.value || '').trim();
+    if (!value) continue;
+    if (!map.has(type)) map.set(type, value);
+  }
+  for (const meta of metas) {
+    const tokenMap = byGuid.get(meta.guid);
+    if (!tokenMap || !tokenMap.size) continue;
+    pushUniqueAddress(addresses, seen, tokensToAddress(meta.guid, meta.label, tokenMap));
+  }
+}
+
+function collectChromiumAddresses(profilePath, { keepGuid = false } = {}) {
+  const webDataDb = path.join(profilePath, 'Web Data');
+  if (!pathExists(webDataDb)) return [];
+
+  const addresses = [];
+  const seen = new Set();
+
+  // Modern Chrome: unified `addresses` / `address_type_tokens`, plus older local/account tables.
+  readChromiumTokenAddresses(webDataDb, 'addresses', 'address_type_tokens', addresses, seen);
+  readChromiumTokenAddresses(webDataDb, 'local_addresses', 'local_addresses_type_tokens', addresses, seen);
+  readChromiumTokenAddresses(webDataDb, 'contact_info', 'contact_info_type_tokens', addresses, seen);
+  // Legacy autofill_profiles (still present on some profiles / older browsers).
+  readChromiumLegacyAddresses(webDataDb, addresses, seen);
+
+  if (keepGuid) return addresses;
+  return addresses.map((addr) => {
+    const { _guid, ...rest } = addr;
+    return rest;
+  });
+}
+
+function readChromiumAddresses(profilePath) {
+  return collectChromiumAddresses(profilePath, { keepGuid: false });
 }
 
 function readFirefoxKey4MasterKey(profilePath) {
@@ -538,9 +684,7 @@ function mapFirefoxAddressEntry(entry) {
   const city = String(entry['address-level2'] || entry.addressLevel2 || '').trim();
   const state = String(entry['address-level1'] || entry.addressLevel1 || '').trim();
   const postalCode = String(entry['postal-code'] || entry.postalCode || '').trim();
-  if (!fullName || !addressLine1 || !city || !postalCode) return null;
-
-  return {
+  const mapped = {
     label: String(entry.label || '').trim(),
     fullName,
     organization: String(entry.organization || '').trim(),
@@ -553,6 +697,8 @@ function mapFirefoxAddressEntry(entry) {
     phone: String(entry.tel || '').trim(),
     email: String(entry.email || '').trim()
   };
+  if (!isImportableAddress(mapped)) return null;
+  return mapped;
 }
 
 function readFirefoxAddresses(profilePath) {
@@ -606,6 +752,16 @@ function extractBrowserSecrets(source, options = {}) {
     }
     if (importCards) {
       cards = readChromiumCards(profilePath, userDataPath, browserId);
+      if (
+        cards.length === 0 &&
+        pathExists(path.join(profilePath, 'Web Data')) &&
+        !resolveKeychainPassword(browserId) &&
+        process.platform === 'darwin'
+      ) {
+        warnings.push(
+          'Could not read payment cards — allow Keychain access for the source browser or quit it and try again.'
+        );
+      }
     }
     if (importAddresses) {
       addresses = readChromiumAddresses(profilePath);
@@ -618,6 +774,9 @@ function extractBrowserSecrets(source, options = {}) {
           'Firefox passwords could not be decrypted — profiles protected with a master password are not supported yet.'
         );
       }
+    }
+    if (importCards) {
+      warnings.push('Firefox does not expose saved payment cards for import.');
     }
     if (importAddresses) {
       addresses = readFirefoxAddresses(profilePath);
