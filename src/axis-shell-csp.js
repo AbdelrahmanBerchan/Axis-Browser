@@ -17,7 +17,7 @@ const AXIS_MAIN_SHELL_CSP =
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; " +
   "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; " +
   "img-src 'self' data: blob: https: http: file:; " +
-  "connect-src 'self' https://api.groq.com https://api.openai.com https://generativelanguage.googleapis.com https://openrouter.ai https://api.mistral.ai https://suggestqueries.google.com; " +
+  "connect-src 'self' https://api.groq.com https://api.openai.com https://generativelanguage.googleapis.com https://openrouter.ai https://api.mistral.ai https://suggestqueries.google.com https://geocoding-api.open-meteo.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com; " +
   "media-src 'self' blob: data:; " +
   "object-src 'none'; " +
   "base-uri 'none'; " +
@@ -34,7 +34,7 @@ const AXIS_SETTINGS_SHELL_CSP =
   "style-src 'self' 'unsafe-inline'; " +
   "font-src 'self' data:; " +
   "img-src 'self' data: blob: https: http: file: chrome-extension:; " +
-  "connect-src 'self'; " +
+  "connect-src 'self' https://geocoding-api.open-meteo.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com; " +
   "object-src 'none'; " +
   "base-uri 'none'; " +
   "form-action 'none'; " +
