@@ -55,9 +55,28 @@ function pathExists(p) {
 
 function normalizeHttpUrl(url) {
   const raw = String(url || '').trim();
-  if (!raw || raw.startsWith('javascript:') || raw.startsWith('chrome:')) return null;
-  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
-  if (raw.startsWith('about:') || raw.startsWith('file:')) return null;
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  /* Reject executable / non-web schemes (incl. data: / vbscript:) before any use. */
+  if (
+    lower.startsWith('javascript:') ||
+    lower.startsWith('data:') ||
+    lower.startsWith('vbscript:') ||
+    lower.startsWith('chrome:') ||
+    lower.startsWith('about:') ||
+    lower.startsWith('file:') ||
+    lower.startsWith('blob:')
+  ) {
+    return null;
+  }
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.href;
+    }
+  } catch (_) {
+    /* not a valid absolute URL */
+  }
   return null;
 }
 
@@ -298,9 +317,14 @@ function parseTabsSnssBuffer(buf) {
         break;
       }
       case 5: {
-        if (data.remaining() >= 1) {
+        if (data.remaining() >= 8) {
+          const tabId = data.readUInt32LE();
+          const pinned = data.readUInt32LE() !== 0;
+          getTab(tabId).pinned = pinned;
+        } else if (data.remaining() >= 5) {
+          const tabId = data.readUInt32LE();
           const pinned = data.readUInt8() !== 0;
-          for (const tab of tabs.values()) tab.pinned = pinned;
+          getTab(tabId).pinned = pinned;
         }
         break;
       }
@@ -391,57 +415,89 @@ function parseSnssFile(filePath) {
 
 function findChromiumSessionFiles(profilePath) {
   const sessionsDir = path.join(profilePath, 'Sessions');
-  if (!pathExists(sessionsDir)) return { session: null, tabs: null };
+  if (!pathExists(sessionsDir)) return { session: null, tabs: null, warnings: [] };
+
+  const warnings = [];
   let session = null;
-  let tabs = null;
-  let sessionScore = -1;
-  let tabsScore = -1;
-  for (const name of fs.readdirSync(sessionsDir)) {
-    const full = path.join(sessionsDir, name);
+  const currentSession = path.join(sessionsDir, 'Current Session');
+  if (pathExists(currentSession)) {
+    session = currentSession;
+  } else {
+    let bestSession = null;
+    let bestScore = -1;
     try {
-      const st = fs.statSync(full);
-      if (!st.isFile()) continue;
-      if (
-        name === 'Current Session' ||
-        name === 'Last Session' ||
-        name.startsWith('Session_')
-      ) {
-        const priority =
-          name === 'Current Session' ? 3 : name === 'Last Session' ? 2 : 1;
-        const score = priority * 1e15 + st.mtimeMs;
-        if (score > sessionScore) {
-          sessionScore = score;
-          session = full;
-        }
-      } else if (name.startsWith('Tabs_')) {
-        const score = st.mtimeMs;
-        if (score > tabsScore) {
-          tabsScore = score;
-          tabs = full;
+      for (const name of fs.readdirSync(sessionsDir)) {
+        if (!name.startsWith('Session_')) continue;
+        const full = path.join(sessionsDir, name);
+        const st = fs.statSync(full);
+        if (!st.isFile()) continue;
+        if (st.mtimeMs > bestScore) {
+          bestScore = st.mtimeMs;
+          bestSession = full;
         }
       }
     } catch (_) {}
+    if (bestSession) {
+      session = bestSession;
+      warnings.push(
+        'Used a saved session snapshot because “Current Session” was missing — quit the source browser before importing for best results.'
+      );
+    }
   }
-  return { session, tabs };
+
+  let tabs = null;
+  let tabsScore = -1;
+  try {
+    for (const name of fs.readdirSync(sessionsDir)) {
+      if (!name.startsWith('Tabs_')) continue;
+      const full = path.join(sessionsDir, name);
+      const st = fs.statSync(full);
+      if (!st.isFile()) continue;
+      if (st.mtimeMs > tabsScore) {
+        tabsScore = st.mtimeMs;
+        tabs = full;
+      }
+    }
+  } catch (_) {}
+
+  if (!session && !tabs) {
+    warnings.push(
+      'No session files were found in this profile — pinned tabs, tab groups, and open tabs may be missing.'
+    );
+  }
+
+  return { session, tabs, warnings };
 }
 
 function extractChromiumSession(profilePath) {
-  const { session, tabs } = findChromiumSessionFiles(profilePath);
+  const { session, tabs, warnings } = findChromiumSessionFiles(profilePath);
   let layout = { tabs: new Map(), groups: new Map() };
   let navTabs = new Map();
+  let sessionReadFailed = false;
+  let tabsReadFailed = false;
 
   if (session) {
     try {
       layout = parseSessionSnssBuffer(fs.readFileSync(session));
-    } catch (_) {}
+    } catch (_) {
+      sessionReadFailed = true;
+    }
   }
   if (tabs) {
     try {
       navTabs = parseTabsSnssBuffer(fs.readFileSync(tabs));
-    } catch (_) {}
+    } catch (_) {
+      tabsReadFailed = true;
+    }
   }
-  if (!session && !tabs) return { tabs: [], groups: new Map() };
-  return mergeChromiumSessionParts(layout, navTabs, layout.groups);
+  if (sessionReadFailed || tabsReadFailed) {
+    warnings.push(
+      'Could not fully read the last session — quit the source browser, then try importing again.'
+    );
+  }
+  if (!session && !tabs) return { tabs: [], groups: new Map(), warnings };
+  const merged = mergeChromiumSessionParts(layout, navTabs, layout.groups);
+  return { ...merged, warnings };
 }
 
 function findFirefoxSessionFile(profilePath) {
@@ -493,21 +549,34 @@ function firefoxGroupColor(colorName) {
 }
 
 function extractFirefoxSession(profilePath) {
+  const warnings = [];
   const sessionPath = findFirefoxSessionFile(profilePath);
-  if (!sessionPath) return { tabs: [], groups: new Map() };
+  if (!sessionPath) {
+    warnings.push(
+      'No Firefox session file was found — pinned tabs, tab groups, and open tabs may be missing.'
+    );
+    return { tabs: [], groups: new Map(), warnings };
+  }
   let raw;
   try {
     raw = fs.readFileSync(sessionPath);
   } catch (_) {
-    return { tabs: [], groups: new Map() };
+    warnings.push(
+      'Could not read the Firefox session — quit Firefox, then try importing again.'
+    );
+    return { tabs: [], groups: new Map(), warnings };
   }
   const text = decompressMozLz4(raw);
-  if (!text) return { tabs: [], groups: new Map() };
+  if (!text) {
+    warnings.push('The Firefox session file could not be decoded.');
+    return { tabs: [], groups: new Map(), warnings };
+  }
   let data;
   try {
     data = JSON.parse(text);
   } catch (_) {
-    return { tabs: [], groups: new Map() };
+    warnings.push('The Firefox session file could not be parsed.');
+    return { tabs: [], groups: new Map(), warnings };
   }
 
   const groups = new Map();
@@ -551,17 +620,103 @@ function extractFirefoxSession(profilePath) {
     }
   }
 
-  return { tabs, groups };
+  return { tabs, groups, warnings };
+}
+
+function readJsonFile(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+function extractChromiumPinnedFromPreferences(profilePath) {
+  const prefs = readJsonFile(path.join(profilePath, 'Preferences'));
+  if (!prefs) return [];
+
+  const candidates = [];
+  const pushList = (list) => {
+    if (!Array.isArray(list)) return;
+    for (const entry of list) {
+      if (typeof entry === 'string') candidates.push({ url: entry, title: entry });
+      else if (entry && typeof entry === 'object') {
+        candidates.push({
+          url: entry.url || entry.link || entry.href || '',
+          title: entry.title || entry.name || entry.url || ''
+        });
+      }
+    }
+  };
+
+  pushList(prefs.pinned_tabs);
+  pushList(prefs?.extensions?.pinned_tabs);
+  pushList(prefs?.bookmark_bar?.pinned_urls);
+
+  const tabs = [];
+  const seen = new Set();
+  for (const item of candidates) {
+    const url = normalizeHttpUrl(item.url);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    tabs.push({
+      url,
+      title: String(item.title || url).slice(0, 200),
+      pinned: true,
+      groupKey: null,
+      groupName: '',
+      groupColor: null,
+      groupCollapsed: false,
+      windowIndex: 0,
+      tabIndex: tabs.length
+    });
+  }
+  return tabs;
 }
 
 function extractBrowserSession(profilePath, engine) {
-  if (engine === 'firefox') return extractFirefoxSession(profilePath);
-  return extractChromiumSession(profilePath);
+  const warnings = [];
+  if (engine === 'firefox') {
+    const session = extractFirefoxSession(profilePath);
+    return {
+      tabs: session.tabs,
+      groups: session.groups,
+      warnings: session.warnings || []
+    };
+  }
+
+  const session = extractChromiumSession(profilePath);
+  if (session.tabs.length > 0) {
+    return {
+      tabs: session.tabs,
+      groups: session.groups,
+      warnings: session.warnings || []
+    };
+  }
+
+  const prefPinned = extractChromiumPinnedFromPreferences(profilePath);
+  if (prefPinned.length > 0) {
+    return {
+      tabs: prefPinned,
+      groups: session.groups || new Map(),
+      warnings: [
+        ...(session.warnings || []),
+        'Used pinned tabs saved in browser settings because the last session could not be read.'
+      ]
+    };
+  }
+
+  return {
+    tabs: session.tabs,
+    groups: session.groups,
+    warnings: session.warnings || []
+  };
 }
 
 module.exports = {
   normalizeHttpUrl,
   extractBrowserSession,
   parseSnssFile,
+  extractChromiumPinnedFromPreferences,
   AXIS_GROUP_COLORS
 };
