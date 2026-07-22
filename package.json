@@ -17,6 +17,7 @@
     "tar": "^7.5.16",
     "ajv": "^8.18.0",
     "minimatch": "^10.2.3",
+    "brace-expansion": "^5.0.7",
     "picomatch": "4.0.4",
     "@xmldom/xmldom": "0.8.13",
     "file-type": ">=21.3.1",
@@ -43,7 +44,7 @@
   "dependencies": {
     "@ghostery/adblocker-electron": "^2.14.1",
     "@primno/dpapi": "^2.0.1",
-    "adm-zip": "^0.5.17",
+    "adm-zip": "^0.6.0",
     "dictionary-en": "^4.0.0",
     "electron-store": "^8.1.0",
     "jimp": "^1.6.1",
