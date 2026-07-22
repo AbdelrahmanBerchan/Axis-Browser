@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSettingsWindow: (tab) => ipcRenderer.invoke('open-settings-window', tab),
   openUrlInBrowser: (url) => ipcRenderer.invoke('open-url-in-browser', url),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
+  fetchText: (url) => ipcRenderer.invoke('axis-fetch-text', url),
+  searchWeatherCities: (query, limit) =>
+    ipcRenderer.invoke('axis-search-weather-cities', query, limit),
+  searchTickers: (query, limit) => ipcRenderer.invoke('axis-search-tickers', query, limit),
 
   getHistory: () => ipcRenderer.invoke('get-history'),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
@@ -89,7 +93,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   switchProfileInWindow: (profileId) => ipcRenderer.invoke('switch-profile-in-window', profileId),
   openOrFocusProfileWindow: (profileId) => ipcRenderer.invoke('open-or-focus-profile-window', profileId),
   onProfilesUpdated: (callback) => {
-    const handler = () => callback();
+    const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('profiles-updated', handler);
     return () => ipcRenderer.removeListener('profiles-updated', handler);
   },
