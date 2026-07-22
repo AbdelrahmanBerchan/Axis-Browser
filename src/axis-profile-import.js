@@ -13,11 +13,19 @@ const {
   extractBrowserExtras,
   mergeSitePermissionOverrides
 } = require('./axis-browser-extra-import');
+const {
+  readStorableSidebarBookmarks
+} = require('./axis-storable-sidebar-import');
+const {
+  querySqliteDb,
+  sqliteReadWarning,
+  pathExists: sqlitePathExists
+} = require('./axis-import-sqlite');
+const { AXIS_PROFILE_HISTORY_MAX, trimProfileHistoryItems } = require('./axis-history-store');
 
-let DatabaseSync = null;
-try {
-  DatabaseSync = require('node:sqlite').DatabaseSync;
-} catch (_) {}
+const FAVORITES_IMPORT_LIMIT = 500;
+const HISTORY_IMPORT_LIMIT = 2000;
+const SIDEBAR_PROFILE_BROWSERS = new Set(['arc', 'dia', 'sidekick']);
 
 const normalizeHttpUrl = sessionNormalizeHttpUrl;
 
@@ -32,11 +40,7 @@ const SEARCH_ENGINE_MAP = {
 };
 
 function pathExists(p) {
-  try {
-    return !!p && fs.existsSync(p);
-  } catch (_) {
-    return false;
-  }
+  return sqlitePathExists(p);
 }
 
 function readJsonFile(filePath) {
@@ -48,17 +52,27 @@ function readJsonFile(filePath) {
 }
 
 function chromiumTimeToIso(microseconds) {
-  if (!microseconds) return new Date().toISOString();
-  const ms = Number(microseconds) / 1000 - 11644473600000;
-  const d = new Date(ms);
-  return Number.isFinite(d.getTime()) ? d.toISOString() : new Date().toISOString();
+  if (microseconds == null || microseconds === '') return new Date().toISOString();
+  try {
+    const micro = BigInt(String(microseconds));
+    const ms = Number(micro / 1000n) - 11644473600000;
+    const d = new Date(ms);
+    return Number.isFinite(d.getTime()) ? d.toISOString() : new Date().toISOString();
+  } catch (_) {
+    return new Date().toISOString();
+  }
 }
 
 function firefoxTimeToIso(microseconds) {
-  if (!microseconds) return new Date().toISOString();
-  const ms = Number(microseconds) / 1000;
-  const d = new Date(ms);
-  return Number.isFinite(d.getTime()) ? d.toISOString() : new Date().toISOString();
+  if (microseconds == null || microseconds === '') return new Date().toISOString();
+  try {
+    const micro = BigInt(String(microseconds));
+    const ms = Number(micro / 1000n);
+    const d = new Date(ms);
+    return Number.isFinite(d.getTime()) ? d.toISOString() : new Date().toISOString();
+  } catch (_) {
+    return new Date().toISOString();
+  }
 }
 
 function browserDefs() {
@@ -81,12 +95,26 @@ function browserDefs() {
 
   const defs = [
     chromium('chrome', 'Google Chrome', 'Google/Chrome', 'Google/Chrome/User Data', '.config/google-chrome'),
+    chromium('chrome-beta', 'Chrome Beta', 'Google/Chrome Beta', 'Google/Chrome Beta/User Data', '.config/google-chrome-beta'),
+    chromium('chrome-dev', 'Chrome Dev', 'Google/Chrome Dev', 'Google/Chrome Dev/User Data', '.config/google-chrome-unstable'),
+    chromium('chrome-canary', 'Chrome Canary', 'Google/Chrome Canary', 'Google/Chrome SxS/User Data', '.config/google-chrome-canary'),
     chromium('edge', 'Microsoft Edge', 'Microsoft Edge', 'Microsoft/Edge/User Data', '.config/microsoft-edge'),
+    chromium('edge-beta', 'Edge Beta', 'Microsoft Edge Beta', 'Microsoft/Edge Beta/User Data', '.config/microsoft-edge-beta'),
+    chromium('edge-dev', 'Edge Dev', 'Microsoft Edge Dev', 'Microsoft/Edge Dev/User Data', '.config/microsoft-edge-dev'),
+    chromium('edge-canary', 'Edge Canary', 'Microsoft Edge Canary', 'Microsoft/Edge SxS/User Data', '.config/microsoft-edge-canary'),
     chromium('brave', 'Brave', 'BraveSoftware/Brave-Browser', 'BraveSoftware/Brave-Browser/User Data', '.config/BraveSoftware/Brave-Browser'),
+    chromium('brave-beta', 'Brave Beta', 'BraveSoftware/Brave-Browser-Beta', 'BraveSoftware/Brave-Browser-Beta/User Data', '.config/BraveSoftware/Brave-Browser-Beta'),
+    chromium('brave-nightly', 'Brave Nightly', 'BraveSoftware/Brave-Browser-Nightly', 'BraveSoftware/Brave-Browser-Nightly/User Data', '.config/BraveSoftware/Brave-Browser-Nightly'),
     chromium('chromium', 'Chromium', 'Chromium', 'Chromium/User Data', '.config/chromium'),
     chromium('arc', 'Arc', 'Arc/User Data', 'Arc/User Data', '.config/arc'),
+    chromium('dia', 'Dia', 'Dia/User Data', 'Dia/User Data', '.config/dia'),
     chromium('opera', 'Opera', 'com.operasoftware.Opera', 'Opera Software/Opera Stable', '.config/opera'),
+    chromium('opera-gx', 'Opera GX', 'com.operasoftware.OperaGX', 'Opera Software/Opera GX Stable', '.config/opera-gx'),
     chromium('vivaldi', 'Vivaldi', 'Vivaldi', 'Vivaldi/User Data', '.config/vivaldi'),
+    chromium('yandex', 'Yandex', 'Yandex/YandexBrowser', 'Yandex/YandexBrowser/User Data', '.config/yandex-browser'),
+    chromium('whale', 'Whale', 'Naver/Whale', 'Naver/Naver Whale/User Data', '.config/naver-whale'),
+    chromium('thorium', 'Thorium', 'Thorium', 'Thorium/User Data', '.config/thorium'),
+    chromium('sidekick', 'Sidekick', 'Sidekick', 'Sidekick/User Data', '.config/sidekick'),
     {
       id: 'firefox',
       name: 'Firefox',
@@ -95,6 +123,56 @@ function browserDefs() {
         if (isMac) return path.join(home, 'Library', 'Application Support', 'Firefox');
         if (isWin) return path.join(appData, 'Mozilla', 'Firefox');
         return path.join(home, '.mozilla', 'firefox');
+      }
+    },
+    {
+      id: 'firefox-dev',
+      name: 'Firefox Developer Edition',
+      engine: 'firefox',
+      resolvePath() {
+        if (isMac) return path.join(home, 'Library', 'Application Support', 'FirefoxDeveloperEdition');
+        if (isWin) return path.join(appData, 'Mozilla', 'Firefox Developer Edition');
+        return path.join(home, '.mozilla', 'firefox-dev');
+      }
+    },
+    {
+      id: 'firefox-nightly',
+      name: 'Firefox Nightly',
+      engine: 'firefox',
+      resolvePath() {
+        if (isMac) return path.join(home, 'Library', 'Application Support', 'FirefoxNightly');
+        if (isWin) return path.join(appData, 'Mozilla', 'Firefox Nightly');
+        return path.join(home, '.mozilla', 'firefox-nightly');
+      }
+    },
+    {
+      id: 'librewolf',
+      name: 'LibreWolf',
+      engine: 'firefox',
+      resolvePath() {
+        if (isMac) return path.join(home, 'Library', 'Application Support', 'librewolf');
+        if (isWin) return path.join(appData, 'librewolf');
+        return path.join(home, '.librewolf');
+      }
+    },
+    {
+      id: 'waterfox',
+      name: 'Waterfox',
+      engine: 'firefox',
+      resolvePath() {
+        if (isMac) return path.join(home, 'Library', 'Application Support', 'Waterfox');
+        if (isWin) return path.join(appData, 'Waterfox');
+        return path.join(home, '.waterfox');
+      }
+    },
+    {
+      id: 'zen',
+      name: 'Zen Browser',
+      engine: 'firefox',
+      resolvePath() {
+        if (isMac) return path.join(home, 'Library', 'Application Support', 'zen');
+        if (isWin) return path.join(appData, 'zen');
+        return path.join(home, '.zen');
       }
     }
   ];
@@ -113,13 +191,25 @@ function flattenChromiumBookmarks(node, out = []) {
   return out;
 }
 
+function looksLikeChromiumProfileDir(profilePath) {
+  return (
+    pathExists(path.join(profilePath, 'Preferences')) ||
+    pathExists(path.join(profilePath, 'Bookmarks')) ||
+    pathExists(path.join(profilePath, 'History')) ||
+    pathExists(path.join(profilePath, 'Login Data'))
+  );
+}
+
 function listChromiumProfiles(userDataDir) {
   const localState = readJsonFile(path.join(userDataDir, 'Local State'));
   const infoCache = localState?.profile?.info_cache || {};
   const profiles = [];
+  const seen = new Set();
+
   for (const [dirName, info] of Object.entries(infoCache)) {
     const profilePath = path.join(userDataDir, dirName);
     if (!pathExists(profilePath)) continue;
+    seen.add(dirName);
     profiles.push({
       id: dirName,
       name: String(info?.name || info?.gaia_name || dirName).trim() || dirName,
@@ -127,6 +217,37 @@ function listChromiumProfiles(userDataDir) {
       browserEngine: 'chromium'
     });
   }
+
+  // Also scan folders so we do not miss profiles missing from Local State.
+  try {
+    const entries = fs.readdirSync(userDataDir, { withFileTypes: true });
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      const dirName = ent.name;
+      if (
+        seen.has(dirName) ||
+        dirName === 'System Profile' ||
+        dirName === 'Guest Profile' ||
+        dirName === 'Crashpad' ||
+        dirName === 'GrShaderCache' ||
+        dirName === 'ShaderCache' ||
+        dirName === 'GraphiteDawnCache' ||
+        dirName.startsWith('.')
+      ) {
+        continue;
+      }
+      const profilePath = path.join(userDataDir, dirName);
+      if (!looksLikeChromiumProfileDir(profilePath)) continue;
+      seen.add(dirName);
+      profiles.push({
+        id: dirName,
+        name: dirName === 'Default' ? 'Default' : dirName.replace(/^Profile\s+/i, 'Profile '),
+        profilePath,
+        browserEngine: 'chromium'
+      });
+    }
+  } catch (_) {}
+
   if (profiles.length === 0 && pathExists(path.join(userDataDir, 'Default'))) {
     profiles.push({
       id: 'Default',
@@ -186,13 +307,42 @@ function parseFirefoxProfilesIni(firefoxDir) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function readChromiumBookmarks(profilePath) {
-  const data = readJsonFile(path.join(profilePath, 'Bookmarks'));
-  const roots = data?.roots || {};
+function collectLooseUrlsFromBookmarkRoot(rootNode) {
+  const loose = [];
+  for (const child of rootNode?.children || []) {
+    if (child.type !== 'url') continue;
+    const url = normalizeHttpUrl(child.url);
+    if (url) loose.push({ title: String(child.name || url).slice(0, 200), url });
+  }
+  return loose;
+}
+
+function readChromiumBookmarks(profilePath, warnings = []) {
+  const bookmarksPath = path.join(profilePath, 'Bookmarks');
+  const data = readJsonFile(bookmarksPath);
+  if (!data?.roots) {
+    if (pathExists(bookmarksPath)) {
+      warnings.push('Could not read the bookmarks file in this profile.');
+    }
+    return {
+      bar: [],
+      all: [],
+      looseBookmarks: [],
+      barFolders: [],
+      otherFolders: [],
+      syncedFolders: [],
+      mobileFolders: []
+    };
+  }
+  const roots = data.roots || {};
   const bar = flattenChromiumBookmarks(roots.bookmark_bar, []);
   const other = flattenChromiumBookmarks(roots.other, []);
   const synced = flattenChromiumBookmarks(roots.synced, []);
   const mobile = flattenChromiumBookmarks(roots.mobile, []);
+  const looseBar = collectLooseUrlsFromBookmarkRoot(roots.bookmark_bar);
+  const looseOther = collectLooseUrlsFromBookmarkRoot(roots.other);
+  const looseSynced = collectLooseUrlsFromBookmarkRoot(roots.synced);
+  const looseMobile = collectLooseUrlsFromBookmarkRoot(roots.mobile);
   const seen = new Set();
   const all = [];
   for (const item of [...bar, ...other, ...synced, ...mobile]) {
@@ -200,47 +350,59 @@ function readChromiumBookmarks(profilePath) {
     seen.add(item.url);
     all.push(item);
   }
+  const looseSeen = new Set();
+  const looseBookmarks = [];
+  for (const item of [...looseBar, ...looseOther, ...looseSynced, ...looseMobile]) {
+    if (looseSeen.has(item.url)) continue;
+    looseSeen.add(item.url);
+    looseBookmarks.push(item);
+  }
   return {
     bar,
     all,
+    looseBookmarks,
     roots,
     barFolders: collectChromiumBookmarkFolders(roots.bookmark_bar, { pinned: true }),
-    otherFolders: collectChromiumBookmarkFolders(roots.other, { pinned: false })
+    otherFolders: collectChromiumBookmarkFolders(roots.other, { pinned: false }),
+    syncedFolders: collectChromiumBookmarkFolders(roots.synced, { pinned: false }),
+    mobileFolders: collectChromiumBookmarkFolders(roots.mobile, { pinned: false })
   };
 }
 
-function collectUrlsFromChromiumFolder(folderNode) {
-  const urls = [];
-  for (const child of folderNode?.children || []) {
+function collectChromiumBookmarkFoldersFromNode(folderNode, { pinned = false, prefix = '' } = {}) {
+  const folders = [];
+  if (!folderNode || folderNode.type !== 'folder') return folders;
+
+  const name = String(folderNode.name || 'Folder').trim().slice(0, 48) || 'Folder';
+  const fullName = prefix ? `${prefix} / ${name}`.slice(0, 80) : name;
+  const directUrls = [];
+  for (const child of folderNode.children || []) {
     if (child.type === 'url') {
       const url = normalizeHttpUrl(child.url);
-      if (url) urls.push({ title: String(child.name || url).slice(0, 200), url });
-    } else if (child.type === 'folder') {
-      urls.push(...collectUrlsFromChromiumFolder(child));
+      if (url) directUrls.push({ title: String(child.name || url).slice(0, 200), url });
     }
   }
-  return urls;
+  if (directUrls.length > 0) folders.push({ name, urls: directUrls, pinned });
+
+  for (const child of folderNode.children || []) {
+    if (child.type === 'folder') {
+      folders.push(...collectChromiumBookmarkFoldersFromNode(child, { pinned, prefix: fullName }));
+    }
+  }
+  return folders;
 }
 
 function collectChromiumBookmarkFolders(rootNode, { pinned = false } = {}) {
   const folders = [];
   for (const child of rootNode?.children || []) {
     if (child.type !== 'folder') continue;
-    const name = String(child.name || 'Folder').trim().slice(0, 48) || 'Folder';
-    const urls = collectUrlsFromChromiumFolder(child);
-    if (urls.length > 0) folders.push({ name, urls, pinned });
-    for (const nested of child.children || []) {
-      if (nested.type !== 'folder') continue;
-      const nestedName = `${name} / ${String(nested.name || 'Folder').trim().slice(0, 40)}`;
-      const nestedUrls = collectUrlsFromChromiumFolder(nested);
-      if (nestedUrls.length > 0) folders.push({ name: nestedName, urls: nestedUrls, pinned });
-    }
+    folders.push(...collectChromiumBookmarkFoldersFromNode(child, { pinned }));
   }
   return folders;
 }
 
-function readFirefoxBookmarkTree(profilePath) {
-  const rows = querySqliteDb(
+function readFirefoxBookmarkTree(profilePath, warnings = []) {
+  const { rows, error } = querySqliteDb(
     path.join(profilePath, 'places.sqlite'),
     `SELECT b.id, b.parent, b.type, b.title, b.position, p.url
      FROM moz_bookmarks b
@@ -248,7 +410,9 @@ function readFirefoxBookmarkTree(profilePath) {
      WHERE b.type IN (1, 2)
      ORDER BY b.parent, b.position`
   );
-  if (!rows.length) return { bar: [], all: [], barFolders: [], otherFolders: [] };
+  const warn = sqliteReadWarning('bookmarks', error);
+  if (warn) warnings.push(warn);
+  if (!rows.length) return { bar: [], all: [], looseBookmarks: [], barFolders: [], otherFolders: [] };
 
   const byId = new Map();
   const children = new Map();
@@ -272,7 +436,7 @@ function readFirefoxBookmarkTree(profilePath) {
     (r) => r.type === 2 && String(r.title || '').toLowerCase() === 'unfiled'
   );
 
-  const walkFolder = (folderId, pinned) => {
+  const walkFolderTree = (folderId, pinned, prefix = '') => {
     const folders = [];
     const loose = [];
     for (const child of children.get(folderId) || []) {
@@ -281,29 +445,24 @@ function readFirefoxBookmarkTree(profilePath) {
         if (url) loose.push({ title: String(child.title || url).slice(0, 200), url });
       } else if (child.type === 2) {
         const name = String(child.title || 'Folder').trim().slice(0, 48) || 'Folder';
+        const fullName = prefix ? `${prefix} / ${name}`.slice(0, 80) : name;
         const urls = [];
-        const nestedFolders = [];
         for (const sub of children.get(child.id) || []) {
           if (sub.type === 1) {
             const url = normalizeHttpUrl(sub.url);
             if (url) urls.push({ title: String(sub.title || url).slice(0, 200), url });
-          } else if (sub.type === 2) {
-            const subName = `${name} / ${String(sub.title || 'Folder').trim().slice(0, 40)}`;
-            const subUrls = [];
-            for (const leaf of children.get(sub.id) || []) {
-              if (leaf.type !== 1) continue;
-              const url = normalizeHttpUrl(leaf.url);
-              if (url) subUrls.push({ title: String(leaf.title || url).slice(0, 200), url });
-            }
-            if (subUrls.length > 0) nestedFolders.push({ name: subName, urls: subUrls, pinned });
           }
         }
         if (urls.length > 0) folders.push({ name, urls, pinned });
-        folders.push(...nestedFolders);
+        const nested = walkFolderTree(child.id, pinned, fullName);
+        folders.push(...nested.folders);
+        loose.push(...nested.loose);
       }
     }
     return { folders, loose };
   };
+
+  const walkFolder = (folderId, pinned) => walkFolderTree(folderId, pinned);
 
   const barData = toolbarRoot ? walkFolder(toolbarRoot.id, true) : { folders: [], loose: [] };
   const otherParts = [];
@@ -313,6 +472,15 @@ function readFirefoxBookmarkTree(profilePath) {
   }
 
   const bar = barData.loose;
+  const looseBookmarks = [...bar];
+  const looseSeen = new Set(bar.map((item) => item.url));
+  for (const part of otherParts) {
+    for (const item of part.loose) {
+      if (!item?.url || looseSeen.has(item.url)) continue;
+      looseSeen.add(item.url);
+      looseBookmarks.push(item);
+    }
+  }
   const allSeen = new Set();
   const all = [];
   const pushAll = (item) => {
@@ -320,9 +488,8 @@ function readFirefoxBookmarkTree(profilePath) {
     allSeen.add(item.url);
     all.push(item);
   };
-  for (const item of bar) pushAll(item);
+  for (const item of looseBookmarks) pushAll(item);
   for (const part of otherParts) {
-    for (const item of part.loose) pushAll(item);
     for (const folder of part.folders) {
       for (const item of folder.urls) pushAll(item);
     }
@@ -334,36 +501,13 @@ function readFirefoxBookmarkTree(profilePath) {
   return {
     bar,
     all,
+    looseBookmarks,
     barFolders: barData.folders,
     otherFolders: otherParts.flatMap((p) => p.folders)
   };
 }
 
-function querySqliteDb(dbPath, sql, params = []) {
-  if (!DatabaseSync || !pathExists(dbPath)) return [];
-  const tmp = path.join(os.tmpdir(), `axis-import-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-  try {
-    fs.copyFileSync(dbPath, tmp);
-    const db = new DatabaseSync(tmp, { readonly: true });
-    const stmt = db.prepare(sql);
-    const rows = typeof params.length === 'number' && params.length > 0 ? stmt.all(...params) : stmt.all();
-    db.close();
-    return rows;
-  } catch (e) {
-    return [];
-  } finally {
-    try {
-      fs.unlinkSync(tmp);
-    } catch (_) {}
-  }
-}
-
-function readChromiumHistory(profilePath, limit = 2000) {
-  const rows = querySqliteDb(
-    path.join(profilePath, 'History'),
-    'SELECT url, title, last_visit_time FROM urls WHERE hidden = 0 ORDER BY last_visit_time DESC LIMIT ?',
-    [limit]
-  );
+function mapHistoryRows(rows, timeField, toIso) {
   return rows
     .map((row, index) => {
       const url = normalizeHttpUrl(row.url);
@@ -372,40 +516,60 @@ function readChromiumHistory(profilePath, limit = 2000) {
         id: Date.now() + index,
         url,
         title: String(row.title || url).slice(0, 300),
-        timestamp: chromiumTimeToIso(row.last_visit_time),
+        timestamp: toIso(row[timeField]),
         favicon: ''
       };
     })
     .filter(Boolean);
 }
 
-function readFirefoxBookmarks(profilePath) {
-  return readFirefoxBookmarkTree(profilePath);
+function readChromiumHistory(profilePath, limit = 2000, warnings = []) {
+  const historyPath = path.join(profilePath, 'History');
+  let { rows, error } = querySqliteDb(
+    historyPath,
+    'SELECT url, title, CAST(last_visit_time AS TEXT) AS last_visit_time FROM urls WHERE hidden = 0 ORDER BY last_visit_time DESC LIMIT ?',
+    [limit]
+  );
+  if ((!rows.length || error) && pathExists(historyPath)) {
+    const fallback = querySqliteDb(
+      historyPath,
+      `SELECT u.url, u.title, CAST(MAX(v.visit_time) AS TEXT) AS last_visit_time
+       FROM urls u
+       INNER JOIN visits v ON u.id = v.url
+       WHERE u.hidden = 0
+       GROUP BY u.id
+       ORDER BY last_visit_time DESC
+       LIMIT ?`,
+      [limit]
+    );
+    if (fallback.rows.length > 0) {
+      rows = fallback.rows;
+      error = fallback.error;
+    }
+  }
+  const warn = sqliteReadWarning('browsing history', error);
+  if (warn && rows.length === 0) warnings.push(warn);
+  return mapHistoryRows(rows, 'last_visit_time', chromiumTimeToIso);
 }
 
-function readFirefoxHistory(profilePath, limit = 2000) {
-  const rows = querySqliteDb(
+function readFirefoxBookmarks(profilePath, warnings = []) {
+  const tree = readFirefoxBookmarkTree(profilePath, warnings);
+  return tree;
+}
+
+function readFirefoxHistory(profilePath, limit = 2000, warnings = []) {
+  const { rows, error } = querySqliteDb(
     path.join(profilePath, 'places.sqlite'),
-    `SELECT url, title, last_visit_date
+    `SELECT url, title, CAST(last_visit_date AS TEXT) AS last_visit_date
      FROM moz_places
      WHERE visit_count > 0 AND url NOT LIKE 'place:%'
      ORDER BY last_visit_date DESC
      LIMIT ?`,
     [limit]
   );
-  return rows
-    .map((row, index) => {
-      const url = normalizeHttpUrl(row.url);
-      if (!url) return null;
-      return {
-        id: Date.now() + index,
-        url,
-        title: String(row.title || url).slice(0, 300),
-        timestamp: firefoxTimeToIso(row.last_visit_date),
-        favicon: ''
-      };
-    })
-    .filter(Boolean);
+  const warn = sqliteReadWarning('browsing history', error);
+  if (warn && rows.length === 0) warnings.push(warn);
+  return mapHistoryRows(rows, 'last_visit_date', firefoxTimeToIso);
 }
 
 function readChromiumSearchEngine(profilePath) {
@@ -468,27 +632,117 @@ function listBrowserImportProfiles(browserId) {
     : listChromiumProfiles(userDataPath);
 }
 
+function resolveChromiumUserDataPath(profilePath) {
+  if (looksLikeChromiumProfileDir(profilePath)) return path.dirname(profilePath);
+  return profilePath;
+}
+
+function isProfileFolderWithinUserData(profilePath, userDataPath) {
+  const resolvedProfile = path.resolve(profilePath);
+  const resolvedUser = path.resolve(userDataPath);
+  if (resolvedProfile === resolvedUser) return false;
+  const rel = path.relative(resolvedUser, resolvedProfile);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+function finalizeImportSource(source) {
+  const profilePath = path.resolve(String(source.profilePath || ''));
+  if (!profilePath || !pathExists(profilePath)) {
+    throw new Error('Browser profile folder not found');
+  }
+
+  const browserEngine = source.browserEngine;
+  let userDataPath = source.userDataPath
+    ? path.resolve(String(source.userDataPath))
+    : browserEngine === 'chromium'
+      ? resolveChromiumUserDataPath(profilePath)
+      : profilePath;
+
+  const profileId = String(source.id || source.sourceProfileId || path.basename(profilePath)).trim();
+  const profileBasename = path.basename(profilePath);
+
+  if (browserEngine === 'chromium') {
+    if (profileBasename === 'User Data' || profileBasename === 'Local State') {
+      throw new Error(
+        'Choose one browser profile (such as Default or Profile 1), not the whole browser data folder.'
+      );
+    }
+    if (!isProfileFolderWithinUserData(profilePath, userDataPath) && looksLikeChromiumProfileDir(profilePath)) {
+      userDataPath = resolveChromiumUserDataPath(profilePath);
+    }
+    const resolvedProfile = path.resolve(profilePath);
+    const resolvedUser = path.resolve(userDataPath);
+    const sameRootProfile = resolvedProfile === resolvedUser && looksLikeChromiumProfileDir(profilePath);
+    if (!sameRootProfile && !isProfileFolderWithinUserData(profilePath, userDataPath)) {
+      throw new Error('The selected folder is not a single browser profile.');
+    }
+  }
+
+  return {
+    ...source,
+    profilePath,
+    userDataPath,
+    id: profileId,
+    profileId,
+    profileBasename,
+    profileLabel: String(source.name || profileId || profileBasename).trim() || profileBasename
+  };
+}
+
+function inferBrowserIdFromPath(profilePath, userDataPath, engine) {
+  if (engine !== 'chromium') return '';
+  const resolvedUser = path.resolve(userDataPath || resolveChromiumUserDataPath(profilePath));
+  for (const def of browserDefs()) {
+    if (def.engine !== 'chromium') continue;
+    try {
+      const defPath = path.resolve(def.resolvePath());
+      if (resolvedUser === defPath || resolvedUser.startsWith(defPath + path.sep)) {
+        return def.id;
+      }
+    } catch (_) {}
+  }
+  const lower = resolvedUser.toLowerCase();
+  const hints = [
+    ['arc/user data', 'arc'],
+    ['/arc/', 'arc'],
+    ['dia/user data', 'dia'],
+    ['/dia/', 'dia'],
+    ['sidekick', 'sidekick'],
+    ['brave-browser', 'brave'],
+    ['microsoft/edge', 'edge'],
+    ['google/chrome', 'chrome'],
+    ['vivaldi', 'vivaldi'],
+    ['yandexbrowser', 'yandex']
+  ];
+  for (const [needle, id] of hints) {
+    if (lower.includes(needle)) return id;
+  }
+  return '';
+}
+
 function resolveImportSource(payload = {}) {
   if (payload.customProfilePath) {
     const profilePath = String(payload.customProfilePath).trim();
     if (!pathExists(profilePath)) throw new Error('Profile folder not found');
     const engine = pathExists(path.join(profilePath, 'places.sqlite'))
       ? 'firefox'
-      : pathExists(path.join(profilePath, 'Bookmarks'))
+      : looksLikeChromiumProfileDir(profilePath)
         ? 'chromium'
         : null;
     if (!engine) throw new Error('This folder does not look like a browser profile');
     const userDataPath =
-      engine === 'chromium' && pathExists(path.join(profilePath, 'Login Data'))
-        ? path.dirname(profilePath)
-        : profilePath;
-    return {
+      engine === 'chromium' ? resolveChromiumUserDataPath(profilePath) : profilePath;
+    const browserId =
+      String(payload.browserId || '').trim() ||
+      inferBrowserIdFromPath(profilePath, userDataPath, engine);
+    return finalizeImportSource({
       name: path.basename(profilePath),
       profilePath,
       browserEngine: engine,
-      browserId: payload.browserId || '',
-      userDataPath
-    };
+      browserId,
+      userDataPath,
+      id: path.basename(profilePath)
+    });
   }
   const browserId = String(payload.browserId || '').trim();
   const sourceProfileId = String(payload.sourceProfileId || '').trim();
@@ -497,11 +751,17 @@ function resolveImportSource(payload = {}) {
   const profiles = listBrowserImportProfiles(browserId);
   const match = profiles.find((p) => p.id === sourceProfileId);
   if (!match) throw new Error('Browser profile not found');
-  return {
+  return finalizeImportSource({
     ...match,
     browserId,
     userDataPath: def?.resolvePath?.() || path.dirname(match.profilePath)
-  };
+  });
+}
+
+function importFaviconUrl(_url) {
+  // Don't bake a proxy favicon at import — display falls back, then the live
+  // page favicon replaces it when the favorite is opened.
+  return null;
 }
 
 function makeAxisTabEntry(item, id, order) {
@@ -509,20 +769,20 @@ function makeAxisTabEntry(item, id, order) {
     id,
     url: item.url,
     title: String(item.title || item.url).slice(0, 200),
-    favicon: null,
+    favicon: item.favicon || importFaviconUrl(item.url),
     order
   };
 }
 
-function makeAxisTabGroup({ name, urls, order, color, pinned, open, ts, groupIndex }) {
+function makeAxisTabGroup({ name, urls, order, color, pinned, open, ts, groupIndex, nextTabId }) {
   const groupId = `import-grp-${ts}-${groupIndex}`;
-  const tabs = urls.map((item, tabIndex) => {
-    const tabId = `${groupId}-tab-${tabIndex}`;
+  const tabs = urls.map((item) => {
+    const tabId = nextTabId();
     return {
       id: tabId,
       url: item.url,
       title: String(item.title || item.url).slice(0, 200),
-      favicon: null
+      favicon: item.favicon || importFaviconUrl(item.url)
     };
   });
   return {
@@ -543,16 +803,17 @@ function makeAxisTabGroup({ name, urls, order, color, pinned, open, ts, groupInd
 function buildAxisImportLayout({
   sessionTabs,
   bookmarkFolders,
-  bookmarkBarUrls,
-  bookmarkAllUrls,
+  bookmarkUrls,
+  browserFavorites,
   options = {}
 }) {
-  const importSession = options.importSession !== false;
-  const importBookmarkFolders = options.importBookmarkFolders !== false;
-  const importPinnedBar = options.importPinnedBar !== false;
+  const importFavorites = options.importFavorites !== false;
   const importBookmarks = options.importBookmarks !== false;
+  const importFolders = options.importFolders !== false;
+  const importOpenTabs = options.importOpenTabs === true;
 
   const usedUrls = new Set();
+  const duplicateSkips = [];
   const pinnedTabs = [];
   const tabGroups = [];
   const unpinnedTabs = [];
@@ -561,61 +822,59 @@ function buildAxisImportLayout({
   let groupOrder = 0;
   let pinOrder = 0;
   let unpinOrder = 0;
+  let importTabIdSeq = 0;
+  const nextTabId = () => {
+    importTabIdSeq += 1;
+    return Math.min(Number.MAX_SAFE_INTEGER, ts * 1000 + importTabIdSeq);
+  };
 
-  const claim = (url) => {
-    if (!url || usedUrls.has(url)) return false;
+  const claim = (url, label) => {
+    if (!url) return false;
+    if (usedUrls.has(url)) {
+      duplicateSkips.push(label);
+      return false;
+    }
     usedUrls.add(url);
     return true;
   };
 
-  const sessionList = importSession ? sessionTabs || [] : [];
+  const sessionList = Array.isArray(sessionTabs) ? sessionTabs : [];
 
-  const sessionGroups = new Map();
-  for (const tab of sessionList) {
-    if (!tab.groupKey) continue;
-    if (!sessionGroups.has(tab.groupKey)) {
-      sessionGroups.set(tab.groupKey, {
-        name: tab.groupName || 'Imported group',
-        color: tab.groupColor || AXIS_GROUP_COLORS[groupOrder % AXIS_GROUP_COLORS.length],
-        pinned: tab.pinned !== false,
-        open: tab.groupCollapsed !== true,
-        urls: []
-      });
+  if (importFolders) {
+    const sessionGroups = new Map();
+    for (const tab of sessionList) {
+      if (!tab.groupKey) continue;
+      if (!sessionGroups.has(tab.groupKey)) {
+        sessionGroups.set(tab.groupKey, {
+          name: tab.groupName || 'Imported group',
+          color: tab.groupColor || AXIS_GROUP_COLORS[groupOrder % AXIS_GROUP_COLORS.length],
+          pinned: tab.pinned !== false,
+          open: tab.groupCollapsed !== true,
+          urls: []
+        });
+      }
+      if (claim(tab.url, 'tab group')) sessionGroups.get(tab.groupKey).urls.push(tab);
     }
-    if (claim(tab.url)) sessionGroups.get(tab.groupKey).urls.push(tab);
-  }
 
-  for (const grp of sessionGroups.values()) {
-    if (grp.urls.length === 0) continue;
-    tabGroups.push(
-      makeAxisTabGroup({
-        name: grp.name,
-        urls: grp.urls,
-        order: groupOrder,
-        color: grp.color,
-        pinned: grp.pinned,
-        open: grp.open,
-        ts,
-        groupIndex: groupOrder++
-      })
-    );
-  }
+    for (const grp of sessionGroups.values()) {
+      if (grp.urls.length === 0) continue;
+      tabGroups.push(
+        makeAxisTabGroup({
+          name: grp.name,
+          urls: grp.urls,
+          order: groupOrder,
+          color: grp.color,
+          pinned: grp.pinned,
+          open: grp.open,
+          ts,
+          groupIndex: groupOrder++,
+          nextTabId
+        })
+      );
+    }
 
-  for (const tab of sessionList) {
-    if (!tab.pinned || tab.groupKey) continue;
-    if (!claim(tab.url)) continue;
-    pinnedTabs.push(makeAxisTabEntry(tab, `import-pin-${ts}-${pinOrder}`, pinOrder++));
-  }
-
-  for (const tab of sessionList) {
-    if (tab.pinned || tab.groupKey) continue;
-    if (!claim(tab.url)) continue;
-    unpinnedTabs.push(makeAxisTabEntry(tab, `import-tab-${ts}-${unpinOrder}`, unpinOrder++));
-  }
-
-  if (importBookmarkFolders) {
     for (const folder of bookmarkFolders || []) {
-      const urls = (folder.urls || []).filter((item) => claim(item.url));
+      const urls = (folder.urls || []).filter((item) => claim(item.url, 'tab group'));
       if (urls.length === 0) continue;
       tabGroups.push(
         makeAxisTabGroup({
@@ -626,90 +885,229 @@ function buildAxisImportLayout({
           pinned: folder.pinned !== false,
           open: true,
           ts,
-          groupIndex: groupOrder++
+          groupIndex: groupOrder++,
+          nextTabId
         })
       );
     }
   }
 
-  if (importPinnedBar) {
-    for (const item of bookmarkBarUrls || []) {
-      if (!claim(item.url)) continue;
-      pinnedTabs.push(makeAxisTabEntry(item, `import-pin-${ts}-${pinOrder}`, pinOrder++));
+  if (importFavorites) {
+    for (const tab of sessionList) {
+      if (!tab.pinned || tab.groupKey) continue;
+      if (!claim(tab.url, 'favorite')) continue;
+      favorites.push({
+        id: `import-${ts}-fav-${favorites.length}`,
+        url: tab.url,
+        title: String(tab.title || tab.url).slice(0, 200),
+        favicon: tab.favicon || importFaviconUrl(tab.url),
+        order: favorites.length
+      });
+      if (favorites.length >= FAVORITES_IMPORT_LIMIT) break;
     }
-  }
 
-  if (importBookmarks) {
-    for (const item of bookmarkAllUrls || []) {
-      if (!claim(item.url)) continue;
+    for (const item of browserFavorites || []) {
+      if (!item?.url || !claim(item.url, 'favorite')) continue;
       favorites.push({
         id: `import-${ts}-fav-${favorites.length}`,
         url: item.url,
         title: String(item.title || item.url).slice(0, 200),
+        favicon: item.favicon || importFaviconUrl(item.url),
         order: favorites.length
       });
-      if (favorites.length >= 120) break;
+      if (favorites.length >= FAVORITES_IMPORT_LIMIT) break;
     }
   }
 
-  return { favorites, pinnedTabs, tabGroups, unpinnedTabs };
+  if (importBookmarks) {
+    for (const item of bookmarkUrls || []) {
+      if (!claim(item.url, 'pinned tab')) continue;
+      pinnedTabs.push(makeAxisTabEntry(item, nextTabId(), pinOrder++));
+    }
+  }
+
+  if (importOpenTabs) {
+    for (const tab of sessionList) {
+      if (tab.pinned || tab.groupKey) continue;
+      if (!claim(tab.url, 'open tab')) continue;
+      unpinnedTabs.push(makeAxisTabEntry(tab, nextTabId(), unpinOrder++));
+    }
+  }
+
+  const layoutWarnings = [];
+  if (duplicateSkips.length > 0) {
+    layoutWarnings.push(
+      `${duplicateSkips.length} duplicate link${duplicateSkips.length === 1 ? '' : 's'} appeared in more than one place and ${duplicateSkips.length === 1 ? 'was' : 'were'} only imported once.`
+    );
+  }
+
+  return { favorites, pinnedTabs, tabGroups, unpinnedTabs, layoutWarnings };
 }
 
 function extractImportData(source, options = {}) {
+  const scopedSource = finalizeImportSource(source);
+  const importFavorites = options.importFavorites !== false;
   const importBookmarks = options.importBookmarks !== false;
-  const importPinnedBar = options.importPinnedBar !== false;
+  const importFolders = options.importFolders !== false;
+  const importOpenTabs = options.importOpenTabs === true;
   const importHistory = options.importHistory !== false;
-  const importSession = options.importSession !== false;
-  const importBookmarkFolders = options.importBookmarkFolders !== false;
-  const engine = source.browserEngine;
-  let bookmarks = { bar: [], all: [], barFolders: [], otherFolders: [] };
+  const engine = scopedSource.browserEngine;
+  let bookmarks = { looseBookmarks: [], barFolders: [], otherFolders: [] };
   let history = [];
   let searchEngine = null;
   let sessionTabs = [];
 
+  const importWarnings = [
+    `Reading data only from browser profile “${scopedSource.profileLabel}” (${scopedSource.profileBasename}).`
+  ];
+
+  let sidebarData = null;
+  let sidebarAuthoritative = false;
+  let browserFavorites = [];
+  let bookmarkUrls = [];
+  let bookmarkFolders = [];
+
   if (engine === 'chromium') {
-    bookmarks = readChromiumBookmarks(source.profilePath);
-    if (importHistory) history = readChromiumHistory(source.profilePath, 500);
-    searchEngine = readChromiumSearchEngine(source.profilePath);
-    if (importSession) {
-      const session = extractBrowserSession(source.profilePath, 'chromium');
+    bookmarks = readChromiumBookmarks(scopedSource.profilePath, importWarnings);
+    const browserId = String(scopedSource.browserId || '').trim();
+    if (SIDEBAR_PROFILE_BROWSERS.has(browserId)) {
+      sidebarData = readStorableSidebarBookmarks(
+        scopedSource.userDataPath || path.dirname(scopedSource.profilePath),
+        browserId,
+        scopedSource
+      );
+      if (!sidebarData) {
+        importWarnings.push(
+          `Could not find sidebar data for ${browserId === 'arc' ? 'Arc' : browserId}. Bookmarks and session will still be imported from the profile folder.`
+        );
+      }
+    }
+
+    sidebarAuthoritative = !!sidebarData?.sidebarAuthoritative;
+
+    if (sidebarAuthoritative) {
+      const spaceList = (sidebarData.matchedSpaces || []).join(', ');
+      importWarnings.push(
+        spaceList
+          ? `Using sidebar for “${sidebarData.profileBasename}” (spaces: ${spaceList}). Bookmark folders from the profile file were skipped.`
+          : `Using sidebar for “${sidebarData.profileBasename}”. Bookmark folders from the profile file were skipped.`
+      );
+      if (importFavorites) {
+        browserFavorites = [...(sidebarData.favorites || []), ...(sidebarData.bar || [])];
+      }
+      if (importFolders) {
+        bookmarkFolders = [...(sidebarData.barFolders || [])];
+      }
+    } else if (sidebarData?.emptyForProfile) {
+      importWarnings.push(
+        `No sidebar data matched browser profile “${sidebarData.profileBasename}”. Bookmarks and session still came from that profile folder only.`
+      );
+    }
+
+    if (!sidebarAuthoritative) {
+      if (importBookmarks) {
+        bookmarkUrls = [...(bookmarks.looseBookmarks || [])];
+      }
+      if (importFolders) {
+        bookmarkFolders = [
+          ...(bookmarks.barFolders || []),
+          ...(bookmarks.otherFolders || []),
+          ...(bookmarks.syncedFolders || []),
+          ...(bookmarks.mobileFolders || [])
+        ];
+      }
+    } else if (importBookmarks || importFolders) {
+      importWarnings.push(
+        'For Arc, Dia, and Sidekick, favorites and tab groups come from the sidebar — not the separate bookmarks file.'
+      );
+    }
+
+    if (importHistory) {
+      history = readChromiumHistory(scopedSource.profilePath, HISTORY_IMPORT_LIMIT, importWarnings);
+    }
+    searchEngine = readChromiumSearchEngine(scopedSource.profilePath);
+
+    const needsSession =
+      importOpenTabs || (!sidebarAuthoritative && (importFavorites || importFolders));
+    if (needsSession) {
+      const session = extractBrowserSession(scopedSource.profilePath, 'chromium');
       sessionTabs = session.tabs || [];
+      importWarnings.push(...(session.warnings || []));
+      const openCount = sessionTabs.filter((tab) => !tab.pinned && !tab.groupKey).length;
+      if (!importOpenTabs && openCount > 0) {
+        importWarnings.push(
+          `${openCount} open tab${openCount === 1 ? '' : 's'} from the last session were skipped. Turn on “Import open tabs” to bring them in as unpinned tabs.`
+        );
+      }
     }
   } else if (engine === 'firefox') {
-    bookmarks = readFirefoxBookmarks(source.profilePath);
-    if (importHistory) history = readFirefoxHistory(source.profilePath, 500);
-    searchEngine = readFirefoxSearchEngine(source.profilePath);
-    if (importSession) {
-      const session = extractBrowserSession(source.profilePath, 'firefox');
+    bookmarks = readFirefoxBookmarks(scopedSource.profilePath, importWarnings);
+    if (importBookmarks) bookmarkUrls = [...(bookmarks.looseBookmarks || [])];
+    if (importFolders) {
+      bookmarkFolders = [...(bookmarks.barFolders || []), ...(bookmarks.otherFolders || [])];
+    }
+    if (importHistory) {
+      history = readFirefoxHistory(scopedSource.profilePath, HISTORY_IMPORT_LIMIT, importWarnings);
+    }
+    searchEngine = readFirefoxSearchEngine(scopedSource.profilePath);
+
+    const needsSession = importFavorites || importOpenTabs || importFolders;
+    if (needsSession) {
+      const session = extractBrowserSession(scopedSource.profilePath, 'firefox');
       sessionTabs = session.tabs || [];
+      importWarnings.push(...(session.warnings || []));
+      const openCount = sessionTabs.filter((tab) => !tab.pinned && !tab.groupKey).length;
+      if (!importOpenTabs && openCount > 0) {
+        importWarnings.push(
+          `${openCount} open tab${openCount === 1 ? '' : 's'} from the last session were skipped. Turn on “Import open tabs” to bring them in as unpinned tabs.`
+        );
+      }
     }
   }
 
-  const bookmarkFolders = [
-    ...(importBookmarkFolders ? bookmarks.barFolders || [] : []),
-    ...(importBookmarkFolders ? bookmarks.otherFolders || [] : [])
-  ];
+  if (importHistory && history.length === 0) {
+    const dbName = engine === 'firefox' ? 'places.sqlite' : 'History';
+    const dbPath = path.join(scopedSource.profilePath, dbName);
+    if (!pathExists(dbPath)) {
+      importWarnings.push('No browsing history file was found in this profile.');
+    } else if (!importWarnings.some((w) => /browsing history/i.test(w))) {
+      importWarnings.push(
+        'No browsing history entries were read from this profile. Quit the source browser and try importing again.'
+      );
+    }
+  }
 
   const layout = buildAxisImportLayout({
     sessionTabs,
     bookmarkFolders,
-    bookmarkBarUrls: importPinnedBar ? bookmarks.bar || [] : [],
-    bookmarkAllUrls: importBookmarks ? bookmarks.all || [] : [],
-    options: { importSession, importBookmarkFolders, importPinnedBar, importBookmarks }
+    bookmarkUrls,
+    browserFavorites,
+    options: {
+      importFavorites,
+      importBookmarks,
+      importFolders,
+      importOpenTabs
+    }
   });
 
-  const secrets = extractBrowserSecrets(source, {
+  if (importFavorites && layout.favorites.length >= FAVORITES_IMPORT_LIMIT) {
+    importWarnings.push(
+      `Only the first ${FAVORITES_IMPORT_LIMIT} favorites were imported. Export and import a backup for a full library.`
+    );
+  }
+
+  const secrets = extractBrowserSecrets(scopedSource, {
     importPasswords: options.importPasswords !== false,
     importCards: options.importCards !== false,
     importAddresses: options.importAddresses !== false
   });
 
-  const extras = extractBrowserExtras(source, {
+  const extras = extractBrowserExtras(scopedSource, {
     importSitePermissions: options.importSitePermissions !== false,
     importExtensions: options.importExtensions !== false
   });
 
-  const importWarnings = [...(secrets.warnings || []), ...(extras.warnings || [])];
+  importWarnings.push(...(layout.layoutWarnings || []), ...(secrets.warnings || []), ...(extras.warnings || []));
 
   return {
     favorites: layout.favorites,
@@ -732,8 +1130,8 @@ function buildImportPreview(extracted) {
     (extracted.extensions?.webStore?.length || 0) + (extracted.extensions?.unpacked?.length || 0);
   const permCount = Object.keys(extracted.sitePermissionOverrides || {}).length;
   return {
-    bookmarks: extracted.favorites.length,
-    pinnedBar: extracted.pinnedTabs.length,
+    favorites: extracted.favorites.length,
+    pinnedTabs: extracted.pinnedTabs.length,
     tabGroups: extracted.tabGroups.length,
     openTabs: extracted.unpinnedTabs.length,
     history: extracted.history.length,
@@ -757,7 +1155,7 @@ function previewBrowserImport(payload = {}) {
   };
 }
 
-function mergeHistory(existing, incoming, limit = 1000) {
+function mergeHistory(existing, incoming, limit = AXIS_PROFILE_HISTORY_MAX) {
   const byUrl = new Map();
   for (const row of [...incoming, ...(Array.isArray(existing) ? existing : [])]) {
     const url = normalizeHttpUrl(row?.url);
@@ -845,13 +1243,14 @@ function importVaultEntries(vault, extracted) {
 async function importExtensionsForProfile(deps, profileId, extensions, options = {}) {
   const installFn = deps.installExtensionForProfileImport;
   if (!installFn || options.importExtensions === false) {
-    return { installed: 0, failed: 0, warnings: [] };
+    return { installed: 0, failed: 0, found: 0, warnings: [] };
   }
   const warnings = [];
   let installed = 0;
   let failed = 0;
   const webStore = (extensions?.webStore || []).filter((e) => e.enabled !== false);
   const unpacked = (extensions?.unpacked || []).filter((e) => e.enabled !== false);
+  const foundCount = webStore.length + unpacked.length;
   const queue = [
     ...unpacked.map((e) => ({ kind: 'folder', ...e })),
     ...webStore.map((e) => ({ kind: 'store', ...e }))
@@ -880,7 +1279,16 @@ async function importExtensionsForProfile(deps, profileId, extensions, options =
   if (failed > 3) {
     warnings.push(`${failed - 3} more extensions could not be imported.`);
   }
-  return { installed, failed, warnings };
+  if (foundCount > 0 && installed === 0) {
+    warnings.push(
+      `Found ${foundCount} extension${foundCount === 1 ? '' : 's'} in the source profile but could not install any. Check your internet connection or install them manually from Settings → Extensions.`
+    );
+  } else if (installed > 0 && failed > 0) {
+    warnings.push(
+      `${installed} extension${installed === 1 ? '' : 's'} imported; ${failed} could not be installed.`
+    );
+  }
+  return { installed, failed, found: foundCount, warnings };
 }
 
 /**
@@ -894,6 +1302,7 @@ async function importBrowserProfileData(deps, payload = {}) {
     getProfileStore,
     normalizeFavoritesStoreList,
     broadcastProfilesUpdated,
+    broadcastSettingsUpdated,
     sanitizeProfileIcon,
     ensureAxisVaultForProfile
   } = deps;
@@ -913,6 +1322,7 @@ async function importBrowserProfileData(deps, payload = {}) {
   }
 
   const store = getProfileStore(profileId);
+  const isFreshProfileImport = !payload.targetProfileId;
   const stats = {
     favorites: 0,
     pinnedTabs: 0,
@@ -928,11 +1338,15 @@ async function importBrowserProfileData(deps, payload = {}) {
   const warnings = Array.isArray(extracted.importWarnings) ? [...extracted.importWarnings] : [];
 
   if (extracted.favorites.length > 0) {
-    const merged = normalizeFavoritesStoreList([
-      ...(Array.isArray(store.get('favorites')) ? store.get('favorites') : []),
-      ...extracted.favorites
-    ]);
-    store.set('favorites', merged);
+    if (isFreshProfileImport) {
+      store.set('favorites', normalizeFavoritesStoreList(extracted.favorites));
+    } else {
+      const merged = normalizeFavoritesStoreList([
+        ...(Array.isArray(store.get('favorites')) ? store.get('favorites') : []),
+        ...extracted.favorites
+      ]);
+      store.set('favorites', merged);
+    }
     stats.favorites = extracted.favorites.length;
   }
 
@@ -940,29 +1354,53 @@ async function importBrowserProfileData(deps, payload = {}) {
   const hasGroups = Array.isArray(store.get('tabGroups')) && store.get('tabGroups').length > 0;
   const hasUnpinned = Array.isArray(store.get('unpinnedTabs')) && store.get('unpinnedTabs').length > 0;
 
-  if (extracted.pinnedTabs.length > 0 && !hasPinned) {
+  if (extracted.pinnedTabs.length > 0 && (isFreshProfileImport || !hasPinned)) {
     store.set('pinnedTabs', extracted.pinnedTabs);
     stats.pinnedTabs = extracted.pinnedTabs.length;
+  } else if (extracted.pinnedTabs.length > 0 && hasPinned) {
+    warnings.push(
+      `${extracted.pinnedTabs.length} pinned tab${extracted.pinnedTabs.length === 1 ? '' : 's'} were skipped because this profile already has pinned tabs.`
+    );
   }
 
-  if (extracted.tabGroups.length > 0 && !hasGroups) {
+  if (extracted.tabGroups.length > 0 && (isFreshProfileImport || !hasGroups)) {
     store.set('tabGroups', extracted.tabGroups);
     stats.tabGroups = extracted.tabGroups.length;
+  } else if (extracted.tabGroups.length > 0 && hasGroups) {
+    warnings.push(
+      `${extracted.tabGroups.length} tab group${extracted.tabGroups.length === 1 ? '' : 's'} were skipped because this profile already has tab groups.`
+    );
   }
 
-  if (extracted.unpinnedTabs.length > 0 && !hasUnpinned) {
+  if (extracted.unpinnedTabs.length > 0 && (isFreshProfileImport || !hasUnpinned)) {
     store.set('unpinnedTabs', extracted.unpinnedTabs);
     stats.unpinnedTabs = extracted.unpinnedTabs.length;
+  } else if (extracted.unpinnedTabs.length > 0 && hasUnpinned) {
+    warnings.push(
+      `${extracted.unpinnedTabs.length} open tab${extracted.unpinnedTabs.length === 1 ? '' : 's'} were skipped because this profile already has unpinned tabs.`
+    );
   }
 
   if (extracted.history.length > 0) {
-    const mergedHistory = mergeHistory(store.get('historyItems'), extracted.history);
-    store.set('historyItems', mergedHistory);
+    if (isFreshProfileImport) {
+      store.set('historyItems', trimProfileHistoryItems(extracted.history));
+    } else {
+      const mergedHistory = mergeHistory(store.get('historyItems'), extracted.history);
+      store.set('historyItems', mergedHistory);
+    }
     stats.history = extracted.history.length;
   }
 
   if (extracted.searchEngine && !payload.targetProfileId) {
     store.set('searchEngine', extracted.searchEngine);
+  }
+
+  if (payload.themeColor) {
+    store.set('themeColor', String(payload.themeColor));
+  }
+
+  if (payload.searchEngine) {
+    store.set('searchEngine', String(payload.searchEngine));
   }
 
   if (
@@ -988,9 +1426,13 @@ async function importBrowserProfileData(deps, payload = {}) {
 
   const extStats = await importExtensionsForProfile(deps, profileId, extracted.extensions, payload);
   stats.extensions = extStats.installed;
+  stats.extensionsFound = extStats.found;
   warnings.push(...(extStats.warnings || []));
 
-  broadcastProfilesUpdated();
+  broadcastProfilesUpdated(profileId);
+  if (typeof broadcastSettingsUpdated === 'function') {
+    broadcastSettingsUpdated(profileId);
+  }
   if (deps.broadcastExtensionsReady && stats.extensions > 0) {
     deps.broadcastExtensionsReady(profileId);
   }
@@ -1100,32 +1542,38 @@ function importAxisProfileBackup(deps, payload, profileNameOverride) {
   return { ok: true, profileId, profileName: allocated.name };
 }
 
-function inspectCustomProfileFolder(folderPath) {
+function inspectCustomProfileFolder(folderPath, options = {}) {
   const profilePath = String(folderPath || '').trim();
   if (!pathExists(profilePath)) return { ok: false, error: 'Folder not found' };
   const engine = pathExists(path.join(profilePath, 'places.sqlite'))
     ? 'firefox'
-    : pathExists(path.join(profilePath, 'Bookmarks'))
+    : looksLikeChromiumProfileDir(profilePath)
       ? 'chromium'
       : null;
   if (!engine) return { ok: false, error: 'No bookmarks or history database found in this folder' };
-  const source = {
+  const userDataPath = engine === 'chromium' ? resolveChromiumUserDataPath(profilePath) : profilePath;
+  const browserId =
+    String(options.browserId || '').trim() ||
+    inferBrowserIdFromPath(profilePath, userDataPath, engine);
+  const source = finalizeImportSource({
     name: path.basename(profilePath),
     profilePath,
     browserEngine: engine,
-    userDataPath: engine === 'chromium' ? path.dirname(profilePath) : profilePath
-  };
+    browserId,
+    userDataPath,
+    id: path.basename(profilePath)
+  });
   const extracted = extractImportData(source, {
-    importBookmarks: true,
-    importPinnedBar: true,
-    importHistory: true,
-    importSession: true,
-    importBookmarkFolders: true,
-    importPasswords: true,
-    importCards: true,
-    importAddresses: true,
-    importSitePermissions: true,
-    importExtensions: true
+    importFavorites: options.importFavorites !== false,
+    importBookmarks: options.importBookmarks !== false,
+    importFolders: options.importFolders !== false,
+    importOpenTabs: options.importOpenTabs === true,
+    importHistory: options.importHistory !== false,
+    importPasswords: options.importPasswords !== false,
+    importCards: options.importCards !== false,
+    importAddresses: options.importAddresses !== false,
+    importSitePermissions: options.importSitePermissions !== false,
+    importExtensions: options.importExtensions !== false
   });
   return {
     ok: true,
