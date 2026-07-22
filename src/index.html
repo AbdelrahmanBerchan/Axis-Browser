@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: blob: https: http: file:; connect-src 'self' https://api.groq.com https://api.openai.com https://generativelanguage.googleapis.com https://openrouter.ai https://api.mistral.ai https://suggestqueries.google.com; media-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'; worker-src 'self' blob:; manifest-src 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: blob: https: http: file:; connect-src 'self' https://api.groq.com https://api.openai.com https://generativelanguage.googleapis.com https://openrouter.ai https://api.mistral.ai https://suggestqueries.google.com https://geocoding-api.open-meteo.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com; media-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'; worker-src 'self' blob:; manifest-src 'self'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Axis Browser</title>
     <link rel="stylesheet" href="styles.css">
@@ -26,6 +26,7 @@
         <div id="main-area">
             <!-- Left Sidebar -->
             <aside id="sidebar">
+                <div id="sidebar-scale" class="sidebar-scale">
                 <div class="sidebar-tabs-topbar" aria-label="Sidebar actions">
                     <button type="button" id="clear-unpinned-floating" class="clear-unpinned-floating hidden" title="Clear all unpinned tabs">
                         <span>Clear</span>
@@ -139,6 +140,7 @@
                     <span>New Incognito Tab</span>
                 </div>
             </div>
+                </div><!-- /.sidebar-scale -->
             </aside>
 
             <div id="sidebar-resize-handle" class="resize-handle" title="Drag to resize sidebar" aria-label="Resize sidebar"></div>
@@ -277,7 +279,11 @@
                                                 </div>
                                             </div>
                                             <input type="file" id="new-tab-image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
-                                            <div class="new-tab-suggestions" id="new-tab-suggestions"></div>
+                                            <div class="new-tab-suggestions" id="new-tab-suggestions" aria-hidden="true">
+                                                <div class="ntp-suggestions-drawer-clip">
+                                                    <div class="ntp-suggestions-drawer" id="ntp-suggestions-drawer"></div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                     <button type="button" id="ntp-widgets-opt-in" class="ntp-widgets-opt-in hidden" aria-label="Add widgets to new tab">
@@ -999,6 +1005,7 @@
         </div>
 
     </div>
+    </div><!-- /#app -->
 
     <!-- Vault modals on <body> so they paint above guest <webview> layers -->
     <div id="vault-save-modal" class="vault-modal vault-save-modal hidden" role="dialog" aria-labelledby="vault-save-title" aria-modal="true">
@@ -1054,11 +1061,273 @@
     <div id="profile-delete-modal" class="vault-modal vault-save-modal hidden" role="alertdialog" aria-labelledby="profile-delete-title" aria-modal="true" data-ui-theme="dark">
         <div class="vault-save-modal__card">
             <h2 id="profile-delete-title" class="vault-save-modal__title">Delete profile?</h2>
-            <p id="profile-delete-message" class="vault-save-modal__hint">All tabs, cookies, history, passwords, extensions, and settings for this profile will be removed permanently. This cannot be undone.</p>
+            <p id="profile-delete-message" class="vault-save-modal__hint">This profile will be moved to trash with its tabs, cookies, history, passwords, extensions, and settings. You can restore it from trash or press ⌘Z right after deleting.</p>
             <div class="vault-save-modal__actions">
                 <button type="button" class="vault-save-modal__btn" id="profile-delete-cancel">Cancel</button>
                 <button type="button" class="vault-save-modal__btn vault-save-modal__btn--danger" id="profile-delete-confirm">Delete profile</button>
             </div>
+        </div>
+    </div>
+
+    <!-- App onboarding (forced every launch while testing) -->
+    <div id="axis-onboarding" class="axis-onboarding hidden" role="dialog" aria-modal="true" aria-labelledby="ob-welcome-title" hidden>
+        <div class="ob-drag" aria-hidden="true"></div>
+        <div class="ob-backdrop" aria-hidden="true">
+            <div class="ob-backdrop-wash"></div>
+            <div class="ob-backdrop-wash ob-backdrop-wash--soft"></div>
+            <div class="ob-backdrop-tint"></div>
+        </div>
+        <div class="ob-shell">
+            <section class="ob-screen ob-screen--welcome" data-ob-screen="welcome">
+                <div class="ob-welcome-copy">
+                    <h1 id="ob-welcome-title" class="ob-hero-title">Welcome.</h1>
+                    <p class="ob-hero-product">
+                        <span>Axis Browser</span>
+                        <span class="ob-hero-logo" aria-hidden="true"></span>
+                    </p>
+                </div>
+                <button type="button" class="ob-btn ob-btn--welcome" id="ob-start-btn">
+                    <span>Start</span>
+                    <span class="ob-btn-arrow" aria-hidden="true">→</span>
+                </button>
+            </section>
+
+            <section class="ob-screen ob-screen--flow hidden" data-ob-screen="flow" hidden>
+                <header class="ob-header">
+                    <div class="ob-progress" aria-hidden="true">
+                        <div class="ob-progress-fill" id="ob-progress-fill"></div>
+                    </div>
+                    <div class="ob-header-meta">
+                        <p class="ob-step-caption" id="ob-step-caption"></p>
+                        <div class="ob-stepper" id="ob-stepper" aria-label="Setup progress"></div>
+                    </div>
+                </header>
+
+                <div class="ob-body">
+                    <div class="ob-panel" data-ob-panel="default" hidden>
+                        <h2 class="ob-title" id="ob-default-title">Default browser</h2>
+                        <p class="ob-desc">Open web links from other apps in Axis. You can change this later in system settings.</p>
+                        <div class="ob-seg" role="radiogroup" aria-labelledby="ob-default-title">
+                            <button type="button" class="ob-seg-btn" data-ob-default="yes" aria-pressed="false">
+                                <span class="ob-seg-title">Yes, set as default</span>
+                                <span class="ob-seg-sub">Use Axis for http and https links</span>
+                            </button>
+                            <button type="button" class="ob-seg-btn" data-ob-default="no" aria-pressed="false">
+                                <span class="ob-seg-title">Not now</span>
+                                <span class="ob-seg-sub">Keep your current default browser</span>
+                            </button>
+                        </div>
+                        <p class="ob-hint" id="ob-default-hint" hidden></p>
+                    </div>
+
+                    <div class="ob-panel" data-ob-panel="search" hidden>
+                        <h2 class="ob-title" id="ob-search-title">Search engine</h2>
+                        <p class="ob-desc">Used from the address bar and New Tab. Change anytime in Settings.</p>
+                        <div class="ob-choice-board" role="radiogroup" aria-labelledby="ob-search-title">
+                            <button type="button" class="ob-choice ob-choice--search" data-ob-search="google" aria-pressed="false">
+                                <span class="ob-choice-icon" aria-hidden="true"><img class="ob-brand-logo" src="assets/brands/google.svg" alt="" draggable="false" /></span>
+                                <span class="ob-choice-label">Google</span>
+                            </button>
+                            <button type="button" class="ob-choice ob-choice--search" data-ob-search="duckduckgo" aria-pressed="false">
+                                <span class="ob-choice-icon" aria-hidden="true"><img class="ob-brand-logo" src="assets/brands/duckduckgo.svg" alt="" draggable="false" /></span>
+                                <span class="ob-choice-label">DuckDuckGo</span>
+                            </button>
+                            <button type="button" class="ob-choice ob-choice--search" data-ob-search="bing" aria-pressed="false">
+                                <span class="ob-choice-icon" aria-hidden="true"><img class="ob-brand-logo" src="assets/brands/bing.svg" alt="" draggable="false" /></span>
+                                <span class="ob-choice-label">Bing</span>
+                            </button>
+                            <button type="button" class="ob-choice ob-choice--search" data-ob-search="yahoo" aria-pressed="false">
+                                <span class="ob-choice-icon" aria-hidden="true"><img class="ob-brand-logo" src="assets/brands/yahoo.svg" alt="" draggable="false" /></span>
+                                <span class="ob-choice-label">Yahoo</span>
+                            </button>
+                            <button type="button" class="ob-choice ob-choice--search" data-ob-search="yandex" aria-pressed="false">
+                                <span class="ob-choice-icon" aria-hidden="true"><img class="ob-brand-logo" src="assets/brands/yandex.svg" alt="" draggable="false" /></span>
+                                <span class="ob-choice-label">Yandex</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="ob-panel" data-ob-panel="data" hidden>
+                        <h2 class="ob-title" id="ob-data-title">Your browsing data</h2>
+                        <p class="ob-desc">Import from Chrome, Edge, Firefox, and other browsers on this computer — or start clean.</p>
+                        <div class="ob-seg" role="radiogroup" aria-labelledby="ob-data-title">
+                            <button type="button" class="ob-seg-btn" data-ob-data="import" aria-pressed="false">
+                                <span class="ob-seg-title">Import</span>
+                                <span class="ob-seg-sub">Favorites, passwords, history, tabs, and more</span>
+                            </button>
+                            <button type="button" class="ob-seg-btn" data-ob-data="fresh" aria-pressed="false">
+                                <span class="ob-seg-title">Start fresh</span>
+                                <span class="ob-seg-sub">Skip import — you can do this later in Settings</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="ob-panel" data-ob-panel="import" hidden>
+                        <h2 class="ob-title" id="ob-import-title">Import</h2>
+                        <p class="ob-desc">Choose a browser, then profiles and what to bring over. The first profile merges into your current Axis profile; extras become new ones.</p>
+
+                        <div class="ob-section" id="ob-browser-section">
+                            <span class="ob-section-label">Browser</span>
+                            <div class="ob-browser-selected" id="ob-browser-selected" hidden></div>
+                            <div class="ob-browser-board" id="ob-browser-list" aria-label="Detected browsers">
+                                <div class="ob-empty">Looking for browsers…</div>
+                            </div>
+                        </div>
+
+                        <div class="ob-import-details" id="ob-profiles-wrap" hidden>
+                            <div class="ob-section">
+                                <span class="ob-section-label">Profiles</span>
+                                <div class="ob-seg" role="radiogroup" aria-label="Profile selection mode">
+                                    <button type="button" class="ob-seg-btn" data-ob-profile-mode="all" aria-pressed="false">
+                                        <span class="ob-seg-title">All profiles</span>
+                                        <span class="ob-seg-sub">Bring everything over</span>
+                                    </button>
+                                    <button type="button" class="ob-seg-btn" data-ob-profile-mode="pick" aria-pressed="false">
+                                        <span class="ob-seg-title">Choose</span>
+                                        <span class="ob-seg-sub">Pick specific ones</span>
+                                    </button>
+                                </div>
+                                <div class="ob-profile-picks" id="ob-profile-list" hidden></div>
+                            </div>
+
+                            <div class="ob-section">
+                                <span class="ob-section-label">What to import</span>
+                                <div class="ob-import-chips" id="ob-import-options"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ob-panel" data-ob-panel="look" hidden>
+                        <h2 class="ob-title" id="ob-look-title">Look &amp; layout</h2>
+                        <p class="ob-desc">Appearance for menus and chrome, your theme color, and which side the sidebar sits on.</p>
+
+                        <div class="ob-section">
+                            <span class="ob-section-label">Appearance</span>
+                            <div class="ob-seg ob-seg--3" role="radiogroup" aria-label="Appearance">
+                                <button type="button" class="ob-seg-btn" data-ob-ui-theme="dark" aria-pressed="false"><span class="ob-seg-title">Dark</span></button>
+                                <button type="button" class="ob-seg-btn" data-ob-ui-theme="light" aria-pressed="false"><span class="ob-seg-title">Light</span></button>
+                                <button type="button" class="ob-seg-btn" data-ob-ui-theme="system" aria-pressed="false"><span class="ob-seg-title">System</span></button>
+                            </div>
+                        </div>
+
+                        <div class="ob-section">
+                            <span class="ob-section-label">Theme color</span>
+                            <label class="ob-color-field" for="ob-theme-color">
+                                <input type="color" id="ob-theme-color" class="ob-color-picker" value="#1a1a1a" aria-label="Theme color" />
+                                <span class="ob-color-meta">
+                                    <span class="ob-color-meta-label">Any color</span>
+                                    <input type="text" id="ob-theme-hex" class="ob-color-hex" value="#1A1A1A" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Theme color hex" />
+                                </span>
+                            </label>
+                        </div>
+
+                        <div class="ob-section">
+                            <span class="ob-section-label">Sidebar</span>
+                            <div class="ob-seg" role="radiogroup" aria-label="Sidebar position">
+                                <button type="button" class="ob-seg-btn" data-ob-sidebar="left" aria-pressed="false">
+                                    <span class="ob-seg-title">Left</span>
+                                    <span class="ob-seg-sub">Tabs on the left (default)</span>
+                                </button>
+                                <button type="button" class="ob-seg-btn" data-ob-sidebar="right" aria-pressed="false">
+                                    <span class="ob-seg-title">Right</span>
+                                    <span class="ob-seg-sub">Tabs on the right</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ob-panel" data-ob-panel="you" hidden>
+                        <h2 class="ob-title" id="ob-you-title">What should we call you?</h2>
+                        <p class="ob-desc">Used in the New Tab greeting. You can change this later in Settings.</p>
+                        <label class="ob-name-field" for="ob-greeting-name">
+                            <span class="ob-name-label">Your name</span>
+                            <input type="text" id="ob-greeting-name" class="ob-name-input" maxlength="48" placeholder="Optional" autocomplete="nickname" spellcheck="false" />
+                        </label>
+                    </div>
+
+                    <div class="ob-panel" data-ob-panel="features" hidden>
+                        <h2 class="ob-title" id="ob-features-title">Features</h2>
+                        <p class="ob-desc">A few core options — change anything later in Settings.</p>
+
+                        <div class="ob-section">
+                            <span class="ob-section-label">Extras</span>
+                            <div class="ob-feature-board">
+                                <button type="button" class="ob-feature-card is-on" data-ob-feature="adBlockerEnabled" aria-pressed="true">
+                                    <span class="ob-feature-card-top">
+                                        <span class="ob-row-title">Ad blocker</span>
+                                        <span class="ob-feature-state">On</span>
+                                    </span>
+                                    <span class="ob-row-desc">Block ads and trackers. Use the shield in the URL bar for site exceptions.</span>
+                                </button>
+                                <button type="button" class="ob-feature-card is-on" data-ob-feature="aiFeaturesEnabled" aria-pressed="true">
+                                    <span class="ob-feature-card-top">
+                                        <span class="ob-row-title">AI features</span>
+                                        <span class="ob-feature-state">On</span>
+                                    </span>
+                                    <span class="ob-row-desc">Ask AI, chat, and related New Tab options.</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="ob-section ob-section--unpinned">
+                            <span class="ob-section-label">Clear unpinned tabs</span>
+                            <p class="ob-section-hint">Pinned tabs stay. Unpinned tabs and groups follow this rule.</p>
+                            <div class="ob-seg ob-seg--unpinned" role="radiogroup" aria-label="Clear unpinned tabs">
+                                <button type="button" class="ob-seg-btn" data-ob-unpinned="app-close" aria-pressed="false">
+                                    <span class="ob-seg-title">When Axis closes</span>
+                                    <span class="ob-seg-sub">Clear when you quit the app</span>
+                                </button>
+                                <button type="button" class="ob-seg-btn" data-ob-unpinned="custom" aria-pressed="false">
+                                    <span class="ob-seg-title">Custom interval</span>
+                                    <span class="ob-seg-sub">Set your own time</span>
+                                </button>
+                                <button type="button" class="ob-seg-btn" data-ob-unpinned="24h" aria-pressed="false">
+                                    <span class="ob-seg-title">Every day</span>
+                                    <span class="ob-seg-sub">Clear once a day</span>
+                                </button>
+                                <button type="button" class="ob-seg-btn" data-ob-unpinned="never" aria-pressed="false">
+                                    <span class="ob-seg-title">Never</span>
+                                    <span class="ob-seg-sub">Keep them until you close them</span>
+                                </button>
+                            </div>
+                            <div class="ob-unpinned-custom-row" id="ob-unpinned-custom-row" hidden>
+                                <span class="ob-unpinned-custom-label">Custom</span>
+                                <label class="ob-unpinned-custom-control" for="ob-unpinned-custom-minutes">
+                                    <span class="ob-unpinned-custom-prefix">Clear after</span>
+                                    <input
+                                        type="number"
+                                        id="ob-unpinned-custom-minutes"
+                                        class="ob-unpinned-custom-input"
+                                        min="1"
+                                        max="10080"
+                                        step="1"
+                                        value="60"
+                                    />
+                                    <span class="ob-unpinned-custom-unit">minutes</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ob-panel ob-panel--ready" data-ob-panel="ready" hidden>
+                        <span class="ob-ready-mark" aria-hidden="true"></span>
+                        <h2 class="ob-title" id="ob-ready-title">You’re ready</h2>
+                        <p class="ob-desc">Review what we’ll apply, then open Axis.</p>
+                        <div class="ob-group ob-summary" id="ob-ready-summary"></div>
+                        <p class="ob-status" id="ob-ready-status" hidden></p>
+                    </div>
+                </div>
+
+                <footer class="ob-footer">
+                    <button type="button" class="ob-btn ob-btn--ghost" id="ob-skip-btn">Skip setup</button>
+                    <div class="ob-footer-right">
+                        <button type="button" class="ob-btn ob-btn--ghost" id="ob-back-btn">Back</button>
+                        <button type="button" class="ob-btn ob-btn--primary" id="ob-next-btn">
+                            <span id="ob-next-label">Continue</span>
+                        </button>
+                    </div>
+                </footer>
+            </section>
         </div>
     </div>
 
@@ -1069,6 +1338,7 @@
     <script src="axis-profile-swipe.js"></script>
     <script src="axis-undo.js"></script>
     <script src="axis-ai-providers.js"></script>
+    <script src="axis-onboarding.js"></script>
     <script src="renderer.js"></script>
 </body>
 </html>
