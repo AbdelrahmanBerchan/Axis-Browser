@@ -436,6 +436,8 @@ class AxisBrowser {
         this._pipLeaveBusy = false;
         /** Background media mini-player after native PiP closes (`{ tabId, videoIndex }`, tabId normalized). */
         this._sidebarMediaDock = null;
+        /** Media guest from another profile (PiP / mini player after profile swipe). */
+        this._crossProfileMediaGuest = null;
         this._sidebarMediaDockPoll = null;
         /** ResizeObserver for sidebar mini-player title slide distance when the dock width changes. */
         this._sidebarMediaTitleResizeObserver = null;
@@ -644,9 +646,9 @@ class AxisBrowser {
         }
         this.runWhenIdle(() => {
             void (async () => {
-                try {
+            try {
                     this._vaultPageScanJs = (await window.electronAPI.vaultGetPageScanJs?.()) || null;
-                } catch (_) {
+            } catch (_) {
                     this._vaultPageScanJs = null;
                 }
                 try {
@@ -683,7 +685,10 @@ class AxisBrowser {
             document.body.classList.add('incognito-window');
         }
         try {
-            window.electronAPI.onProfilesUpdated?.(() => {
+            window.electronAPI.onProfilesUpdated?.((payload) => {
+                if (payload?.evictProfileId) {
+                    this.evictProfileLayerCache?.(payload.evictProfileId);
+                }
                 void this.refreshProfilesMenu();
             });
         } catch (_) {}
@@ -732,6 +737,7 @@ class AxisBrowser {
         applyThemeNow();
         
         this.applySidebarPosition(); // Apply saved sidebar position
+        this.applySidebarZoom();
         this._vaultPickWebview = null;
         this._vaultPendingSave = null;
         this._vaultDismissedOffers = new Set();
@@ -754,12 +760,17 @@ class AxisBrowser {
 
         // Load pinned tabs and tab groups (skip in incognito – start fresh)
         if (!this.isIncognitoWindow) {
-            await Promise.all([
-                this.loadFavorites(),
-                this.loadPinnedTabs(),
-                this.loadTabGroups(),
-                this.loadUnpinnedTabs()
-            ]);
+            this._suppressTabGroupsAutosave = true;
+            try {
+                await Promise.all([
+                    this.loadFavorites(),
+                    this.loadPinnedTabs(),
+                    this.loadTabGroups(),
+                    this.loadUnpinnedTabs()
+                ]);
+            } finally {
+                this._suppressTabGroupsAutosave = false;
+            }
             this._applyUnpinnedClearOnStartup();
             this._setupUnpinnedTabsRecoveryPersistence();
         }
@@ -792,6 +803,24 @@ class AxisBrowser {
         
         // Make browser instance globally accessible for incognito windows
         window.browser = this;
+
+        this.setupOnboarding();
+    }
+
+    setupOnboarding() {
+        if (this._onboardingSetup) return;
+        const api = typeof AxisOnboarding !== 'undefined' ? AxisOnboarding : null;
+        if (!api?.createController) return;
+        this._onboardingSetup = true;
+        this._onboarding = api.createController(this);
+        if (!this._onboarding?.shouldShow?.()) return;
+        // After first paint / theme so the overlay matches light or dark.
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                this._onboarding?.syncTheme?.();
+                this._onboarding?.show?.();
+            });
+        });
     }
 
     // Utilities for performance
@@ -893,6 +922,12 @@ class AxisBrowser {
         ) {
             return true;
         }
+        if (
+            this._crossProfileMediaGuest &&
+            this._normalizeTabMapKey(this._crossProfileMediaGuest.tabId) === nid
+        ) {
+            return true;
+        }
         return false;
     }
 
@@ -959,7 +994,9 @@ class AxisBrowser {
         if (webview.__axisMediaSuspendDone) return;
         webview.__axisMediaSuspendDone = true;
         try {
-            void webview.executeJavaScript(`(function(){
+            this._voidGuestTask(
+                webview.executeJavaScript(
+                    `(function(){
                 if (window.__axisMediaPausedByAxis) return;
                 const pipEl = document.pictureInPictureElement;
                 const nodes = document.querySelectorAll('video,audio');
@@ -971,7 +1008,10 @@ class AxisBrowser {
                     }
                 }
                 if (paused.length) window.__axisMediaPausedByAxis = paused;
-            })();`, false);
+            })();`,
+                    false
+                )
+            );
         } catch (_) {}
     }
 
@@ -994,14 +1034,19 @@ class AxisBrowser {
         if (!webview.__axisMediaSuspendDone) return;
         webview.__axisMediaSuspendDone = false;
         try {
-            void webview.executeJavaScript(`(function(){
+            this._voidGuestTask(
+                webview.executeJavaScript(
+                    `(function(){
                 const list = window.__axisMediaPausedByAxis;
                 window.__axisMediaPausedByAxis = null;
                 if (!list || !list.length) return;
                 for (const el of list) {
                     try { el.play(); } catch (_) {}
                 }
-            })();`, false);
+            })();`,
+                    false
+                )
+            );
         } catch (_) {}
     }
     
@@ -1093,6 +1138,7 @@ class AxisBrowser {
             this.applyNewTabCustomization();
             this.updateNewTabHero();
         }
+        this._onboarding?.syncTheme?.();
     }
 
     async saveSetting(key, value) {
@@ -1113,6 +1159,7 @@ class AxisBrowser {
             key === 'tabGroups' ||
             key === 'pinnedTabs' ||
             key === 'unpinnedTabs' ||
+            key === 'pinnedSidebarOrder' ||
             key === 'favorites'
         );
     }
@@ -1257,7 +1304,7 @@ class AxisBrowser {
         webview[prop] = delays.map((ms) =>
             setTimeout(() => {
                 if (!this.settings?.transparentSites || this.isBenchmarking) return;
-                void this.flushTransparentSitesForWebview(webview);
+                this._voidGuestTask(this.flushTransparentSitesForWebview(webview));
             }, ms)
         );
     }
@@ -1272,7 +1319,7 @@ class AxisBrowser {
         }
         const pageKey = this._urlStablePageKey(url);
         if (webview.__axisTransparentCssKey && webview.__axisTransparentPageKey === pageKey) {
-            void this._runTransparentSitesDomPatch(webview, url);
+            this._voidGuestTask(this._runTransparentSitesDomPatch(webview, url));
             this._scheduleTransparentSitesReinjection(webview);
             return;
         }
@@ -1301,22 +1348,25 @@ class AxisBrowser {
     }
 
     _urlBarThemeSourceRank(source) {
+        // Author theme-color (and HTTP Theme-Color) must beat sampled sticky nav chrome.
         const ranks = {
-            header: 100,
-            'meta-inline': 95,
-            meta: 90,
+            meta: 100,
+            'meta-inline': 98,
+            'http-header': 94,
             'snapshot-restore': 85,
             'tab-restore': 85,
-            cache: 75,
-            hint: 70,
-            extract: 65,
-            pending: 60,
-            surface: 45,
-            topvote: 40,
+            cache: 70,
+            hint: 65,
+            extract: 60,
+            pending: 55,
+            topvote: 50,
+            'dom-header': 45,
+            header: 45, // legacy alias for DOM chrome samples
+            surface: 40,
             default: 0,
             error: 0
         };
-        return ranks[source] ?? 55;
+        return ranks[source] ?? 50;
     }
 
     _urlBarThemeSnapshotMatchesTab(tab, snap) {
@@ -1484,11 +1534,24 @@ class AxisBrowser {
     /**
      * Remove guest webviews that no longer have a tab row (e.g. close raced a stale Map key, or DOM drift).
      * Prevents “sidebar updated but last page stays on screen”.
+     * Never destroy parked other-profile guests or active PiP / mini-player media — profile
+     * switch calls this via switchToTab and used to blank those pages permanently.
      */
     _purgeStaleWebviewsInContainer() {
         const container = document.getElementById('webviews-container');
         if (!container) return;
+        const curPid = String(this.profileId || '');
+        const protect = new Set(
+            [this.pipWebview, this._crossProfileMediaGuest?.webview, this._sidebarMediaDock?.webview].filter(
+                Boolean
+            )
+        );
         for (const wv of Array.from(container.querySelectorAll('webview'))) {
+            if (protect.has(wv)) continue;
+            const wvPid = String(wv.dataset?.axisProfile || '');
+            /* Other profiles keep live guests in the container while cached — do not purge. */
+            if (wvPid && curPid && wvPid !== curPid) continue;
+
             const nid = this._normalizeTabMapKey(wv.dataset.tabId);
             let remove = false;
             if (nid == null || !this.tabs.has(nid)) {
@@ -1705,9 +1768,11 @@ class AxisBrowser {
 
     isTabInNtpAiChat(tabId) {
         if (tabId == null) return false;
-        const tab = this.tabs.get(tabId);
+        const tid = this._normalizeTabMapKey(tabId) ?? tabId;
+        const tab = this.tabs.get(tid);
         if (!tab || tab.url !== this.NEWTAB_URL) return false;
-        if (tabId === this.currentTab) return this.isNewTabInChat();
+        const cur = this._normalizeTabMapKey(this.currentTab);
+        if (tid === cur || tid === this.currentTab) return this.isNewTabInChat();
         const st = tab.newTabPageState;
         return st?.inChat === true || !!(st?.askMessagesHtml && String(st.askMessagesHtml).trim()) || this._hasNewTabAiChatState(st, tab);
     }
@@ -1866,7 +1931,7 @@ class AxisBrowser {
                     try {
                         n.disconnect();
                     } catch (_) {}
-                }
+            }
             }
         } catch (_) {}
         this._ambientAudioChain = null;
@@ -1932,7 +1997,7 @@ class AxisBrowser {
             }
             return;
         }
-        for (let i = 0; i < frames; i++) {
+            for (let i = 0; i < frames; i++) {
             data[i] = Math.random() * 2 - 1;
         }
     }
@@ -1954,7 +2019,7 @@ class AxisBrowser {
                 for (const ch of [left, right]) {
                     const head = ch[i];
                     const tail = ch[frames - fade + i];
-                    const mid = head * (1 - w) + tail * w;
+                const mid = head * (1 - w) + tail * w;
                     ch[i] = mid;
                     ch[frames - fade + i] = mid;
                 }
@@ -2031,7 +2096,7 @@ class AxisBrowser {
         const lfos = [];
 
         const startLoop = (buffer, offset = 0) => {
-            const source = ctx.createBufferSource();
+        const source = ctx.createBufferSource();
             source.buffer = buffer;
             source.loop = true;
             source.loopStart = 0;
@@ -2258,6 +2323,9 @@ class AxisBrowser {
 
         // Sidebar slide-back functionality
         this.setupSidebarSlideBack();
+
+        // Tabs list: show scrollbar only while scrolling
+        this.setupTabsScrollbarAutoHide();
 
         // AI text selection detection
         this.setupAISelectionDetection();
@@ -3153,7 +3221,7 @@ class AxisBrowser {
             if (!contextMenu || contextMenu.classList.contains('hidden')) return;
             e.preventDefault();
             e.stopPropagation();
-            this.hideWebpageContextMenu();
+                this.hideWebpageContextMenu();
         });
         
         // Global click handler for non-webview areas
@@ -3196,6 +3264,9 @@ class AxisBrowser {
                 return;
             }
             if (e.target.closest('#sidebar-profile-footer') || e.target.closest('#sidebar-profile-switcher')) {
+                return;
+            }
+            if (e.target.closest('#profile-switcher-menu') || e.target.closest('.profile-switcher-menu--ported')) {
                 return;
             }
             
@@ -3897,6 +3968,7 @@ class AxisBrowser {
         }
         menu.classList.remove('hidden');
         const anchorRect = anchorBtn.getBoundingClientRect();
+        menu.style.zIndex = '10060';
         menu.style.top = `${Math.round(anchorRect.bottom + 2)}px`;
         menu.style.left = 'auto';
         menu.style.right = `${Math.max(8, Math.round(window.innerWidth - anchorRect.right + 2))}px`;
@@ -3952,11 +4024,87 @@ class AxisBrowser {
         trigger.setAttribute('aria-expanded', 'true');
         void this.refreshProfilesMenu().then(() => {
             this.syncProfileSwitcherState();
+            this._portProfileSwitcherMenu();
             requestAnimationFrame(() => {
+                this._positionProfileSwitcherMenu();
                 root.classList.add('is-open');
+                menu.classList.add('is-open');
                 switcher?.classList.add('is-open');
             });
         });
+    }
+
+    /** Escape sidebar zoom/overflow so the popover keeps a solid glass background. */
+    _portProfileSwitcherMenu() {
+        const menu = this.elements?.profileSwitcherMenu;
+        if (!menu) return;
+        if (!this._profileMenuHome) {
+            this._profileMenuHome = { parent: menu.parentElement, next: menu.nextSibling };
+        }
+        if (menu.parentElement !== document.body) {
+            document.body.appendChild(menu);
+        }
+        menu.classList.add('profile-switcher-menu--ported');
+        if (!menu.dataset.axisPortedClickGuard) {
+            menu.dataset.axisPortedClickGuard = '1';
+            menu.addEventListener('mousedown', (e) => e.stopPropagation());
+            menu.addEventListener('click', (e) => e.stopPropagation());
+        }
+        if (!this._profileMenuRepositionBound) {
+            this._profileMenuRepositionBound = () => {
+                if (this.elements?.profileSwitcherRoot?.classList.contains('is-open')) {
+                    this._positionProfileSwitcherMenu();
+                }
+            };
+        }
+        window.addEventListener('resize', this._profileMenuRepositionBound);
+        window.addEventListener('scroll', this._profileMenuRepositionBound, true);
+    }
+
+    _positionProfileSwitcherMenu() {
+        const menu = this.elements?.profileSwitcherMenu;
+        const trigger = this.elements?.profileSwitcherTrigger;
+        if (!menu || !trigger || !menu.classList.contains('profile-switcher-menu--ported')) return;
+        const rect = trigger.getBoundingClientRect();
+        const sidebarRight = !!document.getElementById('main-area')?.classList.contains('sidebar-right');
+        menu.style.position = 'fixed';
+        menu.style.top = 'auto';
+        menu.style.bottom = `${Math.max(8, window.innerHeight - rect.top + 6)}px`;
+        menu.style.zIndex = '10050';
+        if (sidebarRight) {
+            menu.style.left = 'auto';
+            menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+            menu.style.transformOrigin = 'bottom right';
+        } else {
+            menu.style.right = 'auto';
+            menu.style.left = `${Math.max(8, rect.left)}px`;
+            menu.style.transformOrigin = 'bottom left';
+        }
+    }
+
+    _restoreProfileSwitcherMenuHome() {
+        const menu = this.elements?.profileSwitcherMenu;
+        const home = this._profileMenuHome;
+        if (this._profileMenuRepositionBound) {
+            window.removeEventListener('resize', this._profileMenuRepositionBound);
+            window.removeEventListener('scroll', this._profileMenuRepositionBound, true);
+        }
+        if (!menu) return;
+        menu.classList.remove('profile-switcher-menu--ported');
+        menu.style.position = '';
+        menu.style.top = '';
+        menu.style.bottom = '';
+        menu.style.left = '';
+        menu.style.right = '';
+        menu.style.zIndex = '';
+        menu.style.transformOrigin = '';
+        if (home?.parent && menu.parentElement !== home.parent) {
+            if (home.next && home.next.parentNode === home.parent) {
+                home.parent.insertBefore(menu, home.next);
+            } else {
+                home.parent.appendChild(menu);
+            }
+        }
     }
 
     hideProfileSwitcherMenu() {
@@ -3968,12 +4116,15 @@ class AxisBrowser {
         if (!root || !menu || !trigger) return;
         if (!root.classList.contains('is-open')) {
         menu.classList.add('hidden');
+            menu.classList.remove('is-open');
             menu.setAttribute('aria-hidden', 'true');
         trigger.setAttribute('aria-expanded', 'false');
             switcher?.classList.remove('is-open');
+            this._restoreProfileSwitcherMenuHome();
             return;
         }
         root.classList.remove('is-open');
+        menu.classList.remove('is-open');
         switcher?.classList.remove('is-open');
         trigger.setAttribute('aria-expanded', 'false');
         if (this._profileSwitcherCloseTimer != null) clearTimeout(this._profileSwitcherCloseTimer);
@@ -3982,6 +4133,7 @@ class AxisBrowser {
             if (!root.classList.contains('is-open')) {
                 menu.classList.add('hidden');
                 menu.setAttribute('aria-hidden', 'true');
+                this._restoreProfileSwitcherMenuHome();
             }
         }, 320);
     }
@@ -4162,7 +4314,7 @@ class AxisBrowser {
         const name = String(profile.name || profile.id);
         if (title) title.textContent = `Delete “${name}”?`;
         if (message) {
-            message.textContent = `All tabs, cookies, history, passwords, extensions, and settings for “${name}” will be removed permanently. This cannot be undone.`;
+            message.textContent = `“${name}” will be moved to trash with its tabs, cookies, history, passwords, extensions, and settings. You can restore it from trash or press ⌘Z right after deleting.`;
         }
         this.setProfileFormModalTheme(modal);
         modal.classList.remove('hidden');
@@ -4247,6 +4399,7 @@ class AxisBrowser {
 
     async confirmProfileDelete() {
         const id = this._profileDeleteId;
+        const profileName = this.profiles?.find((p) => p.id === id)?.name || id;
         if (!id) return;
         this.hideProfileDeleteModal();
         this.hideProfileSwitcherMenu();
@@ -4257,8 +4410,17 @@ class AxisBrowser {
                 console.error('deleteProfile failed', result?.error || 'unknown error');
                 return;
             }
+            if (result.trashId) {
+                this._pushUndo({
+                    type: 'delete_profile',
+                    trashId: result.trashId,
+                    profileId: id,
+                    profileName
+                });
+            }
             await this.refreshProfilesMenu();
             this.evictProfileLayerCache?.(id);
+            this.showNotification(`“${profileName}” moved to trash. Press ⌘Z to undo.`, 'info');
         } catch (err) {
             console.error('deleteProfile failed', err);
         }
@@ -4274,6 +4436,15 @@ class AxisBrowser {
             const before = this._settingsApplySnapshot();
             await this.loadSettings();
             const after = this._settingsApplySnapshot();
+
+            // Setup overlay is covering the shell — keep store in sync but skip chrome
+            // refreshes that make the setup UI flash/reload.
+            if (this._onboarding?.isVisible?.()) {
+                this._onboarding?.syncTheme?.();
+                this._notifySettingsTabWebviewsStoreUpdated();
+                return;
+            }
+
             if (this._settingsApplySnapshotsEqual(before, after)) {
                 this._notifySettingsTabWebviewsStoreUpdated();
                 return;
@@ -4297,9 +4468,10 @@ class AxisBrowser {
                 before.ambientVol !== after.ambientVol;
             const linkPreviewChanged = before.linkPreview !== after.linkPreview;
             const windowChromeChanged = before.windowChromeLight !== after.windowChromeLight;
+            const sidebarZoomChanged = before.sidebarZoom !== after.sidebarZoom;
 
             if (
-                (ambientChanged || linkPreviewChanged) &&
+                (ambientChanged || linkPreviewChanged || sidebarZoomChanged) &&
                 !themeChanged &&
                 !transparentChanged &&
                 !sidebarChanged &&
@@ -4310,6 +4482,7 @@ class AxisBrowser {
             ) {
                 if (ambientChanged) void this.applyAmbientFromSettings();
                 if (linkPreviewChanged) this._applyLinkPreviewSetting();
+                if (sidebarZoomChanged) this.applySidebarZoom();
                 this._notifySettingsTabWebviewsStoreUpdated();
                 return;
             }
@@ -4324,44 +4497,47 @@ class AxisBrowser {
             }
             this._lastJavascriptEnabled = after.js;
             if (transparentChanged) {
-                this.syncTransparentSitesUi();
+            this.syncTransparentSitesUi();
             }
             if (themeChanged || before.ui !== after.ui) {
                 this.applyUiThemeSurfaces();
             } else if (windowChromeChanged) {
-                this.applyCustomThemeFromSettings();
+            this.applyCustomThemeFromSettings();
             }
             if (sidebarChanged) {
-                this.applySidebarPosition();
+            this.applySidebarPosition();
+            }
+            if (sidebarZoomChanged) {
+                this.applySidebarZoom();
             }
             if (transparentChanged) {
                 if (after.transparent) {
                     const activeWv = this.getActiveWebview();
-                    if (activeWv) void this.flushTransparentSitesForWebview(activeWv);
+                    if (activeWv) this._voidGuestTask(this.flushTransparentSitesForWebview(activeWv));
                     this._syncBackgroundTabWebviewsForTransparentSetting();
-                } else {
-                    this.removeTransparentSitesFromAllWebviews();
+            } else {
+                this.removeTransparentSitesFromAllWebviews();
                 }
             }
             const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
             const wv = this.getActiveWebview();
             if (themeChanged || before.ui !== after.ui) {
-                this.updateUrlBar(wv, { skipExtractTheme: true });
-                if (tab && tab.url === this.NEWTAB_URL) {
+            this.updateUrlBar(wv, { skipExtractTheme: true });
+            if (tab && tab.url === this.NEWTAB_URL) {
                     this.applyNewTabCustomization();
                     this.updateNewTabHero();
-                } else if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
-                    this.applyInternalShellUrlBarStyle();
-                } else if (wv) {
-                    await this.extractUrlBarTheme(wv);
-                } else {
-                    this.applyAppThemeToUrlBar();
-                }
+            } else if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+                this.applyInternalShellUrlBarStyle();
+            } else if (wv) {
+                await this.extractUrlBarTheme(wv);
+            } else {
+                this.applyAppThemeToUrlBar();
+            }
             } else {
                 this.updateUrlBar(wv, { skipExtractTheme: true });
             }
             if (adBlockChanged) {
-                this.syncAdBlockerUrlBarState();
+            this.syncAdBlockerUrlBarState();
             }
             this.applyAmbientFromSettings();
             this.applyAiFeaturesVisibility();
@@ -4397,6 +4573,13 @@ class AxisBrowser {
         return Math.max(0, Math.min(100, Math.round(v)));
     }
 
+    /** Sidebar UI zoom percent. 100 = current default size. */
+    _normalizeSidebarZoom(raw) {
+        const n = Number(raw);
+        const v = Number.isFinite(n) ? n : 100;
+        return Math.max(75, Math.min(150, Math.round(v / 5) * 5));
+    }
+
     _settingsApplySnapshot() {
         const s = this.settings || {};
         let ambientVol = Number(s.ambientAudioVolume);
@@ -4418,6 +4601,7 @@ class AxisBrowser {
             ambientVol: Math.max(0, Math.min(100, ambientVol)),
             linkPreview: s.linkPreview !== false,
             windowChromeLight: this._normalizeWindowChromeLight(s.windowChromeLight),
+            sidebarZoom: this._normalizeSidebarZoom(s.sidebarZoom),
             ntpWidgets: s.ntpWidgetsEnabled === true,
             ntpWidgetLayout: JSON.stringify(s.ntpWidgetLayout || [])
         };
@@ -5069,8 +5253,8 @@ class AxisBrowser {
                 this._triggerEarlyUrlBarThemeExtract(webview);
                 this._deferGuestLoadChores(webview, tabId);
                 if (this.settings?.transparentSites) {
-                    this._touchTransparentSitesForWebview(webview);
-                }
+                this._touchTransparentSitesForWebview(webview);
+            }
                 if (webview.__axisUrlBarNavHold && !webview.__axisUrlBarNavRevealed) {
                     this._revealUrlBarThemeWithPage(webview);
                 }
@@ -5404,7 +5588,8 @@ class AxisBrowser {
 
         const pageFaviconUpdatedHandler = (event) => {
             if (!event.favicons || event.favicons.length === 0) return;
-                const faviconUrl = event.favicons[0];
+            const faviconUrl = event.favicons[0];
+            if (!faviconUrl) return;
             const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
             if (tabElement) {
                 const img = tabElement.querySelector('.tab-favicon');
@@ -5414,13 +5599,28 @@ class AxisBrowser {
                 }
             }
             const tab = getTab();
-                    if (tab) {
-                        tab.favicon = faviconUrl;
+            if (tab) {
+                tab.favicon = faviconUrl;
+                if (tab.isFavoriteTab && tab.favoriteId && !tab.customIcon) {
+                    const fav = this.favorites.find((f) => f.id === tab.favoriteId);
+                    if (fav && !fav.customIcon) {
+                        const prev = String(fav.favicon || '');
+                        const provisional =
+                            !prev ||
+                            /google\.com\/s2\/favicons/i.test(prev) ||
+                            prev !== faviconUrl;
+                        if (provisional && fav.favicon !== faviconUrl) {
+                            fav.favicon = faviconUrl;
+                            void this.saveFavorites();
+                            this.renderFavorites();
+                        }
                     }
+                }
+            }
         };
         webview.__eventHandlers.pageFaviconUpdated = pageFaviconUpdatedHandler;
         webview.addEventListener('page-favicon-updated', pageFaviconUpdatedHandler);
-
+        
         this.bindWebviewAudioStateListener(tabId, webview);
 
         const contextMenuHandler = (e) => {
@@ -5525,7 +5725,7 @@ class AxisBrowser {
             }
             if (channel === 'axis-vault-autofill-hide') {
                 this.hideVaultAutofillPanel();
-                void this.hideVaultAutofillInPage(webview);
+                this._voidGuestTask(this.hideVaultAutofillInPage(webview));
                 return;
             }
             if (channel === 'axis-vault-autofill-request') {
@@ -6118,7 +6318,7 @@ class AxisBrowser {
 
     _applyCachedSiteThemeColor(url) {
         if (!this._isSiteThemeColorEnabled() || this._isInternalSiteThemeUrl(url)) return false;
-        const found = this._lookupUrlBarThemeEntry(url);
+        const found = this._lookupUrlBarThemeEntry(url, { pageOnly: true });
         const rgb = found?.entry?.rgb;
         if (!rgb) return false;
         return this._applySiteThemeColorFromRgb(rgb, rgb.source || 'cache');
@@ -6136,7 +6336,7 @@ class AxisBrowser {
         }
         if (this._applyCachedSiteThemeColor(tab.url)) return true;
         const webview = this.getActiveWebview();
-        if (webview) void this.extractUrlBarTheme(webview, { early: true });
+        if (webview) this._voidGuestTask(this.extractUrlBarTheme(webview, { early: true }));
         return false;
     }
 
@@ -6340,7 +6540,7 @@ class AxisBrowser {
             return Math.min(0.18, alpha);
         }
 
-        maxBump = Math.min(headroom * 0.98, Math.max(baseAlpha + 0.28, 0.71 - baseAlpha * 0.12));
+            maxBump = Math.min(headroom * 0.98, Math.max(baseAlpha + 0.28, 0.71 - baseAlpha * 0.12));
             const opaqueish = 0.36;
             const airyEdge = 0.13;
             const transmissionWeight = Math.max(0, Math.min(1, (opaqueish - baseAlpha) / (opaqueish - airyEdge)));
@@ -6599,8 +6799,8 @@ class AxisBrowser {
         }
         if (!this._shouldHoldUrlBarThemeForNav(priorUrl, url)) return false;
         this._beginUrlBarNavThemeHold(webview, url);
-        let found = this._lookupUrlBarThemeEntry(url, { pageOnly: true });
-        if (!found) found = this._lookupUrlBarThemeEntry(url, { pageOnly: false });
+        // Only exact-page cache — host fallback paints the wrong site color on new paths.
+        const found = this._lookupUrlBarThemeEntry(url, { pageOnly: true });
         if (found && found.entry.transparentSites === !!this.settings?.transparentSites) {
             this._stageUrlBarThemeForWebview(webview, { kind: 'cache', entry: found.entry });
             return true;
@@ -6628,7 +6828,7 @@ class AxisBrowser {
             } else if (this.settings?.transparentSites) {
                 this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
             } else {
-                void this.extractUrlBarTheme(webview);
+                this._voidGuestTask(this.extractUrlBarTheme(webview));
             }
             requestAnimationFrame(() => {
                 this._releaseUrlBarNavThemeSnapIfNeeded();
@@ -6681,15 +6881,15 @@ class AxisBrowser {
         const webview = this.getActiveWebview();
         if (!webview) return false;
         if (webview && this._isUrlBarThemeHeldForWebview(webview)) {
-            this._stageUrlBarThemeForWebview(webview, { kind: 'rgb', rgb, source: 'header' });
+            this._stageUrlBarThemeForWebview(webview, { kind: 'rgb', rgb, source: 'http-header' });
             return true;
         }
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar || this._isInternalShellUrlBar(urlBar)) return false;
-        if (!this._shouldAcceptUrlBarTheme({ ...rgb, source: 'header' }, webview)) return false;
+        if (!this._shouldAcceptUrlBarTheme({ ...rgb, source: 'http-header' }, webview)) return false;
         this._beginUrlBarNavThemeSnap();
-        if (!this._applyUrlBarColorInfo({ ...rgb, source: 'header' }, urlBar, { force: true })) return false;
-        if (url) this._cacheUrlBarThemeForUrl(url, { ...rgb, source: 'header' });
+        if (!this._applyUrlBarColorInfo({ ...rgb, source: 'http-header' }, urlBar, { force: true })) return false;
+        if (url) this._cacheUrlBarThemeForUrl(url, { ...rgb, source: 'http-header' });
         return true;
     }
     
@@ -6706,12 +6906,20 @@ class AxisBrowser {
 
     _loadPersistedUrlBarThemeCache() {
         try {
-            const raw = localStorage.getItem('axis-url-bar-theme-cache-v1');
+            const raw =
+                localStorage.getItem('axis-url-bar-theme-cache-v2') ||
+                localStorage.getItem('axis-url-bar-theme-cache-v1');
             if (!raw) return;
             const parsed = JSON.parse(raw);
             if (!parsed || typeof parsed !== 'object') return;
             for (const [domain, entry] of Object.entries(parsed)) {
                 if (!domain || (!entry?.snapshot?.vars && !entry?.rgb)) continue;
+                const src = entry?.rgb?.source || '';
+                // Drop bare host keys that caused wrong colors across paths.
+                if (!domain.startsWith('p:') && !domain.startsWith('h:')) continue;
+                if (domain.startsWith('h:') && src && src !== 'meta' && src !== 'meta-inline' && src !== 'http-header') {
+                    continue;
+                }
                 const normalized = {
                     snapshot: entry.snapshot || null,
                     canvasHex: entry.canvasHex || '',
@@ -6719,15 +6927,11 @@ class AxisBrowser {
                     rgb: entry.rgb || null,
                     pageKey: entry.pageKey || null
                 };
-                if (domain.startsWith('p:') || domain.startsWith('h:')) {
-                    this.urlBarThemeCache.set(domain, normalized);
-                } else {
-                    this.urlBarThemeCache.set(domain, normalized);
-                    if (entry.pageKey) {
-                        this.urlBarThemeCache.set(`p:${entry.pageKey}`, normalized);
-                    }
-                }
+                this.urlBarThemeCache.set(domain, normalized);
             }
+            try {
+                localStorage.removeItem('axis-url-bar-theme-cache-v1');
+            } catch (_) {}
         } catch (_) {
             /* ignore corrupt cache */
         }
@@ -6748,7 +6952,7 @@ class AxisBrowser {
                         pageKey: entry.pageKey || null
                     };
                 }
-                localStorage.setItem('axis-url-bar-theme-cache-v1', JSON.stringify(payload));
+                localStorage.setItem('axis-url-bar-theme-cache-v2', JSON.stringify(payload));
             } catch (_) {
                 /* ignore quota errors */
             }
@@ -6805,7 +7009,11 @@ class AxisBrowser {
             pageKey
         };
         this.urlBarThemeCache.set(`p:${pageKey}`, entry);
-        if (storedRgb?.source === 'meta') {
+        if (
+            storedRgb?.source === 'meta' ||
+            storedRgb?.source === 'meta-inline' ||
+            storedRgb?.source === 'http-header'
+        ) {
             const domain = this.getDomainFromUrl(url);
             if (domain) this.urlBarThemeCache.set(`h:${domain}`, entry);
         }
@@ -6885,7 +7093,7 @@ class AxisBrowser {
             return;
         }
         if (this._applyTabSiteThemeFromMemory(tab)) return;
-        void this.extractUrlBarTheme(webview, { early: true });
+        this._voidGuestTask(this.extractUrlBarTheme(webview, { early: true }));
     }
 
     _captureShellChromeSnapshot() {
@@ -6908,8 +7116,8 @@ class AxisBrowser {
     _restoreShellChromeSnapshot(snapshot) {
         if (!snapshot?.colors) return false;
         this.applyCustomTheme(snapshot.colors);
-        return true;
-    }
+            return true;
+        }
 
     /**
      * Precompute stable shell backgrounds for profile-swipe crossfade.
@@ -7093,53 +7301,103 @@ class AxisBrowser {
 
     _styleProfileSwipeThemeLayer(layer, shellBg) {
         if (!layer) return;
+        /*
+         * Only the colored glass tint lives on the layer — the blur is applied once on the
+         * overlay container. Two blurred layers stacked with opacity produced a muddy,
+         * double-blurred midpoint; a single shared blur keeps the crossfade clean.
+         */
         layer.style.background = shellBg || 'transparent';
-        const chrome = this.getShellChromeStyle();
-        if (chrome) {
-            layer.style.setProperty('backdrop-filter', chrome.backdropMain, 'important');
-            layer.style.setProperty('-webkit-backdrop-filter', chrome.backdropMain, 'important');
+        layer.style.removeProperty('backdrop-filter');
+        layer.style.removeProperty('-webkit-backdrop-filter');
+    }
+
+    /** Snapshot the web panel outline at swipe start so it stays steady through the crossfade. */
+    _pinWebPanelRingForProfileSwipe() {
+        const body = document.body;
+        if (!body) return;
+        body.classList.add('axis-profile-ring-pinned');
+        if (body.style.getPropertyValue('--axis-webview-panel-ring-swipe')) return;
+        let ring = getComputedStyle(body).getPropertyValue('--axis-webview-panel-ring').trim();
+        if (!ring || ring === 'none') {
+            const showRing =
+                body.classList.contains('panel-idle') ||
+                body.classList.contains('panel-ntp') ||
+                body.classList.contains('chrome-no-tabs');
+            if (showRing) {
+                ring =
+                    getComputedStyle(document.documentElement)
+                        .getPropertyValue('--axis-webview-panel-ring-on')
+                        .trim() || '0 0 0 1px rgba(var(--shell-ink-rgb), 0.14)';
+            } else {
+                ring = '0 0 0 0 transparent';
+            }
         }
+        body.style.setProperty('--axis-webview-panel-ring-swipe', ring);
+    }
+
+    _unpinWebPanelRingForProfileSwipe() {
+        const body = document.body;
+        if (!body) return;
+        /* Snap the live ring to the pinned value first so dropping the pin can’t flash. */
+        const pinned = body.style.getPropertyValue('--axis-webview-panel-ring-swipe').trim();
+        if (pinned) {
+            body.style.setProperty('--axis-webview-panel-ring', pinned);
+        }
+        body.style.removeProperty('--axis-webview-panel-ring-swipe');
+        body.classList.remove('axis-profile-ring-pinned');
+        /* After panel state settles, clear the inline override so normal classes drive the ring. */
+        requestAnimationFrame(() => {
+            if (body.classList.contains('axis-profile-ring-pinned')) return;
+            body.style.removeProperty('--axis-webview-panel-ring');
+        });
     }
 
     /** GPU crossfade between two fixed profile shells — transforms, not stepped recolors. */
-    armProfileSwipeThemeCrossfade(fromPack, toPack) {
+    armProfileSwipeThemeCrossfade(fromPack, toPack, opts = {}) {
         if (this.isIncognitoWindow || !fromPack || !toPack) return;
+        this._pinWebPanelRingForProfileSwipe();
         const overlay = this._ensureProfileSwipeThemeOverlay();
+        const alreadyActive = overlay.classList.contains('is-active');
+        /* Single shared blur for both layers — clean crossfade, no double-blur midpoint. */
+        const chrome = this.getShellChromeStyle();
+        if (chrome) {
+            overlay.style.setProperty('backdrop-filter', chrome.backdropMain, 'important');
+            overlay.style.setProperty('-webkit-backdrop-filter', chrome.backdropMain, 'important');
+        }
         const fromLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--from');
         const toLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--to');
         this._styleProfileSwipeThemeLayer(fromLayer, fromPack.shellBg);
         this._styleProfileSwipeThemeLayer(toLayer, toPack.shellBg);
-        if (fromLayer) fromLayer.style.removeProperty('opacity');
-        if (toLayer) toLayer.style.removeProperty('opacity');
-        overlay.style.setProperty('--profile-swipe-mix', '0');
+        this._profileSwipeOverlayFromPack = fromPack;
+        this._profileSwipeOverlayToPack = toPack;
+        const startMix = alreadyActive && opts.continueMix != null
+            ? Math.max(0, Math.min(1, opts.continueMix))
+            : 0;
+        if (fromLayer) fromLayer.style.opacity = String(1 - startMix);
+        if (toLayer) toLayer.style.opacity = String(startMix);
+        overlay.style.setProperty('--profile-swipe-mix', String(startMix));
         overlay.classList.add('is-active');
         document.body.classList.add('profile-swipe-theme-active');
         if (!document.body.classList.contains('theme-switching')) {
             document.body.classList.add('theme-switching');
         }
-        this._profileSwipeThemeMix = 0;
-        this._profileSwipeOverlayFromPack = fromPack;
-        this._profileSwipeOverlayToPack = toPack;
-        const root = document.documentElement.style;
-        root.setProperty('--background-color', 'transparent');
-        root.setProperty('--sidebar-background', 'transparent');
-        root.setProperty('--sidebar-slide-out-background', 'transparent');
-        root.setProperty('--primary-gradient', fromPack.shellBg);
-        const app = document.getElementById('app');
-        const mainArea = document.getElementById('main-area');
-        const sidebar = this.elements?.sidebar || document.getElementById('sidebar');
-        if (app) app.style.setProperty('background', 'transparent', 'important');
-        if (mainArea) {
-            mainArea.style.setProperty('background', 'transparent', 'important');
-            mainArea.style.setProperty('backdrop-filter', 'none', 'important');
-            mainArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        this._profileSwipeThemeMix = startMix;
+        if (!alreadyActive) {
+            const root = document.documentElement.style;
+            root.setProperty('--background-color', 'transparent');
+            root.setProperty('--sidebar-background', fromPack.shellBg);
+            root.setProperty('--sidebar-slide-out-background', fromPack.shellBg);
+            root.setProperty('--primary-gradient', fromPack.shellBg);
+            const app = document.getElementById('app');
+            const mainArea = document.getElementById('main-area');
+            if (app) app.style.setProperty('background', 'transparent', 'important');
+            if (mainArea) {
+                mainArea.style.setProperty('background', 'transparent', 'important');
+                mainArea.style.setProperty('backdrop-filter', 'none', 'important');
+                mainArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+            }
         }
-        if (sidebar) {
-            sidebar.style.setProperty('background', 'transparent', 'important');
-            sidebar.style.setProperty('backdrop-filter', 'none', 'important');
-            sidebar.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
-        }
-        this.setProfileSwipeThemeMix(0, fromPack, toPack);
+        this.setProfileSwipeThemeMix(startMix, fromPack, toPack);
     }
 
     setProfileSwipeThemeMix(progress, fromPack, toPack) {
@@ -7148,20 +7406,45 @@ class AxisBrowser {
         const to = toPack || this._profileSwipeOverlayToPack;
         if (!from || !to) return;
         const t = Math.max(0, Math.min(1, progress));
-        if (Math.abs(t - (this._profileSwipeThemeMix ?? -1)) < 0.00008) return;
+        /* Finer updates for a continuous dissolve — still skip near-identical frames. */
+        if (Math.abs(t - (this._profileSwipeThemeMix ?? -1)) < 0.0015) return;
         this._profileSwipeThemeMix = t;
 
         const overlay = document.getElementById('axis-profile-swipe-theme-overlay');
-        if (overlay?.classList.contains('is-active')) {
-            overlay.style.setProperty('--profile-swipe-mix', String(t));
-            const blended = this.blendProfileSwipeThemePacks(from, to, t);
-            const fromLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--from');
-            const toLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--to');
-            if (blended && fromLayer) {
-                this._styleProfileSwipeThemeLayer(fromLayer, blended.shellBg);
-                fromLayer.style.opacity = '1';
-            }
-            if (toLayer) toLayer.style.opacity = '0';
+        if (!overlay?.classList.contains('is-active')) return;
+
+        /* True opacity crossfade — fixed layer paints, no per-frame gradient rebuild. */
+        overlay.style.setProperty('--profile-swipe-mix', String(t));
+        const fromLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--from');
+        const toLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--to');
+        if (fromLayer) fromLayer.style.opacity = String(1 - t);
+        if (toLayer) toLayer.style.opacity = String(t);
+
+        /* Keep the sidebar panel opaque and crossfaded — never hollow it out during swipe. */
+        const blended = this.blendProfileSwipeThemePacks(from, to, t);
+        const root = document.documentElement.style;
+        if (blended?.shellBg) {
+            root.setProperty('--sidebar-background', blended.shellBg);
+            root.setProperty('--sidebar-slide-out-background', blended.shellBg);
+        }
+
+        /* Text/icon contrast only — cheap compared to rebuilding shellBg. */
+        if (from.shellInkRgb || to.shellInkRgb) {
+            root.setProperty(
+                '--shell-ink-rgb',
+                this._lerpProfileSwipeInkRgb(from.shellInkRgb, to.shellInkRgb, t)
+            );
+        }
+        if (from.textPrimary || to.textPrimary) {
+            const text = this._lerpProfileSwipeHex(from.textPrimary, to.textPrimary, t);
+            root.setProperty('--text-color', text);
+            root.setProperty('--tab-text', text);
+        }
+        if (from.textMuted || to.textMuted) {
+            root.setProperty(
+                '--text-color-muted',
+                this._lerpProfileSwipeHex(from.textMuted, to.textMuted, t)
+            );
         }
     }
 
@@ -7173,20 +7456,64 @@ class AxisBrowser {
         const overlay = document.getElementById('axis-profile-swipe-theme-overlay');
         overlay?.classList.remove('is-active');
         overlay?.style.removeProperty('--profile-swipe-mix');
+        overlay?.style.removeProperty('backdrop-filter');
+        overlay?.style.removeProperty('-webkit-backdrop-filter');
+        /*
+         * Do not strip #app / #main-area background here. Arm sets them transparent for the
+         * overlay; commit paints real chrome underneath first, then peels. Removing those
+         * properties on peel left one frame of wrong / opaque theme.
+         */
+    }
+
+    /** Set root theme vars to match the swipe overlay target — safe while overlay is still up. */
+    _paintRealThemeFromSwipePack(pack) {
+        if (!pack || this.isIncognitoWindow) return;
+        const root = document.documentElement.style;
+        root.setProperty('--background-color', pack.shellBg);
+        root.setProperty('--sidebar-background', pack.shellBg);
+        root.setProperty('--sidebar-slide-out-background', pack.shellBg);
+        root.setProperty('--primary-gradient', pack.shellBg);
+        root.setProperty('--theme-color', pack.themeColor);
+        root.setProperty('--primary-color', pack.themeColor);
+        root.setProperty('--accent-color', pack.accent);
+        if (pack.shellInkRgb) {
+            root.setProperty('--shell-ink-rgb', pack.shellInkRgb);
+        }
+        if (pack.textPrimary) {
+            root.setProperty('--text-color', pack.textPrimary);
+            root.setProperty('--tab-text', pack.textPrimary);
+            root.setProperty('--tab-text-active', pack.textPrimary);
+            root.setProperty('--button-text', pack.textPrimary);
+            root.setProperty('--icon-hover', pack.textPrimary);
+        }
+        if (pack.textMuted) {
+            root.setProperty('--text-color-muted', pack.textMuted);
+            root.setProperty('--url-bar-text-muted', pack.textMuted);
+            root.setProperty('--tab-close-color', pack.textMuted);
+            root.setProperty('--icon-color', pack.textMuted);
+        }
+        if (pack.gradientHex) {
+            root.setProperty('--gradient-color', pack.gradientHex);
+            root.setProperty('--gradient-enabled', '1');
+        } else {
+            root.setProperty('--gradient-enabled', '0');
+        }
+
+        /* Match live shell to the overlay end-state before the overlay is peeled. */
+        const chrome = this.getShellChromeStyle?.();
         const app = document.getElementById('app');
         const mainArea = document.getElementById('main-area');
-        const sidebar = this.elements?.sidebar || document.getElementById('sidebar');
-        app?.style.removeProperty('background');
-        mainArea?.style.removeProperty('background');
-        mainArea?.style.removeProperty('backdrop-filter');
-        mainArea?.style.removeProperty('-webkit-backdrop-filter');
-        sidebar?.style.removeProperty('background');
-        sidebar?.style.removeProperty('backdrop-filter');
-        sidebar?.style.removeProperty('-webkit-backdrop-filter');
-        const root = document.documentElement.style;
-        root.removeProperty('--background-color');
-        root.removeProperty('--sidebar-background');
-        root.removeProperty('--sidebar-slide-out-background');
+        if (app && pack.shellBg) {
+            app.style.setProperty('background', pack.shellBg, 'important');
+            const bd = chrome?.backdropMain || 'none';
+            app.style.setProperty('backdrop-filter', bd, 'important');
+            app.style.setProperty('-webkit-backdrop-filter', bd, 'important');
+        }
+        if (mainArea) {
+            mainArea.style.setProperty('background', 'transparent', 'important');
+            mainArea.style.setProperty('backdrop-filter', 'none', 'important');
+            mainArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        }
     }
 
     /** Lightweight shell tint during profile swipe — no full applyCustomTheme pipeline. */
@@ -7454,7 +7781,7 @@ class AxisBrowser {
 
             const wv = tab.webview || this.getActiveWebview();
             if (!restored && wv && this._webviewThemeReady(wv) && !this.settings?.transparentSites) {
-                void this.extractUrlBarTheme(wv);
+                this._voidGuestTask(this.extractUrlBarTheme(wv));
             }
         } catch (e) {
             console.error('tab chrome immediate apply failed', e);
@@ -7750,7 +8077,7 @@ class AxisBrowser {
         const mainArea = document.getElementById('main-area');
         const contentArea = document.getElementById('content-area');
         const app = document.getElementById('app');
-
+        
         if (hasTabs) {
             // Single shell paint on #app — avoid stacking the same gradient on #main-area (visible seam at sidebar edge).
             if (mainArea) {
@@ -8238,6 +8565,9 @@ class AxisBrowser {
 
     /** One body class drives panel fill / overscan — keeps idle, NTP, AI chat, and sites consistent. */
     _syncWebPanelVisualState() {
+        if (this._profileSwipeThemeActive || document.body?.classList.contains('profile-swipe-theme-active')) {
+            return;
+        }
         const body = document.body;
         body.classList.remove('panel-ntp', 'panel-site', 'panel-idle', 'panel-settings');
 
@@ -8295,7 +8625,15 @@ class AxisBrowser {
             document.getElementById(id)?.remove();
         }
         app.classList.remove('axis-shell-glass');
-        const appBg = gradientEnabled
+        /*
+         * Opaque chrome + CSS gradients band badly when vibrancy light is weak.
+         * Keep gradients for see-through glass; go solid when the tint is dense.
+         */
+        const useGradient =
+            !!gradientEnabled &&
+            Number(glassPrim) < 0.82 &&
+            Number(glassGrad) < 0.82;
+        const appBg = useGradient
             ? this.smoothGradient(
                   gradientDirection,
                   this.shellGlassRgba(shellBase, glassPrim),
@@ -8464,6 +8802,17 @@ class AxisBrowser {
         const c1 = parse(color1), c2 = parse(color2);
         if (!c1 || !c2) return `linear-gradient(${direction}, ${color1} 0%, ${color2} 100%)`;
 
+        /*
+         * Opaque fills + few-stop CSS gradients posterize into visible “linen” bands when
+         * there’s little vibrancy light. Prefer a solid primary in that case.
+         */
+        const aAvg = (c1[3] + c2[3]) / 2;
+        const channelDelta =
+            Math.abs(c1[0] - c2[0]) + Math.abs(c1[1] - c2[1]) + Math.abs(c1[2] - c2[2]);
+        if (aAvg >= 0.82 || channelDelta < 18) {
+            return color1;
+        }
+
         // Convert sRGB to linear light
         const srgbToLinear = (v) => {
             const s = v / 255;
@@ -8479,12 +8828,12 @@ class AxisBrowser {
         const lin1 = [srgbToLinear(c1[0]), srgbToLinear(c1[1]), srgbToLinear(c1[2])];
         const lin2 = [srgbToLinear(c2[0]), srgbToLinear(c2[1]), srgbToLinear(c2[2])];
 
-        const STOPS = 24;
+        const STOPS = 48;
         const parts = [];
         for (let i = 0; i <= STOPS; i++) {
             const t = i / STOPS;
-            // Smoothstep easing for perceptually even distribution
-            const et = t * t * (3 - 2 * t);
+            // Smootherstep for perceptually even distribution
+            const et = t * t * t * (t * (t * 6 - 15) + 10);
             const r = linearToSrgb(lin1[0] + (lin2[0] - lin1[0]) * et);
             const g = linearToSrgb(lin1[1] + (lin2[1] - lin1[1]) * et);
             const b = linearToSrgb(lin1[2] + (lin2[2] - lin1[2]) * et);
@@ -8950,8 +9299,7 @@ class AxisBrowser {
     createNewTab(url = null, options = {}) {
         let effectiveUrl = url;
         if (options && options.trustedContextImage && typeof url === 'string') {
-            const t = url.trim();
-            effectiveUrl = t || null;
+            effectiveUrl = this._getTrustedContextImageNavigateUrl(url);
             if (effectiveUrl && !String(effectiveUrl).toLowerCase().startsWith('axis:')) {
                 if (!this.confirmInsecureHttpNavigation(effectiveUrl)) {
                     effectiveUrl = null;
@@ -9034,8 +9382,8 @@ class AxisBrowser {
         
         if (this._tabNeedsGuestWebview(tabData)) {
             const webview = this.createTabWebview(tabId, this._settingsWebviewOptionsForTab(tabData));
-            if (webview) {
-                tabData.webview = webview;
+        if (webview) {
+            tabData.webview = webview;
             }
         }
         
@@ -9315,13 +9663,15 @@ class AxisBrowser {
             const prevTab = this.tabs.get(prevTabId);
             if (prevTab?.webview) {
                 deferSuspendForPipTabId = prevTabId;
-                void this.checkAndShowPIP(prevTabId, prevTab.webview).finally(() => {
-                    const cur = this._normalizeTabMapKey(this.currentTab);
-                    if (cur === prevTabId) return;
-                    if (this._shouldKeepBackgroundMediaAlive(prevTabId)) return;
-                    const t = this.tabs.get(prevTabId);
-                    if (t?.webview) this._suspendInactiveTabGuest(t.webview, t, prevTabId);
-                });
+                this._voidGuestTask(
+                    this.checkAndShowPIP(prevTabId, prevTab.webview).finally(() => {
+                        const cur = this._normalizeTabMapKey(this.currentTab);
+                        if (cur === prevTabId) return;
+                        if (this._shouldKeepBackgroundMediaAlive(prevTabId)) return;
+                        const t = this.tabs.get(prevTabId);
+                        if (t?.webview) this._suspendInactiveTabGuest(t.webview, t, prevTabId);
+                    })
+                );
             }
             const prevTabElement = this._getTabElement(prevTabId);
             if (prevTabElement) prevTabElement.classList.remove('active');
@@ -9420,6 +9770,12 @@ class AxisBrowser {
                     } else if (tab.settingsSection) {
                         this.focusSettingsSection(tabId, tab.settingsSection);
                     }
+                    // Pull latest store-backed lists/form into the open Settings guest.
+                    try {
+                        if (tab.webview && typeof tab.webview.send === 'function') {
+                            tab.webview.send('axis-settings-store-updated');
+                        }
+                    } catch (_) {}
                 } else if (skipGuestSrcReload) {
                     // Inactive guests often report about:blank from getURL() — never reassign src.
                     if (currentSrc && currentSrc !== 'about:blank') {
@@ -9467,6 +9823,10 @@ class AxisBrowser {
                 
                 // Now make webview visible so Chromium paints the content
                 webview.classList.remove('inactive');
+                webview.classList.remove('axis-profile-webview-suspended');
+                try {
+                    webview.dataset.axisProfile = String(this.profileId || 'personal');
+                } catch (_) {}
                 // Empty-state used to set `opacity: 0.3 !important` on every webview; clear it so
                 // the now-active guest paints fully when we hand focus back from no-tabs to a tab.
                 try {
@@ -9495,7 +9855,9 @@ class AxisBrowser {
                 }
             }
 
-            /* #new-tab-page is z-index 50 — must hide when leaving axis://newtab or it covers every webview below. */
+            /* Shared #new-tab-page overlay — must sync even when the tab has no guest webview
+             * (axis://newtab never creates one). Otherwise profile switch leaves the previous
+             * profile’s New Tab painted on top of the incoming profile. */
             if (tab.url === this.NEWTAB_URL) {
                 this.updateNewTabPageVisibility(true);
             } else {
@@ -9762,16 +10124,9 @@ class AxisBrowser {
         const layout = Array.isArray(this.settings?.ntpWidgetLayout) ? this.settings.ntpWidgetLayout : [];
         const api = this._ntpWidgetsApi();
         const weather = layout.find((w) => (api?.resolveType(w?.type) || w?.type) === 'weather');
-        const headlines = layout.find((w) => (api?.resolveType(w?.type) || w?.type) === 'headlines');
-        const until = layout.find((w) => (api?.resolveType(w?.type) || w?.type) === 'until');
-        const worldclock = layout.find((w) => (api?.resolveType(w?.type) || w?.type) === 'worldclock');
         return {
-            city: weather?.config?.city || 'London',
-            feedUrl: headlines?.config?.feedUrl || 'https://feeds.bbci.co.uk/news/rss.xml',
-            untilLabel: until?.config?.label || 'Vacation',
-            untilTarget: until?.config?.target || '',
-            worldclockLabel: worldclock?.config?.label || 'NYC',
-            worldclockTimezone: worldclock?.config?.timezone || 'America/New_York'
+            city: weather?.config?.city || '',
+            unit: weather?.config?.unit === 'F' ? 'F' : 'C'
         };
     }
 
@@ -9823,16 +10178,16 @@ class AxisBrowser {
         const inChat = this.isNewTabInChat();
         const enabled = this.settings?.ntpWidgetsEnabled === true;
         const showWidgets = enabled && !inChat;
-        optIn?.classList.toggle('hidden', showWidgets);
+        optIn?.classList.add('hidden');
         section?.classList.toggle('hidden', !showWidgets);
+        this._ensureNtpHeroAnchorObserver();
         if (showWidgets) {
             this._syncNtpLayoutEmptyState();
-            this._ensureNtpHeroAnchorObserver();
         } else {
             const layout = document.getElementById('new-tab-page-layout');
-            layout?.style.removeProperty('--ntp-widgets-anchor');
-            layout?.style.removeProperty('min-height');
+            layout?.classList.remove('ntp-has-tiles');
         }
+        this._syncNtpHeroAnchor();
         if (!showWidgets) {
             this.setNtpEditMode(false);
             this.setNtpPickerOpen(false);
@@ -10152,233 +10507,27 @@ class AxisBrowser {
                 this._removeNtpWidgetFromGrid(id);
                 return;
             }
-            const focusBtn = e.target.closest('.ntp-w-focus-btn');
-            if (focusBtn) {
+
+            if (this._ntpEditMode) return;
+
+            const calNav = e.target.closest('[data-ntp-cal-nav]');
+            if (calNav) {
                 e.preventDefault();
                 e.stopPropagation();
-                const id = focusBtn.dataset.widgetId;
-                if (id) this._toggleNtpFocus(id);
+                const id = calNav.getAttribute('data-widget-id');
+                const raw = String(calNav.getAttribute('data-ntp-cal-nav') || '');
+                const delta = raw === 'prev' || raw === '-1' ? -1 : raw === 'next' || raw === '1' ? 1 : 0;
+                this._shiftNtpCalendar(id, delta);
                 return;
             }
-            const focusReset = e.target.closest('[data-ntp-focus-reset]');
-            if (focusReset) {
+            const calToday = e.target.closest('[data-ntp-cal-today]');
+            if (calToday) {
                 e.preventDefault();
                 e.stopPropagation();
-                const id = focusReset.dataset.widgetId;
-                if (id) this._resetNtpFocus(id);
-                return;
-            }
-            const focusPreset = e.target.closest('[data-ntp-focus-mins]');
-            if (focusPreset) {
-                e.preventDefault();
-                e.stopPropagation();
-                const id = focusPreset.dataset.widgetId;
-                const mins = Number(focusPreset.dataset.ntpFocusMins);
-                if (id && Number.isFinite(mins)) this._setNtpFocusMinutes(id, mins);
-                return;
-            }
-            const weatherUnit = e.target.closest('[data-ntp-weather-unit]');
-            if (weatherUnit) {
-                e.preventDefault();
-                e.stopPropagation();
-                const id = weatherUnit.dataset.widgetId;
-                if (id) this._toggleNtpWeatherUnit(id);
-                return;
-            }
-            const headlineCycle = e.target.closest('[data-ntp-headline-cycle]');
-            if (headlineCycle) {
-                e.preventDefault();
-                e.stopPropagation();
-                const id = headlineCycle.dataset.widgetId;
-                if (id) this._cycleNtpHeadlineFeed(id);
-                return;
-            }
-            const quoteNext = e.target.closest('[data-ntp-quote-next]');
-            if (quoteNext) {
-                e.preventDefault();
-                e.stopPropagation();
-                const id = quoteNext.dataset.widgetId;
-                if (id) this._nextNtpQuote(id);
-                return;
-            }
-            const linkRemove = e.target.closest('[data-ntp-link-remove]');
-            if (linkRemove) {
-                e.preventDefault();
-                e.stopPropagation();
-                const card = linkRemove.closest('.ntp-widget');
-                const id = card?.dataset?.widgetId;
-                const linkId = linkRemove.getAttribute('data-ntp-link-remove');
-                if (id && linkId) this._removeNtpLink(id, linkId);
-                return;
-            }
-            const taskRemove = e.target.closest('[data-ntp-task-remove]');
-            if (taskRemove) {
-                e.preventDefault();
-                e.stopPropagation();
-                const card = taskRemove.closest('.ntp-widget');
-                const id = card?.dataset?.widgetId;
-                const taskId = taskRemove.getAttribute('data-ntp-task-remove');
-                if (id && taskId) this._removeNtpTask(id, taskId);
-                return;
-            }
-            const taskClear = e.target.closest('[data-ntp-task-clear-done]');
-            if (taskClear) {
-                e.preventDefault();
-                e.stopPropagation();
-                const id = taskClear.dataset.widgetId;
-                if (id) this._clearDoneNtpTasks(id);
-                return;
-            }
-            const taskToggle = e.target.closest('[data-ntp-task-toggle]');
-            if (taskToggle) {
-                e.preventDefault();
-                e.stopPropagation();
-                const card = taskToggle.closest('.ntp-widget');
-                const id = card?.dataset?.widgetId;
-                const taskId = taskToggle.getAttribute('data-ntp-task-toggle');
-                if (id && taskId) this._toggleNtpTask(id, taskId);
-                return;
-            }
-            const reopenBtn = e.target.closest('[data-ntp-reopen]');
-            if (reopenBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                this._reopenClosedTabAt(Number(reopenBtn.dataset.ntpReopen));
-                return;
-            }
-            const link = e.target.closest('[data-ntp-url]');
-            if (link) {
-                e.preventDefault();
-                const url = link.getAttribute('data-ntp-url');
-                if (url) void this.navigate(url);
+                const id = calToday.getAttribute('data-widget-id');
+                this._resetNtpCalendar(id);
             }
         });
-
-        grid.addEventListener('submit', (e) => {
-            const focusForm = e.target.closest('.ntp-w-focus-custom');
-            if (focusForm) {
-                e.preventDefault();
-                const id = focusForm.dataset.widgetId;
-                const input = focusForm.querySelector('.ntp-w-focus-custom-input');
-                const mins = Number(input?.value);
-                if (id && Number.isFinite(mins)) this._setNtpFocusMinutes(id, mins);
-                return;
-            }
-            const worldCustom = e.target.closest('.ntp-w-world-custom');
-            if (worldCustom) {
-                e.preventDefault();
-                const id = worldCustom.dataset.widgetId;
-                const input = worldCustom.querySelector('.ntp-w-world-tz-input');
-                if (id && input) this._setNtpWorldTimezone(id, input.value);
-                return;
-            }
-            const feedCustom = e.target.closest('.ntp-w-feed-custom');
-            if (feedCustom) {
-                e.preventDefault();
-                const id = feedCustom.dataset.widgetId;
-                const input = feedCustom.querySelector('.ntp-w-feed-input');
-                const url = String(input?.value || '').trim();
-                if (id && url) this._setNtpHeadlineFeed(id, url);
-                if (input) input.value = '';
-                return;
-            }
-            const linkForm = e.target.closest('.ntp-w-link-add');
-            if (linkForm) {
-                e.preventDefault();
-                const id = linkForm.dataset.widgetId;
-                const input = linkForm.querySelector('.ntp-w-link-input');
-                const raw = String(input?.value || '').trim();
-                if (!id || !raw) return;
-                this._addNtpLink(id, raw);
-                if (input) input.value = '';
-                return;
-            }
-            const form = e.target.closest('.ntp-w-task-add');
-            if (!form) return;
-            e.preventDefault();
-            const id = form.dataset.widgetId;
-            const input = form.querySelector('.ntp-w-task-input');
-            const text = String(input?.value || '').trim();
-            if (!id || !text) return;
-            this._addNtpTask(id, text);
-            if (input) input.value = '';
-        });
-
-        grid.addEventListener('change', (e) => {
-            const worldPreset = e.target.closest('[data-ntp-world-preset]');
-            if (worldPreset) {
-                const id = worldPreset.dataset.widgetId;
-                if (id) this._setNtpWorldPreset(id, worldPreset.value);
-                return;
-            }
-            const headlineFeed = e.target.closest('[data-ntp-headline-feed]');
-            if (headlineFeed) {
-                const id = headlineFeed.dataset.widgetId;
-                if (id) this._setNtpHeadlineFeed(id, headlineFeed.value);
-                return;
-            }
-            const untilField = e.target.closest('[data-ntp-until-field]');
-            if (!untilField) return;
-            const id = untilField.dataset.widgetId;
-            const field = untilField.dataset.ntpUntilField;
-            if (!id || !field) return;
-            this._patchNtpWidgetConfig(id, { [field]: String(untilField.value || '').trim() });
-            if (field === 'target') this._refreshNtpWidgetAt(id);
-            else this._paintNtpUntilDom(id);
-        });
-
-        grid.addEventListener('keydown', (e) => {
-            if (e.key !== 'Enter') return;
-            const cityInput = e.target.closest('[data-ntp-weather-city]');
-            if (cityInput) {
-                e.preventDefault();
-                cityInput.blur();
-                return;
-            }
-            const worldLabel = e.target.closest('[data-ntp-world-label]');
-            if (worldLabel) {
-                e.preventDefault();
-                worldLabel.blur();
-            }
-        });
-
-        grid.addEventListener('blur', (e) => {
-            const cityInput = e.target.closest('[data-ntp-weather-city]');
-            if (cityInput) {
-                const id = cityInput.dataset.widgetId;
-                const city = String(cityInput.value || '').trim() || 'London';
-                if (id) this._setNtpWeatherCity(id, city);
-                return;
-            }
-            const worldLabel = e.target.closest('[data-ntp-world-label]');
-            if (worldLabel) {
-                const id = worldLabel.dataset.widgetId;
-                if (id) {
-                    this._patchNtpWidgetConfig(id, {
-                        label: String(worldLabel.value || '').trim() || 'City'
-                    });
-                }
-                return;
-            }
-            const untilLabel = e.target.closest('.ntp-w-until-label-input');
-            if (untilLabel) {
-                const id = untilLabel.dataset.widgetId;
-                if (id) {
-                    this._patchNtpWidgetConfig(id, { label: String(untilLabel.value || '').trim() || 'Event' });
-                    this._paintNtpUntilDom(id);
-                }
-                return;
-            }
-            const ta = e.target.closest('.ntp-widget-notes-input');
-            if (!ta) return;
-            const id = ta.dataset.widgetId;
-            const layout = this.getNtpWidgetLayout();
-            const w = layout.find((x) => x.id === id);
-            if (!w) return;
-            w.config = w.config || {};
-            w.config.text = ta.value;
-            void this.saveNtpWidgetLayout(layout);
-        }, true);
 
         this._bindNtpWidgetDrag(grid, section);
         this._bindNtpWidgetResize(grid, section);
@@ -10846,36 +10995,30 @@ class AxisBrowser {
         const api = this._ntpWidgetsApi();
         if (!api) return '';
         const type = api.resolveType(widget.type) || widget.type;
-        switch (type) {
-            case 'today':
-                return api.renderToday(widget);
-            case 'weather':
-            case 'headlines':
-            case 'recent':
-            case 'favorites':
-            case 'topsites':
-            case 'pinned':
-            case 'stats':
-                return api.renderSkeleton(widget);
-            case 'links':
-                return api.renderLinks(widget);
-            case 'tasks':
-                return api.renderTasks(widget);
-            case 'note':
-                return api.renderNote(widget);
-            case 'reopen':
-                return api.renderReopen(widget, this._ntpClosedTabsPreview());
-            case 'focus':
-                return api.renderFocus(widget, this._getNtpFocusState(widget.id, widget));
-            case 'until':
-                return api.renderUntil(widget);
-            case 'worldclock':
-                return api.renderWorldclock(widget);
-            case 'quote':
-                return api.renderQuote(widget);
-            default:
-                return api.renderSkeleton(widget);
+        if (type === 'weather') {
+            if (!String(widget.config?.city || '').trim()) {
+                return api.renderWeather(widget, { needsSetup: true });
+            }
+            return api.renderSkeleton(widget);
         }
+        if (type === 'airquality') {
+            if (!String(widget.config?.city || '').trim()) {
+                return api.renderAirQuality(widget, { needsSetup: true });
+            }
+            return api.renderSkeleton(widget);
+        }
+        if (type === 'markets') {
+            const syms = api.normalizeMarketSymbols?.(widget.config?.symbols) || [];
+            if (!syms.length) return api.renderMarkets(widget, { needsSetup: true });
+            return api.renderSkeleton(widget);
+        }
+        if (type === 'clock' && api.renderClock) return api.renderClock(widget);
+        if (type === 'worldclock' && api.renderWorldClock) return api.renderWorldClock(widget);
+        if (type === 'calendar' && api.renderCalendar) {
+            const view = this._ntpCalView?.get(widget.id) || null;
+            return api.renderCalendar(widget, view);
+        }
+        return api.renderSkeleton(widget);
     }
 
     async _ntpRecentHistoryPreview() {
@@ -11043,13 +11186,33 @@ class AxisBrowser {
         void this._hydrateNtpWidget(w);
     }
 
-    _setNtpWeatherCity(widgetId, city) {
+    _setNtpWeatherCity(widgetId, city, meta = null) {
         const layout = this.getNtpWidgetLayout();
         const w = layout.find((x) => x.id === widgetId);
         if (!w) return;
-        const next = String(city || '').trim() || 'London';
-        if (String(w.config?.city || '') === next) return;
-        w.config = { ...(w.config || {}), city: next };
+        const next = String(city || '').trim();
+        if (!next) return;
+        const lat = meta?.latitude != null ? Number(meta.latitude) : null;
+        const lon = meta?.longitude != null ? Number(meta.longitude) : null;
+        const placeLabel = String(meta?.short || meta?.label || meta?.name || next).trim();
+        const sameCity = String(w.config?.city || '') === next;
+        const sameCoords =
+            lat != null &&
+            lon != null &&
+            Number(w.config?.latitude) === lat &&
+            Number(w.config?.longitude) === lon;
+        if (sameCity && (!meta || sameCoords)) return;
+        w.config = {
+            ...(w.config || {}),
+            city: next,
+            placeLabel,
+            latitude: Number.isFinite(lat) ? lat : undefined,
+            longitude: Number.isFinite(lon) ? lon : undefined
+        };
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            delete w.config.latitude;
+            delete w.config.longitude;
+        }
         void this.saveNtpWidgetLayout(layout);
         const cache = this._ntpFetchCache;
         if (cache) {
@@ -11058,6 +11221,74 @@ class AxisBrowser {
             }
         }
         void this._hydrateNtpWidget(w);
+    }
+
+    _hideNtpWeatherSuggests(form) {
+        const list = form?.querySelector?.('.ntp-w-weather-suggests');
+        if (!list) return;
+        list.classList.add('hidden');
+        list.innerHTML = '';
+    }
+
+    _scheduleNtpWeatherCitySearch(input) {
+        if (!input) return;
+        const api = this._ntpWidgetsApi();
+        if (!api?.searchCities) return;
+        clearTimeout(this._ntpWeatherSearchTimer);
+        const q = String(input.value || '').trim();
+        const form = input.closest('.ntp-w-weather-city-form');
+        if (q.length < 2) {
+            this._hideNtpWeatherSuggests(form);
+            return;
+        }
+        const token = (this._ntpWeatherSearchToken = (this._ntpWeatherSearchToken || 0) + 1);
+        this._ntpWeatherSearchTimer = setTimeout(async () => {
+            const results = await api.searchCities(q, { limit: 10 });
+            if (token !== this._ntpWeatherSearchToken) return;
+            if (!input.isConnected) return;
+            this._renderNtpWeatherSuggests(input, results);
+        }, 220);
+    }
+
+    _renderNtpWeatherSuggests(input, results) {
+        const form = input?.closest('.ntp-w-weather-city-form');
+        const list = form?.querySelector('.ntp-w-weather-suggests');
+        const api = this._ntpWidgetsApi();
+        if (!list || !api) return;
+        const id = input.dataset.widgetId || '';
+        if (!results?.length) {
+            list.innerHTML = `<div class="ntp-w-weather-suggest-empty">No matches</div>`;
+            list.classList.remove('hidden');
+            return;
+        }
+        list.innerHTML = results
+            .map((r, i) => {
+                const label = api.escapeHtml(r.label || r.name || '');
+                const meta = [r.admin1, r.country || r.countryCode].filter(Boolean).join(' · ');
+                return `<button type="button" class="ntp-w-weather-suggest${i === 0 ? ' is-active' : ''}" role="option" data-ntp-weather-pick data-widget-id="${api.escapeHtml(id)}" data-city="${api.escapeHtml(r.name || '')}" data-label="${api.escapeHtml(r.label || '')}" data-short="${api.escapeHtml(r.short || '')}" data-lat="${r.latitude}" data-lon="${r.longitude}">
+  <span class="ntp-w-weather-suggest-name">${label}</span>
+  ${meta ? `<span class="ntp-w-weather-suggest-meta">${api.escapeHtml(meta)}</span>` : ''}
+</button>`;
+            })
+            .join('');
+        list.classList.remove('hidden');
+    }
+
+    _pickNtpWeatherSuggestion(widgetId, el) {
+        if (!el) return;
+        this._ntpWeatherPicking = true;
+        const city = el.getAttribute('data-city') || el.getAttribute('data-short') || '';
+        const meta = {
+            name: city,
+            label: el.getAttribute('data-label') || city,
+            short: el.getAttribute('data-short') || city,
+            latitude: Number(el.getAttribute('data-lat')),
+            longitude: Number(el.getAttribute('data-lon'))
+        };
+        this._setNtpWeatherCity(widgetId, city, meta);
+        setTimeout(() => {
+            this._ntpWeatherPicking = false;
+        }, 200);
     }
 
     _cycleNtpHeadlineFeed(widgetId) {
@@ -11332,57 +11563,81 @@ class AxisBrowser {
             });
     }
 
-    async _fetchNtpWidgetData(widget) {
+    async _fetchNtpWidgetData(widget, opts = {}) {
         const api = this._ntpWidgetsApi();
         if (!api) return null;
         const cache = this._ntpFetchCache || (this._ntpFetchCache = new Map());
-        const ttl = 5 * 60 * 1000;
         const now = Date.now();
         const type = api.resolveType(widget.type) || widget.type;
+        const force = !!opts.force;
+
         if (type === 'weather') {
-            const city = String(widget.config?.city || 'London').trim().toLowerCase();
-            const key = `weather:${city}`;
+            const ttl = 5 * 60 * 1000;
+            const city = String(widget.config?.city || '').trim().toLowerCase();
+            if (!city) return { needsSetup: true };
+            const lat = widget.config?.latitude;
+            const lon = widget.config?.longitude;
+            const key = `weather:${city}:${lat ?? ''}:${lon ?? ''}:${widget.config?.unit || 'C'}`;
             const hit = cache.get(key);
-            if (hit && now - hit.at < ttl) return hit.data;
+            if (hit && now - hit.at < ttl && !force) return hit.data;
             const data = await api.fetchWeather(widget.config);
             cache.set(key, { at: now, data });
             return data;
         }
-        if (type === 'headlines') {
-            const feed = String(widget.config?.feedUrl || '').trim();
-            const key = `headlines:${feed}`;
+
+        if (type === 'airquality') {
+            const ttl = 15 * 60 * 1000;
+            const city = String(widget.config?.city || '').trim().toLowerCase();
+            if (!city) return { needsSetup: true };
+            const lat = widget.config?.latitude;
+            const lon = widget.config?.longitude;
+            const scale = widget.config?.scale === 'eu' ? 'eu' : 'us';
+            const key = `aq:${city}:${lat ?? ''}:${lon ?? ''}:${scale}`;
             const hit = cache.get(key);
-            if (hit && now - hit.at < ttl) return hit.data;
-            const data = await api.fetchNewsItems(widget.config);
+            if (hit && now - hit.at < ttl && !force) return hit.data;
+            const data = await api.fetchAirQuality(widget.config);
             cache.set(key, { at: now, data });
             return data;
         }
-        if (type === 'recent') {
-            const key = 'recent:history';
+
+        if (type === 'markets') {
+            const ttl = 15 * 1000;
+            const symbols = api.normalizeMarketSymbols(widget.config?.symbols);
+            if (!symbols.length) return { needsSetup: true, quotes: [] };
+            const key = `markets:${symbols.join(',')}`;
             const hit = cache.get(key);
-            if (hit && now - hit.at < 30000) return hit.data;
-            const data = await this._ntpRecentHistoryPreview();
+            if (hit && now - hit.at < ttl && !force) return hit.data;
+            const data = await api.fetchMarkets({ symbols });
             cache.set(key, { at: now, data });
             return data;
         }
-        if (type === 'favorites') {
-            return this._ntpFavoritesPreview();
-        }
-        if (type === 'topsites') {
-            const key = 'topsites:history';
-            const hit = cache.get(key);
-            if (hit && now - hit.at < 60000) return hit.data;
-            const data = await this._ntpTopSitesPreview();
-            cache.set(key, { at: now, data });
-            return data;
-        }
-        if (type === 'pinned') {
-            return this._ntpPinnedTabsPreview();
-        }
-        if (type === 'stats') {
-            return this._ntpStatsPreview();
-        }
+
         return null;
+    }
+
+    _shiftNtpCalendar(widgetId, delta) {
+        if (!widgetId || !delta) return;
+        const map = this._ntpCalView || (this._ntpCalView = new Map());
+        const now = new Date();
+        const cur = map.get(widgetId) || { year: now.getFullYear(), month: now.getMonth() };
+        let month = cur.month + delta;
+        let year = cur.year;
+        while (month < 0) {
+            month += 12;
+            year -= 1;
+        }
+        while (month > 11) {
+            month -= 12;
+            year += 1;
+        }
+        map.set(widgetId, { year, month });
+        this._refreshNtpWidgetAt(widgetId);
+    }
+
+    _resetNtpCalendar(widgetId) {
+        if (!widgetId) return;
+        this._ntpCalView?.delete(widgetId);
+        this._refreshNtpWidgetAt(widgetId);
     }
 
     renderNtpWidgets(opts = {}) {
@@ -11395,6 +11650,10 @@ class AxisBrowser {
                 clearInterval(this._ntpClockTimer);
                 this._ntpClockTimer = null;
             }
+            if (this._ntpMarketsTimer) {
+                clearInterval(this._ntpMarketsTimer);
+                this._ntpMarketsTimer = null;
+            }
             return;
         }
 
@@ -11406,8 +11665,7 @@ class AxisBrowser {
             grid.innerHTML = '';
             this._syncNtpLayoutEmptyState();
             this._ntpWidgetStructureKeyCached = '';
-            this._syncNtpClockTimer();
-            this._syncNtpWorldclockTimer();
+            this._syncNtpLiveTimer();
             return;
         }
 
@@ -11422,8 +11680,7 @@ class AxisBrowser {
             this._applyNtpLayoutToGrid(layout);
             this._applyNtpWidgetSizeClasses(layout);
             layout.filter((w) => api.isAsyncType(w.type)).forEach((w) => void this._hydrateNtpWidget(w));
-            this._syncNtpClockTimer();
-            this._syncNtpWorldclockTimer();
+            this._syncNtpLiveTimer();
             this._syncNtpHeroAnchor();
             this._clampNtpWidgetsToViewport();
             return;
@@ -11443,7 +11700,7 @@ class AxisBrowser {
         this._clampNtpWidgetsToViewport();
     }
 
-    /** One shared 1s tick for clock, world clock, and lightweight live tiles. */
+    /** Live timers: 1s clock/world clock, ~15s markets quotes while New Tab is visible. */
     _syncNtpLiveTimer() {
         if (this._ntpClockTimer) {
             clearInterval(this._ntpClockTimer);
@@ -11453,6 +11710,10 @@ class AxisBrowser {
             clearInterval(this._ntpWorldTimer);
             this._ntpWorldTimer = null;
         }
+        if (this._ntpMarketsTimer) {
+            clearInterval(this._ntpMarketsTimer);
+            this._ntpMarketsTimer = null;
+        }
         const enabled = this.settings?.ntpWidgetsEnabled === true;
         const ntpVisible = !document.getElementById('new-tab-page')?.classList.contains('hidden');
         if (!enabled || !ntpVisible) return;
@@ -11461,59 +11722,99 @@ class AxisBrowser {
         const api = this._ntpWidgetsApi();
         if (!api || !layout.length) return;
 
-        const hasToday = layout.some((w) => (api.resolveType(w.type) || w.type) === 'today');
+        const hasClock = layout.some((w) => (api.resolveType(w.type) || w.type) === 'clock');
         const hasWorld = layout.some((w) => (api.resolveType(w.type) || w.type) === 'worldclock');
-        if (!hasToday && !hasWorld) return;
+        const marketWidgets = layout.filter((w) => (api.resolveType(w.type) || w.type) === 'markets');
 
-        const tick = () => {
-            if (hasToday) this._paintNtpTodayDom();
-            if (hasWorld) this._paintNtpWorldclockDom();
-        };
-        tick();
-        this._ntpClockTimer = setInterval(tick, 1000);
+        if (hasClock || hasWorld) {
+            const tick = () => {
+                if (hasClock) this._paintNtpClockDom();
+                if (hasWorld) this._paintNtpWorldclockDom();
+            };
+            tick();
+            this._ntpClockTimer = setInterval(tick, 1000);
+        }
+
+        if (marketWidgets.length) {
+            this._ntpMarketsTimer = setInterval(() => {
+                const ntpStill =
+                    !document.getElementById('new-tab-page')?.classList.contains('hidden');
+                if (!ntpStill || this.settings?.ntpWidgetsEnabled !== true) return;
+                const live = this.getNtpWidgetLayout().filter(
+                    (w) => (api.resolveType(w.type) || w.type) === 'markets'
+                );
+                live.forEach((w) => void this._hydrateNtpWidget(w, { force: true }));
+            }, 15000);
+        }
     }
 
-    _paintNtpTodayDom() {
-        const now = new Date();
-        document.querySelectorAll('.ntp-widget--today').forEach((card) => {
-            const rspan = Number(card.dataset.rspan || 1);
-            const withSeconds = card.classList.contains('ntp-widget--md') || card.classList.contains('ntp-widget--lg') || rspan >= 2;
-            const time = now.toLocaleTimeString([], {
-                hour: 'numeric',
-                minute: '2-digit',
-                second: withSeconds ? '2-digit' : undefined
+    _paintNtpClockDom() {
+        const api = this._ntpWidgetsApi();
+        if (!api?.clockParts) return;
+        this.getNtpWidgetLayout()
+            .filter((w) => (api.resolveType(w.type) || w.type) === 'clock')
+            .forEach((w) => {
+                const card = document.querySelector(`.ntp-widget--clock[data-widget-id="${w.id}"]`);
+                if (!card) return;
+                const shape = {
+                    density: api.contentDensity?.(w) || 'md',
+                    tall: Number(w.rowSpan) >= 2,
+                    wide: Number(w.colSpan) >= 3
+                };
+                const parts = api.clockParts({ ...(w.config || {}), _shape: shape });
+                card.querySelectorAll('.ntp-w-clock-time').forEach((el) => {
+                    el.textContent = parts.time;
+                });
+                card.querySelectorAll('.ntp-w-clock-date').forEach((el) => {
+                    el.textContent =
+                        shape.tall || shape.wide
+                            ? parts.fullDate
+                            : shape.density === 'xs'
+                              ? parts.weekday
+                              : `${parts.weekday}, ${parts.date}`;
+                });
             });
-            const date = now.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
-            card.querySelectorAll('.ntp-w-today-time').forEach((el) => {
-                el.textContent = time;
-            });
-            card.querySelectorAll('.ntp-w-today-date').forEach((el) => {
-                el.textContent = date;
-            });
-        });
     }
 
     _paintNtpWorldclockDom() {
         const api = this._ntpWidgetsApi();
-        if (!api) return;
+        if (!api?.worldClockParts) return;
         this.getNtpWidgetLayout()
             .filter((w) => (api.resolveType(w.type) || w.type) === 'worldclock')
             .forEach((w) => {
-                const parts = api.worldClockParts
-                    ? api.worldClockParts(w.config?.timezone || 'America/New_York')
-                    : { time: '—', weekday: '', offset: '' };
+                const tz = String(w.config?.timezone || '').trim();
+                if (!tz) return;
                 const card = document.querySelector(`.ntp-widget--worldclock[data-widget-id="${w.id}"]`);
                 if (!card) return;
+                const shape = {
+                    density: api.contentDensity?.(w) || 'md',
+                    tall: Number(w.rowSpan) >= 2,
+                    wide: Number(w.colSpan) >= 3
+                };
+                const d = shape.density;
+                const parts = api.worldClockParts(tz, { ...(w.config || {}), _shape: shape });
                 card.querySelectorAll('.ntp-w-world-time').forEach((el) => {
                     el.textContent = parts.time;
                 });
+                const metaBits = [];
+                if (d === 'xs') {
+                    if (parts.weekday) metaBits.push(parts.weekday);
+                    if (parts.offset) metaBits.push(parts.offset);
+                } else {
+                    if (parts.weekday) metaBits.push(parts.weekday);
+                    if ((shape.tall || shape.wide || d === 'lg' || d === 'md') && parts.date) {
+                        metaBits.push(parts.date);
+                    }
+                    if (parts.offset) metaBits.push(parts.offset);
+                }
                 card.querySelectorAll('.ntp-w-world-date').forEach((el) => {
-                    const extra =
-                        parts.offset && !card.querySelector('.ntp-w-world-offset') ? ` · ${parts.offset}` : '';
-                    el.textContent = `${parts.weekday}${extra}`;
+                    el.textContent = metaBits.join(' · ');
                 });
-                card.querySelectorAll('.ntp-w-world-offset').forEach((el) => {
-                    el.textContent = parts.offset || '';
+                card.querySelectorAll('.ntp-w-world-city').forEach((el) => {
+                    const name =
+                        String(w.config?.city || '').trim() ||
+                        String(w.config?.placeLabel || '').split(',')[0].trim();
+                    if (name) el.textContent = name;
                 });
             });
     }
@@ -11526,7 +11827,7 @@ class AxisBrowser {
         this._syncNtpLiveTimer();
     }
 
-    async _hydrateNtpWidget(widget) {
+    async _hydrateNtpWidget(widget, opts = {}) {
         const api = this._ntpWidgetsApi();
         const grid = document.getElementById('ntp-widgets-grid');
         if (!api || !grid) return;
@@ -11537,37 +11838,19 @@ class AxisBrowser {
         const token = (genMap.get(widget.id) || 0) + 1;
         genMap.set(widget.id, token);
 
-        let html = '';
         const type = api.resolveType(widget.type) || widget.type;
-        if (type === 'headlines') {
-            const items = await this._fetchNtpWidgetData(widget);
-            if (genMap.get(widget.id) !== token) return;
-            html = api.renderHeadlines(widget, items || []);
-        } else if (type === 'weather') {
-            const data = await this._fetchNtpWidgetData(widget);
-            if (genMap.get(widget.id) !== token) return;
-            html = api.renderWeather(widget, data || {});
-        } else if (type === 'recent') {
-            const items = await this._fetchNtpWidgetData(widget);
-            if (genMap.get(widget.id) !== token) return;
-            html = api.renderRecent(widget, items || []);
-        } else if (type === 'favorites') {
-            const items = await this._fetchNtpWidgetData(widget);
-            if (genMap.get(widget.id) !== token) return;
-            html = api.renderFavorites(widget, items || []);
-        } else if (type === 'topsites') {
-            const items = await this._fetchNtpWidgetData(widget);
-            if (genMap.get(widget.id) !== token) return;
-            html = api.renderTopsites(widget, items || []);
-        } else if (type === 'pinned') {
-            const items = await this._fetchNtpWidgetData(widget);
-            if (genMap.get(widget.id) !== token) return;
-            html = api.renderPinned(widget, items || []);
-        } else if (type === 'stats') {
-            const data = await this._fetchNtpWidgetData(widget);
-            if (genMap.get(widget.id) !== token) return;
-            html = api.renderStats(widget, data || {});
+        if (type !== 'weather' && type !== 'airquality' && type !== 'markets') {
+            card.classList.add('ntp-widget-ready');
+            return;
         }
+
+        const data = await this._fetchNtpWidgetData(widget, opts);
+        if (genMap.get(widget.id) !== token) return;
+        let html = '';
+        if (type === 'weather') html = api.renderWeather(widget, data || {});
+        else if (type === 'airquality') html = api.renderAirQuality(widget, data || {});
+        else if (type === 'markets') html = api.renderMarkets(widget, data || {});
+
         if (genMap.get(widget.id) !== token) return;
         if (!html) {
             card.classList.add('ntp-widget-ready');
@@ -11581,12 +11864,6 @@ class AxisBrowser {
         const next = wrap.firstElementChild;
         if (!next) return;
         next.classList.add('ntp-widget-ready');
-        if (this._ntpEditMode) {
-            const section = document.getElementById('new-tab-widgets-section');
-            if (section?.classList.contains('ntp-widgets-editing')) {
-                /* keep edit chrome via section class */
-            }
-        }
         live.replaceWith(next);
     }
 
@@ -11606,31 +11883,75 @@ class AxisBrowser {
     }
 
     _setNtpSearchExpanded(expanded) {
-        document.getElementById('new-tab-search-wrapper')?.classList.toggle('ntp-search-expanded', !!expanded);
+        const wrapper = document.getElementById('new-tab-search-wrapper');
+        if (!wrapper) return;
+        if (expanded) {
+            wrapper.classList.remove('ntp-search-collapsing');
+            wrapper.classList.add('ntp-search-expanded');
+        } else {
+            wrapper.classList.remove('ntp-search-expanded', 'ntp-search-collapsing');
+        }
+    }
+
+    _beginNtpSearchCollapse() {
+        const wrapper = document.getElementById('new-tab-search-wrapper');
+        if (!wrapper?.classList.contains('ntp-search-expanded')) return;
+        wrapper.classList.add('ntp-search-collapsing');
+    }
+
+    /** Keep the drawer clip shell; suggestion rows live in #ntp-suggestions-drawer. */
+    _ensureNtpSuggestionsStructure(container = document.getElementById('new-tab-suggestions')) {
+        if (!container) return null;
+        let drawer = container.querySelector('#ntp-suggestions-drawer');
+        if (drawer) return drawer;
+        container.replaceChildren();
+        const clip = document.createElement('div');
+        clip.className = 'ntp-suggestions-drawer-clip';
+        drawer = document.createElement('div');
+        drawer.className = 'ntp-suggestions-drawer';
+        drawer.id = 'ntp-suggestions-drawer';
+        clip.appendChild(drawer);
+        container.appendChild(clip);
+        return drawer;
+    }
+
+    _ntpSuggestionsHost(container = document.getElementById('new-tab-suggestions')) {
+        return this._ensureNtpSuggestionsStructure(container);
+    }
+
+    _clearNtpSuggestionsRows(container = document.getElementById('new-tab-suggestions')) {
+        const host = this._ensureNtpSuggestionsStructure(container);
+        host?.replaceChildren();
+        return host;
     }
 
     async updateNewTabSuggestions(query) {
         const container = document.getElementById('new-tab-suggestions');
         if (!container) return;
+        const host = this._ensureNtpSuggestionsStructure(container);
+        if (!host) return;
 
         if (query.trim().length < 1) {
             if (this._newTabSuggestionsCloseTimer) {
                 clearTimeout(this._newTabSuggestionsCloseTimer);
                 this._newTabSuggestionsCloseTimer = null;
             }
-            if (container.children.length > 0) {
+            if (host.children.length > 0 || container.classList.contains('ntp-suggestions-open')) {
                 container.classList.remove('ntp-suggestions-open');
                 container.classList.add('new-tab-suggestions-closing');
+                container.setAttribute('aria-hidden', 'true');
+                this._beginNtpSearchCollapse();
                 this._newTabSuggestionsCloseTimer = setTimeout(() => {
-                    container.replaceChildren();
+                    this._clearNtpSuggestionsRows(container);
                     container.classList.remove('new-tab-suggestions-closing', 'ntp-suggestions-open');
                     this.spotlightSelectedIndex = -1;
                     this._newTabSuggestionsCloseTimer = null;
                     this._setNtpSearchExpanded(false);
-                }, 250);
+                }, 280);
             } else {
-                container.replaceChildren();
-                container.classList.remove('ntp-suggestions-open');
+                this._clearNtpSuggestionsRows(container);
+                container.classList.remove('ntp-suggestions-open', 'new-tab-suggestions-closing');
+                container.setAttribute('aria-hidden', 'true');
                 this.spotlightSelectedIndex = -1;
                 this._setNtpSearchExpanded(false);
             }
@@ -11640,8 +11961,15 @@ class AxisBrowser {
             clearTimeout(this._newTabSuggestionsCloseTimer);
             this._newTabSuggestionsCloseTimer = null;
         }
+        const wasOpen = container.classList.contains('ntp-suggestions-open')
+            && !container.classList.contains('new-tab-suggestions-closing');
         container.classList.remove('new-tab-suggestions-closing');
+        if (!wasOpen) {
+            container.classList.remove('ntp-suggestions-open');
+            void container.offsetHeight;
+        }
         container.classList.add('ntp-suggestions-open');
+        container.setAttribute('aria-hidden', 'false');
         this._setNtpSearchExpanded(true);
         const seq = (this._ntpSuggestionsSeq = (this._ntpSuggestionsSeq || 0) + 1);
         const suggestions = await this.generateAdvancedSuggestions(query);
@@ -11677,6 +12005,8 @@ class AxisBrowser {
     }
 
     updateNewTabSuggestionsContent(container, suggestions, query = '') {
+        const host = this._ntpSuggestionsHost(container);
+        if (!host) return;
         container.classList.remove('new-tab-suggestions-closing');
         this.spotlightSelectedIndex = -1;
 
@@ -11691,29 +12021,51 @@ class AxisBrowser {
                 el.className = 'spotlight-suggestion-item';
                 el.setAttribute('data-index', i);
                 let faviconUrl = null;
-                if (s.isTab && s.tabId) {
-                    const tab = this.tabs.get(s.tabId);
-                    faviconUrl = tab?.favicon || (tab?.url ? this.getFaviconUrl(tab.url) : null);
+                let iconHtml = '';
+                let fallbackIconHtml = '';
+                if (s.isTab && s.tabId != null) {
+                    const tid = this._normalizeTabMapKey(s.tabId) ?? s.tabId;
+                    const tab = this.tabs.get(tid);
+                    if (tab?.url === this.NEWTAB_URL) {
+                        const inChat = this.isTabInNtpAiChat(tid);
+                        const fa = inChat ? 'fas fa-message' : 'fas fa-search';
+                        fallbackIconHtml = `<i class="${this.escapeHtml(fa)}" aria-hidden="true"></i>`;
+                    } else {
+                        faviconUrl =
+                            (tab ? this.resolveTabFaviconForData(tab, tid) : null) ||
+                            (s.url ? this.getFaviconUrl(s.url) : null);
+                        iconHtml = faviconUrl
+                            ? `<img src="${this.escapeHtmlAttribute(faviconUrl)}" alt="" class="spotlight-favicon" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />`
+                            : '';
+                        fallbackIconHtml = faviconUrl
+                            ? `<i class="${this.escapeHtml(s.icon || 'fas fa-globe')}" style="display:none;" aria-hidden="true"></i>`
+                            : `<i class="${this.escapeHtml(s.icon || 'fas fa-globe')}" aria-hidden="true"></i>`;
+                    }
                 } else if (s.url || s.isHistory || s.isUrl) {
                     faviconUrl = this.getFaviconUrl(s.url);
+                    iconHtml = faviconUrl
+                        ? `<img src="${this.escapeHtmlAttribute(faviconUrl)}" alt="" class="spotlight-favicon" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />`
+                        : '';
+                    fallbackIconHtml = faviconUrl
+                        ? `<i class="${this.escapeHtml(s.icon || 'fas fa-globe')}" style="display:none;" aria-hidden="true"></i>`
+                        : `<i class="${this.escapeHtml(s.icon || 'fas fa-globe')}" aria-hidden="true"></i>`;
+                } else {
+                    fallbackIconHtml = `<i class="${this.escapeHtml(s.icon || 'fas fa-search')}" aria-hidden="true"></i>`;
                 }
-                const iconHtml = faviconUrl
-                    ? `<img src="${this.escapeHtml(faviconUrl)}" alt="" class="spotlight-favicon" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />`
-                    : '';
-                const fallbackIconHtml = faviconUrl ? `<i class="${this.escapeHtml(s.icon)}" style="display:none;"></i>` : `<i class="${this.escapeHtml(s.icon)}"></i>`;
                 el.innerHTML = `
                 <div class="spotlight-suggestion-icon">${iconHtml}${fallbackIconHtml}</div>
                 <div class="spotlight-suggestion-text">${this.escapeHtml(s.text)}</div>
-                ${(s.isTab && s.tabId) ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
+                ${(s.isTab && s.tabId != null) ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
             `;
                 el.addEventListener('click', () => this.performSuggestionAction(s, selectedEngine, true));
                 frag.appendChild(el);
             });
         }
 
-        container.replaceChildren(frag);
-        const open = container.children.length > 0;
+        host.replaceChildren(frag);
+        const open = host.children.length > 0;
         container.classList.toggle('ntp-suggestions-open', open);
+        container.setAttribute('aria-hidden', open ? 'false' : 'true');
         this._setNtpSearchExpanded(open);
     }
 
@@ -11747,8 +12099,10 @@ class AxisBrowser {
         this.hideNewTabAskSetup();
         const suggestionsContainer = document.getElementById('new-tab-suggestions');
         if (suggestionsContainer) {
-            suggestionsContainer.innerHTML = '';
+            this._clearNtpSuggestionsRows(suggestionsContainer);
+            suggestionsContainer.classList.remove('ntp-suggestions-open');
             suggestionsContainer.classList.add('new-tab-suggestions-closing');
+            suggestionsContainer.setAttribute('aria-hidden', 'true');
             this._setNtpSearchExpanded(false);
         }
 
@@ -11841,24 +12195,10 @@ class AxisBrowser {
 
     performSuggestionAction(suggestion, selectedEngine, isNewTabPage) {
         if (suggestion.isTab) {
-            if (suggestion.tabId) {
+            if (suggestion.tabId != null) {
                 this.switchToTab(suggestion.tabId);
             } else if (suggestion.isPlaceholder) {
                 this.createNewTab();
-            }
-        } else if (suggestion.isAction) {
-            if (suggestion.text === 'New Tab') {
-                if (isNewTabPage) {
-                    document.getElementById('new-tab-input')?.focus();
-                } else {
-                    this.createNewTab();
-                }
-            } else if (suggestion.text === 'New Incognito Tab') {
-                this.createIncognitoTab();
-            } else if (suggestion.text === 'Open Settings') {
-                this.toggleSettings();
-            } else if (suggestion.text === 'New Note') {
-                this.openNoteAsTab();
             }
         } else if (suggestion.isNote && suggestion.noteId) {
             this.openNoteAsTab(suggestion.noteId);
@@ -11891,11 +12231,12 @@ class AxisBrowser {
         const page = document.getElementById('new-tab-page');
         if (input) input.value = '';
         this.spotlightSelectedIndex = -1;
-        if (searchWrapper) searchWrapper.classList.remove('hidden', 'ntp-search-expanded');
+        if (searchWrapper) searchWrapper.classList.remove('hidden', 'ntp-search-expanded', 'ntp-search-collapsing');
         if (suggestionsContainer) {
             suggestionsContainer.classList.remove('hidden');
-            suggestionsContainer.innerHTML = '';
-            suggestionsContainer.classList.remove('new-tab-suggestions-closing');
+            this._clearNtpSuggestionsRows(suggestionsContainer);
+            suggestionsContainer.classList.remove('new-tab-suggestions-closing', 'ntp-suggestions-open');
+            suggestionsContainer.setAttribute('aria-hidden', 'true');
         }
         if (askMessages) {
             askMessages.innerHTML = '';
@@ -12153,7 +12494,10 @@ class AxisBrowser {
         if (suggestionsContainer) {
             suggestionsContainer.classList.remove('hidden', 'new-tab-suggestions-closing');
             if (inChat) {
-                suggestionsContainer.innerHTML = '';
+                this._clearNtpSuggestionsRows(suggestionsContainer);
+                suggestionsContainer.classList.remove('ntp-suggestions-open');
+                suggestionsContainer.setAttribute('aria-hidden', 'true');
+                this._setNtpSearchExpanded(false);
             } else {
                 void this.updateNewTabSuggestions(state.inputValue || '');
             }
@@ -12225,7 +12569,7 @@ class AxisBrowser {
                                 this.restoreNewTabPageStateFromTab(this.currentTab);
                             }
                         } else {
-                            this.resetNewTabPageState();
+                    this.resetNewTabPageState();
                             if (this.currentTab != null) {
                                 const freshTab = this.tabs.get(this.currentTab);
                                 if (freshTab) {
@@ -12244,7 +12588,7 @@ class AxisBrowser {
                             this.restoreNewTabPageStateFromTab(this.currentTab);
                         } else if (this._hasNewTabAiChatState(null, tab)) {
                             this._ensureNewTabPageStateFromTabData(this.currentTab);
-                            this.restoreNewTabPageStateFromTab(this.currentTab);
+                        this.restoreNewTabPageStateFromTab(this.currentTab);
                         }
                     }
                 }
@@ -12263,9 +12607,9 @@ class AxisBrowser {
                     this._ntpUiBoundTabId = ntpTabId;
                 }
                 if (ntpNeedsPaint) {
-                    requestAnimationFrame(() => {
-                        document.getElementById('new-tab-input')?.focus();
-                    });
+                requestAnimationFrame(() => {
+                    document.getElementById('new-tab-input')?.focus();
+                });
                 }
             } else {
                 newTabPage.classList.add('hidden');
@@ -14173,6 +14517,9 @@ class AxisBrowser {
                     .then((result) => {
                         if (result === 'ok') {
                             try {
+                                webview.send('axis-settings-store-updated');
+                            } catch (_) {}
+                            try {
                                 webview.send('switch-settings-tab', sectionToFocus);
                             } catch (_) {}
                             return;
@@ -15320,7 +15667,7 @@ class AxisBrowser {
         const currentTitle = titleElement.textContent;
         const tabElement = titleElement.closest('.tab');
         const deferBlurMs = Math.max(0, Number(options.deferBlurMs) || 0);
-
+        
         const input = document.createElement('input');
         input.type = 'text';
         input.value = currentTitle;
@@ -15335,12 +15682,12 @@ class AxisBrowser {
         let finished = false;
         const focusRenameInput = () => {
             if (finished) return;
-            try {
-                input.focus();
+                try {
+                    input.focus();
                 input.select();
-            } catch (e) {
-                // Ignore focus errors
-            }
+                } catch (e) {
+                    // Ignore focus errors
+                }
         };
         requestAnimationFrame(focusRenameInput);
 
@@ -15846,17 +16193,22 @@ class AxisBrowser {
     // Enhanced loading states
     showLoadingState(element, message = 'Loading...') {
         if (!element) return;
-        
-        const originalContent = element.innerHTML;
-        element.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 12px; padding: 20px;">
-                <div class="loading-spinner" style="width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid #fff; border-radius: 50%;"></div>
-                <span>${message}</span>
-            </div>
-        `;
-        
+
+        /* Clone nodes instead of round-tripping via innerHTML (avoids DOM-text-as-HTML XSS). */
+        const saved = Array.from(element.childNodes).map((n) => n.cloneNode(true));
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display: flex; align-items: center; gap: 12px; padding: 20px;';
+        const spinner = document.createElement('div');
+        spinner.className = 'loading-spinner';
+        spinner.style.cssText =
+            'width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid #fff; border-radius: 50%;';
+        const label = document.createElement('span');
+        label.textContent = String(message || 'Loading...');
+        wrap.append(spinner, label);
+        element.replaceChildren(wrap);
+
         return () => {
-            element.innerHTML = originalContent;
+            element.replaceChildren(...saved);
         };
     }
 
@@ -15975,17 +16327,17 @@ class AxisBrowser {
     bindWebviewAudioStateListener(tabId, webview) {
         if (!webview || webview.__axisAudioStateBound) return;
         const syncAudible = () => {
-            const tab = this.tabs.get(tabId);
+                const tab = this.tabs.get(tabId);
             if (!tab || !webview) return;
-            let isAudible = false;
+                let isAudible = false;
             try {
                 if (typeof webview.isCurrentlyAudible === 'function') {
                     isAudible = !!webview.isCurrentlyAudible();
                 }
             } catch (_) {}
-            if (tab.isPlayingAudio !== isAudible) {
-                tab.isPlayingAudio = isAudible;
-                this.updateTabAudioIndicator(tabId, isAudible);
+                if (tab.isPlayingAudio !== isAudible) {
+                    tab.isPlayingAudio = isAudible;
+                    this.updateTabAudioIndicator(tabId, isAudible);
                 if (this._normalizeTabMapKey(this.currentTab) === tabId) {
                     this.applyAmbientFromSettings();
                 }
@@ -16036,7 +16388,7 @@ class AxisBrowser {
         if (tabId == null) return;
         const tab = this.tabs.get(tabId);
         if (!tab) return;
-
+        
         const el = this._resolveLooseSidebarTabElement(tabId, tabElement);
         if (!el) return;
 
@@ -16111,7 +16463,7 @@ class AxisBrowser {
         this._tabElementById.set(tabId, liveEl);
         this.savePinnedTabs();
     }
-
+    
     /** Move a loose sidebar tab row above or below the pinned divider. */
     _moveLooseTabToPinSection(tabEl, pinned) {
         const container = this.elements?.tabsContainer;
@@ -16174,7 +16526,7 @@ class AxisBrowser {
         if (shouldPin) {
             this.setupPinnedTabCloseButton(tabEl, tabId);
             this.updatePinnedTabClosedState(tabId);
-        } else {
+            } else {
             tabEl.classList.remove('closed');
             this.removePinnedTabCloseButton(tabEl);
         }
@@ -16363,8 +16715,11 @@ class AxisBrowser {
             }
             return `<i class="fas ${this.escapeHtml(favorite.customIcon)} favorite-favicon favorite-favicon-fa" aria-hidden="true"></i>`;
         }
-        if (favorite.favicon) {
-            return `<img class="favorite-favicon" src="${this.escapeHtml(favorite.favicon)}" alt="" draggable="false" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';"><span class="favorite-favicon favorite-favicon-fallback" aria-hidden="true" style="display:none;">${this.escapeHtml(this.getFavoriteInitial(favorite))}</span>`;
+        const iconUrl =
+            favorite.favicon ||
+            (favorite.url && typeof this.getFaviconUrl === 'function' ? this.getFaviconUrl(favorite.url) : null);
+        if (iconUrl) {
+            return `<img class="favorite-favicon" src="${this.escapeHtml(iconUrl)}" alt="" draggable="false" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';"><span class="favorite-favicon favorite-favicon-fallback" aria-hidden="true" style="display:none;">${this.escapeHtml(this.getFavoriteInitial(favorite))}</span>`;
         }
         return `<span class="favorite-favicon favorite-favicon-fallback" aria-hidden="true">${this.escapeHtml(this.getFavoriteInitial(favorite))}</span>`;
     }
@@ -16387,7 +16742,7 @@ class AxisBrowser {
                 id: fav.id || `fav-${Date.now()}-${idx}`,
                 url: this.normalizeFavoriteUrl(fav.url),
                 title: String(fav.title || 'Favorite').trim() || 'Favorite',
-                favicon: fav.favicon || null,
+                favicon: fav.favicon || (fav.url ? this.getFaviconUrl(fav.url) : null),
                 customIcon: fav.customIcon || null,
                 customIconType: fav.customIconType || null,
                 order: idx
@@ -17034,7 +17389,11 @@ class AxisBrowser {
     async savePinnedTabs() {
         if (this._profileScopedPersistBlocked?.('pinnedTabs')) return;
         const pinnedTabs = this._collectPinnedTabsPayload();
+        const pinnedSidebarOrder = this._rememberPinnedSidebarOrder();
         await this.saveSetting('pinnedTabs', pinnedTabs);
+        if (pinnedSidebarOrder?.length) {
+            await this.saveSetting('pinnedSidebarOrder', pinnedSidebarOrder);
+        }
     }
     
     async loadPinnedTabs() {
@@ -17250,6 +17609,13 @@ class AxisBrowser {
         window.electronAPI.setSidebarTrafficLayout(this.isSidebarRight()).catch(() => {});
     }
 
+    applySidebarZoom() {
+        const sidebar = document.getElementById('sidebar');
+        if (!sidebar) return;
+        const pct = this._normalizeSidebarZoom(this.settings?.sidebarZoom);
+        sidebar.style.setProperty('--sidebar-ui-zoom', String(pct / 100));
+    }
+
     applySidebarPosition() {
         const mainArea = document.getElementById('main-area');
         const sidebar = document.getElementById('sidebar');
@@ -17283,6 +17649,85 @@ class AxisBrowser {
     isSidebarRight() {
         const mainArea = document.getElementById('main-area');
         return mainArea && mainArea.classList.contains('sidebar-right');
+    }
+
+    setupTabsScrollbarAutoHide() {
+        const container = this.elements?.tabsContainer || document.getElementById('tabs-container');
+        if (!container || container.dataset.sbAutoHideBound === '1') return;
+        container.dataset.sbAutoHideBound = '1';
+
+        const section = container.closest('.tabs-section') || container.parentElement;
+        if (!section) return;
+
+        let thumb = section.querySelector(':scope > .tabs-sb-overlay');
+        if (!thumb) {
+            thumb = document.createElement('div');
+            thumb.className = 'tabs-sb-overlay';
+            thumb.setAttribute('aria-hidden', 'true');
+            section.appendChild(thumb);
+        }
+
+        const IDLE_MS = 900;
+        const FADE_MS = 360;
+        let hideTimer = null;
+        let fadeTimer = null;
+
+        const clearTimers = () => {
+            if (hideTimer) {
+                clearTimeout(hideTimer);
+                hideTimer = null;
+            }
+            if (fadeTimer) {
+                clearTimeout(fadeTimer);
+                fadeTimer = null;
+            }
+        };
+
+        const updateThumb = () => {
+            const scrollHeight = container.scrollHeight;
+            const clientHeight = container.clientHeight;
+            if (scrollHeight <= clientHeight + 1) {
+                thumb.hidden = true;
+                section.classList.remove('is-tabs-scrolling', 'is-tabs-scroll-fading');
+                return false;
+            }
+            thumb.hidden = false;
+            const inset = 6;
+            const trackH = Math.max(0, clientHeight - inset * 2);
+            const ratio = clientHeight / scrollHeight;
+            const thumbH = Math.max(28, Math.min(trackH, trackH * ratio));
+            const maxScroll = scrollHeight - clientHeight;
+            const maxTop = Math.max(0, trackH - thumbH);
+            const thumbOffset = maxScroll > 0 ? (container.scrollTop / maxScroll) * maxTop : 0;
+            thumb.style.height = `${thumbH}px`;
+            thumb.style.top = `${container.offsetTop + inset + thumbOffset}px`;
+            return true;
+        };
+
+        const showScrollbar = () => {
+            if (!updateThumb()) return;
+            clearTimers();
+            section.classList.remove('is-tabs-scroll-fading');
+            section.classList.add('is-tabs-scrolling');
+            hideTimer = setTimeout(() => {
+                hideTimer = null;
+                section.classList.add('is-tabs-scroll-fading');
+                fadeTimer = setTimeout(() => {
+                    fadeTimer = null;
+                    section.classList.remove('is-tabs-scrolling', 'is-tabs-scroll-fading');
+                }, FADE_MS);
+            }, IDLE_MS);
+        };
+
+        container.addEventListener('scroll', showScrollbar, { passive: true });
+        if (typeof ResizeObserver !== 'undefined') {
+            const ro = new ResizeObserver(() => {
+                updateThumb();
+                if (section.classList.contains('is-tabs-scrolling')) showScrollbar();
+            });
+            ro.observe(container);
+        }
+        updateThumb();
     }
 
     setupSidebarSlideBack() {
@@ -19582,19 +20027,19 @@ class AxisBrowser {
         if (tabGroupIcon) {
             tabGroupIcon.draggable = false;
         }
-
+        
         if (this.makeTabGroupSmoothDraggable) {
             this.makeTabGroupSmoothDraggable(tabGroupElement);
         }
-
+        
         let clickStartPos = { x: 0, y: 0 };
         let clickStartTime = 0;
-
+        
         tabContent.addEventListener('mousedown', (e) => {
             clickStartPos = { x: e.clientX, y: e.clientY };
             clickStartTime = Date.now();
         });
-
+            
         tabContent.addEventListener('click', (e) => {
             if (e.target.closest('.tab-group-delete')) {
                 return;
@@ -19602,24 +20047,15 @@ class AxisBrowser {
             if (tabGroupElement.classList.contains('tab-renaming')) {
                 return;
             }
-
+            
             const mouseMoved = Math.abs(e.clientX - clickStartPos.x) > 5 || Math.abs(e.clientY - clickStartPos.y) > 5;
             const timeSinceClick = Date.now() - clickStartTime;
             if (mouseMoved && timeSinceClick > 100) {
                 return;
             }
-
-            e.stopPropagation();
-            this.toggleTabGroup(tabGroup.id);
-        });
-
-        tabContent.addEventListener('dblclick', (e) => {
-            if (e.target.closest('.tab-group-delete')) return;
-            const titleElement = tabGroupElement.querySelector('.tab-title');
-            if (!titleElement || titleElement.tagName === 'INPUT') return;
-            e.preventDefault();
-            e.stopPropagation();
-            this.renameTabGroup(tabGroup.id, titleElement);
+            
+                e.stopPropagation();
+                this.toggleTabGroup(tabGroup.id);
         });
 
         tabGroupElement.addEventListener('contextmenu', (e) => {
@@ -19644,23 +20080,67 @@ class AxisBrowser {
     }
 
     /**
-     * Same collapse animation as the manual "close group" branch in toggleTabGroup.
-     * @param {number|string} tabGroupId
+     * Collapse/expand tab group content. Safe to call again mid-animation (spam click) —
+     * reverses from the current height without getting stuck on the toggling lock.
      */
-    runTabGroupCollapseAnimation(tabGroupId) {
+    _bumpTabGroupAnimToken(tabGroupId) {
+        if (!this._tabGroupAnimTokens) this._tabGroupAnimTokens = new Map();
+        const key = String(tabGroupId);
+        const next = (this._tabGroupAnimTokens.get(key) || 0) + 1;
+        this._tabGroupAnimTokens.set(key, next);
+        return next;
+    }
+
+    _isTabGroupAnimCurrent(tabGroupId, token) {
+        return (this._tabGroupAnimTokens?.get(String(tabGroupId)) || 0) === token;
+    }
+
+    _tabGroupContentCurrentHeight(tabGroupContent) {
+        if (!tabGroupContent) return 0;
+        const cs = getComputedStyle(tabGroupContent);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return 0;
+        const rectH = Math.round(tabGroupContent.getBoundingClientRect().height);
+        if (rectH > 0) return rectH;
+        const mh = cs.maxHeight;
+        if (mh && mh !== 'none') {
+            const n = Math.round(parseFloat(mh));
+            if (Number.isFinite(n) && n > 0) return n;
+        }
+        return Math.round(tabGroupContent.scrollHeight) || 0;
+    }
+
+    _animateTabGroupContent(tabGroupId, wantOpen) {
         const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
         if (!tabGroupElement) return;
         const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
         if (!tabGroupContent) return;
-        if (!tabGroupElement.classList.contains('toggling')) {
-            tabGroupElement.classList.add('toggling');
-        }
+
+        const token = this._bumpTabGroupAnimToken(tabGroupId);
+        tabGroupElement.classList.add('toggling');
 
         const TAB_GROUP_ANIM_MS = 200;
+        const openEase = 'cubic-bezier(0.22, 1, 0.32, 1)';
         const closeEase = 'cubic-bezier(0.4, 0, 0.2, 1)';
-        const transitionClose = `max-height ${TAB_GROUP_ANIM_MS}ms ${closeEase}, padding ${TAB_GROUP_ANIM_MS}ms ${closeEase}`;
+        const fromH = this._tabGroupContentCurrentHeight(tabGroupContent);
+
+        const finishOpen = () => {
+            if (!this._isTabGroupAnimCurrent(tabGroupId, token)) return;
+            tabGroupContent.style.transition = 'none';
+            tabGroupContent.style.maxHeight = 'none';
+            tabGroupContent.style.opacity = '';
+            tabGroupContent.style.visibility = '';
+            tabGroupContent.style.display = '';
+            tabGroupContent.style.padding = '';
+            tabGroupContent.classList.add('open');
+            requestAnimationFrame(() => {
+                if (!this._isTabGroupAnimCurrent(tabGroupId, token)) return;
+                tabGroupContent.style.transition = '';
+                tabGroupElement.classList.remove('toggling');
+            });
+        };
 
         const finishClose = () => {
+            if (!this._isTabGroupAnimCurrent(tabGroupId, token)) return;
             tabGroupContent.style.transition = 'none';
             tabGroupContent.style.display = 'none';
             tabGroupContent.style.visibility = 'hidden';
@@ -19672,126 +20152,117 @@ class AxisBrowser {
             tabGroupElement.classList.remove('toggling');
         };
 
-        const lockedH = Math.round(tabGroupContent.scrollHeight);
+        const bindEnd = (onDone) => {
+            const onEnd = (e) => {
+                if (e.target !== tabGroupContent || e.propertyName !== 'max-height') return;
+                tabGroupContent.removeEventListener('transitionend', onEnd);
+                onDone();
+            };
+            tabGroupContent.addEventListener('transitionend', onEnd);
+            setTimeout(() => {
+                if (!this._isTabGroupAnimCurrent(tabGroupId, token)) return;
+                tabGroupContent.removeEventListener('transitionend', onEnd);
+                onDone();
+            }, TAB_GROUP_ANIM_MS + 90);
+        };
+
+        if (wantOpen) {
+            tabGroupContent.style.display = 'flex';
+            tabGroupContent.style.transition = 'none';
+            tabGroupContent.style.visibility = 'hidden';
+            tabGroupContent.style.opacity = fromH > 1 ? '1' : '0';
+            tabGroupContent.classList.add('open');
+            tabGroupContent.style.maxHeight = 'none';
+            tabGroupContent.style.padding = '';
+            const targetH = Math.max(tabGroupContent.scrollHeight, fromH);
+            tabGroupContent.style.maxHeight = `${fromH}px`;
+            tabGroupContent.style.visibility = 'visible';
+            void tabGroupContent.offsetHeight;
+
+            requestAnimationFrame(() => {
+                if (!this._isTabGroupAnimCurrent(tabGroupId, token)) return;
+                requestAnimationFrame(() => {
+                    if (!this._isTabGroupAnimCurrent(tabGroupId, token)) return;
+                    tabGroupContent.style.transition = `max-height ${TAB_GROUP_ANIM_MS}ms ${openEase}, opacity ${Math.round(TAB_GROUP_ANIM_MS * 0.8)}ms ease-out, padding ${TAB_GROUP_ANIM_MS}ms ${openEase}`;
+                    tabGroupContent.classList.add('open');
+                    tabGroupContent.style.maxHeight = `${targetH}px`;
+                    tabGroupContent.style.opacity = '1';
+                    bindEnd(finishOpen);
+                });
+            });
+            return;
+        }
+
+        const lockedH = Math.max(fromH, Math.round(tabGroupContent.scrollHeight) || 0);
         const cs = getComputedStyle(tabGroupContent);
-        const padPinned = `${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft}`;
+        const padPinned =
+            tabGroupContent.classList.contains('open') || fromH > 0
+                ? `${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft}`
+                : '0 6px';
 
         tabGroupContent.style.display = 'flex';
         tabGroupContent.style.visibility = 'visible';
-        tabGroupContent.style.opacity = '1';
+        tabGroupContent.style.opacity = lockedH > 0 ? '1' : '0';
         tabGroupContent.style.transition = 'none';
         tabGroupContent.style.maxHeight = `${lockedH}px`;
         tabGroupContent.style.padding = padPinned;
         void tabGroupContent.offsetHeight;
 
         requestAnimationFrame(() => {
+            if (!this._isTabGroupAnimCurrent(tabGroupId, token)) return;
             requestAnimationFrame(() => {
-                tabGroupContent.style.transition = transitionClose;
+                if (!this._isTabGroupAnimCurrent(tabGroupId, token)) return;
+                tabGroupContent.style.transition = `max-height ${TAB_GROUP_ANIM_MS}ms ${closeEase}, padding ${TAB_GROUP_ANIM_MS}ms ${closeEase}, opacity ${Math.round(TAB_GROUP_ANIM_MS * 0.7)}ms ease-out`;
                 tabGroupContent.style.maxHeight = '0px';
                 tabGroupContent.style.padding = '0 6px';
-
-                const onEnd = (e) => {
-                    if (e.target !== tabGroupContent || e.propertyName !== 'max-height') return;
-                    tabGroupContent.removeEventListener('transitionend', onEnd);
-                    finishClose();
-                };
-                tabGroupContent.addEventListener('transitionend', onEnd);
-                setTimeout(() => {
-                    if (!tabGroupElement.classList.contains('toggling')) return;
-                    tabGroupContent.removeEventListener('transitionend', onEnd);
-                    finishClose();
-                }, TAB_GROUP_ANIM_MS + 80);
+                tabGroupContent.style.opacity = '0';
+                bindEnd(finishClose);
             });
         });
     }
 
+    /**
+     * Same collapse animation as closing a group — used when a group becomes empty.
+     * @param {number|string} tabGroupId
+     */
+    runTabGroupCollapseAnimation(tabGroupId) {
+        this._animateTabGroupContent(tabGroupId, false);
+    }
+
     toggleTabGroup(tabGroupId) {
-        const tabGroup = this.tabGroups.get(tabGroupId);
+        const resolvedId = this.findTabGroupKey?.(tabGroupId) ?? tabGroupId;
+        const tabGroup = this.tabGroups.get(resolvedId);
         if (!tabGroup) return;
 
-        const tabGroupElement = document.querySelector(`[data-tab-group-id="${tabGroupId}"]`);
+        const tabGroupElement = document.querySelector(`[data-tab-group-id="${resolvedId}"]`);
         if (!tabGroupElement) return;
-        
+
         const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
-        
         if (!tabGroupContent) return;
-        
-        // Prevent multiple toggles
-        if (tabGroupElement.classList.contains('toggling')) return;
-        tabGroupElement.classList.add('toggling');
-        
-        const isOpening = !tabGroup.open;
-        tabGroup.open = isOpening;
-        this.tabGroups.set(tabGroupId, tabGroup);
-        
-        // Check if tab group has tabs - only open if it has content
+
+        const wantOpen = !tabGroup.open;
         const hasTabs = tabGroup.tabIds.length > 0;
-        
-        const TAB_GROUP_ANIM_MS = 200;
-        const TAB_GROUP_EASE = 'cubic-bezier(0.22, 1, 0.32, 1)';
-        const transitionOpen = `max-height ${TAB_GROUP_ANIM_MS}ms ${TAB_GROUP_EASE}, opacity ${Math.round(TAB_GROUP_ANIM_MS * 0.8)}ms ease-out, padding ${TAB_GROUP_ANIM_MS}ms ${TAB_GROUP_EASE}`;
 
-        const finishOpen = () => {
+        if (wantOpen && !hasTabs) {
+            tabGroup.open = false;
+            this.tabGroups.set(resolvedId, tabGroup);
+            this._bumpTabGroupAnimToken(resolvedId);
             tabGroupContent.style.transition = 'none';
-            tabGroupContent.style.maxHeight = 'none';
-            tabGroupContent.style.opacity = '';
-            tabGroupContent.style.visibility = '';
-            tabGroupContent.style.display = '';
-            requestAnimationFrame(() => {
-                tabGroupContent.style.transition = '';
-                tabGroupElement.classList.remove('toggling');
-            });
-        };
-
-        if (isOpening) {
-            // Don't open if tab group is empty
-            if (!hasTabs) {
-                tabGroupContent.style.maxHeight = '0px';
-                tabGroupContent.style.display = 'none';
-                tabGroupContent.style.visibility = 'hidden';
-                tabGroupContent.style.opacity = '0';
-                tabGroupContent.classList.remove('open');
-                tabGroupElement.classList.remove('toggling');
-                this.saveTabGroups();
-                return;
-            }
-
-            // Measure with .open so padding + gap match the expanded state (avoids end snap / magic +48)
-            tabGroupContent.style.display = 'flex';
-            tabGroupContent.style.transition = 'none';
+            tabGroupContent.style.maxHeight = '0px';
+            tabGroupContent.style.display = 'none';
             tabGroupContent.style.visibility = 'hidden';
             tabGroupContent.style.opacity = '0';
-            tabGroupContent.classList.add('open');
-            tabGroupContent.style.maxHeight = 'none';
-            const targetH = tabGroupContent.scrollHeight;
-
             tabGroupContent.classList.remove('open');
-            tabGroupContent.style.maxHeight = '0px';
-            void tabGroupContent.offsetHeight;
-
-            requestAnimationFrame(() => {
-                tabGroupContent.style.transition = transitionOpen;
-                tabGroupContent.classList.add('open');
-                tabGroupContent.style.visibility = 'visible';
-                tabGroupContent.style.maxHeight = `${targetH}px`;
-                tabGroupContent.style.opacity = '1';
-
-                const onEnd = (e) => {
-                    if (e.target !== tabGroupContent || e.propertyName !== 'max-height') return;
-                    tabGroupContent.removeEventListener('transitionend', onEnd);
-                    finishOpen();
-                };
-                tabGroupContent.addEventListener('transitionend', onEnd);
-                setTimeout(() => {
-                    if (!tabGroupElement.classList.contains('toggling')) return;
-                    tabGroupContent.removeEventListener('transitionend', onEnd);
-                    finishOpen();
-                }, TAB_GROUP_ANIM_MS + 100);
-            });
-        } else {
-            this.runTabGroupCollapseAnimation(tabGroupId);
+            tabGroupContent.style.padding = '';
+            tabGroupContent.style.transition = '';
+            tabGroupElement.classList.remove('toggling');
+            this.saveTabGroups();
+            return;
         }
 
+        tabGroup.open = wantOpen;
+        this.tabGroups.set(resolvedId, tabGroup);
+        this._animateTabGroupContent(resolvedId, wantOpen);
         this.saveTabGroups();
     }
 
@@ -20028,7 +20499,11 @@ class AxisBrowser {
     async saveTabGroups() {
         if (this._profileScopedPersistBlocked?.('tabGroups')) return;
         const tabGroupsArray = this._buildTabGroupsSavePayload();
+        const pinnedSidebarOrder = this._rememberPinnedSidebarOrder();
         await this.saveSetting('tabGroups', tabGroupsArray);
+        if (pinnedSidebarOrder?.length) {
+            await this.saveSetting('pinnedSidebarOrder', pinnedSidebarOrder);
+        }
     }
 
     /** Called from main via executeJavaScript when quit is confirmed (never during beforeunload). */
@@ -20052,6 +20527,7 @@ class AxisBrowser {
             const unpinnedTabs = this._shouldPersistUnpinnedItems(context)
                 ? this._collectUnpinnedTabsPayload({ context })
                 : [];
+            const pinnedSidebarOrder = this._rememberPinnedSidebarOrder();
             this.settings.tabGroups = tabGroups;
             this.settings.pinnedTabs = pinnedTabs;
             this.settings.unpinnedTabs = unpinnedTabs;
@@ -20060,6 +20536,7 @@ class AxisBrowser {
                 tabGroups,
                 pinnedTabs,
                 unpinnedTabs,
+                pinnedSidebarOrder: pinnedSidebarOrder || this.settings.pinnedSidebarOrder || [],
                 clearUnpinnedRecovery: context === 'app-quit'
             };
         } catch (e) {
@@ -20351,6 +20828,150 @@ class AxisBrowser {
         return order;
     }
 
+    _normalizePinnedSidebarOrderItems(raw) {
+        if (!Array.isArray(raw) || raw.length === 0) return [];
+        const out = [];
+        const seenTabs = new Set();
+        const seenGroups = new Set();
+        for (const item of raw) {
+            if (!item || (item.type !== 'tab' && item.type !== 'group')) continue;
+            if (item.type === 'tab') {
+                const id = this._normalizeTabMapKey(item.id);
+                if (id == null || seenTabs.has(id)) continue;
+                seenTabs.add(id);
+                out.push({ type: 'tab', id });
+            } else {
+                const gKey = this.findTabGroupKey?.(item.id) ?? item.id;
+                const group =
+                    this.tabGroups?.get?.(gKey) ||
+                    this.tabGroups?.get?.(Number(item.id)) ||
+                    this.tabGroups?.get?.(String(item.id));
+                const id = group?.id ?? item.id;
+                if (id == null || seenGroups.has(id) || seenGroups.has(String(id))) continue;
+                seenGroups.add(id);
+                seenGroups.add(String(id));
+                out.push({ type: 'group', id });
+            }
+        }
+        return out;
+    }
+
+    _mergePinnedSidebarOrder(baseOrder, loosePinnedIds, pinnedGroups) {
+        const order = [...(baseOrder || [])];
+        const seenTabs = new Set(order.filter((item) => item.type === 'tab').map((item) => item.id));
+        const seenGroups = new Set(
+            order.filter((item) => item.type === 'group').map((item) => String(item.id))
+        );
+        for (const id of loosePinnedIds || []) {
+            if (!seenTabs.has(id)) {
+                order.push({ type: 'tab', id });
+                seenTabs.add(id);
+            }
+        }
+        for (const group of pinnedGroups || []) {
+            if (!group || seenGroups.has(String(group.id))) continue;
+            order.push({ type: 'group', id: group.id });
+            seenGroups.add(String(group.id));
+        }
+        return order;
+    }
+
+    /**
+     * Resolve interleaved pinned tabs + groups. Prefer live DOM when it already has groups,
+     * otherwise saved order — avoids the mid-load "all tabs then all groups" flash.
+     */
+    _resolvePinnedSidebarOrder(loosePinnedIds, pinnedGroups, opts = {}) {
+        const fallback =
+            opts.fallback ||
+            [
+                ...(loosePinnedIds || []).map((id) => ({ type: 'tab', id })),
+                ...(pinnedGroups || []).map((g) => ({ type: 'group', id: g.id }))
+            ];
+        const expectedGroupCount = (pinnedGroups || []).length;
+        const saved = this._normalizePinnedSidebarOrderItems(
+            opts.savedOrder || this.settings?.pinnedSidebarOrder
+        );
+        const savedValid = saved.filter((item) => {
+            if (item.type === 'tab') {
+                const tab = this.tabs.get(item.id);
+                return !!(tab && !tab.tabGroupId && tab.pinned && !tab.isFavoriteTab);
+            }
+            const gKey = this.findTabGroupKey?.(item.id) ?? item.id;
+            return !!(
+                this.tabGroups?.get?.(gKey) ||
+                this.tabGroups?.get?.(Number(item.id)) ||
+                this.tabGroups?.get?.(String(item.id))
+            );
+        });
+
+        if (opts.preferDom !== false) {
+            const domPinnedOrder = this._readPinnedSidebarOrderFromDom();
+            if (domPinnedOrder.length > 0) {
+                const domGroupCount = domPinnedOrder.filter((item) => item.type === 'group').length;
+                const domLooksComplete =
+                    expectedGroupCount === 0 || domGroupCount >= expectedGroupCount;
+                if (domLooksComplete) {
+                    return this._mergePinnedSidebarOrder(
+                        domPinnedOrder,
+                        loosePinnedIds,
+                        pinnedGroups
+                    );
+                }
+            }
+        }
+
+        if (savedValid.length > 0) {
+            return this._mergePinnedSidebarOrder(savedValid, loosePinnedIds, pinnedGroups);
+        }
+
+        if (opts.preferDom !== false) {
+            const domPinnedOrder = this._readPinnedSidebarOrderFromDom();
+            if (domPinnedOrder.length > 0) {
+                return this._mergePinnedSidebarOrder(domPinnedOrder, loosePinnedIds, pinnedGroups);
+            }
+        }
+
+        return this._mergePinnedSidebarOrder(fallback, loosePinnedIds, pinnedGroups);
+    }
+
+    _rememberPinnedSidebarOrder(order = null) {
+        const next =
+            order ||
+            this._readPinnedSidebarOrderFromDom() ||
+            this._normalizePinnedSidebarOrderItems(this.settings?.pinnedSidebarOrder);
+        if (!Array.isArray(next) || next.length === 0) return next;
+        if (!this.settings || typeof this.settings !== 'object') this.settings = {};
+        this.settings.pinnedSidebarOrder = next.map((item) => ({
+            type: item.type,
+            id: item.id
+        }));
+        return this.settings.pinnedSidebarOrder;
+    }
+
+    /** Unpinned-section order from the live sidebar DOM (standalone tabs below the divider). */
+    _readUnpinnedSidebarOrderFromDom() {
+        const container = this.elements.tabsContainer;
+        const separator = this.elements.tabsSeparator;
+        if (!container || !separator || separator.parentNode !== container) return [];
+
+        const children = Array.from(container.children);
+        const sepIdx = children.indexOf(separator);
+        if (sepIdx < 0) return [];
+
+        const order = [];
+        for (let i = sepIdx + 1; i < children.length; i++) {
+            const el = children[i];
+            if (!el?.classList?.contains('tab')) continue;
+            const tabId = this._normalizeTabMapKey(el.dataset.tabId);
+            if (tabId == null) continue;
+            const tab = this.tabs.get(tabId);
+            if (tab && !tab.tabGroupId && !tab.pinned && !tab.isFavoriteTab) {
+                order.push({ type: 'tab', id: tabId });
+            }
+        }
+        return order;
+    }
+
     _syncTabGroupOrdersFromPinnedOrder(pinnedOrder) {
         if (!Array.isArray(pinnedOrder) || pinnedOrder.length === 0) return;
         let groupOrd = 0;
@@ -20421,32 +21042,38 @@ class AxisBrowser {
             (a, b) => (a.order ?? 0) - (b.order ?? 0)
         );
 
-        const domPinnedOrder = this._readPinnedSidebarOrderFromDom();
         const fallbackPinnedOrder = [
             ...loosePinnedIds.map(id => ({ type: 'tab', id })),
             ...pinnedGroups.map(g => ({ type: 'group', id: g.id }))
         ];
-        let pinnedOrder = fallbackPinnedOrder;
-        if (domPinnedOrder.length > 0) {
-            const seenTabs = new Set(
-                domPinnedOrder.filter((item) => item.type === 'tab').map((item) => item.id)
-            );
-            const seenGroups = new Set(
-                domPinnedOrder.filter((item) => item.type === 'group').map((item) => item.id)
-            );
-            pinnedOrder = [...domPinnedOrder];
-            for (const id of loosePinnedIds) {
-                if (!seenTabs.has(id)) pinnedOrder.push({ type: 'tab', id });
-            }
-            for (const group of pinnedGroups) {
-                if (!seenGroups.has(group.id)) pinnedOrder.push({ type: 'group', id: group.id });
-            }
-        }
+        const pinnedOrder = this._resolvePinnedSidebarOrder(loosePinnedIds, pinnedGroups, {
+            /* Profile switches pass preferDom: false so saved order wins over a half-mounted DOM. */
+            preferDom: opts.preferDom !== false,
+            fallback: fallbackPinnedOrder
+        });
         this._syncTabGroupOrdersFromPinnedOrder(pinnedOrder);
-        const unpinnedOrder = this._sortLooseUnpinnedTabIds(looseUnpinnedIds).map((id) => ({
-            type: 'tab',
-            id
-        }));
+        const rememberedGroupCount = pinnedOrder.filter((item) => item.type === 'group').length;
+        if (rememberedGroupCount >= pinnedGroups.length) {
+            this._rememberPinnedSidebarOrder(pinnedOrder);
+        }
+
+        // Prefer live DOM order for unpinned tabs. Rebuilding from settings.unpinnedTabs
+        // after a group drag was reverting a prior unpinned reorder (stale save / Map order).
+        const domUnpinnedOrder =
+            opts.preferDom === false ? [] : this._readUnpinnedSidebarOrderFromDom();
+        let unpinnedOrder;
+        if (domUnpinnedOrder.length > 0) {
+            const seen = new Set(domUnpinnedOrder.map((item) => item.id));
+            unpinnedOrder = [...domUnpinnedOrder];
+            for (const id of this._sortLooseUnpinnedTabIds(looseUnpinnedIds)) {
+                if (!seen.has(id)) unpinnedOrder.push({ type: 'tab', id });
+            }
+        } else {
+            unpinnedOrder = this._sortLooseUnpinnedTabIds(looseUnpinnedIds).map((id) => ({
+                type: 'tab',
+                id
+            }));
+        }
 
         const pinnedNodes = [];
         pinnedOrder.forEach(item => {
@@ -20579,7 +21206,7 @@ class AxisBrowser {
 
     renameCurrentTabGroup() {
         if (!this.contextMenuTabGroupId) return;
-        const tabGroupElement = document.querySelector(`[data-tab-group-id="${this.contextMenuTabGroupId}"]`);
+            const tabGroupElement = document.querySelector(`[data-tab-group-id="${this.contextMenuTabGroupId}"]`);
         const titleElement = tabGroupElement?.querySelector('.tab-title');
         if (titleElement && titleElement.tagName !== 'INPUT') {
             this.renameTabGroup(this.contextMenuTabGroupId, titleElement, { deferBlurMs: 250 });
@@ -20645,20 +21272,20 @@ class AxisBrowser {
                     newTabId = this.createNewTab(sanitized, { skipActivate: true });
                 }
 
-                if (newTabId) {
-                    newTabIds.push(newTabId);
+                    if (newTabId) {
+                        newTabIds.push(newTabId);
                     this._copyTabPresentationToDuplicate(originalTab, newTabId);
-
-                    // Get the newly created tab to save its data
-                    const newTab = this.tabs.get(newTabId);
-                    if (newTab) {
-                        // Store tab data for persistence
-                        newTabGroup.tabs.push({
-                            id: newTabId,
-                            url: newTab.url || urlToDuplicate,
-                            title: newTab.title || originalTab.title || 'New Tab',
-                            favicon: newTab.favicon || originalTab.favicon || null
-                        });
+                        
+                        // Get the newly created tab to save its data
+                        const newTab = this.tabs.get(newTabId);
+                        if (newTab) {
+                            // Store tab data for persistence
+                            newTabGroup.tabs.push({
+                                id: newTabId,
+                                url: newTab.url || urlToDuplicate,
+                                title: newTab.title || originalTab.title || 'New Tab',
+                                favicon: newTab.favicon || originalTab.favicon || null
+                            });
                     }
                 }
             }
@@ -20785,7 +21412,7 @@ class AxisBrowser {
         const tabId = this._normalizeTabMapKey(this.contextMenuTabId);
         if (tabId == null) return;
         const tabElement = this._resolveLooseSidebarTabElement(tabId);
-        if (tabElement) {
+            if (tabElement) {
             this.togglePinTab(tabId, tabElement, null);
         }
     }
@@ -20794,7 +21421,7 @@ class AxisBrowser {
         try {
             const tabId = this._normalizeTabMapKey(this.contextMenuTabId || this.currentTab);
             if (tabId == null) return;
-
+            
             const tab = this.tabs.get(tabId);
             if (!tab) return;
 
@@ -20802,7 +21429,7 @@ class AxisBrowser {
             if (!urlToDuplicate || urlToDuplicate === 'about:blank') {
                 return;
             }
-
+            
             if (urlToDuplicate === this.NEWTAB_URL) {
                 const newTabId = this.createNewTab(this.NEWTAB_URL, { preserveNewTabState: true });
                 const newTab = this.tabs.get(newTabId);
@@ -20869,7 +21496,7 @@ class AxisBrowser {
         tab.isMuted = !tab.isMuted;
         this.tabs.set(tabId, tab);
         this._applyTabMuteState(tabId);
-        this.applyAmbientFromSettings();
+            this.applyAmbientFromSettings();
     }
 
     async showSidebarContextMenu(e) {
@@ -21033,8 +21660,11 @@ class AxisBrowser {
                 const speechScript = `(function(){try{return !!(window.speechSynthesis&&window.speechSynthesis.speaking);}catch(e){return false;}})();`;
                 const SPEECH_QUERY_BUDGET_MS = 90;
                 try {
+                    /* Attach catch on the guest script so a late reject after the timeout
+                     * does not become an UnhandledPromiseRejectionWarning. */
+                    const speechP = webview.executeJavaScript(speechScript).catch(() => false);
                     isSpeaking = await Promise.race([
-                        webview.executeJavaScript(speechScript),
+                        speechP,
                         new Promise((resolve) => setTimeout(() => resolve(false), SPEECH_QUERY_BUDGET_MS))
                     ]);
                 } catch (e) {
@@ -23993,28 +24623,28 @@ class AxisBrowser {
                         } else if (crossingIntoPinned) {
                             sepTarget = shiftHeight;
                         } else {
-                            let anchorJ = -1;
+                    let anchorJ = -1;
                             const domIndex = drag.siblingDomIndex;
-                            for (let j = 0; j < numSiblings; j++) {
+                    for (let j = 0; j < numSiblings; j++) {
                                 const idx = domIndex?.get(currentSiblings[j]) ?? -1;
                                 if (idx > drag.sepIdx) {
-                                    anchorJ = j;
-                                    break;
-                                }
-                            }
-                            const sepShiftForIndex = (j) => {
-                                if (j < 0 || j === currentDragIdx) return 0;
-                                if (effectiveTarget < currentDragIdx && j >= effectiveTarget && j < currentDragIdx) return shiftHeight;
-                                if (effectiveTarget > currentDragIdx && j > currentDragIdx && j <= effectiveTarget) return -shiftHeight;
-                                return 0;
-                            };
-                            if (anchorJ >= 0) {
+                            anchorJ = j;
+                            break;
+                        }
+                    }
+                    const sepShiftForIndex = (j) => {
+                        if (j < 0 || j === currentDragIdx) return 0;
+                        if (effectiveTarget < currentDragIdx && j >= effectiveTarget && j < currentDragIdx) return shiftHeight;
+                        if (effectiveTarget > currentDragIdx && j > currentDragIdx && j <= effectiveTarget) return -shiftHeight;
+                        return 0;
+                    };
+                    if (anchorJ >= 0) {
                                 if (anchorJ === currentDragIdx && fu > 0) {
-                                    sepTarget = sepShiftForIndex(fu - 1);
-                                } else if (anchorJ !== currentDragIdx) {
-                                    sepTarget = sepShiftForIndex(anchorJ);
-                                }
-                            }
+                            sepTarget = sepShiftForIndex(fu - 1);
+                        } else if (anchorJ !== currentDragIdx) {
+                            sepTarget = sepShiftForIndex(anchorJ);
+                        }
+                    }
                         }
                     }
 
@@ -24237,6 +24867,7 @@ class AxisBrowser {
                 void this.savePinnedTabs();
                 this._scheduleUnpinnedTabsRecoverySave();
                 if (reorderNeeded) {
+                    void this.saveUnpinnedTabs();
                     this.updatePinnedSeparatorVisibility();
                 }
             }
@@ -24590,7 +25221,7 @@ class AxisBrowser {
         });
 
         observer.observe(tabsContainer, { childList: true, subtree: true });
-
+        
         this._dragObserver = observer;
         this._tabDragDropTeardown = () => {
             if (this._dragObserver) {
@@ -25332,65 +25963,97 @@ class AxisBrowser {
     async generateAdvancedSuggestions(query) {
         const suggestions = [];
         const lowerQuery = query.toLowerCase();
-        
-        // Always show 2 open tab suggestions first (with "Switch to Tab" buttons)
+        const currentId = this._normalizeTabMapKey(this.currentTab);
+        const openTabUrls = new Set();
+
+        const tabDisplayTitle = (tab, tabId) => {
+            if (tab.customTitle) return tab.customTitle;
+            if (tab.url === this.NEWTAB_URL) {
+                return this.isTabInNtpAiChat(tabId) ? 'AI Chat' : 'New Tab';
+            }
+            return tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
+        };
+
+        const tabMatchesQuery = (title, url) => {
+            if (!lowerQuery) return true;
+            if (title.toLowerCase().includes(lowerQuery)) return true;
+            if (url.toLowerCase().includes(lowerQuery)) return true;
+            try {
+                const host = new URL(url).hostname.replace(/^www\./, '');
+                if (host && host.toLowerCase().includes(lowerQuery)) return true;
+            } catch (_) {}
+            return false;
+        };
+
+        // Matching open tabs first — with Switch to Tab (skip the tab you're already on).
         let tabCount = 0;
         this.tabs.forEach((tab, tabId) => {
-            if (tabCount >= 2) return; // Only show first 2 tabs
-            
-            const title = tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
+            if (tabCount >= 5) return;
+            const tid = this._normalizeTabMapKey(tabId);
+            if (tid != null && tid === currentId) return;
+            if (tab?.isFavoriteTab) return;
+
+            const title = tabDisplayTitle(tab, tid ?? tabId);
             const url = tab.url || 'about:blank';
-            
-            // Filter tabs by query if provided
-            if (query.length > 0 && 
-                !title.toLowerCase().includes(lowerQuery) && 
-                !url.toLowerCase().includes(lowerQuery)) {
-                return; // Skip this tab if it doesn't match query
+            if (!tabMatchesQuery(title, url)) return;
+
+            let icon = 'fas fa-globe';
+            if (tab.url === this.NEWTAB_URL) {
+                icon = this.isTabInNtpAiChat(tid ?? tabId) ? 'fas fa-message' : 'fas fa-search';
+            } else if (tab.incognito) {
+                icon = 'fas fa-mask';
+            } else if (this.isUrlOnDomain(url, 'gmail.com')) {
+                icon = 'fas fa-envelope';
+            } else if (this.isUrlOnDomain(url, 'youtube.com')) {
+                icon = 'fab fa-youtube';
+            } else if (this.isUrlOnDomain(url, 'github.com')) {
+                icon = 'fab fa-github';
+            } else if (this.isUrlOnDomain(url, 'facebook.com')) {
+                icon = 'fab fa-facebook';
+            } else if (this.isUrlOnDomain(url, 'twitter.com')) {
+                icon = 'fab fa-twitter';
+            } else if (this.isUrlOnDomain(url, 'instagram.com')) {
+                icon = 'fab fa-instagram';
+            } else if (this.isUrlOnDomain(url, 'reddit.com')) {
+                icon = 'fab fa-reddit';
+            } else if (this.isUrlOnDomain(url, 'stackoverflow.com')) {
+                icon = 'fab fa-stack-overflow';
+            } else if (this.isUrlOnDomain(url, 'wikipedia.org')) {
+                icon = 'fab fa-wikipedia-w';
+            } else if (this.isUrlOnDomain(url, 'amazon.com')) {
+                icon = 'fab fa-amazon';
             }
-                
-                let icon = 'fas fa-globe';
-                if (tab.incognito) {
-                    icon = 'fas fa-mask';
-                } else if (this.isUrlOnDomain(url, 'gmail.com')) {
-                    icon = 'fas fa-envelope';
-                } else if (this.isUrlOnDomain(url, 'youtube.com')) {
-                    icon = 'fab fa-youtube';
-                } else if (this.isUrlOnDomain(url, 'github.com')) {
-                    icon = 'fab fa-github';
-                } else if (this.isUrlOnDomain(url, 'facebook.com')) {
-                    icon = 'fab fa-facebook';
-                } else if (this.isUrlOnDomain(url, 'twitter.com')) {
-                    icon = 'fab fa-twitter';
-                } else if (this.isUrlOnDomain(url, 'instagram.com')) {
-                    icon = 'fab fa-instagram';
-                } else if (this.isUrlOnDomain(url, 'reddit.com')) {
-                    icon = 'fab fa-reddit';
-                } else if (this.isUrlOnDomain(url, 'stackoverflow.com')) {
-                    icon = 'fab fa-stack-overflow';
-                } else if (this.isUrlOnDomain(url, 'wikipedia.org')) {
-                    icon = 'fab fa-wikipedia-w';
-                } else if (this.isUrlOnDomain(url, 'amazon.com')) {
-                    icon = 'fab fa-amazon';
+
+            const tabSuggestion = {
+                text: title,
+                icon,
+                tabId: tid ?? tabId,
+                url,
+                isTab: true
+            };
+
+            if (!this.isSuggestionDismissed(tabSuggestion)) {
+                suggestions.push(tabSuggestion);
+                tabCount += 1;
+                if (url && url !== 'about:blank' && url !== this.NEWTAB_URL) {
+                    openTabUrls.add(url);
+                    try {
+                        openTabUrls.add(new URL(url).href);
+                    } catch (_) {}
                 }
-                
-                const tabSuggestion = {
-                    text: title,
-                    icon: icon,
-                    tabId: tabId,
-                    url: url,
-                    isTab: true
-                };
-                
-                // Only add if not dismissed
-                if (!this.isSuggestionDismissed(tabSuggestion)) {
-                    suggestions.push(tabSuggestion);
-                    tabCount++;
-                }
+            }
         });
-        
-        // Always return exactly 5 suggestions
-        const maxSuggestions = 5;
-        let searchCount = 0;
+
+        const maxSuggestions = 8;
+        const isOpenTabUrl = (u) => {
+            if (!u) return false;
+            if (openTabUrls.has(u)) return true;
+            try {
+                return openTabUrls.has(new URL(u).href);
+            } catch (_) {
+                return false;
+            }
+        };
         
         // Prioritize Google suggestions when there's a query
         if (query.length > 0) {
@@ -25400,7 +26063,7 @@ class AxisBrowser {
                 // Add website recommendations first (they're more actionable)
                 if (googleResults.websites && googleResults.websites.length > 0) {
                     googleResults.websites.forEach(website => {
-                        if (suggestions.length < maxSuggestions) {
+                        if (suggestions.length < maxSuggestions && !isOpenTabUrl(website.url)) {
                             const websiteObj = {
                                 text: website.text,
                                 icon: 'fas fa-globe',
@@ -25408,7 +26071,6 @@ class AxisBrowser {
                                 isUrl: true
                             };
                             suggestions.push(websiteObj);
-                            searchCount++;
                         }
                     });
                 }
@@ -25424,7 +26086,6 @@ class AxisBrowser {
                                 isSearch: true
                             };
                             suggestions.push(suggestionObj);
-                            searchCount++;
                         }
                     });
                 }
@@ -25451,7 +26112,6 @@ class AxisBrowser {
             recentSearches.forEach(search => {
                 if (suggestions.length < maxSuggestions && !this.isSuggestionDismissed(search)) {
                     suggestions.push(search);
-                    searchCount++;
                 }
             });
         }
@@ -25461,9 +26121,10 @@ class AxisBrowser {
             const remainingSlots = maxSuggestions - suggestions.length;
             const recentHistory = this.settings.history
                 .filter(item => 
-                    query.length === 0 ||
+                    !isOpenTabUrl(item.url) &&
+                    (query.length === 0 ||
                     item.title.toLowerCase().includes(lowerQuery) || 
-                    item.url.toLowerCase().includes(lowerQuery)
+                    item.url.toLowerCase().includes(lowerQuery))
                 )
                 .slice(0, remainingSlots)
                 .map(item => {
@@ -25502,42 +26163,27 @@ class AxisBrowser {
             recentHistory.forEach(item => {
                 if (suggestions.length < maxSuggestions && !this.isSuggestionDismissed(item)) {
                     suggestions.push(item);
-                    searchCount++;
                 }
             });
         }
-        
-        // Fill to exactly 5 with default suggestions if needed
+
+        // No shortcut fillers (New Tab / Incognito / Settings / Note) — only real matches.
         if (suggestions.length < maxSuggestions) {
-            const defaultSuggestions = this.getDefaultSuggestions();
-            const existingTexts = new Set(suggestions.map(s => s.text));
-            const needed = maxSuggestions - suggestions.length;
-            
-            // Get unique suggestions from defaults
-            const additional = defaultSuggestions
-                .filter(s => !existingTexts.has(s.text))
-                .slice(0, needed);
-            
-            suggestions.push(...additional);
-            
-            // If still not 5, add placeholder actions
-            if (suggestions.length < maxSuggestions) {
-                const placeholders = [
-                    { text: 'New Tab', icon: 'fas fa-plus', isAction: true },
-                    { text: 'New Incognito Tab', icon: 'fas fa-mask', isAction: true },
-                    { text: 'Open Settings', icon: 'fas fa-cog', isAction: true },
-                    { text: 'New Note', icon: 'fas fa-sticky-note', isAction: true }
-                ];
-                
-                placeholders.forEach(placeholder => {
-                    if (suggestions.length < maxSuggestions && !existingTexts.has(placeholder.text)) {
-                        suggestions.push(placeholder);
-                    }
-                });
+            const defaultSuggestions = this.getDefaultSuggestions().filter((s) => !s.isAction);
+            const existingTexts = new Set(suggestions.map((s) => s.text));
+            for (const s of defaultSuggestions) {
+                if (suggestions.length >= maxSuggestions) break;
+                if (existingTexts.has(s.text)) continue;
+                if (s.isTab && s.tabId != null) {
+                    const tid = this._normalizeTabMapKey(s.tabId);
+                    if (tid != null && tid === currentId) continue;
+                }
+                if (s.url && isOpenTabUrl(s.url) && !s.isTab) continue;
+                suggestions.push(s);
+                existingTexts.add(s.text);
             }
         }
-        
-        // Return exactly 5
+
         return suggestions.slice(0, maxSuggestions);
     }
 
@@ -26070,17 +26716,31 @@ class AxisBrowser {
 
     getDefaultSuggestions() {
         const suggestions = [];
-        
-        // Always show 2 open tab suggestions first (with "Switch to Tab" buttons)
+        const maxSuggestions = 8;
+        const currentId = this._normalizeTabMapKey(this.currentTab);
+        const openTabUrls = new Set();
+
+        const tabDisplayTitle = (tab, tabId) => {
+            if (tab.customTitle) return tab.customTitle;
+            if (tab.url === this.NEWTAB_URL) {
+                return this.isTabInNtpAiChat(tabId) ? 'AI Chat' : 'New Tab';
+            }
+            return tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
+        };
+
         let tabCount = 0;
         this.tabs.forEach((tab, tabId) => {
-            if (tabCount >= 2) return; // Only show first 2 tabs
-            
-            const title = tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
+            if (tabCount >= 5) return;
+            const tid = this._normalizeTabMapKey(tabId);
+            if (tid != null && tid === currentId) return;
+            if (tab?.isFavoriteTab) return;
+
+            const title = tabDisplayTitle(tab, tid ?? tabId);
             const url = tab.url || 'about:blank';
-            
             let icon = 'fas fa-globe';
-            if (tab.incognito) {
+            if (tab.url === this.NEWTAB_URL) {
+                icon = this.isTabInNtpAiChat(tid ?? tabId) ? 'fas fa-message' : 'fas fa-search';
+            } else if (tab.incognito) {
                 icon = 'fas fa-mask';
             } else if (this.isUrlOnDomain(url, 'gmail.com')) {
                 icon = 'fas fa-envelope';
@@ -26103,31 +26763,40 @@ class AxisBrowser {
             } else if (this.isUrlOnDomain(url, 'amazon.com')) {
                 icon = 'fab fa-amazon';
             }
-        
-        const tabSuggestion = {
+
+            const tabSuggestion = {
                 text: title,
-                icon: icon,
-                tabId: tabId,
-                url: url,
+                icon,
+                tabId: tid ?? tabId,
+                url,
                 isTab: true
             };
-            
-            // Only add if not dismissed
+
             if (!this.isSuggestionDismissed(tabSuggestion)) {
                 suggestions.push(tabSuggestion);
-                tabCount++;
+                tabCount += 1;
+                if (url && url !== 'about:blank' && url !== this.NEWTAB_URL) {
+                    openTabUrls.add(url);
+                    try {
+                        openTabUrls.add(new URL(url).href);
+                    } catch (_) {}
+                }
             }
         });
-        
-        // Always return exactly 5 suggestions
-        const maxSuggestions = 5;
-        let searchCount = 0;
-        
-        // Add recent searches if we have space
-        if (this.settings.recentSearches && this.settings.recentSearches.length > 0 && suggestions.length < maxSuggestions) {
+
+        const isOpenTabUrl = (u) => {
+            if (!u) return false;
+            if (openTabUrls.has(u)) return true;
+            try {
+                return openTabUrls.has(new URL(u).href);
+            } catch (_) {
+                return false;
+            }
+        };
+
+        if (this.settings.recentSearches?.length && suggestions.length < maxSuggestions) {
             const remainingSlots = maxSuggestions - suggestions.length;
-            const recentSearches = this.settings.recentSearches.slice(0, remainingSlots);
-            recentSearches.forEach(search => {
+            this.settings.recentSearches.slice(0, remainingSlots).forEach((search) => {
                 const searchSuggestion = {
                     text: `Search "${search}"`,
                     icon: 'fas fa-search',
@@ -26136,74 +26805,53 @@ class AxisBrowser {
                 };
                 if (suggestions.length < maxSuggestions && !this.isSuggestionDismissed(searchSuggestion)) {
                     suggestions.push(searchSuggestion);
-                    searchCount++;
                 }
             });
         }
-        
-        // Add recent history if we need more suggestions
-        if (suggestions.length < maxSuggestions && this.settings.history && this.settings.history.length > 0) {
+
+        if (suggestions.length < maxSuggestions && this.settings.history?.length) {
             const remainingSlots = maxSuggestions - suggestions.length;
-            const recentHistory = this.settings.history.slice(0, remainingSlots);
-            recentHistory.forEach(item => {
-                let icon = 'fas fa-lightbulb';
-                if (this.isUrlOnDomain(item.url, 'gmail.com')) {
-                    icon = 'fas fa-envelope';
-                } else if (this.isUrlOnDomain(item.url, 'youtube.com')) {
-                    icon = 'fab fa-youtube';
-                } else if (this.isUrlOnDomain(item.url, 'github.com')) {
-                    icon = 'fab fa-github';
-                } else if (this.isUrlOnDomain(item.url, 'facebook.com')) {
-                    icon = 'fab fa-facebook';
-                } else if (this.isUrlOnDomain(item.url, 'twitter.com')) {
-                    icon = 'fab fa-twitter';
-                } else if (this.isUrlOnDomain(item.url, 'instagram.com')) {
-                    icon = 'fab fa-instagram';
-                } else if (this.isUrlOnDomain(item.url, 'reddit.com')) {
-                    icon = 'fab fa-reddit';
-                } else if (this.isUrlOnDomain(item.url, 'stackoverflow.com')) {
-                    icon = 'fab fa-stack-overflow';
-                } else if (this.isUrlOnDomain(item.url, 'wikipedia.org')) {
-                    icon = 'fab fa-wikipedia-w';
-                } else if (this.isUrlOnDomain(item.url, 'amazon.com')) {
-                    icon = 'fab fa-amazon';
-                }
-                
-                const historySuggestion = {
-                    text: item.title,
-                    icon: icon,
-                    url: item.url,
-                    isHistory: true,
-                    timestamp: item.timestamp
-                };
-                
-                if (suggestions.length < maxSuggestions && !this.isSuggestionDismissed(historySuggestion)) {
-                    suggestions.push(historySuggestion);
-                    searchCount++;
-                }
-            });
+            this.settings.history
+                .filter((item) => !isOpenTabUrl(item.url))
+                .slice(0, remainingSlots)
+                .forEach((item) => {
+                    let icon = 'fas fa-lightbulb';
+                    if (this.isUrlOnDomain(item.url, 'gmail.com')) {
+                        icon = 'fas fa-envelope';
+                    } else if (this.isUrlOnDomain(item.url, 'youtube.com')) {
+                        icon = 'fab fa-youtube';
+                    } else if (this.isUrlOnDomain(item.url, 'github.com')) {
+                        icon = 'fab fa-github';
+                    } else if (this.isUrlOnDomain(item.url, 'facebook.com')) {
+                        icon = 'fab fa-facebook';
+                    } else if (this.isUrlOnDomain(item.url, 'twitter.com')) {
+                        icon = 'fab fa-twitter';
+                    } else if (this.isUrlOnDomain(item.url, 'instagram.com')) {
+                        icon = 'fab fa-instagram';
+                    } else if (this.isUrlOnDomain(item.url, 'reddit.com')) {
+                        icon = 'fab fa-reddit';
+                    } else if (this.isUrlOnDomain(item.url, 'stackoverflow.com')) {
+                        icon = 'fab fa-stack-overflow';
+                    } else if (this.isUrlOnDomain(item.url, 'wikipedia.org')) {
+                        icon = 'fab fa-wikipedia-w';
+                    } else if (this.isUrlOnDomain(item.url, 'amazon.com')) {
+                        icon = 'fab fa-amazon';
+                    }
+
+                    const historySuggestion = {
+                        text: item.title,
+                        icon,
+                        url: item.url,
+                        isHistory: true,
+                        timestamp: item.timestamp
+                    };
+
+                    if (suggestions.length < maxSuggestions && !this.isSuggestionDismissed(historySuggestion)) {
+                        suggestions.push(historySuggestion);
+                    }
+                });
         }
-        
-        // Fill to exactly 5 with placeholder actions if needed
-        if (suggestions.length < maxSuggestions) {
-            const placeholders = [
-                { text: 'New Tab', icon: 'fas fa-plus', isAction: true },
-                { text: 'New Incognito Tab', icon: 'fas fa-mask', isAction: true },
-                { text: 'Open Settings', icon: 'fas fa-cog', isAction: true },
-                { text: 'New Note', icon: 'fas fa-sticky-note', isAction: true }
-            ];
-            
-            const existingTexts = new Set(suggestions.map(s => s.text));
-            const needed = maxSuggestions - suggestions.length;
-            
-            placeholders.forEach(placeholder => {
-                if (suggestions.length < maxSuggestions && !existingTexts.has(placeholder.text)) {
-                    suggestions.push(placeholder);
-                }
-            });
-        }
-        
-        // Return exactly 5
+
         return suggestions.slice(0, maxSuggestions);
     }
 
@@ -26390,7 +27038,13 @@ class AxisBrowser {
         let url = raw.trim().replace(/[<>'"\x00-\x1f\x7f-\x9f]/g, '');
         if (!url) return null;
         const lower = url.toLowerCase();
-        if (lower.startsWith('javascript:') || lower.startsWith('vbscript:')) return null;
+        if (
+            lower.startsWith('javascript:') ||
+            lower.startsWith('vbscript:') ||
+            (lower.startsWith('data:') && !this._isSafeContextMenuDataImageUrl(url))
+        ) {
+            return null;
+        }
 
         if (!/^https?:\/\//i.test(url) && !lower.startsWith('data:') && !lower.startsWith('blob:')) {
             if (url.startsWith('//')) {
@@ -27381,17 +28035,17 @@ class AxisBrowser {
             const alwaysFull = !!this.settings?.alwaysShowFullUrl;
             if (alwaysFull) {
                 el.urlBarDisplay.textContent = currentUrl || 'New Tab';
-            } else {
+        } else {
                 try {
                     const url = new URL(currentUrl);
                     const domain = url.hostname.replace(/^www\./, '');
-                    let parts = [`<span class="url-domain">${domain}</span>`];
+                    let parts = [`<span class="url-domain">${this.escapeHtml(domain)}</span>`];
                     if (pageTitle && pageTitle.length > 0 && pageTitle !== domain) {
                         let title = pageTitle.replace(new RegExp(domain.split('.')[0], 'gi'), '').trim();
                         title = title.replace(/^[\s\-\|\/\:]+/, '').trim();
                         if (title.length > 0) {
                             if (title.length > 50) title = title.substring(0, 47) + '...';
-                            parts.push(`<span class="url-path">${title}</span>`);
+                            parts.push(`<span class="url-path">${this.escapeHtml(title)}</span>`);
                         }
                     } else if (url.pathname && url.pathname !== '/') {
                         const pathParts = url.pathname.split('/').filter((p) => p.length > 0);
@@ -27407,7 +28061,7 @@ class AxisBrowser {
                                 })
                                 .join(' / ');
                             if (pathDisplay.length > 40) pathDisplay = pathDisplay.substring(0, 37) + '...';
-                            parts.push(`<span class="url-path">${pathDisplay}</span>`);
+                            parts.push(`<span class="url-path">${this.escapeHtml(pathDisplay)}</span>`);
                         }
                     }
                     el.urlBarDisplay.innerHTML = parts.join('<span class="url-separator">/</span>');
@@ -27570,7 +28224,7 @@ class AxisBrowser {
                     
                     // Domain (without www)
                     const domain = url.hostname.replace(/^www\./, '');
-                    parts.push(`<span class="url-domain">${domain}</span>`);
+                    parts.push(`<span class="url-domain">${this.escapeHtml(domain)}</span>`);
                     
                     // Add page title or path
                     if (pageTitle && pageTitle.length > 0 && pageTitle !== domain) {
@@ -27586,7 +28240,7 @@ class AxisBrowser {
                             if (title.length > 50) {
                                 title = title.substring(0, 47) + '...';
                             }
-                            parts.push(`<span class="url-path">${title}</span>`);
+                            parts.push(`<span class="url-path">${this.escapeHtml(title)}</span>`);
                         }
                     } else if (url.pathname && url.pathname !== '/') {
                         // Use path if no good title
@@ -27603,7 +28257,7 @@ class AxisBrowser {
                             if (pathDisplay.length > 40) {
                                 pathDisplay = pathDisplay.substring(0, 37) + '...';
                             }
-                            parts.push(`<span class="url-path">${pathDisplay}</span>`);
+                            parts.push(`<span class="url-path">${this.escapeHtml(pathDisplay)}</span>`);
                         }
                     }
                     
@@ -27619,7 +28273,7 @@ class AxisBrowser {
         if (!opts.skipExtractTheme) {
             if (this.settings?.transparentSites) {
                 this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
-            } else {
+        } else {
                 this._voidGuestTask(this.extractUrlBarTheme(webview));
             }
         } else if (!opts.keepInstantTheme) {
@@ -27649,7 +28303,7 @@ class AxisBrowser {
 
         let shellDarkChrome = this.isIncognitoWindow || this.isDarkColor(themeColor);
         if (!this.isIncognitoWindow && gradientEnabled) {
-            shellDarkChrome = this.isDarkColor(this.mixHexColors(themeColor, gradientColor, 0.5));
+                shellDarkChrome = this.isDarkColor(this.mixHexColors(themeColor, gradientColor, 0.5));
         }
 
         urlBar.style.removeProperty('backdrop-filter');
@@ -27703,10 +28357,10 @@ class AxisBrowser {
         urlBar.classList.toggle('dark-mode', shellDarkChrome);
 
         if (shellDarkChrome) {
-            urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
-            urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
-            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+                urlBar.style.setProperty('--url-bar-border', 'rgba(255, 255, 255, 0.1)');
+                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+                urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
+                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
         } else {
             urlBar.style.setProperty('--url-bar-border', 'rgba(0, 0, 0, 0.08)');
             urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.88)');
@@ -27723,21 +28377,21 @@ class AxisBrowser {
         this._clearWebviewCanvasColor();
         urlBar.style.setProperty('background', 'transparent', 'important');
         urlBar.style.setProperty('--url-bar-bg', 'transparent');
-        urlBar.style.removeProperty('backdrop-filter');
-        urlBar.style.removeProperty('-webkit-backdrop-filter');
+            urlBar.style.removeProperty('backdrop-filter');
+            urlBar.style.removeProperty('-webkit-backdrop-filter');
         const lightUi = this.isLightUiTheme();
         urlBar.classList.toggle('dark-mode', !lightUi);
         urlBar.style.setProperty('--url-bar-border', 'transparent');
-        if (lightUi) {
+            if (lightUi) {
             urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.88)');
             urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
             urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.06)');
-        } else {
-            urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+            } else {
+                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
             urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
-            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+            }
         }
-    }
 
     /** New tab URL bar follows light/dark appearance; Settings stays dark frosted. */
     applyInternalShellUrlBarStyle() {
@@ -27770,7 +28424,9 @@ class AxisBrowser {
             if (this.getActiveWebview() !== wv) return;
             const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
             if (!tab || tab.url === this.NEWTAB_URL || tab.url === 'axis://settings' || tab.isSettings) return;
-            void this.extractUrlBarTheme(wv, { refine: true, afterRestore: !!opts.afterRestore });
+            this._voidGuestTask(
+                this.extractUrlBarTheme(wv, { refine: true, afterRestore: !!opts.afterRestore })
+            );
             });
         });
     }
@@ -27884,7 +28540,7 @@ class AxisBrowser {
                                 var b = Math.round(parseFloat(match[2]));
                                 var a = match.length >= 4 ? parseFloat(match[3]) : 1;
                                 if (a < 0.1) return null;
-                                return { r, g, b };
+                                return { r: r, g: g, b: b };
                             }
                             return null;
                         }
@@ -27901,7 +28557,28 @@ class AxisBrowser {
                             }
                             return null;
                         }
-                        var themeMeta = document.querySelector('meta[name="theme-color"]');
+                        function pickThemeColorMeta() {
+                            var metas = document.querySelectorAll('meta[name="theme-color"]');
+                            if (!metas || !metas.length) return null;
+                            var preferred = null;
+                            var fallback = null;
+                            for (var i = 0; i < metas.length; i++) {
+                                var m = metas[i];
+                                var media = (m.getAttribute('media') || '').trim();
+                                if (!media) {
+                                    if (!fallback) fallback = m;
+                                    continue;
+                                }
+                                try {
+                                    if (window.matchMedia(media).matches) {
+                                        preferred = m;
+                                        break;
+                                    }
+                                } catch (e) {}
+                            }
+                            return preferred || fallback;
+                        }
+                        var themeMeta = pickThemeColorMeta();
                         if (themeMeta && themeMeta.content) {
                             var metaColor = parseColor(themeMeta.content);
                             if (metaColor) {
@@ -28088,18 +28765,39 @@ class AxisBrowser {
                                     score += Math.min(r.width, vw) / vw * 30;
                                     if (score > bestScore) {
                                         bestScore = score;
-                                        best = { rgb: bg, score: 60 + score, source: 'header' };
+                                        best = { rgb: bg, score: 40 + Math.min(score, 80), source: 'dom-header' };
                                     }
                                 }
                             }
                             return best;
                         }
+                        function pickThemeColorMeta() {
+                            var metas = document.querySelectorAll('meta[name="theme-color"]');
+                            if (!metas || !metas.length) return null;
+                            var preferred = null;
+                            var fallback = null;
+                            for (var i = 0; i < metas.length; i++) {
+                                var m = metas[i];
+                                var media = (m.getAttribute('media') || '').trim();
+                                if (!media) {
+                                    if (!fallback) fallback = m;
+                                    continue;
+                                }
+                                try {
+                                    if (window.matchMedia(media).matches) {
+                                        preferred = m;
+                                        break;
+                                    }
+                                } catch (e) {}
+                            }
+                            return preferred || fallback;
+                        }
                         function collectMetaCandidate() {
-                            var themeMeta = document.querySelector('meta[name="theme-color"]');
+                            var themeMeta = pickThemeColorMeta();
                             if (!themeMeta || !themeMeta.content) return null;
                             var metaColor = parseColor(themeMeta.content);
                             if (!metaColor) return null;
-                            return { rgb: metaColor, score: 72, source: 'meta' };
+                            return { rgb: metaColor, score: 140, source: 'meta' };
                         }
                         function collectSurfaceCandidate() {
                             var bodyBg = parseColor(window.getComputedStyle(document.body).backgroundColor);
@@ -28128,30 +28826,21 @@ class AxisBrowser {
                         var hdr = collectHeaderCandidate();
                         var meta = collectMetaCandidate();
                         var surface = collectSurfaceCandidate();
+                        // Author theme-color wins when present — sticky nav samples were painting the wrong bar color.
+                        if (meta) {
+                            return { r: meta.rgb.r, g: meta.rgb.g, b: meta.rgb.b, brightness: getBrightness(meta.rgb), source: 'meta' };
+                        }
                         if (top) candidates.push(top);
                         if (hdr) candidates.push(hdr);
-                        if (meta) candidates.push(meta);
                         if (surface) candidates.push(surface);
 
-                        var cMeta = meta;
-                        var cTop = top;
-                        var cHdr = hdr;
-                        if (cMeta && cHdr && isSimilar(cMeta.rgb, cHdr.rgb, 50)) {
-                            cMeta.score += 35;
-                            cHdr.score += 35;
+                        if (top && hdr && isSimilar(top.rgb, hdr.rgb, 45)) {
+                            top.score += 40;
+                            hdr.score += 20;
                         }
-                        if (cMeta && cTop && isSimilar(cMeta.rgb, cTop.rgb, 50)) {
-                            cMeta.score += 30;
-                            cTop.score += 30;
-                        }
-                        if (cTop && cHdr && isSimilar(cTop.rgb, cHdr.rgb, 45)) {
-                            cTop.score += 40;
-                            cHdr.score += 40;
-                        }
-                        if (cMeta && cTop && cHdr &&
-                            !isSimilar(cMeta.rgb, cTop.rgb, 55) &&
-                            !isSimilar(cMeta.rgb, cHdr.rgb, 55)) {
-                            cMeta.score -= 45;
+                        if (top && surface && isSimilar(top.rgb, surface.rgb, 40)) {
+                            top.score += 35;
+                            surface.score += 20;
                         }
 
                         var winner = pickBestCandidate(candidates);
@@ -28170,12 +28859,12 @@ class AxisBrowser {
             if (isEarly && seqAtStart !== this._urlBarThemeSeq) return;
             if (!isEarly && seq !== this._urlBarThemeSeq) return;
             if (this.getActiveWebview() !== webview) return;
-
+            
             const earlyTrusted =
                 colorInfo &&
                 (colorInfo.source === 'meta' ||
                     colorInfo.source === 'meta-inline' ||
-                    colorInfo.source === 'header');
+                    colorInfo.source === 'http-header');
             if (isEarly && !earlyTrusted) return;
             
             if (this._isUrlBarThemeHeldForWebview(webview)) {
@@ -28192,7 +28881,7 @@ class AxisBrowser {
             const isDefaultOrError =
                 colorInfo &&
                 (colorInfo.source === 'default' || colorInfo.source === 'error');
-            if (isDefaultOrError) {
+                    if (isDefaultOrError) {
                 if (!isEarly) {
                     this.applyAppThemeToUrlBar({ skipShellReset: true });
                     this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
@@ -28276,7 +28965,7 @@ class AxisBrowser {
         this.stopPIPLeaveCheck();
         this._pipLeaveBusy = false;
         this.pipLeaveCheckInterval = setInterval(() => {
-            void this._pipPollPiPStateOnce();
+            this._voidGuestTask(this._pipPollPiPStateOnce());
         }, 150);
     }
 
@@ -28503,8 +29192,20 @@ class AxisBrowser {
             e.preventDefault();
             e.stopPropagation();
             if (!this._sidebarMediaDock) return;
-            const tid = this._normalizeTabMapKey(this._sidebarMediaDock.tabId);
-            if (tid != null) this.switchToTab(tid);
+            const dock = this._sidebarMediaDock;
+            const tid = this._normalizeTabMapKey(dock.tabId);
+            if (tid == null) return;
+            if (this.tabs.has(tid)) {
+                this.switchToTab(tid);
+                return;
+            }
+            const pid = String(dock.profileId || this._crossProfileMediaGuest?.profileId || '');
+            const cur = String(this.profileId || '');
+            if (pid && pid !== cur && typeof this.switchToProfileId === 'function') {
+                void this.switchToProfileId(pid, { animate: true }).then(() => {
+                    if (this.tabs.has(tid)) this.switchToTab(tid);
+                });
+            }
         });
         el.sidebarMediaPipBtn?.addEventListener('click', () => void this.sidebarMediaDockRequestPip());
         el.sidebarMediaDismissBtn?.addEventListener('click', () => void this.sidebarMediaDockDismiss());
@@ -28516,7 +29217,24 @@ class AxisBrowser {
 
     _getSidebarMediaWebview() {
         if (!this._sidebarMediaDock) return null;
-        const tid = this._normalizeTabMapKey(this._sidebarMediaDock.tabId);
+        const dock = this._sidebarMediaDock;
+        const stored = dock.webview;
+        if (stored && !stored.isDestroyed?.()) return stored;
+        const guest = this._crossProfileMediaGuest;
+        if (
+            guest?.webview &&
+            !guest.webview.isDestroyed?.() &&
+            this._normalizeTabMapKey(guest.tabId) === this._normalizeTabMapKey(dock.tabId)
+        ) {
+            return guest.webview;
+        }
+        if (this.pipWebview && !this.pipWebview.isDestroyed?.()) {
+            const pipTid = this._normalizeTabMapKey(this.pipTabId);
+            if (pipTid != null && pipTid === this._normalizeTabMapKey(dock.tabId)) {
+                return this.pipWebview;
+            }
+        }
+        const tid = this._normalizeTabMapKey(dock.tabId);
         const tab = tid != null ? this.tabs.get(tid) : null;
         return tab?.webview || null;
     }
@@ -28525,6 +29243,7 @@ class AxisBrowser {
         this._stopSidebarMediaDockPoll();
         this._sidebarMediaTitleDisconnectResizeObserver();
         this._sidebarMediaDock = null;
+        this._crossProfileMediaGuest = null;
         this._sidebarMediaGlowSeq += 1;
         const dock = this.elements?.sidebarMediaDock;
         if (!dock) return;
@@ -28553,9 +29272,37 @@ class AxisBrowser {
 
     showSidebarMediaDock(tabId, videoIndex) {
         const tid = this._normalizeTabMapKey(tabId);
-        if (tid == null || !this.tabs.has(tid)) return;
+        if (tid == null) return;
+        const tab = this.tabs.get(tid);
+        const guest = this._crossProfileMediaGuest;
+        const guestMatch =
+            guest && this._normalizeTabMapKey(guest.tabId) === tid && guest.webview && !guest.webview.isDestroyed?.();
+        const pipMatch =
+            this.pipWebview &&
+            !this.pipWebview.isDestroyed?.() &&
+            this._normalizeTabMapKey(this.pipTabId) === tid;
+        /* Tab may live on another profile after a swipe — still show the mini player. */
+        if (!tab && !guestMatch && !pipMatch) return;
         this._stopSidebarMediaDockPoll();
-        this._sidebarMediaDock = { tabId: tid, videoIndex: Number(videoIndex) || 0 };
+        const webview = tab?.webview || (guestMatch ? guest.webview : null) || (pipMatch ? this.pipWebview : null);
+        this._sidebarMediaDock = {
+            tabId: tid,
+            videoIndex: Number(videoIndex) || 0,
+            webview: webview || null,
+            profileId: tab ? this.profileId : guest?.profileId || null,
+            title: tab?.customTitle || tab?.title || guest?.title || 'Playing media',
+            url: tab?.url || guest?.url || '',
+            favicon: tab?.favicon || null
+        };
+        if (webview) {
+            this._ensureBackgroundMediaPlayback(webview, tab || null);
+            /* Keep foreign-profile guests hidden in the main panel; only the mini player UI shows. */
+            if (!tab) {
+                try {
+                    webview.classList?.add('axis-profile-webview-suspended');
+                } catch (_) {}
+            }
+        }
         const dock = this.elements?.sidebarMediaDock;
         if (dock) {
             dock.classList.remove('hidden');
@@ -28620,10 +29367,17 @@ class AxisBrowser {
         const el = this.elements;
         const state = this._sidebarMediaDock;
         if (!state) return;
-        const tab = this.tabs.get(this._normalizeTabMapKey(state.tabId));
-        const rawUrl = tab?.url || '';
+        const tid = this._normalizeTabMapKey(state.tabId);
+        const tab = tid != null ? this.tabs.get(tid) : null;
+        const guest =
+            this._crossProfileMediaGuest &&
+            this._normalizeTabMapKey(this._crossProfileMediaGuest.tabId) === tid
+                ? this._crossProfileMediaGuest
+                : null;
+        const rawUrl = tab?.url || state.url || guest?.url || '';
         const isYouTube = this.isYouTubeHost(rawUrl);
-        const title = tab?.customTitle || tab?.title || 'Playing media';
+        const title =
+            tab?.customTitle || tab?.title || state.title || guest?.title || 'Playing media';
         if (el.sidebarMediaTitle) el.sidebarMediaTitle.textContent = title;
         if (el.sidebarMediaTitleBtn) {
             el.sidebarMediaTitleBtn.title = title ? `${title} — Go to tab` : 'Go to tab';
@@ -28642,7 +29396,8 @@ class AxisBrowser {
         const volI = el.sidebarMediaVolBtn?.querySelector('i');
         if (volI) volI.className = 'fas fa-volume-high';
         const badge = el.sidebarMediaSourceBadge;
-        const faviconUrl = tab?.favicon || (rawUrl ? this.getFaviconUrl(rawUrl) : null);
+        const faviconUrl =
+            tab?.favicon || state.favicon || (rawUrl ? this.getFaviconUrl(rawUrl) : null);
         if (badge) {
             if (faviconUrl) {
                 badge.innerHTML = `<img class="sidebar-media-favicon" src="${this.escapeHtml(faviconUrl)}" alt="" draggable="false" />`;
@@ -28654,17 +29409,22 @@ class AxisBrowser {
             }
         }
         this._layoutSidebarMediaTitleSlide();
-        if (card && tab) {
+        const glowTab = tab || {
+            url: rawUrl,
+            favicon: faviconUrl,
+            title
+        };
+        if (card) {
             const faviconImg = badge?.querySelector?.('.sidebar-media-favicon');
             if (faviconImg) {
-                const runGlow = () => void this._applySidebarMediaDockGlow(tab, card, faviconImg);
+                const runGlow = () => void this._applySidebarMediaDockGlow(glowTab, card, faviconImg);
                 if (faviconImg.complete) runGlow();
                 else {
                     faviconImg.addEventListener('load', runGlow, { once: true });
                     faviconImg.addEventListener('error', runGlow, { once: true });
                 }
             } else {
-                void this._applySidebarMediaDockGlow(tab, card, null);
+                void this._applySidebarMediaDockGlow(glowTab, card, null);
             }
         }
     }
@@ -28984,8 +29744,8 @@ class AxisBrowser {
     
     hidePIP() {
         this.stopPIPLeaveCheck();
-        // Exit native PIP if active
-        this.exitNativePIP();
+        // Exit native PIP if active (async; never leave an unhandled rejection).
+        this._voidGuestTask(this.exitNativePIP());
         
         this.pipTabId = null;
         this.pipVideoIndex = 0;
@@ -29086,7 +29846,7 @@ class AxisBrowser {
         if (!webview) return;
         if (channel === 'axis-vault-autofill-hide') {
             this.hideVaultAutofillPanel();
-            void this.hideVaultAutofillInPage(webview);
+            this._voidGuestTask(this.hideVaultAutofillInPage(webview));
             return;
         }
         if (channel === 'axis-vault-autofill-request') {
@@ -29243,7 +30003,7 @@ class AxisBrowser {
             } catch (_) {}
             if (!/^https?:/i.test(url)) return;
             void this.pollVaultAutofillFocus(wv).catch(() => {});
-        }, 1200);
+        }, 450);
     }
 
     async executeInGuestFrames(webview, js, userGesture = false) {
@@ -29313,6 +30073,7 @@ class AxisBrowser {
             } catch (_) {}
             if (!/^https?:/i.test(url)) return;
             await this.syncVaultAutofillUiTheme(webview);
+            // Always walk frames — Stripe/Payment Element iframes load after the top page.
             await this.executeInGuestFrames(webview, js, false);
             webview.__axisVaultAutofillInjected = true;
         } catch (_) {}
@@ -29330,16 +30091,25 @@ class AxisBrowser {
         const js = this._vaultAutofillProbeJs;
         if (!webview || !js) return null;
         let pick = null;
-        let focus = null;
-        let focusKey = '';
+        let best = null;
         const visitFrame = async (frame) => {
             if (!frame) return;
             try {
                 const r = await frame.executeJavaScript(js, false);
                 if (r?.pick) pick = r.pick;
                 if (r?.focus) {
-                    focus = r.focus;
-                    focusKey = r.focusKey || '';
+                    const score =
+                        (r.menuOpen ? 2 : 0) +
+                        (r.focus?.kind === 'card' || r.focus?.kind === 'address' ? 1 : 0) +
+                        (Number(r.focusAt) || 0) / 1e15;
+                    if (!best || score >= best.score) {
+                        best = {
+                            focus: r.focus,
+                            focusKey: r.focusKey || '',
+                            menuOpen: !!r.menuOpen,
+                            score
+                        };
+                    }
                 }
             } catch (_) {}
             let kids = [];
@@ -29358,7 +30128,15 @@ class AxisBrowser {
             const wc = typeof webview.getWebContents === 'function' ? webview.getWebContents() : null;
             if (wc && !wc.isDestroyed() && wc.mainFrame) {
                 await visitFrame(wc.mainFrame);
-                return pick ? { pick } : focus ? { focus, focusKey } : null;
+                if (pick) return { pick };
+                if (best) {
+                    return {
+                        focus: best.focus,
+                        focusKey: best.focusKey,
+                        menuOpen: best.menuOpen
+                    };
+                }
+                return null;
             }
         } catch (_) {}
         try {
@@ -29394,20 +30172,21 @@ class AxisBrowser {
             return;
         }
         if (!items.length) return;
-        await this.showVaultAutofillInPage(webview, items);
+        // Inject into every frame (including Stripe iframes) so the menu appears next to the field.
+        await this.showVaultAutofillInPage(webview, items, kind);
         try {
             webview.send('axis-vault-show-autofill', { kind, items });
         } catch (_) {}
     }
 
-    async showVaultAutofillInPage(webview, items) {
+    async showVaultAutofillInPage(webview, items, kind = 'login') {
         try {
             if (!webview || !items?.length) return;
             const theme = this.getVaultAutofillUiTheme();
             await this.syncVaultAutofillUiTheme(webview);
             let showJs = null;
             try {
-                showJs = await window.electronAPI.vaultBuildAutofillShowJs(items, theme);
+                showJs = await window.electronAPI.vaultBuildAutofillShowJs(items, theme, kind);
             } catch (_) {
                 return;
             }
@@ -29421,6 +30200,7 @@ class AxisBrowser {
                         return '';
                     }
                 })(),
+                kind,
                 n: items.length
             });
         } catch (_) {}
@@ -29433,9 +30213,8 @@ class AxisBrowser {
                 const status = await window.electronAPI.vaultStatus();
                 if (status?.autofillEnabled === false) return;
             } catch (_) {}
-            if (!webview.__axisVaultAutofillInjected) {
-                await this.injectVaultAutofillBootstrap(webview);
-            }
+            // Re-inject every poll so late-loading payment iframes get listeners.
+            await this.injectVaultAutofillBootstrap(webview);
             const probe = await this.probeVaultAutofillGuest(webview);
             if (!probe) return;
             if (probe.menuOpen) {
@@ -29456,8 +30235,16 @@ class AxisBrowser {
             const focus = probe.focus;
             if (!focus) return;
             const key = probe.focusKey || JSON.stringify(focus);
-            if (key === webview.__axisVaultAutofillLastKey) return;
+            const now = Date.now();
+            // Retry showing soon if a payment iframe was not ready the first time.
+            if (
+                key === webview.__axisVaultAutofillLastKey &&
+                now - (webview.__axisVaultAutofillLastAt || 0) < 900
+            ) {
+                return;
+            }
             webview.__axisVaultAutofillLastKey = key;
+            webview.__axisVaultAutofillLastAt = now;
             await this.presentVaultAutofill(webview, focus);
         } catch (_) {}
     }
@@ -29607,7 +30394,7 @@ class AxisBrowser {
             }
         }
         if (!items.length) return;
-        await this.showVaultAutofillInPage(webview, items);
+        await this.showVaultAutofillInPage(webview, items, kind);
         try {
             webview.send('axis-vault-show-autofill', { kind, items });
         } catch (_) {}
@@ -29916,6 +30703,18 @@ if (typeof AxisUndo !== 'undefined') {
 // Initialize the browser when DOM is loaded
 // Initialize browser immediately
 let browserInstance = null;
+
+/*
+ * Guest executeJavaScript often rejects with "Script failed to execute" when a page
+ * navigates away or is not ready yet. Call sites swallow these; keep a last-resort
+ * handler so a missed .catch does not spam UnhandledPromiseRejectionWarning on start.
+ */
+window.addEventListener('unhandledrejection', (event) => {
+    const msg = String(event?.reason?.message || event?.reason || '');
+    if (msg.includes('Script failed to execute')) {
+        event.preventDefault();
+    }
+});
 
 document.addEventListener('DOMContentLoaded', () => {
     browserInstance = new AxisBrowser();
