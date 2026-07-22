@@ -25,6 +25,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSitePermissionOverrides: (obj) => ipcRenderer.invoke('set-site-permission-overrides', obj),
   sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
   openSettingsWindow: (tab) => ipcRenderer.invoke('open-settings-window', tab),
+  listImportableBrowsers: () => ipcRenderer.invoke('list-importable-browsers'),
+  listBrowserImportProfiles: (browserId) => ipcRenderer.invoke('list-browser-import-profiles', browserId),
+  previewBrowserImport: (payload) => ipcRenderer.invoke('preview-browser-import', payload),
+  importBrowserProfile: (payload) => ipcRenderer.invoke('import-browser-profile', payload),
+  getDefaultBrowserStatus: () => ipcRenderer.invoke('axis-get-default-browser-status'),
+  setAsDefaultBrowser: () => ipcRenderer.invoke('axis-set-as-default-browser'),
+  openDefaultBrowserSettings: () => ipcRenderer.invoke('axis-open-default-browser-settings'),
   getSettingsTabLoadUrl: (section) => ipcRenderer.invoke('get-settings-tab-load-url', section),
   getSettingsWebviewPreloadPath: () => ipcRenderer.invoke('get-settings-webview-preload-path'),
   openUrlInBrowser: (url) => ipcRenderer.invoke('open-url-in-browser', url),
@@ -111,7 +118,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('settings-updated', (_event, data) => callback(data)),
   onExtensionsReady: (callback) =>
     ipcRenderer.on('axis-extensions-ready', (_event, data) => callback(data)),
-  onProfilesUpdated: (callback) => ipcRenderer.on('profiles-updated', () => callback()),
+  onProfilesUpdated: (callback) =>
+    ipcRenderer.on('profiles-updated', (_event, payload) => callback(payload)),
   onProfileMenuAction: (callback) =>
     ipcRenderer.on('profile-menu-action', (_event, payload) => callback(payload)),
   onSwitchSettingsTab: (callback) => ipcRenderer.on('switch-settings-tab', (event, tab) => callback(tab)),
@@ -135,6 +143,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'delete-profile',
       typeof profileId === 'object' ? profileId : { id: profileId }
     ),
+  listTrashedProfiles: () => ipcRenderer.invoke('list-trashed-profiles'),
+  restoreTrashedProfile: (payload) =>
+    ipcRenderer.invoke(
+      'restore-trashed-profile',
+      typeof payload === 'object' ? payload : { trashId: payload }
+    ),
+  permanentlyDeleteTrashedProfile: (payload) =>
+    ipcRenderer.invoke(
+      'permanently-delete-trashed-profile',
+      typeof payload === 'object' ? payload : { trashId: payload }
+    ),
   openOrFocusProfileWindow: (profileId) => ipcRenderer.invoke('open-or-focus-profile-window', profileId),
   switchProfileInWindow: (profileId) => ipcRenderer.invoke('switch-profile-in-window', profileId),
   onAxisSwitchProfile: (callback) => {
@@ -151,6 +170,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('persist-outgoing-profile', profileId, captured),
   fetchFaviconBytes: (url) => ipcRenderer.invoke('axis-fetch-favicon-bytes', url),
   fetchText: (url) => ipcRenderer.invoke('axis-fetch-text', url),
+  searchWeatherCities: (query, limit) =>
+    ipcRenderer.invoke('axis-search-weather-cities', query, limit),
+  searchTickers: (query, limit) => ipcRenderer.invoke('axis-search-tickers', query, limit),
   showFavoriteContextMenu: (x, y, info) => ipcRenderer.invoke('show-favorite-context-menu', x, y, info),
   onFavoriteContextMenuAction: (callback) =>
     ipcRenderer.on('favorite-context-menu-action', (event, action, data) => callback(action, data)),
@@ -159,8 +181,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vaultStatus: () => ipcRenderer.invoke('axis-vault-status'),
   vaultGetPageScanJs: () => ipcRenderer.invoke('axis-vault-get-page-scan-js'),
   vaultGetAutofillInjectJs: () => ipcRenderer.invoke('axis-vault-get-autofill-inject-js'),
-  vaultBuildAutofillShowJs: (items, theme) =>
-    ipcRenderer.invoke('axis-vault-build-autofill-show-js', { items, theme }),
+  vaultBuildAutofillShowJs: (items, theme, kind) =>
+    ipcRenderer.invoke('axis-vault-build-autofill-show-js', { items, theme, kind }),
   vaultBuildAutofillFillJs: (cred) => ipcRenderer.invoke('axis-vault-build-autofill-fill-js', cred),
   vaultReportCredentials: (payload) => ipcRenderer.invoke('axis-vault-report-credentials', payload),
   vaultVerifyDevice: (reason) => ipcRenderer.invoke('axis-vault-verify-device', reason),
