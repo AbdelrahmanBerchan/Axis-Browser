@@ -54,15 +54,74 @@
             });
         }
 
+        function pickThemeColorMeta() {
+            try {
+                const metas = document.querySelectorAll('meta[name="theme-color"]');
+                if (!metas.length) return null;
+                let preferred = null;
+                let fallback = null;
+                for (const m of metas) {
+                    const media = (m.getAttribute('media') || '').trim();
+                    if (!media) {
+                        if (!fallback) fallback = m;
+                        continue;
+                    }
+                    try {
+                        if (window.matchMedia(media).matches) {
+                            preferred = m;
+                            break;
+                        }
+                    } catch (_) {
+                        /* ignore bad media */
+                    }
+                }
+                return preferred || fallback;
+            } catch (_) {
+                return null;
+            }
+        }
+
         function scanInlineHtml() {
             try {
                 const html = document.documentElement?.innerHTML || '';
                 if (!html) return false;
-                const m =
+                // Prefer media-matched tags when present in the markup burst.
+                const mediaRe =
+                    /<meta[^>]+name=["']theme-color["'][^>]*media=["']([^"']*)["'][^>]*content=["']([^"']+)["']/gi;
+                const mediaRe2 =
+                    /<meta[^>]+content=["']([^"']+)["'][^>]*name=["']theme-color["'][^>]*media=["']([^"']*)["']/gi;
+                let m;
+                while ((m = mediaRe.exec(html))) {
+                    try {
+                        if (window.matchMedia(m[1]).matches) {
+                            const c = parseColor(m[2]);
+                            if (c) {
+                                send(c, 'meta-inline');
+                                return true;
+                            }
+                        }
+                    } catch (_) {
+                        /* ignore */
+                    }
+                }
+                while ((m = mediaRe2.exec(html))) {
+                    try {
+                        if (window.matchMedia(m[2]).matches) {
+                            const c = parseColor(m[1]);
+                            if (c) {
+                                send(c, 'meta-inline');
+                                return true;
+                            }
+                        }
+                    } catch (_) {
+                        /* ignore */
+                    }
+                }
+                const plain =
                     html.match(/<meta[^>]+name=["']theme-color["'][^>]+content=["']([^"']+)["']/i) ||
                     html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']theme-color["']/i);
-                if (m) {
-                    const metaColor = parseColor(m[1]);
+                if (plain) {
+                    const metaColor = parseColor(plain[1]);
                     if (metaColor) {
                         send(metaColor, 'meta-inline');
                         return true;
@@ -76,8 +135,7 @@
 
         function scan() {
             try {
-                if (scanInlineHtml()) return;
-                const themeMeta = document.querySelector('meta[name="theme-color"]');
+                const themeMeta = pickThemeColorMeta();
                 if (themeMeta && themeMeta.content) {
                     const metaColor = parseColor(themeMeta.content);
                     if (metaColor) {
@@ -85,6 +143,7 @@
                         return;
                     }
                 }
+                if (scanInlineHtml()) return;
             } catch (_) {
                 /* ignore */
             }
@@ -119,7 +178,10 @@
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', scan, { once: true });
         }
-        window.addEventListener('load', scanSurface, { once: true });
+        window.addEventListener('load', () => {
+            scan();
+            scanSurface();
+        }, { once: true });
         try {
             const obs = new MutationObserver(() => scan());
             const head = document.head;
@@ -128,7 +190,7 @@
                     childList: true,
                     subtree: true,
                     attributes: true,
-                    attributeFilter: ['content', 'name']
+                    attributeFilter: ['content', 'name', 'media']
                 });
             }
         } catch (_) {
