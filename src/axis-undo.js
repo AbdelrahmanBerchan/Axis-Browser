@@ -500,6 +500,17 @@
             this.addTabToTabGroup(action.tabId, action.tabGroupId, true, action.indexInGroup);
             this.showNotification('Undo: Tab put back in group', 'success');
             break;
+          case 'delete_profile': {
+            void (async () => {
+              try {
+                const restored = await window.electronAPI.restoreTrashedProfile(action.trashId);
+                if (!restored?.ok) return;
+                await this.refreshProfilesMenu();
+                this.showNotification(`Undo: Restored “${restored.profileName || 'profile'}”`, 'success');
+              } catch (_) {}
+            })();
+            break;
+          }
           default:
             break;
         }
