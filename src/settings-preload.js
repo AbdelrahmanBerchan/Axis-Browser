@@ -26,6 +26,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeSettingsWindow: () => ipcRenderer.invoke('axis-close-settings-window'),
   openUrlInBrowser: (url) => ipcRenderer.invoke('open-url-in-browser', url),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
+  fetchText: (url) => ipcRenderer.invoke('axis-fetch-text', url),
+  searchWeatherCities: (query, limit) =>
+    ipcRenderer.invoke('axis-search-weather-cities', query, limit),
+  searchTickers: (query, limit) => ipcRenderer.invoke('axis-search-tickers', query, limit),
 
   getHistory: () => ipcRenderer.invoke('get-history'),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
@@ -67,6 +71,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   onSettingsUpdated: (callback) =>
     ipcRenderer.on('settings-updated', (_event, data) => callback(data)),
+  onSettingsStoreUpdated: (callback) =>
+    ipcRenderer.on('axis-settings-store-updated', () => callback()),
   onSwitchSettingsTab: (callback) =>
     ipcRenderer.on('switch-settings-tab', (_event, tab) => callback(tab)),
   onSettingsEditingProfileChanged: (callback) => {
@@ -84,11 +90,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'delete-profile',
       typeof profileId === 'object' ? profileId : { id: profileId }
     ),
+  listTrashedProfiles: () => ipcRenderer.invoke('list-trashed-profiles'),
+  restoreTrashedProfile: (payload) =>
+    ipcRenderer.invoke(
+      'restore-trashed-profile',
+      typeof payload === 'object' ? payload : { trashId: payload }
+    ),
+  permanentlyDeleteTrashedProfile: (payload) =>
+    ipcRenderer.invoke(
+      'permanently-delete-trashed-profile',
+      typeof payload === 'object' ? payload : { trashId: payload }
+    ),
   reorderProfiles: (orderedIds) => ipcRenderer.invoke('reorder-profiles', orderedIds),
   switchProfileInWindow: (profileId) => ipcRenderer.invoke('switch-profile-in-window', profileId),
   openOrFocusProfileWindow: (profileId) => ipcRenderer.invoke('open-or-focus-profile-window', profileId),
   onProfilesUpdated: (callback) => {
-    const handler = () => callback();
+    const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('profiles-updated', handler);
     return () => ipcRenderer.removeListener('profiles-updated', handler);
   },
