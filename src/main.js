@@ -20,6 +20,8 @@ const {
   buildAxisProfileExportPayload,
   importAxisProfileBackup
 } = require('./axis-profile-import');
+const { createProfileTrashApi } = require('./axis-profile-trash');
+const { trimProfileHistoryItems } = require('./axis-history-store');
 const { AXIS_VAULT_PAGE_SCAN_JS } = require('./axis-vault-page-scan');
 const {
   AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS,
@@ -452,11 +454,14 @@ function getProfilesOverview() {
   });
 }
 
-function broadcastProfilesUpdated() {
+function broadcastProfilesUpdated(evictProfileId) {
+  const payload = evictProfileId
+    ? { evictProfileId: sanitizeProfileId(evictProfileId) }
+    : null;
   for (const w of BrowserWindow.getAllWindows()) {
     if (w.isDestroyed() || w.__axisIsIncognito) continue;
     try {
-      w.webContents.send('profiles-updated');
+      w.webContents.send('profiles-updated', payload);
     } catch (_) {}
   }
   try {
@@ -490,6 +495,20 @@ function getProfileVaultFilePath(profileId) {
 function getProfileStoreFilePath(profileId) {
   return path.join(app.getPath('userData'), `profile-${sanitizeProfileId(profileId)}.json`);
 }
+
+const profileTrash = createProfileTrashApi({
+  app,
+  sanitizeProfileId,
+  getProfileStoreFilePath,
+  getProfileVaultFilePath,
+  listAxisProfiles,
+  saveAxisProfiles,
+  axisProfileStores,
+  axisVaultByProfile,
+  getStoredAxisExtensions,
+  setStoredAxisExtensions,
+  AXIS_DEFAULT_PROFILE_ID
+});
 
 function updateAxisProfile(profileId, updates = {}) {
   const id = sanitizeProfileId(profileId);
@@ -560,9 +579,12 @@ async function deleteAxisProfile(profileId) {
   }
 
   const extensions = getStoredAxisExtensions(id);
+  const trashEntry = await profileTrash.trashAxisProfile(id);
+
   for (const record of extensions) {
     try {
-      await removeAxisExtension(record.id, id);
+      unloadAxisExtensionRecord(record, id);
+      deleteExtensionRuntimeState(id, record.id);
     } catch (_) {}
   }
 
@@ -575,16 +597,10 @@ async function deleteAxisProfile(profileId) {
   } catch (_) {}
 
   axisVaultByProfile.delete(id);
-  try {
-    await fs.promises.unlink(getProfileVaultFilePath(id));
-  } catch (_) {}
 
   if (axisProfileStores.has(id)) {
     axisProfileStores.delete(id);
   }
-  try {
-    await fs.promises.unlink(getProfileStoreFilePath(id));
-  } catch (_) {}
 
   const profiles = listAxisProfiles().filter((p) => p.id !== id);
   saveAxisProfiles(profiles);
@@ -595,7 +611,7 @@ async function deleteAxisProfile(profileId) {
     createWindow({ profileId: AXIS_DEFAULT_PROFILE_ID });
   }
 
-  return { ok: true };
+  return { ok: true, trashId: trashEntry.trashId, profileId: id, profileName: trashEntry.name };
 }
 
 function ensureAxisProfile(profileId, displayName, icon) {
@@ -675,6 +691,7 @@ function initializeProfileDefaults(profileId, profileStore) {
     linkPreview: true,
     vaultAutofillEnabled: true,
     windowChromeLight: 50,
+    sidebarZoom: 100,
     searchEngine: 'google',
     recentSearches: [],
     dismissedSuggestions: [],
@@ -736,7 +753,7 @@ function getHistoryItems(profileId) {
 }
 
 function setHistoryItems(profileId, items) {
-  getProfileStore(profileId).set('historyItems', Array.isArray(items) ? items : []);
+  getProfileStore(profileId).set('historyItems', trimProfileHistoryItems(items));
 }
 
 function getDownloadItems(profileId) {
@@ -2244,6 +2261,10 @@ function configureAxisSessionInstance(sess) {
     installAxisPageSecurityOnSession(sess);
   } catch (_) {}
   try {
+    const { installAxisShellCsp } = require('./axis-shell-csp');
+    installAxisShellCsp(sess);
+  } catch (_) {}
+  try {
     attachDownloadActivityTracking(sess);
   } catch (_) {}
   try {
@@ -3140,6 +3161,16 @@ function getProfileIdForWebContents(contents) {
 function dispatchBrowserShortcutFromContents(contents, action) {
   const win = getBrowserWindowForWebContents(contents);
   if (!win || win.isDestroyed()) return;
+  /*
+   * Profile arrow shortcuts can arrive twice in one keypress (repeat + duplicate
+   * before-input-event). Ignore the second so one shortcut never skips a profile.
+   */
+  if (action === 'next-profile' || action === 'previous-profile') {
+    const now = Date.now();
+    const last = win.__axisLastProfileShortcut;
+    if (last && last.action === action && now - last.at < 500) return;
+    win.__axisLastProfileShortcut = { action, at: now };
+  }
   win.webContents.send('browser-shortcut', action);
 }
 
@@ -3174,6 +3205,15 @@ function attachAxisArrowShortcutHandler(contents) {
     }
 
     if (!shortcutUsesArrowKey(accel)) return;
+
+    /* One profile step per keypress — key repeat must not queue another switch. */
+    if (
+      input.isAutoRepeat &&
+      (action === 'next-profile' || action === 'previous-profile')
+    ) {
+      return;
+    }
+
     event.preventDefault();
     dispatchBrowserShortcutFromContents(contents, action);
   });
@@ -3745,6 +3785,9 @@ function openSettingsWindow(section = null, profileIdHint = null) {
     if (existing.isMinimized()) existing.restore();
     existing.show();
     existing.focus();
+    try {
+      existing.webContents.send('axis-settings-store-updated');
+    } catch (_) {}
     if (prevId !== nextId) {
       try {
         existing.webContents.send('settings-editing-profile-changed', { profileId: nextId });
@@ -4946,7 +4989,8 @@ ipcMain.handle('axis-vault-build-autofill-show-js', (_e, payload) => {
   const data = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : { items: payload };
   const items = Array.isArray(data.items) ? data.items : [];
   const theme = data.theme === 'light' ? 'light' : 'dark';
-  return buildVaultAutofillShowMenuJs(items, theme);
+  const kind = data.kind === 'card' || data.kind === 'address' ? data.kind : 'login';
+  return buildVaultAutofillShowMenuJs(items, theme, kind);
 });
 
 ipcMain.handle('axis-vault-build-autofill-fill-js', (_e, cred) =>
@@ -5149,17 +5193,13 @@ function vaultAutofillCandidates(profileId, payload) {
   if (status.autofillEnabled === false) {
     return { ok: true, kind: 'login', items: [] };
   }
-  let origin = v.normalizeVaultOrigin(payload && payload.origin);
-  if (!origin && payload && payload.pageUrl) {
-    origin = v.normalizeVaultOrigin(payload.pageUrl);
-  }
-  if (!origin) return { ok: true, kind: 'login', items: [] };
   const kind =
     payload && payload.kind === 'card'
       ? 'card'
       : payload && payload.kind === 'address'
         ? 'address'
         : 'login';
+  // Cards and addresses are not site-scoped — don't require a page origin.
   if (kind === 'card') {
     const cards = v.matchCards().map((c) => ({
       id: c.id,
@@ -5178,6 +5218,11 @@ function vaultAutofillCandidates(profileId, payload) {
     const addresses = v.matchAddresses().map((a) => ({ ...a }));
     return { ok: true, kind: 'address', items: addresses };
   }
+  let origin = v.normalizeVaultOrigin(payload && payload.origin);
+  if (!origin && payload && payload.pageUrl) {
+    origin = v.normalizeVaultOrigin(payload.pageUrl);
+  }
+  if (!origin) return { ok: true, kind: 'login', items: [] };
   const logins = v
     .matchLogins(origin, payload && payload.usernameHint, payload && payload.pageUrl)
     .map((e) => ({
@@ -5482,7 +5527,8 @@ function persistOutgoingProfileStore(profileId, captured) {
     pinnedTabs,
     tabGroups,
     unpinnedTabs,
-    favoritesPayload
+    favoritesPayload,
+    pinnedSidebarOrder
   } = captured;
   const existingPinned = store.get('pinnedTabs');
   const existingGroups = store.get('tabGroups');
@@ -5510,11 +5556,15 @@ function persistOutgoingProfileStore(profileId, captured) {
     if (sessionPayload.tabGroups != null) store.set('tabGroups', sessionPayload.tabGroups);
     if (sessionPayload.pinnedTabs != null) store.set('pinnedTabs', sessionPayload.pinnedTabs);
     if (sessionPayload.unpinnedTabs != null) store.set('unpinnedTabs', sessionPayload.unpinnedTabs);
+    if (sessionPayload.pinnedSidebarOrder != null) {
+      store.set('pinnedSidebarOrder', sessionPayload.pinnedSidebarOrder);
+    }
     if (sessionPayload.clearUnpinnedRecovery === true) store.set('unpinnedTabsRecovery', []);
   }
   if (pinnedTabs != null) store.set('pinnedTabs', pinnedTabs);
   if (tabGroups != null) store.set('tabGroups', tabGroups);
   if (unpinnedTabs != null) store.set('unpinnedTabs', unpinnedTabs);
+  if (pinnedSidebarOrder != null) store.set('pinnedSidebarOrder', pinnedSidebarOrder);
   if (favoritesPayload != null) {
     store.set('favorites', normalizeFavoritesStoreList(favoritesPayload));
   }
@@ -5554,6 +5604,7 @@ function applyAxisSessionFlushPayload(event, payload) {
   if (payload.tabGroups != null) s.set('tabGroups', payload.tabGroups);
   if (payload.pinnedTabs != null) s.set('pinnedTabs', payload.pinnedTabs);
   if (payload.unpinnedTabs != null) s.set('unpinnedTabs', payload.unpinnedTabs);
+  if (payload.pinnedSidebarOrder != null) s.set('pinnedSidebarOrder', payload.pinnedSidebarOrder);
   if (payload.clearUnpinnedRecovery === true) s.set('unpinnedTabsRecovery', []);
 }
 
@@ -5631,17 +5682,108 @@ ipcMain.handle('axis-get-page-security-info', async (event, opts = {}) => {
   }
 });
 
-/** Fetch remote text (RSS feeds, etc.) without renderer CORS limits. */
+/** Fetch remote text (RSS feeds, weather, etc.) without renderer CORS limits. */
 ipcMain.handle('axis-fetch-text', async (_event, rawUrl) => {
   const url = typeof rawUrl === 'string' ? rawUrl.trim() : '';
   if (!/^https?:\/\//i.test(url)) return { ok: false, text: '', error: 'invalid-url' };
   try {
-    const res = await net.fetch(url, { method: 'GET', redirect: 'follow' });
+    const res = await net.fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      headers: {
+        Accept: 'application/json,text/plain,*/*',
+        'User-Agent': 'Mozilla/5.0 (compatible; AxisBrowser/1.0)'
+      }
+    });
     if (!res.ok) return { ok: false, text: '', error: `http-${res.status}` };
     const text = await res.text();
     return { ok: true, text: String(text || '').slice(0, 2_000_000) };
   } catch (err) {
     return { ok: false, text: '', error: String(err?.message || err || 'fetch-failed') };
+  }
+});
+
+/** Geocode cities for Settings weather picker (Open-Meteo, no API key). */
+ipcMain.handle('axis-search-weather-cities', async (_event, rawQuery, rawLimit) => {
+  const q = String(rawQuery || '').trim();
+  if (q.length < 2) return { ok: true, results: [] };
+  const limit = Math.min(20, Math.max(1, Number(rawLimit) || 12));
+  const url =
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}` +
+    `&count=${limit}&language=en&format=json`;
+  try {
+    const res = await net.fetch(url, { method: 'GET', redirect: 'follow' });
+    if (!res.ok) return { ok: false, results: [], error: `http-${res.status}` };
+    const data = await res.json();
+    const rows = Array.isArray(data?.results) ? data.results : [];
+    const results = rows.map((hit) => {
+      const name = hit.name || '';
+      const admin1 = hit.admin1 || '';
+      const country = hit.country || '';
+      const countryCode = hit.country_code || '';
+      const labelParts = [name];
+      if (admin1) labelParts.push(admin1);
+      if (country) labelParts.push(country);
+      else if (countryCode) labelParts.push(String(countryCode).toUpperCase());
+      const short = countryCode
+        ? `${name}, ${String(countryCode).toUpperCase()}`
+        : country
+          ? `${name}, ${country}`
+          : name;
+      return {
+        name,
+        admin1,
+        country,
+        countryCode,
+        timezone: hit.timezone || '',
+        latitude: hit.latitude,
+        longitude: hit.longitude,
+        label: labelParts.filter(Boolean).join(', '),
+        short
+      };
+    });
+    return { ok: true, results };
+  } catch (err) {
+    return { ok: false, results: [], error: String(err?.message || err || 'search-failed') };
+  }
+});
+
+/** Ticker / symbol search for Markets widget settings (Yahoo Finance, no API key). */
+ipcMain.handle('axis-search-tickers', async (_event, rawQuery, rawLimit) => {
+  const q = String(rawQuery || '').trim();
+  if (q.length < 1) return { ok: true, results: [] };
+  const limit = Math.min(12, Math.max(1, Number(rawLimit) || 8));
+  const url =
+    `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}` +
+    `&quotesCount=${limit}&newsCount=0&listsCount=0`;
+  try {
+    const res = await net.fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Mozilla/5.0 (compatible; AxisBrowser/1.0)'
+      }
+    });
+    if (!res.ok) return { ok: false, results: [], error: `http-${res.status}` };
+    const data = await res.json();
+    const quotes = Array.isArray(data?.quotes) ? data.quotes : [];
+    const results = quotes
+      .map((hit) => {
+        const symbol = String(hit.symbol || '').toUpperCase();
+        if (!symbol) return null;
+        return {
+          symbol,
+          name: hit.shortname || hit.longname || hit.name || symbol,
+          type: hit.quoteType || hit.typeDisp || '',
+          exch: hit.exchDisp || hit.exchange || ''
+        };
+      })
+      .filter(Boolean)
+      .slice(0, limit);
+    return { ok: true, results };
+  } catch (err) {
+    return { ok: false, results: [], error: String(err?.message || err || 'search-failed') };
   }
 });
 
@@ -5761,12 +5903,8 @@ ipcMain.handle('add-history-item', (event, item) => {
     history.splice(existingIndex, 1);
   }
   
-  // Add to beginning and limit to 1000 items
+  // Add to beginning and cap at profile limit
   history.unshift(newItem);
-  if (history.length > 1000) {
-    history.splice(1000);
-  }
-  
   setHistoryItems(pid, history);
   return newItem;
 });
@@ -6016,6 +6154,7 @@ ipcMain.handle('get-profile-bootstrap', (_event, profileId) => {
     tabGroups: profileStore.get('tabGroups', []),
     unpinnedTabs: profileStore.get('unpinnedTabs', []),
     unpinnedTabsRecovery: profileStore.get('unpinnedTabsRecovery', []),
+    pinnedSidebarOrder: profileStore.get('pinnedSidebarOrder', []),
     favorites: profileStore.get('favorites', [])
   };
 });
@@ -6055,7 +6194,7 @@ ipcMain.handle('delete-profile', async (_event, payload) => {
       type: 'warning',
       message: `Delete “${profileName}”?`,
       detail:
-        'All tabs, cookies, history, saved passwords, extensions, and settings for this profile will be removed permanently. This cannot be undone.',
+        'The profile will be moved to trash with its tabs, cookies, history, saved passwords, extensions, and settings. You can restore it from Settings → Profiles or press ⌘Z right after deleting.',
       buttons: ['Cancel', 'Delete Profile'],
       defaultId: 0,
       cancelId: 0,
@@ -6064,10 +6203,32 @@ ipcMain.handle('delete-profile', async (_event, payload) => {
     if (response !== 1) return { ok: false, cancelled: true };
   }
   try {
-    await deleteAxisProfile(id);
-    return { ok: true };
+    const result = await deleteAxisProfile(id);
+    return result;
   } catch (err) {
     return { ok: false, error: err?.message || 'Could not delete profile' };
+  }
+});
+
+ipcMain.handle('list-trashed-profiles', () => profileTrash.listTrashedProfiles());
+
+ipcMain.handle('restore-trashed-profile', async (_event, payload) => {
+  try {
+    const trashId = payload?.trashId || payload?.id;
+    const restored = await profileTrash.restoreTrashedProfile(trashId);
+    broadcastProfilesUpdated();
+    return restored;
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Could not restore profile' };
+  }
+});
+
+ipcMain.handle('permanently-delete-trashed-profile', async (_event, payload) => {
+  try {
+    const trashId = payload?.trashId || payload?.id;
+    return await profileTrash.permanentlyDeleteTrashedProfile(trashId);
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Could not delete profile from trash' };
   }
 });
 
@@ -6097,6 +6258,61 @@ ipcMain.handle('list-browser-import-profiles', (_event, browserId) => {
   return listBrowserImportProfiles(browserId);
 });
 
+function axisIsDefaultBrowser() {
+  try {
+    const httpOk = app.isDefaultProtocolClient('http');
+    const httpsOk = app.isDefaultProtocolClient('https');
+    return !!(httpOk && httpsOk);
+  } catch (_) {
+    return false;
+  }
+}
+
+ipcMain.handle('axis-get-default-browser-status', () => {
+  return {
+    isDefault: axisIsDefaultBrowser(),
+    platform: process.platform
+  };
+});
+
+ipcMain.handle('axis-set-as-default-browser', async () => {
+  let registered = false;
+  try {
+    registered = !!(app.setAsDefaultProtocolClient('http') && app.setAsDefaultProtocolClient('https'));
+  } catch (_) {
+    registered = false;
+  }
+  const isDefault = axisIsDefaultBrowser();
+  return { ok: registered || isDefault, isDefault, registered };
+});
+
+ipcMain.handle('axis-open-default-browser-settings', async () => {
+  try {
+    if (process.platform === 'darwin') {
+      await new Promise((resolve) => {
+        exec('open "x-apple.systempreferences:com.apple.Default-Browser"', () => {
+          exec(
+            'open "x-apple.systempreferences:com.apple.preference.general"',
+            () => resolve()
+          );
+        });
+      });
+      return { ok: true };
+    }
+    if (process.platform === 'win32') {
+      await shell.openExternal('ms-settings:defaultapps');
+      return { ok: true };
+    }
+    // Linux: best-effort; desktops vary.
+    try {
+      await shell.openExternal('xdg-settings');
+    } catch (_) {}
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+});
+
 ipcMain.handle('inspect-import-profile-folder', (_event, folderPath) => {
   try {
     return inspectCustomProfileFolder(folderPath);
@@ -6124,6 +6340,7 @@ ipcMain.handle('import-browser-profile', async (event, payload) => {
         getProfileStore,
         normalizeFavoritesStoreList,
         broadcastProfilesUpdated,
+        broadcastSettingsUpdated,
         sanitizeProfileIcon,
         ensureAxisVaultForProfile,
         cleanSitePermissionOverrides,
