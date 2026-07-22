@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: http: file: chrome-extension:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: http: file: chrome-extension:; connect-src 'self' https://geocoding-api.open-meteo.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark" id="axis-settings-color-scheme">
     <title>Settings</title>
@@ -104,7 +104,7 @@
                 html.axis-dark .sidebar { background: rgba(30,30,30,0.95); border-right-color: rgba(255,255,255,0.08); }
         .settings-profile-switch {
             position: relative;
-            margin: 0 8px 10px;
+            margin: 0 10px 8px;
             flex-shrink: 0;
         }
         .settings-profile-switch.is-hidden {
@@ -114,46 +114,63 @@
             opacity: 0.65;
             pointer-events: none;
         }
-        .settings-profile-trigger {
+        .settings-profile-trigger,
+        html.axis-dark .settings-profile-trigger,
+        html:not(.axis-dark) .settings-profile-trigger {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 7px;
             width: 100%;
-            padding: 6px 10px;
-            border: none;
+            min-height: 0;
+            padding: 5px 8px;
+            border: 1px solid rgba(0, 0, 0, 0.12);
             border-radius: 8px;
-            background: transparent;
+            background: rgba(0, 0, 0, 0.03);
+            box-shadow: none;
             color: inherit;
             font: inherit;
-            font-size: 12.5px;
+            font-size: 12px;
             text-align: left;
             cursor: pointer;
-            transition: background 0.12s ease;
+            transition: background 0.12s ease, border-color 0.12s ease;
         }
-        .settings-profile-trigger:hover {
-            background: rgba(0,0,0,0.05);
+        html.axis-dark .settings-profile-trigger {
+            border-color: rgba(255, 255, 255, 0.14);
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .settings-profile-trigger:hover,
+        html.axis-dark .settings-profile-trigger:hover,
+        html:not(.axis-dark) .settings-profile-trigger:hover {
+            background: rgba(0, 0, 0, 0.055);
+            border-color: rgba(0, 0, 0, 0.18);
         }
         html.axis-dark .settings-profile-trigger:hover {
-            background: rgba(255,255,255,0.08);
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.22);
         }
-        .settings-profile-trigger[aria-expanded="true"] {
-            background: rgba(0,0,0,0.06);
+        .settings-profile-trigger[aria-expanded="true"],
+        html.axis-dark .settings-profile-trigger[aria-expanded="true"],
+        html:not(.axis-dark) .settings-profile-trigger[aria-expanded="true"] {
+            background: rgba(0, 0, 0, 0.06);
+            border-color: rgba(0, 0, 0, 0.22);
         }
         html.axis-dark .settings-profile-trigger[aria-expanded="true"] {
-            background: rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.26);
         }
         .settings-profile-trigger-text {
             flex: 1;
             min-width: 0;
             display: flex;
             flex-direction: column;
-            gap: 1px;
-            line-height: 1.2;
+            gap: 0;
+            line-height: 1.15;
         }
         .settings-profile-trigger-label {
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 600;
-            letter-spacing: 0.02em;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
             color: #86868b;
         }
         html.axis-dark .settings-profile-trigger-label { color: #98989d; }
@@ -161,13 +178,14 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            font-weight: 500;
+            font-size: 12px;
+            font-weight: 550;
         }
         .settings-profile-chevron {
             flex-shrink: 0;
-            width: 12px;
-            height: 12px;
-            opacity: 0.45;
+            width: 10px;
+            height: 10px;
+            opacity: 0.4;
             transition: transform 0.15s ease;
         }
         .settings-profile-trigger[aria-expanded="true"] .settings-profile-chevron {
@@ -180,17 +198,17 @@
             right: 0;
             z-index: 40;
             padding: 4px;
-            border-radius: 10px;
+            border-radius: 9px;
             background: #fff;
-            border: 1px solid rgba(0,0,0,0.1);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.14);
-            max-height: 220px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+            max-height: 200px;
             overflow-y: auto;
         }
         html.axis-dark .settings-profile-menu {
-            background: #2c2c2e;
-            border-color: rgba(255,255,255,0.12);
-            box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+            background: #1c1c1e;
+            border-color: rgba(255, 255, 255, 0.12);
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.48);
         }
         .settings-profile-menu.hidden {
             display: none;
@@ -200,35 +218,57 @@
             flex-direction: column;
             gap: 1px;
         }
-        .settings-profile-row {
+        .settings-profile-row,
+        html.axis-dark .settings-profile-row,
+        html:not(.axis-dark) .settings-profile-row {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 7px;
             width: 100%;
-            padding: 6px 8px;
+            min-height: 0;
+            padding: 5px 7px;
             border: none;
-            border-radius: 7px;
+            border-radius: 6px;
             background: transparent;
+            box-shadow: none;
             color: inherit;
             font: inherit;
-            font-size: 13px;
+            font-size: 12px;
+            font-weight: 450;
             text-align: left;
             cursor: pointer;
             transition: background 0.12s ease;
         }
-        .settings-profile-row:hover {
-            background: rgba(0,0,0,0.06);
+        .settings-profile-row:hover,
+        html.axis-dark .settings-profile-row:hover,
+        html:not(.axis-dark) .settings-profile-row:hover {
+            background: rgba(0, 0, 0, 0.05);
+            border-color: transparent;
         }
         html.axis-dark .settings-profile-row:hover {
-            background: rgba(255,255,255,0.08);
+            background: rgba(255, 255, 255, 0.07);
         }
-        .settings-profile-row.is-active {
+        .settings-profile-row.is-active,
+        html.axis-dark .settings-profile-row.is-active,
+        html:not(.axis-dark) .settings-profile-row.is-active {
+            background: rgba(0, 0, 0, 0.07);
             font-weight: 600;
+            border-color: transparent;
+        }
+        html.axis-dark .settings-profile-row.is-active {
+            background: rgba(255, 255, 255, 0.12);
+        }
+        .settings-profile-row.is-active:hover,
+        html.axis-dark .settings-profile-row.is-active:hover {
+            background: rgba(0, 0, 0, 0.09);
+        }
+        html.axis-dark .settings-profile-row.is-active:hover {
+            background: rgba(255, 255, 255, 0.14);
         }
         .settings-profile-avatar {
             flex-shrink: 0;
-            width: 20px;
-            height: 20px;
+            width: 16px;
+            height: 16px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -237,8 +277,8 @@
             line-height: 1;
         }
         .settings-profile-avatar svg {
-            width: 14px;
-            height: 14px;
+            width: 12px;
+            height: 12px;
             display: block;
         }
         .settings-profile-name {
@@ -250,9 +290,9 @@
         }
         .settings-profile-check {
             flex-shrink: 0;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 700;
-            opacity: 0.7;
+            opacity: 0.6;
         }
         .sidebar-item {
             display: flex;
@@ -754,6 +794,13 @@
         }
                 html.axis-dark .history-toolbar { border-bottom-color: rgba(255,255,255,0.06); }
         .history-toolbar input[type="search"] { flex: 1; min-width: 0; }
+        .history-count {
+            font-size: 11px;
+            color: #86868b;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        html.axis-dark .history-count { color: #98989d; }
         .history-list { display: flex; flex-direction: column; gap: 2px; }
         .history-item {
             display: flex;
@@ -777,6 +824,18 @@
             opacity: 0.7;
         }
         .history-item:hover .history-delete { opacity: 1; }
+        .history-load-sentinel {
+            height: 1px;
+            margin: 0;
+            pointer-events: none;
+        }
+        .history-load-more {
+            padding: 12px 16px;
+            text-align: center;
+            font-size: 12px;
+            color: #86868b;
+        }
+        html.axis-dark .history-load-more { color: #98989d; }
         .vault-pane-header {
             display: flex;
             align-items: flex-start;
@@ -940,6 +999,20 @@
         }
         html.axis-dark .vault-editor { border-color: rgba(255,255,255,0.14); background: rgba(255,255,255,0.03); }
         .vault-editor.hidden { display: none !important; }
+        .vault-editor--inline {
+            margin-top: 0;
+            padding: 12px 0 0;
+            border: none;
+            border-top: 1px solid rgba(0,0,0,0.08);
+            border-radius: 0;
+            background: transparent;
+        }
+        html.axis-dark .vault-editor--inline {
+            border-top-color: rgba(255,255,255,0.08);
+            background: transparent;
+        }
+        .vault-editor-home:not(:empty) { margin-bottom: 10px; }
+        #vault-editor-park { display: none; }
         .vault-editor h3 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
         #vault-editor-login-fields,
         #vault-editor-card-fields,
@@ -1006,6 +1079,44 @@
         }
         .profiles-overview-table tr.active td:first-child {
             font-weight: 600;
+        }
+        .profiles-trash-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .profiles-trash-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.03);
+        }
+        html:not(.axis-dark) .profiles-trash-row {
+            border-color: rgba(0, 0, 0, 0.08);
+            background: rgba(0, 0, 0, 0.02);
+        }
+        .profiles-trash-meta {
+            min-width: 0;
+        }
+        .profiles-trash-name {
+            font-weight: 600;
+        }
+        .profiles-trash-date {
+            font-size: 12px;
+            opacity: 0.65;
+        }
+        .profiles-trash-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .profiles-trash-empty {
+            opacity: 0.7;
+            margin: 0;
         }
         .profiles-badge {
             font-size: 10px;
@@ -1108,6 +1219,17 @@
             flex-direction: column;
             gap: 8px;
             margin: 12px 0;
+        }
+        .profiles-import-options-heading {
+            margin: 8px 0 0;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            opacity: 0.72;
+        }
+        .profiles-import-options-heading:first-child {
+            margin-top: 0;
         }
         .profiles-import-options label {
             display: flex;
@@ -1268,8 +1390,8 @@
         .shortcuts-subheading { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #86868b; margin: 16px 0 8px; padding: 0 16px; }
                 html.axis-dark .shortcuts-subheading { color: #98989d; }
         .shortcut-row.shortcut-row-disabled .shortcut-input { opacity: 0.55; pointer-events: none; }
-        .gradient-rows { display: none; }
-        .gradient-rows.visible { display: flex; }
+        .gradient-rows { display: none !important; }
+        .gradient-rows.visible { display: flex !important; }
         .unpinned-custom-row { display: none !important; }
         .unpinned-custom-row.visible { display: flex !important; }
         .ntp-welcome-subgroup {
@@ -1291,6 +1413,325 @@
             width: 180px;
             max-width: min(220px, 42vw);
         }
+        #ntp-widgets-subgroup {
+            padding: 12px 14px 4px;
+            background: rgba(0, 0, 0, 0.02);
+        }
+        html.axis-dark #ntp-widgets-subgroup {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        #ntp-widgets-subgroup .row {
+            padding-left: 0;
+            margin: 4px -14px 0;
+            padding-right: 18px;
+            padding-left: 18px;
+            background: transparent;
+        }
+        .ntp-widgets-settings-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-bottom: 8px;
+        }
+        .ntp-widgets-settings-empty {
+            padding: 10px 4px 14px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #86868b;
+        }
+        html.axis-dark .ntp-widgets-settings-empty {
+            color: #98989d;
+        }
+        .ntp-widget-settings-card {
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 10px;
+            background: #fff;
+            overflow: hidden;
+        }
+        html.axis-dark .ntp-widget-settings-card {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        .ntp-widget-settings-card-head {
+            padding: 10px 12px 8px;
+            font-size: 12px;
+            font-weight: 650;
+            letter-spacing: -0.01em;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        html.axis-dark .ntp-widget-settings-card-head {
+            border-bottom-color: rgba(255, 255, 255, 0.08);
+        }
+        .ntp-widget-settings-fields {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 12px;
+        }
+        .ntp-widget-settings-field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            min-width: 0;
+        }
+        .ntp-widget-settings-field-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #86868b;
+        }
+        .ntp-widget-settings-field-hint {
+            font-size: 11px;
+            line-height: 1.35;
+            color: #98989d;
+        }
+        .ntp-weather-city-selected {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1d1d1f;
+            padding: 2px 0 4px;
+        }
+        html.axis-dark .ntp-weather-city-selected {
+            color: #f5f5f7;
+        }
+        .ntp-weather-city-results {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            max-height: 220px;
+            overflow: auto;
+            margin-top: 4px;
+            padding: 4px;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.04);
+        }
+        html.axis-dark .ntp-weather-city-results {
+            background: rgba(255, 255, 255, 0.06);
+        }
+        .ntp-weather-city-results.hidden {
+            display: none;
+        }
+        .ntp-weather-city-option {
+            border: none;
+            background: transparent;
+            text-align: left;
+            padding: 8px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font: inherit;
+            font-size: 12.5px;
+            color: inherit;
+            width: 100%;
+        }
+        .ntp-weather-city-option:hover {
+            background: rgba(0, 0, 0, 0.06);
+        }
+        html.axis-dark .ntp-weather-city-option:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .ntp-weather-city-empty {
+            padding: 10px;
+            font-size: 12px;
+            color: #98989d;
+        }
+        .ntp-ticker-picker {
+            gap: 8px;
+        }
+        .ntp-ticker-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+            min-width: 0;
+        }
+        .ntp-ticker-list:empty {
+            display: none;
+        }
+        .ntp-ticker-empty {
+            font-size: 11px;
+            line-height: 1.35;
+            color: #98989d;
+            padding: 2px 0 4px;
+        }
+        .ntp-ticker-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            padding: 8px 8px 8px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            background: rgba(0, 0, 0, 0.03);
+            box-sizing: border-box;
+        }
+        html.axis-dark .ntp-ticker-row {
+            border-color: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .ntp-ticker-row-sym {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 13px;
+            font-weight: 650;
+            color: #1d1d1f;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        html.axis-dark .ntp-ticker-row-sym {
+            color: #f5f5f7;
+        }
+        .ntp-ticker-row-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        #ntp-widgets-active-list button.ntp-ticker-move,
+        #ntp-widgets-active-list button.ntp-ticker-remove {
+            width: 30px !important;
+            height: 30px !important;
+            min-width: 30px !important;
+            min-height: 30px !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            border-radius: 8px !important;
+            background: transparent !important;
+            color: #86868b !important;
+            cursor: pointer;
+            display: inline-flex !important;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px !important;
+            line-height: 1 !important;
+            box-shadow: none !important;
+        }
+        #ntp-widgets-active-list button.ntp-ticker-move:hover,
+        #ntp-widgets-active-list button.ntp-ticker-remove:hover {
+            background: rgba(0, 0, 0, 0.08) !important;
+            color: #1d1d1f !important;
+        }
+        html.axis-dark #ntp-widgets-active-list button.ntp-ticker-move:hover,
+        html.axis-dark #ntp-widgets-active-list button.ntp-ticker-remove:hover {
+            background: rgba(255, 255, 255, 0.12) !important;
+            color: #f5f5f7 !important;
+        }
+        #ntp-widgets-active-list button.ntp-ticker-move:disabled {
+            opacity: 0.28 !important;
+            cursor: default;
+            pointer-events: none;
+        }
+        .ntp-ticker-search-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+        .ntp-ticker-results {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            max-height: 260px;
+            overflow: auto;
+            padding: 4px;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.04);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        html.axis-dark .ntp-ticker-results {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.08);
+        }
+        .ntp-ticker-results.hidden {
+            display: none;
+        }
+        /* One clean line per hit — same idea as city search (no nested/clipped rows). */
+        #ntp-widgets-active-list .ntp-ticker-option {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            padding: 9px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            color: inherit;
+            line-height: 1.35;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 12.5px;
+        }
+        #ntp-widgets-active-list .ntp-ticker-option:hover,
+        #ntp-widgets-active-list .ntp-ticker-option:focus {
+            background: rgba(0, 0, 0, 0.07);
+            outline: none;
+        }
+        html.axis-dark #ntp-widgets-active-list .ntp-ticker-option:hover,
+        html.axis-dark #ntp-widgets-active-list .ntp-ticker-option:focus {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        #ntp-widgets-active-list .ntp-ticker-option-sym {
+            font-weight: 700;
+            color: #1d1d1f;
+        }
+        html.axis-dark #ntp-widgets-active-list .ntp-ticker-option-sym {
+            color: #f5f5f7;
+        }
+        #ntp-widgets-active-list .ntp-ticker-option-rest {
+            font-weight: 400;
+            color: #86868b;
+        }
+        html.axis-dark #ntp-widgets-active-list .ntp-ticker-option-rest {
+            color: #98989d;
+        }
+        .ntp-weather-city-option,
+        button.ntp-weather-city-option,
+        html.axis-dark button.ntp-weather-city-option {
+            height: auto;
+            min-height: 0;
+            border: none;
+            background: transparent;
+            box-shadow: none;
+            white-space: normal;
+            overflow: visible;
+        }
+        html.axis-dark .ntp-widget-settings-field-label {
+            color: #98989d;
+        }
+        .ntp-widget-settings-field input,
+        .ntp-widget-settings-field select,
+        #ntp-widgets-active-list .ntp-widget-settings-field input[type="text"],
+        #ntp-widgets-active-list .ntp-widget-settings-field input[type="url"],
+        #ntp-widgets-active-list .ntp-widget-settings-field input[type="date"],
+        #ntp-widgets-active-list .ntp-widget-settings-field input[type="number"],
+        #ntp-widgets-active-list .ntp-widget-settings-field select {
+            width: 100%;
+            max-width: none;
+            min-width: 0;
+            box-sizing: border-box;
+        }
+        .ntp-widget-settings-links {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .ntp-widget-deal-fields {
+            display: grid;
+            grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr);
+            gap: 8px;
+            width: 100%;
+            margin: 0;
+        }
+        .ntp-widget-deal-fields input {
+            width: 100%;
+            min-width: 0;
+        }
+        @media (max-width: 560px) {
+            .ntp-widget-deal-fields {
+                grid-template-columns: 1fr;
+            }
+        }
         .ntp-settings-intro {
             padding: 14px 18px;
             font-size: 12px;
@@ -1303,23 +1744,6 @@
             border-bottom-color: rgba(255,255,255,0.06);
         }
         .ntp-settings-intro p { margin: 0; }
-        .ntp-widget-deal-fields {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            min-width: 220px;
-        }
-        .ntp-widget-deal-fields input {
-            width: 100%;
-        }
-        #ntp-widgets-active-list .row-controls input[type="text"],
-        #ntp-widgets-active-list .row-controls input[type="url"],
-        #ntp-widgets-active-list .row-controls input[type="date"],
-        #ntp-widgets-active-list .row-controls input[type="number"],
-        #ntp-widgets-active-list .row-controls select {
-            width: 200px;
-            max-width: min(220px, 38vw);
-        }
         .settings-search-wrap {
             margin-bottom: 16px;
         }
@@ -1356,7 +1780,7 @@
             font-size: 12px;
             color: #86868b;
             line-height: 1.45;
-            padding: 10px 18px 4px;
+            padding: 12px 16px 0;
             margin: 0;
         }
                 html.axis-dark .perm-intro { color: #98989d; }
@@ -1365,16 +1789,16 @@
             flex-wrap: wrap;
             align-items: center;
             gap: 10px;
-            padding: 10px 18px 14px;
+            padding: 12px 16px 14px;
             border-bottom: 1px solid rgba(0,0,0,0.06);
         }
                 html.axis-dark .perm-add-row { border-bottom-color: rgba(255,255,255,0.06); }
         .perm-add-row input[type="text"] {
             flex: 1;
-            min-width: 180px;
-            padding: 8px 12px;
+            min-width: 0;
+            padding: 9px 12px;
             border: 1px solid rgba(0,0,0,0.2);
-            border-radius: 6px;
+            border-radius: 8px;
             font-size: 13px;
             background: #fff;
             color: inherit;
@@ -1387,56 +1811,161 @@
             flex-basis: 100%;
         }
                 html.axis-dark .perm-add-error { color: #ff453a; }
-        .perm-table-wrap {
-            overflow-x: auto;
-            max-width: 100%;
+        .perm-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 12px 16px 16px;
         }
-        .perm-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
+        .perm-card {
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 12px;
+            background: rgba(0, 0, 0, 0.02);
+            overflow: hidden;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
         }
-        .perm-table th {
-            text-align: left;
-            padding: 10px 12px;
-            font-weight: 600;
+        html.axis-dark .perm-card {
+            border-color: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.04);
+            box-shadow: none;
+        }
+        .perm-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 11px 14px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+            background: rgba(0, 0, 0, 0.015);
+        }
+        html.axis-dark .perm-card-header {
+            border-bottom-color: rgba(255, 255, 255, 0.06);
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .perm-card-site-wrap {
+            min-width: 0;
+            flex: 1;
+        }
+        .perm-card-site-title {
+            display: block;
+            font-size: 13px;
+            font-weight: 650;
+            letter-spacing: -0.01em;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: inherit;
+        }
+        .perm-card-site-url {
+            display: block;
+            margin-top: 3px;
             font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
+            line-height: 1.3;
             color: #86868b;
-            border-bottom: 1px solid rgba(0,0,0,0.08);
+            overflow: hidden;
+            text-overflow: ellipsis;
             white-space: nowrap;
         }
-                html.axis-dark .perm-table th { color: #98989d; border-bottom-color: rgba(255,255,255,0.08); }
-        .perm-table td {
-            padding: 8px 10px;
-            border-bottom: 1px solid rgba(0,0,0,0.06);
-            vertical-align: middle;
-        }
-                html.axis-dark .perm-table td { border-bottom-color: rgba(255,255,255,0.06); }
-        .perm-table td.perm-origin {
-            font-family: 'SF Mono', Monaco, ui-monospace, monospace;
+        html.axis-dark .perm-card-site-url { color: #98989d; }
+        .perm-card-remove {
+            flex-shrink: 0;
+            padding: 5px 10px;
             font-size: 11px;
-            word-break: break-all;
-            max-width: 200px;
+            font-weight: 500;
+            border-radius: 7px;
+            border: 1px solid rgba(255, 59, 48, 0.25);
+            background: transparent;
+            color: #ff3b30;
+            cursor: pointer;
         }
-        .perm-table select {
-            min-width: 96px;
-            max-width: 120px;
-            font-size: 12px;
-            padding: 4px 8px;
+        html.axis-dark .perm-card-remove {
+            color: #ff453a;
+            border-color: rgba(255, 69, 58, 0.28);
         }
-        .perm-table .perm-remove {
-            padding: 4px 10px;
-            font-size: 11px;
+        .perm-card-remove:hover {
+            background: rgba(255, 59, 48, 0.08);
+        }
+        html.axis-dark .perm-card-remove:hover {
+            background: rgba(255, 69, 58, 0.12);
+        }
+        .perm-card-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1px;
+            background: rgba(0, 0, 0, 0.06);
+        }
+        html.axis-dark .perm-card-grid {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .perm-card-cell {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.55);
+            min-width: 0;
+        }
+        html.axis-dark .perm-card-cell {
+            background: rgba(28, 28, 30, 0.92);
+        }
+        html:not(.axis-dark) .perm-card-cell {
+            background: #fff;
+        }
+        .perm-card-cell label {
+            font-size: 10px;
+            font-weight: 650;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #86868b;
+        }
+        html.axis-dark .perm-card-cell label { color: #98989d; }
+        .perm-card-cell select {
+            width: 100%;
+            min-width: 0;
+            padding: 7px 10px;
+            font-size: 13px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.12);
+            background: rgba(0, 0, 0, 0.03);
+            color: inherit;
+            box-sizing: border-box;
+            cursor: pointer;
+        }
+        html.axis-dark .perm-card-cell select {
+            border-color: rgba(255, 255, 255, 0.14);
+            background: rgba(255, 255, 255, 0.06);
+        }
+        .perm-card-cell select:focus {
+            outline: none;
+            border-color: rgba(0, 0, 0, 0.28);
+            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.08);
+        }
+        html.axis-dark .perm-card-cell select:focus {
+            border-color: rgba(255, 255, 255, 0.32);
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+        }
+        @media (max-width: 420px) {
+            .perm-card-grid { grid-template-columns: 1fr; }
+        }
+        .perm-list > .perm-empty {
+            margin: 0;
         }
         .perm-empty {
             text-align: center;
             color: #86868b;
             font-size: 12px;
-            padding: 24px 16px !important;
+            line-height: 1.45;
+            padding: 32px 20px;
+            border: 1px dashed rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            margin: 12px 16px 16px;
+            background: rgba(0, 0, 0, 0.02);
         }
-                html.axis-dark .perm-empty { color: #98989d; }
+        html.axis-dark .perm-empty {
+            color: #98989d;
+            border-color: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.02);
+        }
 
         /* —— Light `uiTheme` only: Chromium was still using dark *native* form chrome (black
            select rings, checkboxes, scrollbars) when the OS is dark, because `light dark`
@@ -1472,7 +2001,7 @@
             color: rgba(0, 0, 0, 0.45);
         }
         html:not(.axis-dark) select,
-        html:not(.axis-dark) .perm-table select {
+        html:not(.axis-dark) .perm-card-cell select {
             border: 1px solid rgba(0, 0, 0, 0.12);
             background-color: #fff;
             color: #1d1d1f;
@@ -1732,6 +2261,48 @@
         button:active {
             transform: none;
         }
+        .settings-profile-trigger,
+        html.axis-dark .settings-profile-trigger,
+        html:not(.axis-dark) .settings-profile-trigger {
+            min-height: 0;
+            border: 1px solid rgba(0, 0, 0, 0.12);
+            background: rgba(0, 0, 0, 0.03);
+            box-shadow: none;
+        }
+        html.axis-dark .settings-profile-trigger {
+            border-color: rgba(255, 255, 255, 0.14);
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .settings-profile-row,
+        html.axis-dark .settings-profile-row,
+        html:not(.axis-dark) .settings-profile-row {
+            min-height: 0;
+            border: none;
+            background: transparent;
+            box-shadow: none;
+        }
+        .settings-profile-row.is-active,
+        html.axis-dark .settings-profile-row.is-active {
+            background: rgba(0, 0, 0, 0.07);
+        }
+        html.axis-dark .settings-profile-row.is-active {
+            background: rgba(255, 255, 255, 0.12);
+        }
+        .settings-profile-row:hover,
+        html.axis-dark .settings-profile-row:hover {
+            background: rgba(0, 0, 0, 0.05);
+            border-color: transparent;
+        }
+        html.axis-dark .settings-profile-row:hover {
+            background: rgba(255, 255, 255, 0.07);
+        }
+        .settings-profile-row.is-active:hover,
+        html.axis-dark .settings-profile-row.is-active:hover {
+            background: rgba(0, 0, 0, 0.09);
+        }
+        html.axis-dark .settings-profile-row.is-active:hover {
+            background: rgba(255, 255, 255, 0.14);
+        }
         select,
         input[type="text"],
         input[type="search"],
@@ -1739,7 +2310,7 @@
         html.axis-dark input[type="text"],
         html.axis-dark input[type="search"],
         html:not(.axis-dark) select,
-        html:not(.axis-dark) .perm-table select {
+        html:not(.axis-dark) .perm-card-cell select {
             min-height: 34px;
             border-radius: 9px;
             border-color: var(--settings-card-border);
@@ -1827,13 +2398,6 @@
         }
         .perm-add-row {
             padding: 14px 18px 16px;
-        }
-        .perm-table th {
-            background: var(--settings-hover-bg);
-        }
-        .perm-table td,
-        html.axis-dark .perm-table td {
-            border-bottom-color: var(--settings-row-border);
         }
         @media (max-width: 760px) {
             html.macos .settings-window-chrome {
@@ -2083,7 +2647,7 @@
         html.settings-native-window input[type="text"],
         html.settings-native-window input[type="password"],
         html.settings-native-window input[type="search"],
-        html.settings-native-window .perm-table select {
+        html.settings-native-window .perm-card-cell select {
             background: rgba(0, 0, 0, 0.22);
             border-color: rgba(255, 255, 255, 0.1);
         }
@@ -2091,7 +2655,7 @@
         html.settings-native-window:not(.axis-dark) input[type="text"],
         html.settings-native-window:not(.axis-dark) input[type="password"],
         html.settings-native-window:not(.axis-dark) input[type="search"],
-        html.settings-native-window:not(.axis-dark) .perm-table select {
+        html.settings-native-window:not(.axis-dark) .perm-card-cell select {
             background: rgba(255, 255, 255, 0.85);
             border-color: rgba(0, 0, 0, 0.12);
         }
@@ -2308,6 +2872,16 @@
                             <option value="left">Left</option>
                             <option value="right">Right</option>
                         </select>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title">Sidebar zoom</div>
+                            <div class="row-desc">How large tabs, icons, and controls look in the sidebar. 100% matches the current default size.</div>
+                        </div>
+                        <div class="window-chrome-light-stack">
+                            <span class="window-chrome-light-value" id="sidebar-zoom-label">100%</span>
+                            <input type="range" id="sidebar-zoom" min="75" max="150" step="5" value="100">
+                        </div>
                     </div>
                     <div class="row">
                         <div class="row-label">
@@ -2568,21 +3142,7 @@
                         <button type="button" id="site-perm-add-btn">Add site</button>
                         <span class="perm-add-error" id="site-perm-add-error"></span>
                     </div>
-                    <div class="perm-table-wrap">
-                        <table class="perm-table" id="site-perm-table" aria-label="Per-site permissions">
-                            <thead>
-                                <tr>
-                                    <th>Site</th>
-                                    <th>Camera</th>
-                                    <th>Microphone</th>
-                                    <th>Notifications</th>
-                                    <th>Location</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody id="site-perm-tbody"></tbody>
-                        </table>
-                    </div>
+                    <div class="perm-list" id="site-perm-list" aria-label="Per-site permissions"></div>
                 </div>
             </div>
         </div>
@@ -2701,9 +3261,20 @@
             </div>
 
             <div class="group">
+                <div class="group-title">Profile trash</div>
+                <p class="profiles-pane-lead">
+                    Deleted profiles stay here until you restore them or remove them permanently. You can also press <strong>⌘Z</strong> right after deleting to bring a profile back.
+                </p>
+                <div class="profiles-trash-list" id="profiles-trash-list">
+                    <p class="profiles-trash-empty">No deleted profiles.</p>
+                </div>
+                <div class="profiles-status" id="profiles-trash-status"></div>
+            </div>
+
+            <div class="group">
                 <div class="group-title">Import from another browser</div>
                 <p class="profiles-pane-lead">
-                    Bring open tabs, pinned tabs, tab groups, bookmark folders, favorites, saved passwords, payment cards, addresses, extensions, site permissions, and recent history into a new Axis profile. Chrome, Edge, Brave, Firefox, Arc, and other Chromium browsers are detected automatically when installed on this computer. Quit the source browser before importing for the most reliable results.
+                    Bring favorites, pinned tabs, bookmarks, folders, saved passwords, payment cards, addresses, extensions, site permissions, and recent history into a new Axis profile. Chrome, Edge, Brave, Firefox, Arc, and other Chromium browsers are detected automatically when installed on this computer. Quit the source browser before importing for the most reliable results.
                 </p>
                 <div class="profiles-import-grid">
                     <div>
@@ -2724,10 +3295,12 @@
                     </div>
                 </div>
                 <div class="profiles-import-options">
-                    <label><input type="checkbox" id="profiles-import-session" checked> Import open tabs, pinned tabs, and tab groups from last session</label>
-                    <label><input type="checkbox" id="profiles-import-folders" checked> Import bookmark folders as tab groups</label>
-                    <label><input type="checkbox" id="profiles-import-bookmarks" checked> Import remaining bookmarks into Favorites</label>
-                    <label><input type="checkbox" id="profiles-import-pinned" checked> Import bookmark bar links as pinned tabs</label>
+                    <p class="profiles-import-options-heading">Sidebar &amp; tabs</p>
+                    <label><input type="checkbox" id="profiles-import-favorites" checked> Import favorites &amp; browser pinned tabs → <strong>Favorites</strong></label>
+                    <label><input type="checkbox" id="profiles-import-bookmarks" checked> Import bookmarks → <strong>Pinned tabs</strong></label>
+                    <label><input type="checkbox" id="profiles-import-open-tabs"> Import open tabs → <strong>Unpinned tabs</strong></label>
+                    <label><input type="checkbox" id="profiles-import-folders" checked> Import folders → <strong>Tab groups</strong></label>
+                    <p class="profiles-import-options-heading">Other data</p>
                     <label><input type="checkbox" id="profiles-import-history" checked> Import browsing history</label>
                     <label><input type="checkbox" id="profiles-import-passwords" checked> Import saved passwords</label>
                     <label><input type="checkbox" id="profiles-import-cards" checked> Import saved payment cards</label>
@@ -2767,6 +3340,7 @@
                         <span class="vault-list-count" id="vault-login-count">0 passwords</span>
                         <button type="button" id="vault-add-login-btn">+ Add password</button>
                     </div>
+                    <div class="vault-editor-home" data-vault-editor-home="login"></div>
                     <div class="vault-table">
                         <div class="vault-table-head">
                             <span>Website</span>
@@ -2780,6 +3354,7 @@
                         <span class="vault-list-count" id="vault-card-count">0 cards</span>
                         <button type="button" id="vault-add-card-btn">+ Add card</button>
                     </div>
+                    <div class="vault-editor-home" data-vault-editor-home="card"></div>
                     <div class="vault-table">
                         <div class="vault-table-head">
                             <span>Card</span>
@@ -2793,6 +3368,7 @@
                         <span class="vault-list-count" id="vault-address-count">0 addresses</span>
                         <button type="button" id="vault-add-address-btn">+ Add address</button>
                     </div>
+                    <div class="vault-editor-home" data-vault-editor-home="address"></div>
                     <div class="vault-table">
                         <div class="vault-table-head">
                             <span>Address</span>
@@ -2890,6 +3466,7 @@
                         </div>
                         <p id="vault-editor-error" class="vault-settings-error"></p>
                 </div>
+                <div id="vault-editor-park" hidden aria-hidden="true"></div>
             </div>
         </div>
 
@@ -2940,12 +3517,12 @@
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title">Show widgets</div>
-                            <div class="row-desc">Tiles below search — use <strong>Edit</strong> on a new tab to add or arrange them</div>
+                            <div class="row-desc">Weather below search — use <strong>Edit</strong> on a new tab to add or arrange it</div>
                         </div>
                         <input type="checkbox" id="ntp-widgets-enabled">
                     </div>
                     <div class="ntp-welcome-subgroup" id="ntp-widgets-subgroup">
-                        <div id="ntp-widgets-active-list"></div>
+                        <div id="ntp-widgets-active-list" class="ntp-widgets-settings-list"></div>
                         <div class="row">
                             <div class="row-label">
                                 <div class="row-title">Clear all widgets</div>
@@ -3019,6 +3596,7 @@
                 <div class="group-content">
                 <div class="history-toolbar">
                     <input type="search" id="history-search" placeholder="Search history...">
+                    <span class="history-count" id="history-count"></span>
                     <button id="clear-history" class="destructive">Clear All</button>
                 </div>
                     <div class="history-list" id="history-list"></div>
@@ -3384,6 +3962,20 @@
                 if (settings?.uiTheme === 'system') void syncSettingsLightTint();
             });
             document.getElementById('sidebar-position').value = settings.sidebarPosition || 'left';
+            function normalizeSidebarZoom(raw) {
+                const n = Number(raw);
+                const v = Number.isFinite(n) ? n : 100;
+                return Math.max(75, Math.min(150, Math.round(v / 5) * 5));
+            }
+            function syncSidebarZoomControl(raw) {
+                const zoom = normalizeSidebarZoom(raw);
+                const input = document.getElementById('sidebar-zoom');
+                const label = document.getElementById('sidebar-zoom-label');
+                if (input) input.value = String(zoom);
+                if (label) label.textContent = zoom + '%';
+                settings.sidebarZoom = zoom;
+            }
+            syncSidebarZoomControl(settings.sidebarZoom);
             document.getElementById('search-engine').value = settings.searchEngine || 'google';
             document.getElementById('always-show-full-url').checked = !!settings.alwaysShowFullUrl;
             document.getElementById('https-only-mode').checked = !!settings.httpsOnlyMode;
@@ -3398,6 +3990,19 @@
                 const modeEl = document.getElementById('unpinned-clear-mode');
                 if (!row || !modeEl) return;
                 row.classList.toggle('visible', modeEl.value === 'custom');
+                row.style.removeProperty('display');
+            }
+            function syncGradientRowsVisibility() {
+                const enabled = document.getElementById('gradient-enabled')?.checked === true;
+                document.querySelectorAll('.gradient-rows').forEach((row) => {
+                    row.classList.toggle('visible', enabled);
+                    row.style.removeProperty('display');
+                });
+            }
+            function syncConditionalSettingsRows() {
+                syncGradientRowsVisibility();
+                syncUnpinnedClearCustomRow();
+                syncNtpSettingsNestedState();
             }
             syncUnpinnedClearCustomRow();
             document.getElementById('speech-enabled').checked = settings.speechEnabled !== false;
@@ -3849,139 +4454,205 @@
                     : Array.isArray(settings.ntpWidgetLayout)
                       ? settings.ntpWidgetLayout
                       : [];
-                const rows = [];
                 const esc = (s) => escapeHtml(s);
+                const field = (label, controlHtml) =>
+                    `<div class="ntp-widget-settings-field">
+  <div class="ntp-widget-settings-field-label">${esc(label)}</div>
+  ${controlHtml}
+</div>`;
+                const card = (title, fieldsHtml) =>
+                    `<div class="ntp-widget-settings-card">
+  <div class="ntp-widget-settings-card-head">${esc(title)}</div>
+  <div class="ntp-widget-settings-fields">${fieldsHtml}</div>
+</div>`;
+
+                const cards = [];
+                const typeCounts = new Map();
                 for (const w of layout) {
                     const type = api?.resolveType ? api.resolveType(w.type) : w.type;
                     if (!api?.widgetHasConfig?.(type)) continue;
-                    if (type === 'weather') {
-                        const unit = String(w.config?.unit || 'C').toUpperCase() === 'F' ? 'F' : 'C';
-                        rows.push(`<div class="row">
-  <div class="row-label">
-    <div class="row-title">Weather city</div>
-    <div class="row-desc">City name for your Weather tile</div>
-  </div>
-  <div class="row-controls">
-    <input type="text" data-ntp-field="city" data-widget-id="${w.id}" value="${esc(w.config?.city || 'London')}" placeholder="London" spellcheck="false" maxlength="64">
-  </div>
-</div>
-<div class="row">
-  <div class="row-label">
-    <div class="row-title">Temperature unit</div>
-    <div class="row-desc">Celsius or Fahrenheit</div>
-  </div>
-  <div class="row-controls">
-    <select data-ntp-field="unit" data-widget-id="${w.id}">
-      <option value="C"${unit === 'C' ? ' selected' : ''}>°C</option>
-      <option value="F"${unit === 'F' ? ' selected' : ''}>°F</option>
-    </select>
-  </div>
-</div>`);
-                    } else if (type === 'headlines') {
-                        const feeds = api.HEADLINE_FEED_PRESETS || [];
-                        const current = w.config?.feedUrl || feeds[0]?.url || '';
-                        const opts = feeds
-                            .map(
-                                (f) =>
-                                    `<option value="${esc(f.url)}"${f.url === current ? ' selected' : ''}>${esc(f.label)}</option>`
+                    typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+                }
+                const typeSeen = new Map();
+
+                for (const w of layout) {
+                    const type = api?.resolveType ? api.resolveType(w.type) : w.type;
+                    if (
+                        type !== 'weather' &&
+                        type !== 'worldclock' &&
+                        type !== 'clock' &&
+                        type !== 'airquality' &&
+                        type !== 'markets' &&
+                        type !== 'calendar'
+                    ) {
+                        continue;
+                    }
+                    const baseTitle = api?.widgetLabel?.(w) || type;
+                    const seen = (typeSeen.get(type) || 0) + 1;
+                    typeSeen.set(type, seen);
+                    const title =
+                        (typeCounts.get(type) || 0) > 1 ? `${baseTitle} ${seen}` : baseTitle;
+
+                    if (type === 'clock') {
+                        const hour12 = w.config?.hour12 !== false && w.config?.format !== '24';
+                        cards.push(
+                            card(
+                                title,
+                                field(
+                                    'Time format',
+                                    `<select data-ntp-field="hour12" data-widget-id="${w.id}">
+      <option value="true"${hour12 ? ' selected' : ''}>12-hour</option>
+      <option value="false"${!hour12 ? ' selected' : ''}>24-hour</option>
+    </select>`
+                                )
                             )
-                            .join('');
-                        rows.push(`<div class="row">
-  <div class="row-label">
-    <div class="row-title">News feed</div>
-    <div class="row-desc">Pick a source or paste any RSS URL below</div>
-  </div>
-  <div class="row-controls">
-    <select data-ntp-field="feedUrl" data-widget-id="${w.id}">
-      ${opts}
-      <option value="__custom__"${feeds.some((f) => f.url === current) ? '' : ' selected'}>Custom URL…</option>
-    </select>
-  </div>
-</div>
-<div class="row">
-  <div class="row-label">
-    <div class="row-title">Custom feed URL</div>
-    <div class="row-desc">Used when Custom URL is selected</div>
-  </div>
-  <div class="row-controls">
-    <input type="url" data-ntp-field="feedUrlCustom" data-widget-id="${w.id}" value="${esc(current)}" placeholder="https://…" spellcheck="false">
-  </div>
-</div>`);
-                    } else if (type === 'until') {
-                        rows.push(`<div class="row">
-  <div class="row-label">
-    <div class="row-title">Countdown name</div>
-    <div class="row-desc">Label on your Countdown tile</div>
-  </div>
-  <div class="row-controls">
-    <input type="text" data-ntp-field="label" data-widget-id="${w.id}" value="${esc(w.config?.label || 'Event')}" placeholder="Event" spellcheck="false">
-  </div>
-</div>
-<div class="row">
-  <div class="row-label">
-    <div class="row-title">Countdown date</div>
-    <div class="row-desc">Target day for your Countdown tile</div>
-  </div>
-  <div class="row-controls">
-    <input type="date" data-ntp-field="target" data-widget-id="${w.id}" value="${esc(w.config?.target || '')}">
-  </div>
-</div>`);
-                    } else if (type === 'worldclock') {
-                        const presets = api.WORLD_CLOCK_PRESETS || [];
-                        const tz = w.config?.timezone || 'America/New_York';
-                        const opts = presets
-                            .map(
-                                (p) =>
-                                    `<option value="${esc(p.timezone)}" data-label="${esc(p.label)}"${p.timezone === tz ? ' selected' : ''}>${esc(p.label)}</option>`
+                        );
+                        continue;
+                    }
+
+                    if (type === 'calendar') {
+                        const weekStartsOn = Number(w.config?.weekStartsOn) === 1 ? 1 : 0;
+                        cards.push(
+                            card(
+                                title,
+                                field(
+                                    'Week starts on',
+                                    `<select data-ntp-field="weekStartsOn" data-widget-id="${w.id}">
+      <option value="0"${weekStartsOn === 0 ? ' selected' : ''}>Sunday</option>
+      <option value="1"${weekStartsOn === 1 ? ' selected' : ''}>Monday</option>
+    </select>`
+                                )
                             )
-                            .join('');
-                        rows.push(`<div class="row">
-  <div class="row-label">
-    <div class="row-title">World clock city</div>
-    <div class="row-desc">Pick a city for your World clock tile</div>
+                        );
+                        continue;
+                    }
+
+                    if (type === 'markets') {
+                        const symbols = Array.isArray(w.config?.symbols)
+                            ? w.config.symbols
+                            : String(w.config?.symbols || '')
+                                  .split(/[\s,;]+/)
+                                  .filter(Boolean);
+                        const norm = api?.normalizeMarketSymbols
+                            ? api.normalizeMarketSymbols(symbols)
+                            : symbols.map((s) => String(s).toUpperCase()).slice(0, 8);
+                        const displaySym = (s) =>
+                            api?.displayMarketSymbol ? api.displayMarketSymbol(s) : s;
+                        const rows = norm.length
+                            ? norm
+                                  .map((sym, idx) => {
+                                      const label = esc(displaySym(sym));
+                                      const upDisabled = idx === 0 ? ' disabled' : '';
+                                      const downDisabled = idx === norm.length - 1 ? ' disabled' : '';
+                                      return `<li class="ntp-ticker-row" data-ntp-ticker-row data-widget-id="${w.id}" data-symbol="${esc(sym)}" data-index="${idx}">
+  <div class="ntp-ticker-row-sym">${label}</div>
+  <div class="ntp-ticker-row-actions">
+    <button type="button" class="ntp-ticker-move" data-ntp-ticker-move="up" data-widget-id="${w.id}" data-symbol="${esc(sym)}"${upDisabled} aria-label="Move ${label} up">↑</button>
+    <button type="button" class="ntp-ticker-move" data-ntp-ticker-move="down" data-widget-id="${w.id}" data-symbol="${esc(sym)}"${downDisabled} aria-label="Move ${label} down">↓</button>
   </div>
-  <div class="row-controls">
-    <select data-ntp-field="timezone" data-ntp-sync-label="label" data-widget-id="${w.id}">
-      ${opts}
-    </select>
+  <button type="button" class="ntp-ticker-remove" data-ntp-ticker-remove data-widget-id="${w.id}" data-symbol="${esc(sym)}" aria-label="Remove ${label}">×</button>
+</li>`;
+                                  })
+                                  .join('')
+                            : '';
+                        const empty = norm.length
+                            ? ''
+                            : '<div class="ntp-ticker-empty">No tickers yet — search below</div>';
+                        cards.push(
+                            card(
+                                title,
+                                `<div class="ntp-widget-settings-field ntp-ticker-picker" data-widget-id="${w.id}">
+  <div class="ntp-widget-settings-field-label">Tickers</div>
+  ${empty}
+  <ul class="ntp-ticker-list" data-ntp-ticker-list data-widget-id="${w.id}">${rows}</ul>
+  <div class="ntp-ticker-search-wrap">
+    <input type="text" class="ntp-weather-city-search" data-ntp-ticker-search data-widget-id="${w.id}" placeholder="Search stocks or crypto…" spellcheck="false" maxlength="40" autocomplete="off">
+    <div class="ntp-ticker-results hidden" data-ntp-ticker-results role="listbox"></div>
   </div>
-</div>`);
-                    } else if (type === 'focus') {
-                        const mins = Number(w.config?.minutes) || 25;
-                        rows.push(`<div class="row">
-  <div class="row-label">
-    <div class="row-title">Focus length</div>
-    <div class="row-desc">Any length from 1 to 180 minutes</div>
-  </div>
-  <div class="row-controls">
-    <input type="number" data-ntp-field="minutes" data-widget-id="${w.id}" min="1" max="180" step="1" value="${mins}" inputmode="numeric">
-  </div>
-</div>`);
-                    } else if (type === 'links') {
-                        const links = api.normalizeLinks ? api.normalizeLinks(w.config) : [];
-                        const padded = [...links];
-                        while (padded.length < 4) padded.push({ label: '', url: '' });
-                        const fields = padded
-                            .slice(0, 6)
-                            .map(
-                                (link, i) => `<div class="ntp-widget-deal-fields" style="width:100%;margin-bottom:8px;">
-  <input type="text" data-ntp-link-index="${i}" data-ntp-link-field="label" data-widget-id="${w.id}" value="${esc(link.label || '')}" placeholder="Label" spellcheck="false" maxlength="40">
-  <input type="url" data-ntp-link-index="${i}" data-ntp-link-field="url" data-widget-id="${w.id}" value="${esc(link.url || '')}" placeholder="https://…" spellcheck="false">
+  <div class="ntp-widget-settings-field-hint">Search and pick up to 8 tickers. Use ↑ ↓ to reorder. Quotes update live on New Tab.</div>
 </div>`
                             )
-                            .join('');
-                        rows.push(`<div class="row" style="align-items:flex-start;">
-  <div class="row-label">
-    <div class="row-title">Quick links</div>
-    <div class="row-desc">Up to six site shortcuts on your Quick links tile</div>
-  </div>
-  <div class="row-controls" style="flex-direction:column;align-items:stretch;min-width:220px;">
-    ${fields}
-  </div>
-</div>`);
+                        );
+                        continue;
                     }
+
+                    if (type === 'worldclock') {
+                        const hour12 = w.config?.hour12 !== false && w.config?.format !== '24';
+                        const selectedLabel = esc(
+                            w.config?.placeLabel ||
+                                w.config?.city ||
+                                'None — search and pick a city below'
+                        );
+                        const fieldsHtml =
+                            field(
+                                'Time format',
+                                `<select data-ntp-field="hour12" data-widget-id="${w.id}">
+      <option value="true"${hour12 ? ' selected' : ''}>12-hour</option>
+      <option value="false"${!hour12 ? ' selected' : ''}>24-hour</option>
+    </select>`
+                            ) +
+                            `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${w.id}">
+  <div class="ntp-widget-settings-field-label">City</div>
+  <div class="ntp-weather-city-selected" data-ntp-city-selected>${selectedLabel}</div>
+  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="Search cities worldwide…" spellcheck="false" maxlength="80" autocomplete="off">
+  <div class="ntp-weather-city-results hidden" data-ntp-city-results role="listbox"></div>
+  <div class="ntp-widget-settings-field-hint">Type at least 2 letters, then choose a city. Time zone is set automatically.</div>
+</div>`;
+                        cards.push(card(title, fieldsHtml));
+                        continue;
+                    }
+
+                    if (type === 'airquality') {
+                        const scale = w.config?.scale === 'eu' ? 'eu' : 'us';
+                        const selectedLabel = esc(
+                            w.config?.placeLabel ||
+                                w.config?.city ||
+                                'None — search and pick a city below'
+                        );
+                        const fieldsHtml =
+                            field(
+                                'AQI scale',
+                                `<select data-ntp-field="scale" data-widget-id="${w.id}">
+      <option value="us"${scale === 'us' ? ' selected' : ''}>US AQI</option>
+      <option value="eu"${scale === 'eu' ? ' selected' : ''}>European AQI</option>
+    </select>`
+                            ) +
+                            `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${w.id}">
+  <div class="ntp-widget-settings-field-label">City</div>
+  <div class="ntp-weather-city-selected" data-ntp-city-selected>${selectedLabel}</div>
+  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="Search cities worldwide…" spellcheck="false" maxlength="80" autocomplete="off">
+  <div class="ntp-weather-city-results hidden" data-ntp-city-results role="listbox"></div>
+  <div class="ntp-widget-settings-field-hint">Type at least 2 letters, then choose a city. Air quality updates automatically.</div>
+</div>`;
+                        cards.push(card(title, fieldsHtml));
+                        continue;
+                    }
+
+                    const unit = String(w.config?.unit || 'C').toUpperCase() === 'F' ? 'F' : 'C';
+                    const selectedLabel = esc(
+                        w.config?.placeLabel || w.config?.city || 'None — search and pick a city below'
+                    );
+                    const fieldsHtml =
+                        field(
+                            'Temperature unit',
+                            `<select data-ntp-field="unit" data-widget-id="${w.id}">
+      <option value="C"${unit === 'C' ? ' selected' : ''}>°C</option>
+      <option value="F"${unit === 'F' ? ' selected' : ''}>°F</option>
+    </select>`
+                        ) +
+                        `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${w.id}">
+  <div class="ntp-widget-settings-field-label">City</div>
+  <div class="ntp-weather-city-selected" data-ntp-city-selected>${selectedLabel}</div>
+  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="Search cities worldwide…" spellcheck="false" maxlength="80" autocomplete="off">
+  <div class="ntp-weather-city-results hidden" data-ntp-city-results role="listbox"></div>
+  <div class="ntp-widget-settings-field-hint">Type at least 2 letters, then choose a city from the list. Weather updates automatically.</div>
+</div>`;
+                    cards.push(card(title, fieldsHtml));
                 }
-                list.innerHTML = rows.join('') || '<div class="row-desc" style="padding:4px 0;">Add widgets on the New Tab page, then customize them here.</div>';
+
+                list.innerHTML =
+                    cards.join('') ||
+                    '<div class="ntp-widgets-settings-empty">No configurable widgets yet. Turn widgets on, then use <strong>Edit</strong> on a New Tab page to add tiles — configure cities, symbols, and options here.</div>';
             }
 
             function syncNtpWidgetSettingsFields() {
@@ -4001,6 +4672,9 @@
                 const w = layout.find((x) => x.id === widgetId);
                 if (!w) return;
                 w.config = { ...(w.config || {}), ...patch };
+                for (const k of Object.keys(w.config)) {
+                    if (w.config[k] === undefined) delete w.config[k];
+                }
                 if (patch.url != null) {
                     const url = String(patch.url || '').trim();
                     w.config.urlLabel = url.replace(/^https?:\/\//, '').split('/')[0];
@@ -4015,6 +4689,41 @@
                     config: item.config ? { ...item.config } : {}
                 }));
                 await saveSetting('ntpWidgetLayout', settings.ntpWidgetLayout, false);
+            }
+
+            function getNtpTickerSymbols(widgetId) {
+                const api = window.AxisNtpWidgets;
+                const layout = api
+                    ? api.normalizeLayout(settings.ntpWidgetLayout)
+                    : Array.isArray(settings.ntpWidgetLayout)
+                      ? settings.ntpWidgetLayout
+                      : [];
+                const w = layout.find((x) => x.id === widgetId);
+                if (!w) return [];
+                return api?.normalizeMarketSymbols
+                    ? api.normalizeMarketSymbols(w.config?.symbols)
+                    : [];
+            }
+
+            async function setNtpTickerSymbols(widgetId, symbols) {
+                const api = window.AxisNtpWidgets;
+                const next = api?.normalizeMarketSymbols
+                    ? api.normalizeMarketSymbols(symbols)
+                    : (Array.isArray(symbols) ? symbols : []).slice(0, 8);
+                await patchNtpWidgetConfigById(widgetId, { symbols: next });
+                renderNtpWidgetSettingsList();
+            }
+
+            async function moveNtpTicker(widgetId, symbol, delta) {
+                const list = getNtpTickerSymbols(widgetId);
+                const from = list.indexOf(symbol);
+                if (from < 0) return;
+                const to = from + delta;
+                if (to < 0 || to >= list.length) return;
+                const next = list.slice();
+                const [item] = next.splice(from, 1);
+                next.splice(to, 0, item);
+                await setNtpTickerSymbols(widgetId, next);
             }
 
             async function removeNtpWidgetById(widgetId) {
@@ -4047,10 +4756,8 @@
                 const welcomeOn = document.getElementById('ntp-welcome-enabled')?.checked !== false;
                 document.getElementById('ntp-welcome-subgroup')?.classList.toggle('visible', welcomeOn);
             }
-            syncNtpSettingsNestedState();
-            
-            const gradRows = document.querySelectorAll('.gradient-rows');
-            gradRows.forEach(r => r.classList.toggle('visible', settings.gradientEnabled));
+            syncUnpinnedClearCustomRow();
+            syncGradientRowsVisibility();
             
             function updateThemePreview() {
                 const el = document.getElementById('theme-preview');
@@ -4067,6 +4774,7 @@
                     settings.uiTheme === 'light' || settings.uiTheme === 'system' ? settings.uiTheme : 'dark';
                 await syncSettingsLightTint();
                 document.getElementById('sidebar-position').value = settings.sidebarPosition || 'left';
+                syncSidebarZoomControl(settings.sidebarZoom);
                 document.getElementById('search-engine').value = settings.searchEngine || 'google';
                 document.getElementById('always-show-full-url').checked = !!settings.alwaysShowFullUrl;
                 document.getElementById('https-only-mode').checked = !!settings.httpsOnlyMode;
@@ -4128,9 +4836,7 @@
                     ntpGreetingNameInput.value = storedName === 'User' ? '' : storedName;
                 }
                 syncNtpSettingsNestedState();
-                document
-                    .querySelectorAll('.gradient-rows')
-                    .forEach((r) => r.classList.toggle('visible', settings.gradientEnabled));
+                syncGradientRowsVisibility();
                 updateThemePreview();
             }
             window.__axisApplyLoadedSettingsToForm = applyLoadedSettingsToForm;
@@ -4179,6 +4885,12 @@
             window.electronAPI?.onSwitchSettingsTab?.((tab) => switchSection(tab));
 
             const SITE_PERM_KEYS = ['camera', 'microphone', 'notifications', 'geolocation'];
+            const SITE_PERM_LABELS = {
+                camera: 'Camera',
+                microphone: 'Microphone',
+                notifications: 'Notifications',
+                geolocation: 'Location'
+            };
             function normalizeSiteOriginInput(raw) {
                 if (!raw || typeof raw !== 'string') return null;
                 const s = raw.trim();
@@ -4211,6 +4923,15 @@
                     '<option value="deny"' + (v === 'deny' ? ' selected' : '') + '>Block</option>'
                 );
             }
+            function formatPermOriginLabel(origin) {
+                try {
+                    const u = new URL(origin);
+                    const path = u.pathname && u.pathname !== '/' ? u.pathname : '';
+                    return `${u.hostname}${path}`;
+                } catch (_) {
+                    return origin;
+                }
+            }
             async function loadSitePermissionOverrides() {
                 try {
                     sitePermissionOverrides = (await window.electronAPI.getSitePermissionOverrides()) || {};
@@ -4228,32 +4949,65 @@
                 renderSitePermissionTable();
             }
             function renderSitePermissionTable() {
-                const tbody = document.getElementById('site-perm-tbody');
-                if (!tbody) return;
-                tbody.innerHTML = '';
+                const container = document.getElementById('site-perm-list');
+                if (!container) return;
+                container.innerHTML = '';
                 const origins = Object.keys(sitePermissionOverrides).sort((a, b) => a.localeCompare(b));
                 if (origins.length === 0) {
-                    const tr = document.createElement('tr');
-                    const td = document.createElement('td');
-                    td.colSpan = 6;
-                    td.className = 'perm-empty';
-                    td.textContent = 'No sites yet. Add a site above to set overrides.';
-                    tr.appendChild(td);
-                    tbody.appendChild(tr);
+                    const empty = document.createElement('div');
+                    empty.className = 'perm-empty';
+                    empty.textContent = 'No sites yet. Add a site above to set overrides.';
+                    container.appendChild(empty);
                     return;
                 }
                 for (const origin of origins) {
                     const perms = sitePermissionOverrides[origin] || {};
-                    const tr = document.createElement('tr');
-                    const tdO = document.createElement('td');
-                    tdO.className = 'perm-origin';
-                    tdO.textContent = origin;
-                    tr.appendChild(tdO);
+                    const card = document.createElement('article');
+                    card.className = 'perm-card';
+
+                    const header = document.createElement('div');
+                    header.className = 'perm-card-header';
+
+                    const siteWrap = document.createElement('div');
+                    siteWrap.className = 'perm-card-site-wrap';
+                    const title = document.createElement('span');
+                    title.className = 'perm-card-site-title';
+                    title.textContent = formatPermOriginLabel(origin);
+                    title.title = origin;
+                    const url = document.createElement('span');
+                    url.className = 'perm-card-site-url';
+                    url.textContent = origin;
+                    url.title = origin;
+                    siteWrap.appendChild(title);
+                    siteWrap.appendChild(url);
+
+                    const removeBtn = document.createElement('button');
+                    removeBtn.type = 'button';
+                    removeBtn.className = 'perm-card-remove destructive';
+                    removeBtn.textContent = 'Remove';
+                    removeBtn.addEventListener('click', () => {
+                        delete sitePermissionOverrides[origin];
+                        persistSitePermissionOverrides();
+                    });
+
+                    header.appendChild(siteWrap);
+                    header.appendChild(removeBtn);
+                    card.appendChild(header);
+
+                    const grid = document.createElement('div');
+                    grid.className = 'perm-card-grid';
                     for (const key of SITE_PERM_KEYS) {
-                        const td = document.createElement('td');
+                        const cell = document.createElement('div');
+                        cell.className = 'perm-card-cell';
+                        const label = document.createElement('label');
+                        label.textContent = SITE_PERM_LABELS[key] || key;
                         const sel = document.createElement('select');
                         sel.dataset.origin = origin;
                         sel.dataset.permKey = key;
+                        sel.setAttribute(
+                            'aria-label',
+                            `${SITE_PERM_LABELS[key] || key} for ${formatPermOriginLabel(origin)}`
+                        );
                         sel.innerHTML = permSelectHtml(perms[key]);
                         sel.addEventListener('change', () => {
                             const o = sel.dataset.origin;
@@ -4264,21 +5018,12 @@
                             else sitePermissionOverrides[o][k] = val;
                             persistSitePermissionOverrides();
                         });
-                        td.appendChild(sel);
-                        tr.appendChild(td);
+                        cell.appendChild(label);
+                        cell.appendChild(sel);
+                        grid.appendChild(cell);
                     }
-                    const tdR = document.createElement('td');
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'perm-remove destructive';
-                    btn.textContent = 'Remove';
-                    btn.addEventListener('click', () => {
-                        delete sitePermissionOverrides[origin];
-                        persistSitePermissionOverrides();
-                    });
-                    tdR.appendChild(btn);
-                    tr.appendChild(tdR);
-                    tbody.appendChild(tr);
+                    card.appendChild(grid);
+                    container.appendChild(card);
                 }
             }
             document.getElementById('site-perm-add-btn')?.addEventListener('click', async () => {
@@ -4445,39 +5190,127 @@
                     if (btn) btn.disabled = false;
                 }
             });
-            // When the store changes elsewhere (context menu, another window), refresh affected controls.
+            // When the store changes elsewhere (New Tab widgets, another window, profile edits),
+            // refresh form fields and the visible data lists without rebuilding the whole page.
+            function isSettingsTextFieldFocused() {
+                const ae = document.activeElement;
+                if (!ae || !document.body.contains(ae)) return false;
+                const tag = ae.tagName;
+                if (tag === 'TEXTAREA') return true;
+                if (tag === 'SELECT') return true;
+                if (tag === 'INPUT') {
+                    const t = String(ae.type || 'text').toLowerCase();
+                    return (
+                        t === 'text' ||
+                        t === 'search' ||
+                        t === 'password' ||
+                        t === 'url' ||
+                        t === 'number' ||
+                        t === 'date' ||
+                        t === 'email' ||
+                        t === ''
+                    );
+                }
+                return !!ae.isContentEditable;
+            }
+
             async function refreshStoreBackedSettingsFields() {
-                        loadSitePermissionOverrides();
-                        loadExtensions();
-                        try {
+                try {
                     const s = await window.electronAPI.getSettings();
                     if (!s) return;
-                    settings.sidebarPosition = s.sidebarPosition;
-                    const sidebarPos = document.getElementById('sidebar-position');
-                    if (sidebarPos) {
-                        sidebarPos.value = s.sidebarPosition === 'right' ? 'right' : 'left';
+                    const editingText = isSettingsTextFieldFocused();
+                    const editingWidgetField = !!document.activeElement?.closest?.(
+                        '#ntp-widgets-active-list'
+                    );
+                    settings = s;
+
+                    if (!editingText) {
+                        if (typeof window.__axisApplyLoadedSettingsToForm === 'function') {
+                            await window.__axisApplyLoadedSettingsToForm();
+                        }
+                    } else {
+                        // Keep in-memory settings current, but don't yank focus mid-edit.
+                        if (
+                            !editingWidgetField &&
+                            typeof syncNtpWidgetSettingsFields === 'function'
+                        ) {
+                            syncNtpWidgetSettingsFields();
+                        }
+                        ensureAiProvidersFromSettings?.();
+                        if (typeof renderAiProvidersList === 'function') renderAiProvidersList();
+                        syncSettingsLightTint?.();
+                        syncNativeWindowChromeTransparency?.();
                     }
-                                const ab = document.getElementById('ad-blocker-enabled');
-                    if (ab) ab.checked = s.adBlockerEnabled !== false;
-                    settings.aiProviders = s.aiProviders;
-                    settings.activeAiProviderId = s.activeAiProviderId;
-                    settings.groqApiKey = s.groqApiKey;
-                    ensureAiProvidersFromSettings();
-                    settings.uiTheme = s.uiTheme;
-                    settings.windowChromeLight = s.windowChromeLight;
-                    syncSettingsLightTint();
-                    syncNativeWindowChromeTransparency();
-                    renderAiProvidersList();
-                        } catch (_) {}
+
+                    const section = activeSection || 'customization';
+                    if (typeof refreshSettingsSectionInternal === 'function') {
+                        if (
+                            section === 'history' ||
+                            section === 'extensions' ||
+                            section === 'permissions' ||
+                            section === 'profiles' ||
+                            section === 'shortcuts'
+                        ) {
+                            refreshSettingsSectionInternal(section);
+                        } else if (section === 'vault') {
+                            const hasOpenReveal = !!document.querySelector(
+                                '.vault-table-row--open, .vault-row-detail:not(.hidden)'
+                            );
+                            if (!vaultEditorMode && !hasOpenReveal && vaultAuthInProgress <= 0) {
+                                refreshSettingsSectionInternal(section);
+                            }
+                        }
+                    }
+
+                    try {
+                        const ctx = window.electronAPI?.getSettingsProfileBootstrap?.();
+                        if (ctx?.profiles) {
+                            settingsEditingProfileId =
+                                ctx.profileId || settingsEditingProfileId;
+                            renderSettingsProfileList(
+                                ctx.profiles || [],
+                                settingsEditingProfileId
+                            );
+                        }
+                    } catch (_) {}
+                } catch (_) {}
             }
+            let _settingsStoreRefreshTimer = null;
+            function scheduleSettingsStoreRefresh(delayMs = 140) {
+                if (_settingsStoreRefreshTimer) clearTimeout(_settingsStoreRefreshTimer);
+                _settingsStoreRefreshTimer = setTimeout(() => {
+                    _settingsStoreRefreshTimer = null;
+                    void refreshStoreBackedSettingsFields();
+                }, delayMs);
+            }
+
             try {
                 if (window.electronAPI?.onSettingsUpdated) {
-                    window.electronAPI.onSettingsUpdated(() => { void refreshStoreBackedSettingsFields(); });
+                    window.electronAPI.onSettingsUpdated(() => {
+                        scheduleSettingsStoreRefresh(60);
+                    });
                 }
                 if (window.electronAPI?.onSettingsStoreUpdated) {
-                    window.electronAPI.onSettingsStoreUpdated(() => { void refreshStoreBackedSettingsFields(); });
+                    window.electronAPI.onSettingsStoreUpdated(() => {
+                        scheduleSettingsStoreRefresh(60);
+                    });
                 }
             } catch (_) {}
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    if (vaultAuthInProgress > 0) return;
+                    scheduleSettingsStoreRefresh(80);
+                }
+            });
+            window.addEventListener('focus', () => {
+                if (vaultAuthInProgress > 0) return;
+                scheduleSettingsStoreRefresh(120);
+            });
+            window.addEventListener('pageshow', () => {
+                if (vaultAuthInProgress > 0) return;
+                scheduleSettingsStoreRefresh(60);
+            });
 
             // Settings search (instant filter)
             const settingsSearchInput = document.getElementById('settings-search');
@@ -4493,7 +5326,7 @@
                     });
                     if (settingsSearchEmpty) settingsSearchEmpty.style.display = 'none';
                     showActiveSectionOnly(activeSection || 'customization');
-                    syncUnpinnedClearCustomRow();
+                    syncConditionalSettingsRows();
                     return;
                 }
 
@@ -4532,6 +5365,29 @@
             
             // Change handlers
             document.getElementById('sidebar-position').addEventListener('change', e => saveSetting('sidebarPosition', e.target.value, false));
+            let sidebarZoomSaveTimer = null;
+            const persistSidebarZoom = (raw) => {
+                const zoom = normalizeSidebarZoom(raw);
+                syncSidebarZoomControl(zoom);
+                saveSetting('sidebarZoom', zoom, false);
+            };
+            document.getElementById('sidebar-zoom')?.addEventListener('input', (e) => {
+                const zoom = normalizeSidebarZoom(e.target.value);
+                const label = document.getElementById('sidebar-zoom-label');
+                if (label) label.textContent = zoom + '%';
+                if (sidebarZoomSaveTimer) clearTimeout(sidebarZoomSaveTimer);
+                sidebarZoomSaveTimer = setTimeout(() => {
+                    sidebarZoomSaveTimer = null;
+                    persistSidebarZoom(e.target.value);
+                }, 60);
+            });
+            document.getElementById('sidebar-zoom')?.addEventListener('change', (e) => {
+                if (sidebarZoomSaveTimer) {
+                    clearTimeout(sidebarZoomSaveTimer);
+                    sidebarZoomSaveTimer = null;
+                }
+                persistSidebarZoom(e.target.value);
+            });
             document.getElementById('search-engine').addEventListener('change', e => saveSetting('searchEngine', e.target.value, false));
             document.getElementById('always-show-full-url').addEventListener('change', e => saveSetting('alwaysShowFullUrl', e.target.checked, false));
             document.getElementById('https-only-mode').addEventListener('change', e => saveSetting('httpsOnlyMode', e.target.checked, false));
@@ -4603,7 +5459,7 @@
             document.getElementById('gradient-enabled').addEventListener('change', e => {
                 const v = e.target.checked;
                 saveSetting('gradientEnabled', v, true);
-                gradRows.forEach(r => r.classList.toggle('visible', v));
+                syncGradientRowsVisibility();
                 updateThemePreview();
             });
             document.getElementById('gradient-direction').addEventListener('change', e => {
@@ -4629,68 +5485,252 @@
                 syncNtpWidgetSettingsFields();
             });
             document.getElementById('ntp-widgets-active-list')?.addEventListener('change', (e) => {
-                const linkField = e.target.closest('[data-ntp-link-field][data-widget-id]');
-                if (linkField) {
-                    const widgetId = linkField.dataset.widgetId;
-                    const api = window.AxisNtpWidgets;
-                    let layout = api
-                        ? api.normalizeLayout(settings.ntpWidgetLayout)
-                        : Array.isArray(settings.ntpWidgetLayout)
-                          ? settings.ntpWidgetLayout
-                          : [];
-                    const w = layout.find((x) => x.id === widgetId);
-                    if (!w) return;
-                    const inputs = document.querySelectorAll(`[data-widget-id="${widgetId}"][data-ntp-link-field]`);
-                    const byIndex = new Map();
-                    inputs.forEach((inp) => {
-                        const i = Number(inp.dataset.ntpLinkIndex);
-                        if (!Number.isFinite(i)) return;
-                        const row = byIndex.get(i) || { label: '', url: '' };
-                        row[inp.dataset.ntpLinkField] = String(inp.value || '').trim();
-                        byIndex.set(i, row);
-                    });
-                    const links = [...byIndex.entries()]
-                        .sort((a, b) => a[0] - b[0])
-                        .map(([, v]) => v)
-                        .filter((v) => v.url);
-                    void patchNtpWidgetConfigById(widgetId, { links });
-                    return;
-                }
                 const input = e.target.closest('[data-ntp-field][data-widget-id]');
                 if (!input) return;
                 const field = input.dataset.ntpField;
                 const widgetId = input.dataset.widgetId;
                 if (!field || !widgetId) return;
-                if (field === 'feedUrlCustom') {
-                    void patchNtpWidgetConfigById(widgetId, { feedUrl: String(input.value || '').trim() });
-                    return;
-                }
-                if (field === 'feedUrl' && input.value === '__custom__') {
-                    const custom = document.querySelector(`[data-widget-id="${widgetId}"][data-ntp-field="feedUrlCustom"]`);
-                    void patchNtpWidgetConfigById(widgetId, {
-                        feedUrl: String(custom?.value || '').trim()
-                    });
-                    return;
-                }
-                if (field === 'timezone' && input.dataset.ntpSyncLabel === 'label') {
-                    const opt = input.selectedOptions?.[0];
-                    const label = opt?.dataset?.label || opt?.textContent || '';
-                    void patchNtpWidgetConfigById(widgetId, {
-                        timezone: String(input.value || '').trim(),
-                        label: String(label || '').trim()
-                    });
-                    return;
-                }
-                if (field === 'minutes') {
-                    const api = window.AxisNtpWidgets;
-                    const mins = api?.clampFocusMinutes
-                        ? api.clampFocusMinutes(input.value)
-                        : Math.max(1, Math.min(180, Number(input.value) || 25));
-                    void patchNtpWidgetConfigById(widgetId, { minutes: mins });
-                    return;
-                }
-                void patchNtpWidgetConfigById(widgetId, { [field]: String(input.value || '').trim() });
+                let value = String(input.value || '').trim();
+                if (field === 'hour12') value = value !== 'false';
+                if (field === 'weekStartsOn') value = Number(value) === 1 ? 1 : 0;
+                void patchNtpWidgetConfigById(widgetId, { [field]: value });
             });
+
+            let weatherCitySearchTimer = null;
+            let weatherCitySearchToken = 0;
+            let tickerSearchTimer = null;
+            let tickerSearchToken = 0;
+            document.getElementById('ntp-widgets-active-list')?.addEventListener('input', (e) => {
+                const tickerSearch = e.target.closest('[data-ntp-ticker-search]');
+                if (tickerSearch) {
+                    const widgetId = tickerSearch.dataset.widgetId;
+                    const picker = tickerSearch.closest('.ntp-ticker-picker');
+                    const resultsEl = picker?.querySelector('[data-ntp-ticker-results]');
+                    const api = window.AxisNtpWidgets;
+                    if (!widgetId || !resultsEl || !api?.searchTickers) return;
+
+                    const q = String(tickerSearch.value || '').trim();
+                    clearTimeout(tickerSearchTimer);
+                    if (q.length < 1) {
+                        resultsEl.classList.add('hidden');
+                        resultsEl.innerHTML = '';
+                        return;
+                    }
+
+                    const token = ++tickerSearchToken;
+                    resultsEl.innerHTML = '<div class="ntp-weather-city-empty">Searching…</div>';
+                    resultsEl.classList.remove('hidden');
+
+                    tickerSearchTimer = setTimeout(async () => {
+                        let rows = [];
+                        let failed = false;
+                        try {
+                            if (typeof window.electronAPI?.searchTickers === 'function') {
+                                const res = await window.electronAPI.searchTickers(q, 10);
+                                if (res?.ok && Array.isArray(res.results)) {
+                                    rows = res.results;
+                                } else {
+                                    failed = true;
+                                    rows = await api.searchTickers(q, { limit: 10 });
+                                }
+                            } else {
+                                rows = await api.searchTickers(q, { limit: 10 });
+                            }
+                        } catch (_) {
+                            failed = true;
+                            rows = [];
+                        }
+                        if (token !== tickerSearchToken) return;
+                        if (!rows.length) {
+                            resultsEl.innerHTML = failed
+                                ? '<div class="ntp-weather-city-empty">Couldn’t reach ticker search — check your connection and try again</div>'
+                                : '<div class="ntp-weather-city-empty">No tickers found — try another symbol</div>';
+                            resultsEl.classList.remove('hidden');
+                            return;
+                        }
+                        resultsEl.innerHTML = rows
+                            .map((r) => {
+                                const symbol = escapeHtml(r.symbol || '');
+                                const rawName = String(r.name || '').trim();
+                                const nameText =
+                                    rawName &&
+                                    rawName.toUpperCase() !== String(r.symbol || '').toUpperCase()
+                                        ? rawName
+                                        : '';
+                                const metaBits = [r.type, r.exch].filter(Boolean).join(' · ');
+                                const restParts = [nameText, metaBits].filter(Boolean);
+                                const rest = restParts.length
+                                    ? ` — <span class="ntp-ticker-option-rest">${escapeHtml(restParts.join(' · '))}</span>`
+                                    : '';
+                                return `<div class="ntp-ticker-option" role="option" tabindex="0" data-ntp-ticker-pick
+        data-widget-id="${escapeHtml(widgetId)}"
+        data-symbol="${symbol}" title="${symbol}${nameText ? ' — ' + escapeHtml(nameText) : ''}">
+  <span class="ntp-ticker-option-sym">${symbol}</span>${rest}
+</div>`;
+                            })
+                            .join('');
+                        resultsEl.classList.remove('hidden');
+                    }, 200);
+                    return;
+                }
+
+                const search = e.target.closest('[data-ntp-city-search], [data-ntp-weather-city-search]');
+                if (!search) return;
+                const widgetId = search.dataset.widgetId;
+                const picker = search.closest('.ntp-city-picker, .ntp-weather-city-picker');
+                const resultsEl = picker?.querySelector(
+                    '[data-ntp-city-results], [data-ntp-weather-city-results]'
+                );
+                const api = window.AxisNtpWidgets;
+                if (!widgetId || !resultsEl || !api?.searchCities) return;
+
+                const q = String(search.value || '').trim();
+                clearTimeout(weatherCitySearchTimer);
+                if (q.length < 2) {
+                    resultsEl.classList.add('hidden');
+                    resultsEl.innerHTML = '';
+                    return;
+                }
+
+                const token = ++weatherCitySearchToken;
+                resultsEl.innerHTML = '<div class="ntp-weather-city-empty">Searching…</div>';
+                resultsEl.classList.remove('hidden');
+
+                weatherCitySearchTimer = setTimeout(async () => {
+                    let rows = [];
+                    let failed = false;
+                    try {
+                        if (typeof window.electronAPI?.searchWeatherCities === 'function') {
+                            const res = await window.electronAPI.searchWeatherCities(q, 12);
+                            if (res?.ok && Array.isArray(res.results)) {
+                                rows = res.results;
+                            } else {
+                                failed = true;
+                                rows = await api.searchCities(q, { limit: 12 });
+                            }
+                        } else {
+                            rows = await api.searchCities(q, { limit: 12 });
+                        }
+                    } catch (_) {
+                        failed = true;
+                        rows = [];
+                    }
+                    if (token !== weatherCitySearchToken) return;
+                    if (!rows.length) {
+                        resultsEl.innerHTML = failed
+                            ? '<div class="ntp-weather-city-empty">Couldn’t reach city search — check your connection and try again</div>'
+                            : '<div class="ntp-weather-city-empty">No cities found — try another spelling</div>';
+                        resultsEl.classList.remove('hidden');
+                        return;
+                    }
+                    resultsEl.innerHTML = rows
+                        .map((r) => {
+                            const label = escapeHtml(r.label || r.name || '');
+                            return `<button type="button" class="ntp-weather-city-option" data-ntp-city-pick
+        data-widget-id="${escapeHtml(widgetId)}"
+        data-city="${escapeHtml(r.name || '')}"
+        data-label="${escapeHtml(r.label || r.name || '')}"
+        data-short="${escapeHtml(r.short || r.name || '')}"
+        data-tz="${escapeHtml(r.timezone || '')}"
+        data-lat="${r.latitude ?? ''}"
+        data-lon="${r.longitude ?? ''}">${label}</button>`;
+                        })
+                        .join('');
+                    resultsEl.classList.remove('hidden');
+                }, 200);
+            });
+
+            document.getElementById('ntp-widgets-active-list')?.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                const opt = e.target.closest('[data-ntp-ticker-pick]');
+                if (!opt) return;
+                e.preventDefault();
+                opt.click();
+            });
+
+            document.getElementById('ntp-widgets-active-list')?.addEventListener('click', (e) => {
+                const moveBtn = e.target.closest('[data-ntp-ticker-move]');
+                if (moveBtn) {
+                    e.preventDefault();
+                    if (moveBtn.disabled) return;
+                    const widgetId = moveBtn.dataset.widgetId;
+                    const symbol = moveBtn.getAttribute('data-symbol') || '';
+                    const dir = moveBtn.getAttribute('data-ntp-ticker-move') === 'up' ? -1 : 1;
+                    if (!widgetId || !symbol) return;
+                    void moveNtpTicker(widgetId, symbol, dir);
+                    return;
+                }
+
+                const removeChip = e.target.closest('[data-ntp-ticker-remove]');
+                if (removeChip) {
+                    e.preventDefault();
+                    const widgetId = removeChip.dataset.widgetId;
+                    const symbol = removeChip.getAttribute('data-symbol') || '';
+                    if (!widgetId || !symbol) return;
+                    const next = getNtpTickerSymbols(widgetId).filter((s) => s !== symbol);
+                    void setNtpTickerSymbols(widgetId, next);
+                    return;
+                }
+
+                const tickerOpt = e.target.closest('[data-ntp-ticker-pick]');
+                if (tickerOpt) {
+                    e.preventDefault();
+                    const widgetId = tickerOpt.dataset.widgetId;
+                    const symbol = tickerOpt.getAttribute('data-symbol') || '';
+                    if (!widgetId || !symbol) return;
+                    const current = getNtpTickerSymbols(widgetId);
+                    const next = window.AxisNtpWidgets?.normalizeMarketSymbols
+                        ? window.AxisNtpWidgets.normalizeMarketSymbols([...current, symbol])
+                        : [...current, symbol].slice(0, 8);
+                    const picker = tickerOpt.closest('.ntp-ticker-picker');
+                    const search = picker?.querySelector('[data-ntp-ticker-search]');
+                    const resultsEl = picker?.querySelector('[data-ntp-ticker-results]');
+                    if (search) search.value = '';
+                    if (resultsEl) {
+                        resultsEl.classList.add('hidden');
+                        resultsEl.innerHTML = '';
+                    }
+                    void setNtpTickerSymbols(widgetId, next);
+                    return;
+                }
+
+                const opt = e.target.closest('[data-ntp-city-pick], [data-ntp-weather-pick]');
+                if (!opt) return;
+                e.preventDefault();
+                const widgetId = opt.dataset.widgetId;
+                if (!widgetId) return;
+                const city = opt.getAttribute('data-city') || '';
+                const label = opt.getAttribute('data-label') || city;
+                const short = opt.getAttribute('data-short') || city;
+                const timezone = opt.getAttribute('data-tz') || '';
+                const lat = Number(opt.getAttribute('data-lat'));
+                const lon = Number(opt.getAttribute('data-lon'));
+                const picker = opt.closest('.ntp-city-picker, .ntp-weather-city-picker');
+                const selected = picker?.querySelector(
+                    '[data-ntp-city-selected], [data-ntp-weather-selected]'
+                );
+                const search = picker?.querySelector(
+                    '[data-ntp-city-search], [data-ntp-weather-city-search]'
+                );
+                const resultsEl = picker?.querySelector(
+                    '[data-ntp-city-results], [data-ntp-weather-city-results]'
+                );
+                if (selected) selected.textContent = label;
+                if (search) search.value = '';
+                if (resultsEl) {
+                    resultsEl.classList.add('hidden');
+                    resultsEl.innerHTML = '';
+                }
+                const patch = {
+                    city,
+                    placeLabel: short || label,
+                    latitude: Number.isFinite(lat) ? lat : undefined,
+                    longitude: Number.isFinite(lon) ? lon : undefined
+                };
+                if (timezone) patch.timezone = timezone;
+                void patchNtpWidgetConfigById(widgetId, patch);
+            });
+
             document.getElementById('ntp-widgets-reset-layout')?.addEventListener('click', () => {
                 void (async () => {
                     settings.ntpWidgetLayout = [];
@@ -4727,51 +5767,175 @@
                 wclLabel.textContent = formatWindowChromeLightLabel(v);
             });
             
-            // History
+            // History — load in pages as you scroll
+            const HISTORY_PAGE_SIZE = 60;
+            let historyAllItems = [];
+            let historyVisibleCount = 0;
+            let historySearchQuery = '';
+            let historyObserver = null;
+
+            function buildHistoryItemHtml(item) {
+                return `<div class="history-item" data-url="${escapeHtml(item.url)}" data-id="${escapeHtml(String(item.id))}">
+                    <img class="history-favicon" src="${escapeHtml(item.favicon || '')}" alt="" onerror="this.style.display='none'">
+                    <div class="history-info">
+                        <div class="history-title">${escapeHtml(item.title)}</div>
+                        <div class="history-url">${escapeHtml(item.url)}</div>
+                    </div>
+                    <div class="history-time">${escapeHtml(formatTimeAgo(item.timestamp))}</div>
+                    <button class="history-delete" data-id="${item.id}">Delete</button>
+                </div>`;
+            }
+
+            function getFilteredHistoryItems() {
+                const q = historySearchQuery.trim().toLowerCase();
+                if (!q) return historyAllItems;
+                return historyAllItems.filter((item) => {
+                    const title = String(item.title || '').toLowerCase();
+                    const url = String(item.url || '').toLowerCase();
+                    return title.includes(q) || url.includes(q);
+                });
+            }
+
+            function wireHistoryListHandlers(list) {
+                list.querySelectorAll('.history-delete').forEach((btn) => {
+                    if (btn.dataset.bound) return;
+                    btn.dataset.bound = '1';
+                    btn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        await window.electronAPI.deleteHistoryItem(parseInt(btn.dataset.id, 10));
+                        populateHistory();
+                    });
+                });
+                list.querySelectorAll('.history-item').forEach((item) => {
+                    if (item.dataset.bound) return;
+                    item.dataset.bound = '1';
+                    item.addEventListener('click', (e) => {
+                        if (!e.target.closest('.history-delete') && item.dataset.url) {
+                            window.electronAPI?.openUrlInBrowser?.(item.dataset.url);
+                        }
+                    });
+                });
+            }
+
+            function updateHistoryCountLabel() {
+                const el = document.getElementById('history-count');
+                if (!el) return;
+                const filtered = getFilteredHistoryItems();
+                const total = filtered.length;
+                const shown = Math.min(historyVisibleCount, total);
+                if (total === 0) {
+                    el.textContent = '';
+                    return;
+                }
+                if (shown >= total) {
+                    el.textContent = `${total} item${total === 1 ? '' : 's'}`;
+                } else {
+                    el.textContent = `${shown} of ${total}`;
+                }
+            }
+
+            function updateHistorySentinel(hasMore) {
+                const list = document.getElementById('history-list');
+                if (!list) return;
+                updateHistoryCountLabel();
+                let sentinel = document.getElementById('history-load-sentinel');
+                let status = document.getElementById('history-load-status');
+                if (!hasMore) {
+                    sentinel?.remove();
+                    if (status) status.remove();
+                    if (historyObserver) {
+                        historyObserver.disconnect();
+                        historyObserver = null;
+                    }
+                    return;
+                }
+                if (!sentinel) {
+                    sentinel = document.createElement('div');
+                    sentinel.id = 'history-load-sentinel';
+                    sentinel.className = 'history-load-sentinel';
+                    list.appendChild(sentinel);
+                } else if (sentinel.parentElement !== list) {
+                    list.appendChild(sentinel);
+                }
+                if (!status) {
+                    status = document.createElement('div');
+                    status.id = 'history-load-status';
+                    status.className = 'history-load-more';
+                    list.appendChild(status);
+                } else if (status.parentElement !== list) {
+                    list.insertBefore(status, sentinel);
+                }
+                status.textContent = 'Scroll for more…';
+                setupHistoryObserver(sentinel);
+            }
+
+            function setupHistoryObserver(sentinel) {
+                const root = document.querySelector('.main');
+                if (!root || !sentinel) return;
+                if (historyObserver) historyObserver.disconnect();
+                historyObserver = new IntersectionObserver(
+                    (entries) => {
+                        if (entries.some((entry) => entry.isIntersecting)) {
+                            renderMoreHistory(false);
+                        }
+                    },
+                    { root, rootMargin: '240px 0px' }
+                );
+                historyObserver.observe(sentinel);
+            }
+
+            function renderMoreHistory(reset = false) {
+                const list = document.getElementById('history-list');
+                if (!list) return;
+                const filtered = getFilteredHistoryItems();
+                if (reset) {
+                    historyVisibleCount = 0;
+                    list.innerHTML = '';
+                }
+                if (filtered.length === 0) {
+                    list.innerHTML = '<div class="empty-state">No history</div>';
+                    if (historyObserver) {
+                        historyObserver.disconnect();
+                        historyObserver = null;
+                    }
+                    return;
+                }
+                const batch = filtered.slice(historyVisibleCount, historyVisibleCount + HISTORY_PAGE_SIZE);
+                if (!batch.length) {
+                    updateHistorySentinel(false);
+                    return;
+                }
+                historyVisibleCount += batch.length;
+                const html = batch.map((item) => buildHistoryItemHtml(item)).join('');
+                const status = document.getElementById('history-load-status');
+                if (status && list.contains(status)) {
+                    status.insertAdjacentHTML('beforebegin', html);
+                } else {
+                    list.insertAdjacentHTML('beforeend', html);
+                }
+                wireHistoryListHandlers(list);
+                updateHistorySentinel(historyVisibleCount < filtered.length);
+            }
+
             async function populateHistory() {
                 const list = document.getElementById('history-list');
+                if (!list) return;
                 try {
-                    const history = await window.electronAPI.getHistory() || [];
-                    if (history.length === 0) {
-                        list.innerHTML = '<div class="empty-state">No history</div>';
-                        return;
-                    }
-                    list.innerHTML = history.map(item => `
-                        <div class="history-item" data-url="${escapeHtml(item.url)}">
-                            <img class="history-favicon" src="${escapeHtml(item.favicon || '')}" alt="" onerror="this.style.display='none'">
-                            <div class="history-info">
-                                <div class="history-title">${escapeHtml(item.title)}</div>
-                                <div class="history-url">${escapeHtml(item.url)}</div>
-                            </div>
-                            <div class="history-time">${escapeHtml(formatTimeAgo(item.timestamp))}</div>
-                            <button class="history-delete" data-id="${item.id}">Delete</button>
-                        </div>
-                    `).join('');
-                    list.querySelectorAll('.history-delete').forEach(btn => {
-                        btn.addEventListener('click', async (e) => {
-                            e.stopPropagation();
-                            await window.electronAPI.deleteHistoryItem(parseInt(btn.dataset.id, 10));
-                            populateHistory();
-                        });
-                    });
-                    list.querySelectorAll('.history-item').forEach(item => {
-                        item.addEventListener('click', (e) => {
-                            if (!e.target.closest('.history-delete') && item.dataset.url) {
-                                window.electronAPI?.openUrlInBrowser?.(item.dataset.url);
-                            }
-                        });
-                    });
+                    historyAllItems = (await window.electronAPI.getHistory()) || [];
+                    historySearchQuery = document.getElementById('history-search')?.value || '';
+                    renderMoreHistory(true);
                 } catch (e) {
                     list.innerHTML = '<div class="empty-state">Failed to load</div>';
                 }
             }
+            let historySearchTimer = null;
             document.getElementById('history-search').addEventListener('input', (e) => {
-                const q = e.target.value.toLowerCase();
-                document.querySelectorAll('.history-item').forEach(item => {
-                    const t = item.querySelector('.history-title')?.textContent || '';
-                    const u = item.querySelector('.history-url')?.textContent || '';
-                    item.style.display = (t.toLowerCase().includes(q) || u.toLowerCase().includes(q)) ? 'flex' : 'none';
-                });
+                historySearchQuery = e.target.value || '';
+                if (historySearchTimer) clearTimeout(historySearchTimer);
+                historySearchTimer = setTimeout(() => {
+                    historySearchTimer = null;
+                    renderMoreHistory(true);
+                }, 120);
             });
             document.getElementById('clear-history').addEventListener('click', async () => {
                 if (confirm('Clear all history?')) {
@@ -4933,6 +6097,15 @@
             const baseSwitchSection = switchSection;
             let vaultEditorMode = null;
             let vaultEditorId = null;
+            let vaultAuthInProgress = 0;
+
+            function beginVaultAuth() {
+                vaultAuthInProgress += 1;
+            }
+
+            function endVaultAuth() {
+                vaultAuthInProgress = Math.max(0, vaultAuthInProgress - 1);
+            }
 
             function vaultToast(message, isError) {
                 const el = document.getElementById('vault-toast');
@@ -4943,6 +6116,7 @@
 
             async function requireVaultAuth(reason) {
                 vaultToast('Waiting for authentication…');
+                beginVaultAuth();
                 try {
                     const ok = await window.electronAPI.vaultVerifyDevice(reason);
                     if (!ok) {
@@ -4954,6 +6128,8 @@
                 } catch (e) {
                     vaultToast(e?.message || 'Could not verify identity', true);
                     return false;
+                } finally {
+                    endVaultAuth();
                 }
             }
 
@@ -4998,7 +6174,9 @@
                     vaultToast('');
                     return;
                 }
+                hideVaultEditor();
                 vaultToast('Waiting for authentication…');
+                beginVaultAuth();
                 try {
                     const revealed = await window.electronAPI.vaultRevealLogin(id);
                     if (!revealed || !revealed.ok) {
@@ -5015,6 +6193,8 @@
                     vaultToast('');
                 } catch (e) {
                     vaultToast(e?.message || 'Could not verify identity', true);
+                } finally {
+                    endVaultAuth();
                 }
             }
 
@@ -5028,7 +6208,9 @@
                     vaultToast('');
                     return;
                 }
+                hideVaultEditor();
                 vaultToast('Waiting for authentication…');
+                beginVaultAuth();
                 try {
                     const revealed = await window.electronAPI.vaultRevealCard(id);
                     if (!revealed || !revealed.ok) {
@@ -5050,6 +6232,8 @@
                     vaultToast('');
                 } catch (e) {
                     vaultToast(e?.message || 'Could not verify identity', true);
+                } finally {
+                    endVaultAuth();
                 }
             }
 
@@ -5149,12 +6333,13 @@
                     const name = escapeHtml(item.fullName || 'Saved address');
                     const summary = escapeHtml(item.summary || '');
                     const id = escapeHtml(item.id);
-                    return `<div class="vault-table-row">
+                    return `<div class="vault-table-row" data-address-id="${id}">
                         <div class="vault-td-site"><strong>${label}${name}</strong><div style="font-size:12px;color:#86868b;margin-top:2px;">${summary}</div></div>
                         <div class="vault-td-actions">
                             <button type="button" class="vault-icon-btn vault-edit-address" data-id="${id}" title="Edit" aria-label="Edit">✎</button>
                             <button type="button" class="vault-icon-btn destructive vault-del-address" data-id="${id}" title="Delete" aria-label="Delete">⌫</button>
                         </div>
+                        <div class="vault-row-detail hidden" data-address-detail="${id}"></div>
                     </div>`;
                 }).join('');
                 list.querySelectorAll('.vault-edit-address').forEach((btn) => {
@@ -5165,13 +6350,49 @@
                 });
             }
 
-            function hideVaultEditor() {
-                document.getElementById('vault-editor')?.classList.add('hidden');
-                vaultEditorMode = null;
-                vaultEditorId = null;
+            function parkVaultEditor() {
+                const ed = document.getElementById('vault-editor');
+                const park = document.getElementById('vault-editor-park');
+                if (ed && park && ed.parentElement !== park) park.appendChild(ed);
+                ed?.classList.add('hidden');
+                ed?.classList.remove('vault-editor--inline');
             }
 
+            function mountVaultEditor(targetEl, inline = false) {
+                const ed = document.getElementById('vault-editor');
+                if (!ed || !targetEl) return;
+                targetEl.appendChild(ed);
+                ed.classList.remove('hidden');
+                ed.classList.toggle('vault-editor--inline', inline);
+            }
+
+            function closeVaultRowPanels({ keepEditor = false } = {}) {
+                if (!keepEditor) parkVaultEditor();
+                document.querySelectorAll('.vault-row-detail').forEach((el) => {
+                    if (keepEditor && el.querySelector('#vault-editor')) return;
+                    el.classList.add('hidden');
+                    if (!el.querySelector('#vault-editor')) el.innerHTML = '';
+                });
+                document.querySelectorAll('.vault-table-row--open').forEach((row) => {
+                    if (keepEditor && row.querySelector('#vault-editor')) return;
+                    row.classList.remove('vault-table-row--open');
+                });
+                document.querySelectorAll('.vault-eye-login, .vault-eye-card').forEach((btn) => {
+                    btn.setAttribute('aria-pressed', 'false');
+                });
+            }
+
+            function hideVaultEditor() {
+                parkVaultEditor();
+                vaultEditorMode = null;
+                vaultEditorId = null;
+                closeVaultRowPanels();
+            }
+
+            parkVaultEditor();
+
             async function openVaultLoginEditor(id) {
+                closeVaultRowPanels();
                 vaultEditorMode = 'login';
                 vaultEditorId = id || null;
                 const ed = document.getElementById('vault-editor');
@@ -5182,24 +6403,41 @@
                 document.getElementById('vault-editor-error').textContent = '';
                 const pw = document.getElementById('vault-edit-password');
                 const pwEye = document.getElementById('vault-edit-password-eye');
+                let mountTarget = document.querySelector('[data-vault-editor-home="login"]');
+                let mountInline = false;
                 if (id) {
                     vaultToast('Waiting for authentication…');
                     let revealed;
+                    beginVaultAuth();
                     try {
                         revealed = await window.electronAPI.vaultRevealLogin(id);
                     } catch (e) {
                         vaultToast(e?.message || 'Could not verify identity', true);
+                        vaultEditorMode = null;
+                        vaultEditorId = null;
                         return;
+                    } finally {
+                        endVaultAuth();
                     }
                     if (!revealed?.ok) {
                         vaultToast(
                             revealed?.cancelled ? 'Authentication cancelled' : 'Could not verify identity',
                             true
                         );
+                        vaultEditorMode = null;
+                        vaultEditorId = null;
                         return;
                     }
-                    const row = await window.electronAPI.vaultGetLogin(id);
-                    document.getElementById('vault-edit-origin').value = row.origin || '';
+                    const row = document.querySelector(`.vault-table-row[data-login-id="${CSS.escape(id)}"]`);
+                    const detail = row?.querySelector('[data-login-detail]');
+                    if (detail) {
+                        mountTarget = detail;
+                        mountInline = true;
+                        detail.classList.remove('hidden');
+                        setVaultRowOpen(row, true);
+                    }
+                    const rowMeta = await window.electronAPI.vaultGetLogin(id);
+                    document.getElementById('vault-edit-origin').value = rowMeta.origin || '';
                     document.getElementById('vault-edit-username').value = revealed.username || '';
                     if (pw) {
                         pw.type = 'password';
@@ -5207,7 +6445,7 @@
                         pw.placeholder = '';
                     }
                     if (pwEye) pwEye.setAttribute('aria-pressed', 'false');
-                    document.getElementById('vault-edit-notes').value = row.notes || '';
+                    document.getElementById('vault-edit-notes').value = rowMeta.notes || '';
                     vaultToast('');
                 } else {
                     document.getElementById('vault-edit-origin').value = '';
@@ -5220,10 +6458,16 @@
                     if (pwEye) pwEye.setAttribute('aria-pressed', 'false');
                     document.getElementById('vault-edit-notes').value = '';
                 }
-                ed?.classList.remove('hidden');
+                if (mountTarget) {
+                    mountVaultEditor(mountTarget, mountInline);
+                    if (mountInline) mountTarget.closest('.vault-table-row')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                } else {
+                    ed?.classList.remove('hidden');
+                }
             }
 
             async function openVaultCardEditor(id) {
+                closeVaultRowPanels();
                 vaultEditorMode = 'card';
                 vaultEditorId = id || null;
                 const ed = document.getElementById('vault-editor');
@@ -5232,40 +6476,57 @@
                 document.getElementById('vault-editor-card-fields').classList.remove('hidden');
                 document.getElementById('vault-editor-address-fields').classList.add('hidden');
                 document.getElementById('vault-editor-error').textContent = '';
+                let mountTarget = document.querySelector('[data-vault-editor-home="card"]');
+                let mountInline = false;
                 if (id) {
                     vaultToast('Waiting for authentication…');
                     let revealed;
+                    beginVaultAuth();
                     try {
                         revealed = await window.electronAPI.vaultRevealCard(id);
                     } catch (e) {
                         vaultToast(e?.message || 'Could not verify identity', true);
+                        vaultEditorMode = null;
+                        vaultEditorId = null;
                         return;
+                    } finally {
+                        endVaultAuth();
                     }
                     if (!revealed?.ok) {
                         vaultToast(
                             revealed?.cancelled ? 'Authentication cancelled' : 'Could not verify identity',
                             true
                         );
+                        vaultEditorMode = null;
+                        vaultEditorId = null;
                         return;
                     }
-                    const row = await window.electronAPI.vaultGetCard(id);
-                    document.getElementById('vault-edit-card-label').value = row.label || '';
-                    document.getElementById('vault-edit-cardholder').value = row.cardholder || '';
+                    const row = document.querySelector(`[data-card-detail="${CSS.escape(id)}"]`)?.closest('.vault-table-row');
+                    const detail = row?.querySelector('[data-card-detail]');
+                    if (detail) {
+                        mountTarget = detail;
+                        mountInline = true;
+                        detail.classList.remove('hidden');
+                        setVaultRowOpen(row, true);
+                    }
+                    const rowMeta = await window.electronAPI.vaultGetCard(id);
+                    document.getElementById('vault-edit-card-label').value = rowMeta.label || '';
+                    document.getElementById('vault-edit-cardholder').value = rowMeta.cardholder || '';
                     const num = document.getElementById('vault-edit-card-number');
                     if (num) {
                         num.type = 'text';
                         num.value = revealed.number || '';
                         num.placeholder = '';
                     }
-                    document.getElementById('vault-edit-exp-month').value = row.expMonth || revealed.expMonth || '';
-                    document.getElementById('vault-edit-exp-year').value = row.expYear || revealed.expYear || '';
+                    document.getElementById('vault-edit-exp-month').value = rowMeta.expMonth || revealed.expMonth || '';
+                    document.getElementById('vault-edit-exp-year').value = rowMeta.expYear || revealed.expYear || '';
                     const cvv = document.getElementById('vault-edit-cvv');
                     if (cvv) {
                         cvv.type = 'password';
                         cvv.value = revealed.cvv || '';
                         cvv.placeholder = '';
                     }
-                    document.getElementById('vault-edit-billing-zip').value = row.billingZip || '';
+                    document.getElementById('vault-edit-billing-zip').value = rowMeta.billingZip || '';
                     vaultToast('');
                 } else {
                     ['vault-edit-card-label','vault-edit-cardholder','vault-edit-card-number','vault-edit-exp-month','vault-edit-exp-year','vault-edit-cvv','vault-edit-billing-zip'].forEach((i) => {
@@ -5273,10 +6534,16 @@
                         if (el) el.value = '';
                     });
                 }
-                ed?.classList.remove('hidden');
+                if (mountTarget) {
+                    mountVaultEditor(mountTarget, mountInline);
+                    if (mountInline) mountTarget.closest('.vault-table-row')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                } else {
+                    ed?.classList.remove('hidden');
+                }
             }
 
             async function openVaultAddressEditor(id) {
+                closeVaultRowPanels();
                 vaultEditorMode = 'address';
                 vaultEditorId = id || null;
                 const ed = document.getElementById('vault-editor');
@@ -5285,6 +6552,8 @@
                 document.getElementById('vault-editor-card-fields').classList.add('hidden');
                 document.getElementById('vault-editor-address-fields').classList.remove('hidden');
                 document.getElementById('vault-editor-error').textContent = '';
+                let mountTarget = document.querySelector('[data-vault-editor-home="address"]');
+                let mountInline = false;
                 const fieldIds = [
                     'vault-edit-address-label',
                     'vault-edit-address-name',
@@ -5299,25 +6568,38 @@
                     'vault-edit-address-email'
                 ];
                 if (id) {
-                    const row = await window.electronAPI.vaultGetAddress(id);
-                    document.getElementById('vault-edit-address-label').value = row.label || '';
-                    document.getElementById('vault-edit-address-name').value = row.fullName || '';
-                    document.getElementById('vault-edit-address-org').value = row.organization || '';
-                    document.getElementById('vault-edit-address-line1').value = row.addressLine1 || '';
-                    document.getElementById('vault-edit-address-line2').value = row.addressLine2 || '';
-                    document.getElementById('vault-edit-address-city').value = row.city || '';
-                    document.getElementById('vault-edit-address-state').value = row.state || '';
-                    document.getElementById('vault-edit-address-postal').value = row.postalCode || '';
-                    document.getElementById('vault-edit-address-country').value = row.country || '';
-                    document.getElementById('vault-edit-address-phone').value = row.phone || '';
-                    document.getElementById('vault-edit-address-email').value = row.email || '';
+                    const row = document.querySelector(`.vault-table-row[data-address-id="${CSS.escape(id)}"]`);
+                    const detail = row?.querySelector('[data-address-detail]');
+                    if (detail) {
+                        mountTarget = detail;
+                        mountInline = true;
+                        detail.classList.remove('hidden');
+                        setVaultRowOpen(row, true);
+                    }
+                    const rowMeta = await window.electronAPI.vaultGetAddress(id);
+                    document.getElementById('vault-edit-address-label').value = rowMeta.label || '';
+                    document.getElementById('vault-edit-address-name').value = rowMeta.fullName || '';
+                    document.getElementById('vault-edit-address-org').value = rowMeta.organization || '';
+                    document.getElementById('vault-edit-address-line1').value = rowMeta.addressLine1 || '';
+                    document.getElementById('vault-edit-address-line2').value = rowMeta.addressLine2 || '';
+                    document.getElementById('vault-edit-address-city').value = rowMeta.city || '';
+                    document.getElementById('vault-edit-address-state').value = rowMeta.state || '';
+                    document.getElementById('vault-edit-address-postal').value = rowMeta.postalCode || '';
+                    document.getElementById('vault-edit-address-country').value = rowMeta.country || '';
+                    document.getElementById('vault-edit-address-phone').value = rowMeta.phone || '';
+                    document.getElementById('vault-edit-address-email').value = rowMeta.email || '';
                 } else {
                     fieldIds.forEach((fid) => {
                         const el = document.getElementById(fid);
                         if (el) el.value = '';
                     });
                 }
-                ed?.classList.remove('hidden');
+                if (mountTarget) {
+                    mountVaultEditor(mountTarget, mountInline);
+                    if (mountInline) mountTarget.closest('.vault-table-row')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                } else {
+                    ed?.classList.remove('hidden');
+                }
             }
 
             async function saveVaultEditor() {
@@ -5421,6 +6703,7 @@
                     return;
                 }
                 vaultToast('Waiting for authentication…');
+                beginVaultAuth();
                 try {
                     const revealed = await window.electronAPI.vaultRevealLogin(vaultEditorId);
                     if (!revealed?.ok) {
@@ -5433,6 +6716,8 @@
                     vaultToast('');
                 } catch (e) {
                     vaultToast(e?.message || 'Could not verify', true);
+                } finally {
+                    endVaultAuth();
                 }
             });
 
@@ -5448,6 +6733,7 @@
                     return;
                 }
                 vaultToast('Waiting for authentication…');
+                beginVaultAuth();
                 try {
                     const revealed = await window.electronAPI.vaultRevealCard(vaultEditorId);
                     if (!revealed?.ok) {
@@ -5460,6 +6746,8 @@
                     vaultToast('');
                 } catch (e) {
                     vaultToast(e?.message || 'Could not verify', true);
+                } finally {
+                    endVaultAuth();
                 }
             });
 
@@ -5475,6 +6763,7 @@
                     return;
                 }
                 vaultToast('Waiting for authentication…');
+                beginVaultAuth();
                 try {
                     const revealed = await window.electronAPI.vaultRevealCard(vaultEditorId);
                     if (!revealed?.ok) {
@@ -5487,6 +6776,8 @@
                     vaultToast('');
                 } catch (e) {
                     vaultToast(e?.message || 'Could not verify', true);
+                } finally {
+                    endVaultAuth();
                 }
             });
 
@@ -5515,6 +6806,8 @@
             let profilesCurrentId = 'personal';
             let profilesCustomImportPath = '';
             const profilesOverviewBody = document.getElementById('profiles-overview-body');
+            const profilesTrashList = document.getElementById('profiles-trash-list');
+            const profilesTrashStatus = document.getElementById('profiles-trash-status');
             const profilesStartupMode = document.getElementById('profiles-startup-mode');
             const profilesStartupProfileRow = document.getElementById('profiles-startup-profile-row');
             const profilesStartupProfile = document.getElementById('profiles-startup-profile');
@@ -5580,7 +6873,7 @@
                     .map((p) => {
                         const active = p.id === currentId;
                         return `<tr class="${active ? 'active' : ''}">
-                            <td>${escapeHtml(p.name || p.id)}${active ? '<span class="profiles-badge">This window</span>' : ''}</td>
+                            <td>${escapeHtml(p.name || p.id)}</td>
                             <td class="num">${p.favorites ?? 0}</td>
                             <td class="num">${p.history ?? 0}</td>
                             <td class="num">${p.pinnedTabs ?? 0}</td>
@@ -5591,6 +6884,83 @@
                     .join('');
                 fillProfileSelect(profilesExportSelect, profiles, currentId);
             }
+
+            async function refreshProfilesTrash() {
+                if (!profilesTrashList || !window.electronAPI?.listTrashedProfiles) return;
+                try {
+                    const entries = await window.electronAPI.listTrashedProfiles();
+                    if (!Array.isArray(entries) || entries.length === 0) {
+                        profilesTrashList.innerHTML = '<p class="profiles-trash-empty">No deleted profiles.</p>';
+                        return;
+                    }
+                    profilesTrashList.innerHTML = entries
+                        .map((entry) => {
+                            const deletedAt = entry.deletedAt
+                                ? new Date(entry.deletedAt).toLocaleString()
+                                : 'Recently';
+                            const name = String(entry.name || entry.profileId || 'Profile');
+                            return `<div class="profiles-trash-row" data-trash-id="${entry.trashId}">
+                                <div class="profiles-trash-meta">
+                                    <div class="profiles-trash-name">${name}</div>
+                                    <div class="profiles-trash-date">Deleted ${deletedAt}</div>
+                                </div>
+                                <div class="profiles-trash-actions">
+                                    <button type="button" class="profiles-trash-restore" data-trash-id="${entry.trashId}">Restore</button>
+                                    <button type="button" class="profiles-trash-delete" data-trash-id="${entry.trashId}">Delete permanently</button>
+                                </div>
+                            </div>`;
+                        })
+                        .join('');
+                } catch (_) {
+                    profilesTrashList.innerHTML = '<p class="profiles-trash-empty">Could not load profile trash.</p>';
+                }
+            }
+
+            function setTrashStatus(text, kind) {
+                if (!profilesTrashStatus) return;
+                profilesTrashStatus.textContent = text || '';
+                profilesTrashStatus.className = `profiles-status${kind ? ` profiles-status--${kind}` : ''}`;
+            }
+
+            profilesTrashList?.addEventListener('click', (event) => {
+                const restoreBtn = event.target.closest('.profiles-trash-restore');
+                const deleteBtn = event.target.closest('.profiles-trash-delete');
+                if (restoreBtn) {
+                    const trashId = restoreBtn.getAttribute('data-trash-id');
+                    void (async () => {
+                        setTrashStatus('Restoring…');
+                        try {
+                            const result = await window.electronAPI.restoreTrashedProfile?.({ trashId });
+                            if (!result?.ok) {
+                                setTrashStatus(result?.error || 'Restore failed', 'err');
+                                return;
+                            }
+                            setTrashStatus(`Restored “${result.profileName || 'profile'}”.`, 'ok');
+                            await refreshProfilesPane();
+                        } catch (e) {
+                            setTrashStatus(String(e?.message || e), 'err');
+                        }
+                    })();
+                    return;
+                }
+                if (deleteBtn) {
+                    const trashId = deleteBtn.getAttribute('data-trash-id');
+                    void (async () => {
+                        setTrashStatus('Removing…');
+                        try {
+                            const result = await window.electronAPI.permanentlyDeleteTrashedProfile?.({ trashId });
+                            if (!result?.ok) {
+                                setTrashStatus(result?.error || 'Delete failed', 'err');
+                                return;
+                            }
+                            setTrashStatus('Profile removed permanently.', 'ok');
+                            await refreshProfilesTrash();
+                        } catch (e) {
+                            setTrashStatus(String(e?.message || e), 'err');
+                        }
+                    })();
+                }
+            });
 
             async function refreshProfilesPane() {
                 if (!window.electronAPI?.getProfilesOverviewForWindow) return;
@@ -5605,6 +6975,7 @@
                         profilesOverviewBody.innerHTML = '<tr><td colspan="6">Could not load profiles.</td></tr>';
                     }
                 }
+                await refreshProfilesTrash();
                 await refreshImportBrowsers();
             }
 
@@ -5672,10 +7043,10 @@
             function formatImportPreview(p, warnList) {
                 if (!p) return '';
                 const parts = [
+                    `${p.favorites || 0} favorites`,
+                    `${p.pinnedTabs || 0} pinned tabs`,
                     `${p.tabGroups || 0} tab groups`,
-                    `${p.pinnedBar || 0} pinned tabs`,
-                    `${p.openTabs || 0} open tabs`,
-                    `${p.bookmarks || 0} favorites`,
+                    `${p.openTabs || 0} unpinned tabs`,
                     `${p.passwords || 0} passwords`,
                     `${p.cards || 0} cards`,
                     `${p.addresses || 0} addresses`,
@@ -5683,9 +7054,17 @@
                     `${p.sitePermissions || 0} site permission rules`,
                     `${p.history || 0} history items`
                 ];
-                let text = `Found ${parts.join(', ')}.`;
+                const totalItems =
+                    (p.favorites || 0) +
+                    (p.pinnedTabs || 0) +
+                    (p.tabGroups || 0) +
+                    (p.openTabs || 0);
+                let text =
+                    totalItems === 0
+                        ? 'No sidebar or tab items found with the current options.'
+                        : `Found ${parts.join(', ')}.`;
                 if (Array.isArray(warnList) && warnList.length > 0) {
-                    text += ` ${warnList[0]}`;
+                    text += ` ${warnList.slice(0, 2).join(' ')}`;
                 }
                 return text;
             }
@@ -5693,10 +7072,10 @@
             function buildImportPayload() {
                 const payload = {
                     profileName: profilesImportName?.value?.trim() || 'Imported',
-                    importSession: document.getElementById('profiles-import-session')?.checked !== false,
-                    importBookmarkFolders: document.getElementById('profiles-import-folders')?.checked !== false,
+                    importFavorites: document.getElementById('profiles-import-favorites')?.checked !== false,
                     importBookmarks: document.getElementById('profiles-import-bookmarks')?.checked !== false,
-                    importPinnedBar: document.getElementById('profiles-import-pinned')?.checked !== false,
+                    importOpenTabs: document.getElementById('profiles-import-open-tabs')?.checked === true,
+                    importFolders: document.getElementById('profiles-import-folders')?.checked !== false,
                     importHistory: document.getElementById('profiles-import-history')?.checked !== false,
                     importPasswords: document.getElementById('profiles-import-passwords')?.checked !== false,
                     importCards: document.getElementById('profiles-import-cards')?.checked !== false,
@@ -5728,9 +7107,12 @@
                             preview.preview,
                             preview.warnings
                         );
+                    } else {
+                        profilesImportPreview.textContent =
+                            preview?.error || 'Could not scan this profile.';
                     }
-                } catch (_) {
-                    profilesImportPreview.textContent = '';
+                } catch (e) {
+                    profilesImportPreview.textContent = String(e?.message || e || 'Could not scan this profile.');
                 }
             }
 
@@ -5802,7 +7184,7 @@
 
             document
                 .querySelectorAll(
-                    '#profiles-import-session, #profiles-import-folders, #profiles-import-bookmarks, #profiles-import-pinned, #profiles-import-history, #profiles-import-passwords, #profiles-import-cards, #profiles-import-addresses, #profiles-import-permissions, #profiles-import-extensions'
+                    '#profiles-import-favorites, #profiles-import-bookmarks, #profiles-import-open-tabs, #profiles-import-folders, #profiles-import-history, #profiles-import-passwords, #profiles-import-cards, #profiles-import-addresses, #profiles-import-permissions, #profiles-import-extensions'
                 )
                 .forEach((el) => el?.addEventListener('change', () => void refreshImportPreview()));
 
@@ -5819,13 +7201,7 @@
                     if (profilesImportName && !profilesImportName.value.trim()) {
                         profilesImportName.value = pathBasename(picked.path);
                     }
-                    const preview = await window.electronAPI.inspectImportProfileFolder?.(picked.path);
-                    if (preview?.ok && profilesImportPreview) {
-                        profilesImportPreview.textContent = formatImportPreview(
-                            preview.preview,
-                            preview.warnings
-                        );
-                    }
+                    await refreshImportPreview();
                 })();
             });
 
@@ -5854,6 +7230,13 @@
                             'ok'
                         );
                         profilesCustomImportPath = '';
+                        await reloadSettingsForEditingProfile(result.profileId);
+                        if (settingsEditingProfileId === result.profileId) {
+                            window.__axisRefreshAllSettingsData?.();
+                        }
+                        try {
+                            await window.electronAPI?.switchProfileInWindow?.(result.profileId);
+                        } catch (_) {}
                         await refreshProfilesPane();
                     } catch (e) {
                         setImportStatus(String(e?.message || e), 'err');
@@ -5889,7 +7272,6 @@
                     vaultEditorMode = null;
                     vaultToast?.('');
                     aiProviderRevealState?.clear?.();
-                    loadedLazySections.clear();
                     refreshSettingsSection(activeSection || 'customization');
                     profilesCurrentId = settingsEditingProfileId;
                     const ctx = window.electronAPI?.getSettingsProfileBootstrap?.() || { profiles: [] };
@@ -5916,6 +7298,7 @@
                 }
             };
             window.__axisRefreshAllSettingsData = () => {
+                void refreshStoreBackedSettingsFields();
                 void populateHistory();
                 void loadExtensions();
                 void loadSitePermissionOverrides();
@@ -5924,24 +7307,18 @@
                 void reloadShortcutState().then(() => renderShortcuts());
             };
 
-            const LAZY_SECTIONS = ['vault', 'permissions', 'extensions', 'history', 'shortcuts', 'profiles'];
-            const loadedLazySections = new Set();
-            const loadLazySectionOnce = (section) => {
-                if (!section || loadedLazySections.has(section)) return;
-                loadedLazySections.add(section);
-                refreshSettingsSectionInternal(section);
-            };
             const refreshSettingsSection = (section) => {
-                if (LAZY_SECTIONS.includes(section)) {
-                    loadLazySectionOnce(section);
-                    return;
-                }
+                // Always re-fetch list data when opening a section so History, Vault,
+                // Extensions, etc. stay current without closing Settings.
                 refreshSettingsSectionInternal(section);
             };
 
             switchSection = (section) => {
                 baseSwitchSection(section);
-                if (!suppressSectionRefresh) refreshSettingsSection(section);
+                if (!suppressSectionRefresh) {
+                    scheduleSettingsStoreRefresh(40);
+                    refreshSettingsSection(section);
+                }
             };
             window.__axisSwitchSettingsSection = switchSection;
 
