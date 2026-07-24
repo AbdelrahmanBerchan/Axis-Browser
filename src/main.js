@@ -1,12 +1,22 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen, nativeImage, clipboard, nativeTheme, systemPreferences, net } = require('electron');
-// Must run before `ready`. `package.json` `name` is lowercase `axis` (npm); Dock tooltip and `getName()` use this human-readable label.
-app.setName('Axis');
+const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen, nativeImage, clipboard, nativeTheme, systemPreferences, net, desktopCapturer } = require('electron');
 const path = require('path');
+// Must run before `ready`. Keep Dock label + userData folder identical for `npm start` and the packaged .app
+// (package.json `name` is lowercase `axis`, which otherwise creates a separate Application Support folder).
+app.setName('Axis');
+try {
+  app.setPath('userData', path.join(app.getPath('appData'), 'Axis'));
+} catch (_) {}
 const Store = require('electron-store');
 const fs = require('fs');
 const os = require('os');
-const { exec } = require('child_process');
-const AdmZip = require('adm-zip');
+const { exec, execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
+let AdmZipCtor = null;
+function getAdmZip() {
+  if (!AdmZipCtor) AdmZipCtor = require('adm-zip');
+  return AdmZipCtor;
+}
 const { pathToFileURL, fileURLToPath } = require('url');
 const { installAxisShellCspOnAllSessions } = require('./axis-shell-csp');
 const { createAxisVault, formatAddressSummary } = require('./axis-vault');
@@ -28,7 +38,9 @@ const {
   AXIS_VAULT_AUTOFILL_PROBE_JS,
   AXIS_VAULT_AUTOFILL_HIDE_JS,
   buildVaultAutofillShowMenuJs,
-  buildVaultAutofillFillLoginJs
+  buildVaultAutofillFillLoginJs,
+  buildVaultAutofillFillCardJs,
+  buildVaultAutofillFillAddressJs
 } = require('./axis-vault-autofill-inject');
 const { installAxisPageSecurityOnSession, installAxisPageSecurityOnWebContents, getPageSecurityInfo } = require('./axis-page-security');
 const axisUpdateCheck = require('./axis-update-check');
@@ -193,6 +205,15 @@ function getGlobalSidebarPosition() {
 function setGlobalSidebarPosition(value) {
   const v = value === 'right' ? 'right' : 'left';
   store.set(AXIS_SIDEBAR_POSITION_KEY, v);
+  // Keep per-profile copies in sync so Settings always reads the window-wide value
+  // even if a caller forgets to merge globals.
+  try {
+    for (const p of listAxisProfiles()) {
+      try {
+        getProfileStore(p.id).set(AXIS_SIDEBAR_POSITION_KEY, v);
+      } catch (_) {}
+    }
+  } catch (_) {}
   return v;
 }
 
@@ -648,7 +669,11 @@ function allocateProfileId(displayName) {
 
 function getProfileStore(profileId) {
   const id = sanitizeProfileId(profileId);
-  if (axisProfileStores.has(id)) return axisProfileStores.get(id);
+  if (axisProfileStores.has(id)) {
+    const existing = axisProfileStores.get(id);
+    initializeProfileDefaults(id, existing);
+    return existing;
+  }
   const profileStore = new Store({ name: `profile-${id}` });
   if (id === AXIS_DEFAULT_PROFILE_ID) {
     try {
@@ -676,7 +701,6 @@ function getProfileStore(profileId) {
 
 function initializeProfileDefaults(profileId, profileStore) {
   const s = profileStore || getProfileStore(profileId);
-  if (s.get('__profileInitialized')) return;
   const defaults = {
     uiTheme: 'dark',
     theme: 'dark',
@@ -710,6 +734,9 @@ function initializeProfileDefaults(profileId, profileStore) {
     ntpAiSearchEnabled: true,
     ntpWidgetsEnabled: false,
     ntpWidgetLayout: null,
+    ntpWidgetBackgrounds: true,
+    ntpShowSettingsShortcut: true,
+    ntpShowWidgetsEditButton: true,
     aiFeaturesEnabled: true,
     ntpGreetingName: 'User',
     unpinnedClearMode: 'app-close',
@@ -719,10 +746,20 @@ function initializeProfileDefaults(profileId, profileStore) {
     ambientAudioPreset: 'rain',
     ambientAudioVolume: 48
   };
+  // Always fill missing keys (including on older profiles created before a setting existed).
   for (const [key, value] of Object.entries(defaults)) {
     if (s.get(key) === undefined) s.set(key, value);
   }
-  s.set('__profileInitialized', true);
+  // Older builds auto-approved site permissions (Electron’s default). Wipe saved choices
+  // once so Allow / Block prompts can appear again.
+  if (s.get('sitePermissionsPromptV3') !== true) {
+    try {
+      s.set('sitePermissionOverrides', {});
+    } catch (_) {}
+    s.set('sitePermissionsPromptV3', true);
+    s.set('sitePermissionsPromptV2', true);
+  }
+  if (!s.get('__profileInitialized')) s.set('__profileInitialized', true);
 }
 
 function getProfilePartition(profileId) {
@@ -793,13 +830,15 @@ function extensionRuntimeKey(profileId, recordId) {
 }
 
 /**
- * Must match tab `<webview>` guests (`renderer.js` `getTabWebpreferencesString`) so
- * `chrome-extension://` popups run in the same kind of guest as the main browser.
+ * Extension popup/options guest webviews (bridge fallback only).
+ * Site tabs stay contextIsolation+sandbox; extension UI needs chrome.* in-page.
  */
 function getAxisExtensionPopupGuestWebpreferencesAttr() {
+  // Guest bridge must match Electron extension-page requirements.
   return [
-    'contextIsolation=false',
+    'contextIsolation=true',
     'nodeIntegration=false',
+    'sandbox=true',
     'webSecurity=true',
     'accelerated2dCanvas=true',
     'enableWebGL=true',
@@ -807,14 +846,14 @@ function getAxisExtensionPopupGuestWebpreferencesAttr() {
     'enableGpuRasterization=true',
     'enableZeroCopy=false',
     'enableHardwareAcceleration=true',
-    'backgroundThrottling=true',
+    'backgroundThrottling=false',
     'offscreen=false',
     'spellcheck=yes'
   ].join(',');
 }
 
-/** Load popup inside a guest webview (reliable); plain `loadURL(chrome-extension:)` on the window often stays blank / never `ready-to-show`. */
-function buildAxisExtensionPopupBridgeDataUrl(popupUrl) {
+/** Load popup inside a guest webview as a last-resort fallback. */
+function buildAxisExtensionPopupBridgeDataUrl(popupUrl, partition) {
   if (!popupUrl || typeof popupUrl !== 'string') {
     throw new Error('Invalid extension popup URL');
   }
@@ -827,6 +866,15 @@ function buildAxisExtensionPopupBridgeDataUrl(popupUrl) {
   if (parsed.protocol !== 'chrome-extension:') {
     throw new Error('Invalid extension popup URL');
   }
+  const part =
+    typeof partition === 'string' && partition
+      ? partition
+      : AXIS_EXTENSION_SESSION_PARTITION;
+  const partEsc = String(part)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
   const srcEsc = String(popupUrl)
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
@@ -838,12 +886,12 @@ function buildAxisExtensionPopupBridgeDataUrl(popupUrl) {
     '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; ' +
     'script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; ' +
     'child-src chrome-extension:; frame-src chrome-extension:;">' +
-    '<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#f5f5f5;color:#1f1f1f;font:13px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}' +
+    '<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#ffffff;color:#1f1f1f;font:13px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}' +
     'webview{display:flex;width:100%;height:100%;border:0;background:transparent}' +
-    '#axis-ext-status{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:18px;box-sizing:border-box;color:#555;background:#f5f5f5}' +
+    '#axis-ext-status{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:18px;box-sizing:border-box;color:#555;background:#ffffff}' +
     '#axis-ext-status.hidden{display:none}</style></head><body>' +
     '<div id="axis-ext-status">Loading extension…</div>' +
-    `<webview src="${srcEsc}" partition="${AXIS_EXTENSION_SESSION_PARTITION}" allowpopups ` +
+    `<webview src="${srcEsc}" partition="${partEsc}" allowpopups ` +
     `webpreferences="${wp}"></webview>` +
     '<script>(function(){var status=document.getElementById("axis-ext-status");var wv=document.querySelector("webview");function hide(){if(status)status.className="hidden";}function fail(e){if(!status)return;var msg=e&&e.errorDescription?e.errorDescription:"Could not load this extension popup.";status.className="";status.textContent=msg;}if(wv){wv.addEventListener("dom-ready",hide);wv.addEventListener("did-finish-load",hide);wv.addEventListener("did-fail-load",fail);setTimeout(function(){try{if(wv.getURL&&wv.getURL())hide();}catch(e){}},1200);}})();</script>' +
     '</body></html>';
@@ -870,6 +918,62 @@ function attachAxisExtensionPopupShowHandlers(popupWin) {
     if (isMainFrame) reveal();
   });
   setTimeout(reveal, 2000);
+}
+
+async function fitAxisExtensionPopupToContent(popupWin) {
+  if (!popupWin || popupWin.isDestroyed()) return;
+  const measureJs = `(function(){
+    try {
+      var el = document.documentElement;
+      var body = document.body;
+      var w = Math.max(
+        el ? el.scrollWidth : 0,
+        el ? el.clientWidth : 0,
+        body ? body.scrollWidth : 0,
+        body ? body.clientWidth : 0,
+        280
+      );
+      var h = Math.max(
+        el ? el.scrollHeight : 0,
+        el ? el.clientHeight : 0,
+        body ? body.scrollHeight : 0,
+        body ? body.clientHeight : 0,
+        120
+      );
+      return {
+        w: Math.min(800, Math.max(280, Math.ceil(w))),
+        h: Math.min(720, Math.max(120, Math.ceil(h)))
+      };
+    } catch (e) { return null; }
+  })();`;
+  try {
+    let size = null;
+    const guestId = await popupWin.webContents.executeJavaScript(
+      `(function(){
+        try {
+          var wv = document.querySelector('webview');
+          if (!wv || typeof wv.getWebContentsId !== 'function') return 0;
+          return wv.getWebContentsId() || 0;
+        } catch (e) { return 0; }
+      })();`,
+      true
+    ).catch(() => 0);
+    if (guestId) {
+      try {
+        const { webContents } = require('electron');
+        const guest = webContents.fromId(guestId);
+        if (guest && !guest.isDestroyed()) {
+          size = await guest.executeJavaScript(measureJs, true);
+        }
+      } catch (_) {}
+    }
+    if (!size) {
+      size = await popupWin.webContents.executeJavaScript(measureJs, true);
+    }
+    if (size && size.w && size.h) {
+      popupWin.setContentSize(size.w, size.h);
+    }
+  } catch (_) {}
 }
 
 function getAxisExtensionsDir() {
@@ -1148,7 +1252,9 @@ function getAxisExtensionApiShimSource() {
   return `
 (function () {
   var root = typeof globalThis !== 'undefined' ? globalThis : self;
-  var chromeObj = root.chrome = root.chrome || {};
+  // Never create a blank chrome object — that blocks Electron's real chrome.* injection.
+  var chromeObj = root.chrome;
+  if (!chromeObj) return;
   function eventStub() {
     return {
       addListener: function () {},
@@ -1200,13 +1306,42 @@ function getAxisExtensionApiShimSource() {
 })();`;
 }
 
-async function prepareAxisExtensionLoadPath(record, manifest) {
+/** Permissions Electron rejects (ExtensionLoadWarning / load failures). */
+const AXIS_UNSUPPORTED_EXTENSION_PERMISSIONS = new Set([
+  'contextMenus',
+  'identity',
+  'tts',
+  'cookies',
+  'sidePanel',
+  'fontSettings',
+  'proxy',
+  'privacy',
+  'browsingData',
+  'history',
+  'topSites',
+  'bookmarks',
+  'downloads',
+  'pageCapture',
+  'nativeMessaging',
+  'geolocation'
+]);
+
+function filterAxisExtensionPermissions(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (p) => typeof p === 'string' && p && !AXIS_UNSUPPORTED_EXTENSION_PERMISSIONS.has(p)
+  );
+}
+
+async function prepareAxisExtensionLoadPath(record, manifest, opts = {}) {
+  const force = opts && opts.force === true;
   if (!record?.path || !manifest || manifest.manifest_version !== 3) {
     return record?.path || '';
   }
   const serviceWorker = manifest.background?.service_worker;
-  const hasAction = manifest.action && typeof manifest.action === 'object';
-  const needsCompat = !!serviceWorker || hasAction || Array.isArray(manifest.host_permissions);
+  // Only rewrite automatically for service workers (Electron cannot run them).
+  // action / host_permissions alone are tried native-first, then force-compat on failure.
+  const needsCompat = force || !!serviceWorker;
   if (!needsCompat) return record.path;
 
   const runtimeRoot = getAxisExtensionRuntimeDir();
@@ -1232,12 +1367,7 @@ async function prepareAxisExtensionLoadPath(record, manifest) {
   }
   delete compatManifest.action;
 
-  const unsupportedMv2Permissions = new Set(['scripting', 'fontSettings', 'contextMenus']);
-  const permissions = new Set(
-    (Array.isArray(manifest.permissions) ? manifest.permissions : []).filter(
-      (p) => typeof p === 'string' && !unsupportedMv2Permissions.has(p)
-    )
-  );
+  const permissions = new Set(filterAxisExtensionPermissions(manifest.permissions));
   if (Array.isArray(manifest.host_permissions)) {
     for (const p of manifest.host_permissions) {
       if (typeof p === 'string') permissions.add(p);
@@ -1247,9 +1377,7 @@ async function prepareAxisExtensionLoadPath(record, manifest) {
   delete compatManifest.host_permissions;
 
   const optionalPermissions = new Set(
-    (Array.isArray(manifest.optional_permissions) ? manifest.optional_permissions : []).filter(
-      (p) => typeof p === 'string' && !unsupportedMv2Permissions.has(p)
-    )
+    filterAxisExtensionPermissions(manifest.optional_permissions)
   );
   if (Array.isArray(manifest.optional_host_permissions)) {
     for (const p of manifest.optional_host_permissions) {
@@ -1278,7 +1406,8 @@ async function prepareAxisExtensionLoadPath(record, manifest) {
 
   if (serviceWorker) {
     if (manifest.background?.type === 'module') {
-      const bgPage = '__axis_mv3_background__.html';
+      // Chromium reserves filenames that start with "_".
+      const bgPage = 'axis_mv3_background.html';
       await fs.promises.writeFile(
         path.join(compatPath, bgPage),
         `<!doctype html><meta charset="utf-8"><script src="${shimFile}"></script><script type="module" src="${String(serviceWorker).replace(/"/g, '&quot;')}"></script>`,
@@ -1294,6 +1423,20 @@ async function prepareAxisExtensionLoadPath(record, manifest) {
       scripts: [shimFile, ...manifest.background.scripts]
     };
   }
+
+  // MV3 action commands → MV2 browser_action commands.
+  if (compatManifest.commands && typeof compatManifest.commands === 'object') {
+    const cmds = { ...compatManifest.commands };
+    if (cmds._execute_action) {
+      cmds._execute_browser_action = cmds._execute_action;
+      delete cmds._execute_action;
+    }
+    compatManifest.commands = cmds;
+  }
+
+  // MV3 side_panel is unsupported in Electron — drop so load warnings stay quiet.
+  delete compatManifest.side_panel;
+  delete compatManifest.sidePanel;
 
   if (
     compatManifest.content_security_policy &&
@@ -1392,6 +1535,46 @@ async function fetchXpiBufferForFirefoxAmo(addonKey) {
   return buf;
 }
 
+function extractZipSafelyTo(zip, destDir) {
+  const root = path.resolve(destDir);
+  const entries = typeof zip.getEntries === 'function' ? zip.getEntries() : [];
+  for (const entry of entries) {
+    const name = String(entry.entryName || entry.name || '');
+    if (!name || name.includes('\0')) {
+      throw new Error('Archive contains an unsafe path');
+    }
+    const target = path.resolve(root, name);
+    if (target !== root && !target.startsWith(root + path.sep)) {
+      throw new Error('Archive contains an unsafe path');
+    }
+  }
+  zip.extractAllTo(destDir, true);
+}
+
+function getAxisLibraryRootDirs() {
+  const home = os.homedir();
+  return [
+    path.resolve(path.join(home, 'Downloads')),
+    path.resolve(path.join(home, 'Desktop')),
+    path.resolve(path.join(home, 'Documents')),
+    path.resolve(path.join(home, 'Pictures'))
+  ];
+}
+
+function isPathInsideAxisLibraryRoots(filePath) {
+  if (!filePath || typeof filePath !== 'string') return false;
+  let resolved;
+  try {
+    resolved = path.resolve(filePath);
+  } catch (_) {
+    return false;
+  }
+  if (resolved.includes('\0')) return false;
+  return getAxisLibraryRootDirs().some(
+    (root) => resolved === root || resolved.startsWith(root + path.sep)
+  );
+}
+
 async function installAxisExtensionFromXpiBuffer(
   xpiBuffer,
   profileId = AXIS_DEFAULT_PROFILE_ID,
@@ -1401,8 +1584,8 @@ async function installAxisExtensionFromXpiBuffer(
   const unpackedDir = path.join(tempRoot, 'unpacked');
   await fs.promises.mkdir(unpackedDir, { recursive: true });
   try {
-    const zip = new AdmZip(xpiBuffer);
-    zip.extractAllTo(unpackedDir, true);
+    const zip = new (getAdmZip())(xpiBuffer);
+    extractZipSafelyTo(zip, unpackedDir);
     return await commitAxisExtensionInstall(unpackedDir, profileId, {
       storeListingToken
     });
@@ -1581,8 +1764,8 @@ async function installAxisExtensionFromCrxBuffer(
   const unpackedDir = path.join(tempRoot, 'unpacked');
   await fs.promises.mkdir(unpackedDir, { recursive: true });
   try {
-    const zip = new AdmZip(zipBuf);
-    zip.extractAllTo(unpackedDir, true);
+    const zip = new (getAdmZip())(zipBuf);
+    extractZipSafelyTo(zip, unpackedDir);
     return await commitAxisExtensionInstall(unpackedDir, profileId, {
       storeListingToken
     });
@@ -1639,15 +1822,50 @@ async function loadAxisExtensionRecord(record, profileId = AXIS_DEFAULT_PROFILE_
 
   try {
     const manifest = await readAxisExtensionManifest(record.path);
-    const loadPath = await prepareAxisExtensionLoadPath(record, manifest);
     const extSession = getAxisExtensionSession(pid);
     const loadExtension =
       extSession.extensions && typeof extSession.extensions.loadExtension === 'function'
         ? extSession.extensions.loadExtension.bind(extSession.extensions)
         : extSession.loadExtension.bind(extSession);
-    const ext = await loadExtension(loadPath, {
-      allowFileAccess: true
-    });
+
+    let ext = null;
+    let lastErr = null;
+    // Electron still does not run MV3 service workers. Prefer the MV2 compat
+    // rewrite whenever a SW is present; do not fall back to the raw package
+    // (Electron may accept it with permission warnings while the SW stays dead).
+    const hasServiceWorker =
+      manifest.manifest_version === 3 && !!manifest.background?.service_worker;
+    const pathsToTry = [];
+    if (hasServiceWorker) {
+      const compatPath = await prepareAxisExtensionLoadPath(record, manifest, { force: true });
+      if (compatPath) pathsToTry.push(compatPath);
+    } else {
+      if (record.path) pathsToTry.push(record.path);
+    }
+
+    for (const loadPath of pathsToTry) {
+      try {
+        ext = await loadExtension(loadPath, { allowFileAccess: true });
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        ext = null;
+      }
+    }
+    if (!ext && manifest.manifest_version === 3 && !hasServiceWorker) {
+      const compatPath = await prepareAxisExtensionLoadPath(record, manifest, { force: true });
+      if (compatPath && compatPath !== record.path) {
+        try {
+          ext = await loadExtension(compatPath, { allowFileAccess: true });
+          lastErr = null;
+        } catch (compatErr) {
+          lastErr = compatErr;
+        }
+      }
+    }
+    if (!ext) throw lastErr || new Error('Failed to load extension');
+
     const next = {
       ...record,
       extensionId: ext.id,
@@ -1701,7 +1919,12 @@ function unloadAxisExtensionRecord(record, profileId = AXIS_DEFAULT_PROFILE_ID) 
   const extensionId = rt?.loadedId || record.extensionId;
   if (extensionId) {
     try {
-      getAxisExtensionSession(pid).removeExtension(extensionId);
+      const sess = getAxisExtensionSession(pid);
+      if (sess.extensions && typeof sess.extensions.removeExtension === 'function') {
+        sess.extensions.removeExtension(extensionId);
+      } else if (typeof sess.removeExtension === 'function') {
+        sess.removeExtension(extensionId);
+      }
     } catch (_) {}
   }
   setExtensionRuntimeState(pid, record.id, { loadedId: '', error: '' });
@@ -1896,6 +2119,54 @@ async function removeAxisExtension(id, profileId = AXIS_DEFAULT_PROFILE_ID) {
   return await listAxisExtensions(pid);
 }
 
+function isLoadedAxisChromeExtensionId(extensionId) {
+  const id = String(extensionId || '').trim();
+  if (!id) return false;
+  for (const state of axisExtensionRuntime.values()) {
+    if (state && state.loadedId && String(state.loadedId) === id) return true;
+  }
+  try {
+    for (const p of listAxisProfiles()) {
+      const sess = getAxisExtensionSession(p.id);
+      const all =
+        sess && typeof sess.getAllExtensions === 'function' ? sess.getAllExtensions() : null;
+      if (!all) continue;
+      if (all[id]) return true;
+      for (const ext of Object.values(all)) {
+        if (ext && ext.id === id) return true;
+      }
+    }
+  } catch (_) {}
+  return false;
+}
+
+function isSafeChromeExtensionUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'chrome-extension:') return false;
+    return isLoadedAxisChromeExtensionId(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function getAxisExtensionPageWebPreferences(extSession, opts = {}) {
+  return {
+    session: extSession,
+    // Electron only injects chrome.* into extension pages with isolation+sandbox.
+    // contextIsolation:false causes chrome-extension:// loads to fail (ERR_FAILED).
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    webSecurity: true,
+    // Popup bridge fallback hosts the extension page in a nested <webview>.
+    webviewTag: opts.allowWebview === true,
+    backgroundThrottling: false,
+    spellcheck: false
+  };
+}
+
 async function openAxisExtensionOptions(id, profileId = AXIS_DEFAULT_PROFILE_ID) {
   const pid = sanitizeProfileId(profileId);
   const record = getStoredAxisExtensions(pid).find((x) => x.id === id);
@@ -1906,7 +2177,37 @@ async function openAxisExtensionOptions(id, profileId = AXIS_DEFAULT_PROFILE_ID)
     view = await loadAxisExtensionRecord(record, pid);
   }
   if (!view.optionsUrl) throw new Error('This extension does not provide an options page');
-  openUrlInAxisBrowser(view.optionsUrl);
+  const extSession = getAxisExtensionSession(pid);
+  const parentWin =
+    mainWindow && !mainWindow.isDestroyed()
+      ? mainWindow
+      : BrowserWindow.getFocusedWindow();
+  const win = new BrowserWindow({
+    width: 920,
+    height: 720,
+    minWidth: 480,
+    minHeight: 360,
+    show: false,
+    title: `${view.name || 'Extension'} — Options`,
+    icon: fs.existsSync(APP_ICON_PATH) ? APP_ICON_PATH : undefined,
+    parent: parentWin && !parentWin.isDestroyed() ? parentWin : undefined,
+    autoHideMenuBar: true,
+    backgroundColor: '#ffffff',
+    webPreferences: getAxisExtensionPageWebPreferences(extSession)
+  });
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) {
+      win.show();
+      win.focus();
+    }
+  });
+  setTimeout(() => {
+    if (!win.isDestroyed() && !win.isVisible()) {
+      win.show();
+      win.focus();
+    }
+  }, 1500);
+  await win.loadURL(view.optionsUrl);
   return true;
 }
 
@@ -1942,27 +2243,18 @@ async function openAxisExtensionPopup(id, profileId = AXIS_DEFAULT_PROFILE_ID, o
         : null;
 
   const popupWin = new BrowserWindow({
-    width: 400,
-    height: 560,
-    minWidth: 200,
+    width: 380,
+    height: 520,
+    minWidth: 280,
     minHeight: 120,
+    useContentSize: true,
     show: false,
     title: view.name || 'Extension',
     icon: fs.existsSync(APP_ICON_PATH) ? APP_ICON_PATH : undefined,
     parent: parentWin || undefined,
     autoHideMenuBar: true,
-    backgroundColor: '#f5f5f5',
-    webPreferences: {
-      session: extSession,
-      contextIsolation: false,
-      nodeIntegration: false,
-      sandbox: false,
-      preload: path.join(__dirname, 'extension-popup-preload.js'),
-      webSecurity: true,
-      webviewTag: false,
-      backgroundThrottling: false,
-      spellcheck: false
-    }
+    backgroundColor: '#ffffff',
+    webPreferences: getAxisExtensionPageWebPreferences(extSession, { allowWebview: true })
   });
 
   axisExtensionPopupByRecordId.set(popupKey, popupWin);
@@ -1972,16 +2264,31 @@ async function openAxisExtensionPopup(id, profileId = AXIS_DEFAULT_PROFILE_ID, o
     }
   });
 
+  const scheduleFit = () => {
+    setTimeout(() => {
+      void fitAxisExtensionPopupToContent(popupWin);
+    }, 60);
+    setTimeout(() => {
+      void fitAxisExtensionPopupToContent(popupWin);
+    }, 350);
+  };
+  popupWin.webContents.on('did-finish-load', scheduleFit);
+  popupWin.webContents.on('dom-ready', scheduleFit);
+
   attachAxisExtensionPopupShowHandlers(popupWin);
 
   try {
-    // Load extension popups as real top-level extension pages. The previous data-URL
-    // bridge nested the popup in a <webview>, which opened a window but left many
-    // extension UIs blank/non-interactive because popup scripts were not running in
-    // the expected top-level extension page context.
     await popupWin.loadURL(view.popupUrl);
   } catch (err) {
-    axisExtensionPopupByRecordId.delete(popupKey);
+    // Fallback: host the popup in a guest webview with the profile partition.
+    try {
+      const partition =
+        typeof extSession.getPartition === 'function'
+          ? extSession.getPartition() || getProfilePartition(pid)
+          : getProfilePartition(pid);
+      await popupWin.loadURL(buildAxisExtensionPopupBridgeDataUrl(view.popupUrl, partition));
+    } catch (bridgeErr) {
+      axisExtensionPopupByRecordId.delete(popupKey);
     if (!popupWin.isDestroyed()) {
       try {
         popupWin.close();
@@ -1989,9 +2296,81 @@ async function openAxisExtensionPopup(id, profileId = AXIS_DEFAULT_PROFILE_ID, o
         /* ignore */
       }
     }
-    throw err;
+      throw bridgeErr || err;
+    }
   }
 
+  return true;
+}
+
+/**
+ * Open any chrome-extension:// page for a loaded extension in a proper extension
+ * window (site tabs stay sandboxed and cannot host extension chrome.* APIs).
+ */
+async function openAxisExtensionPageUrl(url, profileId = AXIS_DEFAULT_PROFILE_ID, ownerWindow) {
+  if (!isSafeChromeExtensionUrl(url)) {
+    throw new Error('Unknown or invalid extension page');
+  }
+  const pid = sanitizeProfileId(profileId);
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_) {
+    throw new Error('Invalid extension page URL');
+  }
+  const extensionId = parsed.hostname;
+  const record = getStoredAxisExtensions(pid).find(
+    (x) =>
+      x &&
+      (String(x.extensionId || '') === extensionId ||
+        String(getExtensionRuntimeState(pid, x.id)?.loadedId || '') === extensionId)
+  );
+  if (record && record.enabled === false) {
+    throw new Error('Enable this extension before opening its pages.');
+  }
+  if (record && record.enabled !== false) {
+    const view = toAxisExtensionView(record, pid);
+    if (!view.loaded) {
+      await loadAxisExtensionRecord(record, pid);
+    }
+  }
+  if (!isLoadedAxisChromeExtensionId(extensionId)) {
+    throw new Error('Extension is not loaded');
+  }
+
+  const extSession = getAxisExtensionSession(pid);
+  const parentWin =
+    ownerWindow && !ownerWindow.isDestroyed()
+      ? ownerWindow
+      : mainWindow && !mainWindow.isDestroyed()
+        ? mainWindow
+        : BrowserWindow.getFocusedWindow();
+  const win = new BrowserWindow({
+    width: 920,
+    height: 720,
+    minWidth: 320,
+    minHeight: 200,
+    show: false,
+    title: record?.name || 'Extension',
+    icon: fs.existsSync(APP_ICON_PATH) ? APP_ICON_PATH : undefined,
+    parent: parentWin && !parentWin.isDestroyed() ? parentWin : undefined,
+    autoHideMenuBar: true,
+    backgroundColor: '#ffffff',
+    webPreferences: getAxisExtensionPageWebPreferences(extSession)
+  });
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) {
+      win.show();
+      win.focus();
+    }
+  });
+  setTimeout(() => {
+    if (!win.isDestroyed() && !win.isVisible()) {
+      win.show();
+      win.focus();
+    }
+  }, 1500);
+  await win.loadURL(url);
   return true;
 }
 
@@ -2034,28 +2413,73 @@ function normalizePermissionOrigin(url) {
 function cleanSitePermissionOverrides(raw) {
   const out = {};
   if (!raw || typeof raw !== 'object') return out;
+  const allowedKeys = new Set([
+    'camera',
+    'microphone',
+    'notifications',
+    'geolocation',
+    'display-capture',
+    'openExternal',
+    'clipboard-read',
+    'clipboard-sanitized-write',
+    'fileSystem',
+    'midi',
+    'midiSysex',
+    'window-management',
+    'speaker-selection',
+    'fullscreen',
+    'pointerLock',
+    'keyboardLock',
+    'idle-detection',
+    'storage-access',
+    'top-level-storage-access',
+    'mediaKeySystem',
+    'unknown',
+    'usb',
+    'hid',
+    'serial',
+    'bluetooth',
+    'sensors'
+  ]);
   for (const [origin, perms] of Object.entries(raw)) {
     if (!origin || typeof perms !== 'object' || !perms) continue;
     const row = {};
-    for (const k of ['camera', 'microphone', 'notifications', 'geolocation']) {
-      if (perms[k] === 'allow' || perms[k] === 'deny') row[k] = perms[k];
+    for (const [k, v] of Object.entries(perms)) {
+      if (!allowedKeys.has(k) && !/^[a-zA-Z0-9._-]{1,64}$/.test(k)) continue;
+      if (v === 'allow' || v === 'deny') row[k] = v;
     }
-    out[origin] = row;
+    if (Object.keys(row).length) out[origin] = row;
   }
   return out;
 }
 
 /** Notify windows for one profile (or all if profileId omitted) to reload store-backed state. */
-function broadcastSettingsUpdated(profileId = null) {
+function broadcastSettingsUpdated(profileId = null, changed = null) {
   const target = profileId != null ? sanitizeProfileId(profileId) : null;
+  const changedKey = changed && typeof changed.key === 'string' ? changed.key : null;
   for (const w of BrowserWindow.getAllWindows()) {
     if (w.isDestroyed() || w.__axisIsIncognito) continue;
-    const winProfile = getSettingsEditingProfileIdForWindow(w) ||
-      sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
-    if (target && winProfile !== target) continue;
+    const browsingProfile = sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+    // Settings windows follow the profile they are editing. Browser windows must follow
+    // the *browsing* profile — otherwise a leftover "Editing profile" in Settings can
+    // block New Tab / chrome updates for the profile you are actually using.
+    const matchProfile = w.__axisIsSettingsWindow
+      ? getSettingsEditingProfileIdForWindow(w) || browsingProfile
+      : browsingProfile;
+    if (target && matchProfile !== target) continue;
     try {
-      applyVibrancyToWindow(w);
-      w.webContents.send('settings-updated', { profileId: winProfile });
+      // Vibrancy only depends on chrome light / theme — skip on every toggle.
+      if (!changedKey || changedKey === 'windowChromeLight' || changedKey === 'uiTheme') {
+        applyVibrancyToWindow(w);
+      }
+      const payload = { profileId: matchProfile };
+      if (changedKey) {
+        payload.key = changedKey;
+        if (changed && Object.prototype.hasOwnProperty.call(changed, 'value')) {
+          payload.value = changed.value;
+        }
+      }
+      w.webContents.send('settings-updated', payload);
     } catch (_) {
       /* window gone */
     }
@@ -2078,14 +2502,16 @@ function broadcastExtensionsReady(profileId = null) {
 }
 
 /**
- * When the session auto-grants a permission (no per-site override), persist that
- * decision so Settings → Site permission overrides reflects reality.
- * @param {string} origin
- * @param {string} permission Electron permission id
- * @param {Record<string, unknown> | undefined} details `mediaTypes` for `media` requests
+ * Resolve the browsing profile for a guest or shell webContents.
  */
 function getProfileIdFromWebContents(webContents) {
   if (!webContents || webContents.isDestroyed()) return AXIS_DEFAULT_PROFILE_ID;
+  try {
+    const win = getWindowFromSender(webContents);
+    if (win && !win.isDestroyed() && win.__axisIsIncognito !== true && win.__axisProfileId) {
+      return sanitizeProfileId(win.__axisProfileId);
+    }
+  } catch (_) {}
   try {
     return getProfileIdFromSession(webContents.session);
   } catch (_) {
@@ -2093,42 +2519,153 @@ function getProfileIdFromWebContents(webContents) {
   }
 }
 
-function recordSitePermissionAllowance(origin, permission, details, profileId = AXIS_DEFAULT_PROFILE_ID) {
+function recordSitePermissionDecision(origin, permission, decision, details, profileId = AXIS_DEFAULT_PROFILE_ID) {
   if (!origin || typeof origin !== 'string') return;
+  if (decision !== 'allow' && decision !== 'deny') return;
   const pid = sanitizeProfileId(profileId);
   const profileStore = getProfileSitePermissionStore(pid);
-
-  if (permission === 'geolocation' || permission === 'notifications') {
-    const raw = profileStore.get('sitePermissionOverrides', {});
+  const raw = profileStore.get('sitePermissionOverrides', {});
     const base = raw && typeof raw === 'object' ? raw : {};
     const site = { ...(base[origin] || {}) };
-    site[permission] = 'allow';
-    const next = { ...base, [origin]: site };
-    profileStore.set('sitePermissionOverrides', cleanSitePermissionOverrides(next));
-    broadcastSettingsUpdated(pid);
-    return;
-  }
 
   if (permission === 'media') {
     const types = details && Array.isArray(details.mediaTypes) ? details.mediaTypes : ['video', 'audio'];
-    const raw = profileStore.get('sitePermissionOverrides', {});
-    const base = raw && typeof raw === 'object' ? raw : {};
-    const site = { ...(base[origin] || {}) };
-    if (types.length === 0) {
-      site.camera = 'allow';
-      site.microphone = 'allow';
+    if (!types.length) {
+      site.camera = decision;
+      site.microphone = decision;
     } else {
-      if (types.includes('video')) site.camera = 'allow';
-      if (types.includes('audio')) site.microphone = 'allow';
+      if (types.includes('video')) site.camera = decision;
+      if (types.includes('audio')) site.microphone = decision;
     }
+  } else if (permission === 'display-capture') {
+    site['display-capture'] = decision;
+  } else {
+    const key = String(permission || '').trim();
+    if (key) site[key] = decision;
+  }
+
     const next = { ...base, [origin]: site };
-    profileStore.set('sitePermissionOverrides', cleanSitePermissionOverrides(next));
-    broadcastSettingsUpdated(pid);
+  profileStore.set('sitePermissionOverrides', cleanSitePermissionOverrides(next));
+  broadcastSettingsUpdated(pid);
+}
+
+const pendingSitePermissionPrompts = new Map();
+let nextSitePermissionPromptId = 1;
+
+function describeSitePermissionPrompt(permission, details) {
+  const types = details && Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
+  const p = String(permission || '');
+  if (p === 'media') {
+    const wantsCam = !types.length || types.includes('video');
+    const wantsMic = !types.length || types.includes('audio');
+    if (wantsCam && wantsMic) {
+      return { title: 'Use camera and microphone?', detail: 'This site wants to use your camera and microphone.' };
+    }
+    if (wantsCam) return { title: 'Use your camera?', detail: 'This site wants to use your camera.' };
+    return { title: 'Use your microphone?', detail: 'This site wants to use your microphone.' };
+  }
+  const copy = {
+    geolocation: { title: 'Share your location?', detail: 'This site wants to know your location.' },
+    notifications: { title: 'Show notifications?', detail: 'This site wants to send you notifications.' },
+    'display-capture': { title: 'Share your screen?', detail: 'This site wants to capture your screen.' },
+    openExternal: { title: 'Open an outside app?', detail: 'This site wants to open another application.' },
+    'clipboard-read': { title: 'Read the clipboard?', detail: 'This site wants to read text from your clipboard.' },
+    'clipboard-sanitized-write': {
+      title: 'Write to the clipboard?',
+      detail: 'This site wants to write text to your clipboard.'
+    },
+    fileSystem: { title: 'Access files?', detail: 'This site wants access to files on your computer.' },
+    midi: { title: 'Use MIDI devices?', detail: 'This site wants to connect to MIDI devices.' },
+    midiSysex: { title: 'Use MIDI devices?', detail: 'This site wants full MIDI system access.' },
+    'window-management': { title: 'Manage windows?', detail: 'This site wants to place or resize windows.' },
+    'speaker-selection': { title: 'Choose speakers?', detail: 'This site wants to pick an audio output.' },
+    fullscreen: { title: 'Go full screen?', detail: 'This site wants to enter full screen.' },
+    pointerLock: { title: 'Lock the pointer?', detail: 'This site wants to lock your mouse pointer.' },
+    keyboardLock: { title: 'Lock keyboard keys?', detail: 'This site wants to capture special keyboard keys.' },
+    'idle-detection': { title: 'Detect when you are idle?', detail: 'This site wants to know when you are away.' },
+    'storage-access': { title: 'Access site storage?', detail: 'This site wants access to cookies or storage across sites.' },
+    'top-level-storage-access': {
+      title: 'Access site storage?',
+      detail: 'This site wants top-level storage access.'
+    },
+    mediaKeySystem: { title: 'Use protected media?', detail: 'This site wants to play protected (DRM) media.' },
+    usb: { title: 'Connect a USB device?', detail: 'This site wants to connect to a USB device.' },
+    hid: { title: 'Connect an HID device?', detail: 'This site wants to connect to an HID device.' },
+    serial: { title: 'Connect a serial port?', detail: 'This site wants to connect to a serial port.' },
+    bluetooth: { title: 'Use Bluetooth?', detail: 'This site wants to use Bluetooth devices.' },
+    sensors: { title: 'Use device sensors?', detail: 'This site wants access to motion or environment sensors.' },
+    unknown: { title: 'Allow this site?', detail: 'This site is asking for an extra permission.' }
+  };
+  return copy[p] || {
+    title: 'Allow this site?',
+    detail: `This site is asking for “${p || 'a permission'}”.`
+  };
+}
+
+function findBrowserWindowForPermissionPrompt(webContents) {
+  let win = getWindowFromSender(webContents);
+  if (win && !win.isDestroyed() && !win.__axisIsSettingsWindow) return win;
+  try {
+    const focused = BrowserWindow.getFocusedWindow();
+    if (focused && !focused.isDestroyed() && !focused.__axisIsSettingsWindow) return focused;
+  } catch (_) {}
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed() || w.__axisIsSettingsWindow) continue;
+    return w;
+  }
+  return null;
+}
+
+/**
+ * Ask the user to Allow / Block with a native dialog.
+ * (In-window modals are easy to miss behind <webview>; Electron also auto-approves
+ * when no request handler answers — this path always blocks until the user chooses.)
+ */
+async function askSitePermissionPrompt(webContents, origin, permission, details) {
+  const win = findBrowserWindowForPermissionPrompt(webContents);
+  const copy = describeSitePermissionPrompt(permission, details);
+  let siteLabel = origin || 'This site';
+  try {
+    siteLabel = new URL(origin).hostname.replace(/^www\./i, '') || siteLabel;
+  } catch (_) {}
+
+  try {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+  } catch (_) {}
+
+  const boxOpts = {
+    type: 'question',
+    buttons: ['Block', 'Allow'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    normalizeAccessKeys: true,
+    title: 'Axis — site permission',
+    message: copy.title,
+    detail: `${siteLabel}\n\n${copy.detail}`
+  };
+
+  try {
+    const result =
+      win && !win.isDestroyed()
+        ? await dialog.showMessageBox(win, boxOpts)
+        : await dialog.showMessageBox(boxOpts);
+    return result.response === 1;
+  } catch (_) {
+    return false;
   }
 }
 
+function recordSitePermissionAllowance(origin, permission, details, profileId = AXIS_DEFAULT_PROFILE_ID) {
+  recordSitePermissionDecision(origin, permission, 'allow', details, profileId);
+}
+
 /** @param {string|null} origin @param {string} permission Electron permission id */
-function getSitePermissionDecision(origin, permission, profileId = AXIS_DEFAULT_PROFILE_ID) {
+function getSitePermissionDecision(origin, permission, profileId = AXIS_DEFAULT_PROFILE_ID, details = null) {
   const overrides = getProfileStore(profileId).get('sitePermissionOverrides', {});
   if (!origin || typeof overrides !== 'object') return null;
   const site = overrides[origin];
@@ -2137,80 +2674,238 @@ function getSitePermissionDecision(origin, permission, profileId = AXIS_DEFAULT_
   if (permission === 'media') {
     const cam = site.camera;
     const mic = site.microphone;
-    if (cam === 'deny' || mic === 'deny') return 'deny';
-    if (cam === 'allow' || mic === 'allow') return 'allow';
+    const types = details && Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
+    const wantsCam = !types.length || types.includes('video');
+    const wantsMic = !types.length || types.includes('audio');
+    if (wantsCam && cam === 'deny') return 'deny';
+    if (wantsMic && mic === 'deny') return 'deny';
+    if (wantsCam && wantsMic) {
+      if (cam === 'allow' && mic === 'allow') return 'allow';
+    return null;
+  }
+    if (wantsCam) return cam === 'allow' ? 'allow' : null;
+    if (wantsMic) return mic === 'allow' ? 'allow' : null;
     return null;
   }
 
-  if (permission === 'geolocation' || permission === 'notifications') {
-    const v = site[permission];
-    if (v === 'deny' || v === 'allow') return v;
-    return null;
-  }
-
+  const key = String(permission || '');
+  const v = site[key];
+  if (v === 'deny' || v === 'allow') return v;
   return null;
 }
 
 function permissionRequestHandler(webContents, permission, callback, details) {
-  const profileId = getProfileIdFromWebContents(webContents);
-  const requestingUrl = details && details.requestingUrl;
-  const origin = normalizePermissionOrigin(requestingUrl);
-  const decided = getSitePermissionDecision(origin, permission, profileId);
+  // Always answer through our prompt path — Electron grants everything if this
+  // handler is missing or never calls callback.
+  const safeCallback = (allowed) => {
+    try {
+      callback(!!allowed);
+    } catch (_) {}
+  };
+  try {
+    const profileId = getProfileIdFromWebContents(webContents);
+    const requestingUrl =
+      (details && details.requestingUrl) ||
+      (details && details.securityOrigin) ||
+      '';
+    let origin = normalizePermissionOrigin(requestingUrl);
+    if (!origin && details && details.securityOrigin) {
+      origin = normalizePermissionOrigin(details.securityOrigin);
+    }
+    if (!origin) {
+      try {
+        const u = webContents && webContents.getURL && webContents.getURL();
+        origin = normalizePermissionOrigin(u);
+      } catch (_) {}
+    }
+
+    const decided = getSitePermissionDecision(origin, permission, profileId, details);
   if (decided === 'deny') {
-    callback(false);
+      safeCallback(false);
     return;
   }
   if (decided === 'allow') {
-    callback(true);
+      void ensureOsMediaAccess(permission, details).finally(() => safeCallback(true));
     return;
   }
 
-  const allowedPermissions = [
-    'display-capture',
-    'fullscreen',
-    'geolocation',
-    'idle-detection',
-    'media',
-    'mediaKeySystem',
-    'midi',
-    'midiSysex',
-    'notifications',
-    'pointerLock',
-    'keyboardLock',
-    'openExternal',
-    'speaker-selection',
-    'storage-access',
-    'top-level-storage-access',
-    'window-management',
-    'clipboard-read',
-    'clipboard-sanitized-write',
-    'unknown',
-    'fileSystem'
-  ];
-
-  const grant = allowedPermissions.includes(permission);
-  if (grant) {
-    try {
-      recordSitePermissionAllowance(origin, permission, details, profileId);
-    } catch (err) {
-      console.warn('recordSitePermissionAllowance failed:', err);
-    }
+    void askSitePermissionPrompt(webContents, origin, permission, details || {})
+      .then(async (allowed) => {
+        try {
+          const win = getWindowFromSender(webContents);
+          const isIncognito = !!(win && win.__axisIsIncognito);
+          if (origin && !isIncognito) {
+            recordSitePermissionDecision(
+              origin,
+              permission,
+              allowed ? 'allow' : 'deny',
+              details || {},
+              profileId
+            );
+          }
+        } catch (_) {}
+        if (allowed) {
+          try {
+            await ensureOsMediaAccess(permission, details);
+          } catch (_) {}
+        }
+        safeCallback(!!allowed);
+      })
+      .catch(() => safeCallback(false));
+  } catch (_) {
+    safeCallback(false);
   }
-  callback(grant);
+}
+
+/** macOS: site Allow is not enough — the app also needs Camera / Mic OS access. */
+async function ensureOsMediaAccess(permission, details) {
+  if (process.platform !== 'darwin' || !systemPreferences) return;
+  try {
+    if (permission !== 'media') return;
+    const types = details && Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
+    const wantsCam = !types.length || types.includes('video');
+    const wantsMic = !types.length || types.includes('audio');
+    if (wantsCam && typeof systemPreferences.getMediaAccessStatus === 'function') {
+      const st = systemPreferences.getMediaAccessStatus('camera');
+      if (st !== 'granted' && typeof systemPreferences.askForMediaAccess === 'function') {
+        await systemPreferences.askForMediaAccess('camera');
+      }
+    }
+    if (wantsMic && typeof systemPreferences.getMediaAccessStatus === 'function') {
+      const st = systemPreferences.getMediaAccessStatus('microphone');
+      if (st !== 'granted' && typeof systemPreferences.askForMediaAccess === 'function') {
+        await systemPreferences.askForMediaAccess('microphone');
+      }
+    }
+  } catch (_) {}
 }
 
 function permissionCheckHandler(webContents, permission, requestingOrigin, details) {
-  const profileId = getProfileIdFromWebContents(webContents);
-  const origin = normalizePermissionOrigin(requestingOrigin) || requestingOrigin;
-  const decided = getSitePermissionDecision(origin, permission, profileId);
+  try {
+    const profileId = getProfileIdFromWebContents(webContents);
+    const origin =
+      normalizePermissionOrigin(requestingOrigin) ||
+      normalizePermissionOrigin(details && details.requestingUrl) ||
+      requestingOrigin;
+    const decided = getSitePermissionDecision(origin, permission, profileId, details);
   if (decided === 'deny') return false;
   if (decided === 'allow') return true;
-  return true;
+    // Undecided: deny the sync check so Chromium issues a permission *request*
+    // (handled by permissionRequestHandler → user prompt). Returning true here
+    // would grant silently.
+    return false;
+  } catch (_) {
+    return false;
+  }
 }
 
+async function resolveDisplayCaptureStreams(request, origin, webContents) {
+  const profileId = webContents
+    ? getProfileIdFromWebContents(webContents)
+    : AXIS_DEFAULT_PROFILE_ID;
+  const decided = getSitePermissionDecision(origin, 'display-capture', profileId, {});
+  let allowed = decided === 'allow';
+  if (decided == null) {
+    allowed = await askSitePermissionPrompt(webContents, origin, 'display-capture', {});
+    try {
+      const win = webContents ? getWindowFromSender(webContents) : null;
+      const isIncognito = !!(win && win.__axisIsIncognito);
+      if (origin && !isIncognito) {
+        recordSitePermissionDecision(
+          origin,
+          'display-capture',
+          allowed ? 'allow' : 'deny',
+          {},
+          profileId
+        );
+      }
+    } catch (_) {}
+  }
+  if (!allowed) return {};
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen', 'window'],
+      thumbnailSize: { width: 1, height: 1 }
+    });
+    if (!sources.length) return {};
+    const streams = { video: sources[0] };
+    if (request && request.audioRequested) streams.audio = 'loopback';
+    return streams;
+  } catch (_) {
+    return {};
+  }
+}
+
+const axisDisplayMediaHandlerSessions = new WeakSet();
+const axisPermissionHandlerBoundSessions = new WeakSet();
+
 function installSessionPermissionHandlers(sess) {
+  if (!sess) return;
+  // Clear any prior handler once per session object, then bind ours. Do not clear on
+  // every webview create — a null gap would let Electron auto-approve briefly.
+  if (!axisPermissionHandlerBoundSessions.has(sess)) {
+    try {
+      sess.setPermissionRequestHandler(null);
+    } catch (_) {}
+    try {
+      sess.setPermissionCheckHandler(null);
+    } catch (_) {}
+    axisPermissionHandlerBoundSessions.add(sess);
+  }
+  try {
   sess.setPermissionRequestHandler(permissionRequestHandler);
+  } catch (err) {
+    console.error('[Axis] setPermissionRequestHandler failed:', err);
+  }
+  try {
   sess.setPermissionCheckHandler(permissionCheckHandler);
+  } catch (err) {
+    console.error('[Axis] setPermissionCheckHandler failed:', err);
+  }
+  // Screen share uses a separate Electron handler.
+  try {
+    if (typeof sess.setDisplayMediaRequestHandler === 'function' && !axisDisplayMediaHandlerSessions.has(sess)) {
+      axisDisplayMediaHandlerSessions.add(sess);
+      sess.setDisplayMediaRequestHandler((request, callback) => {
+        let webContents = null;
+        try {
+          const frame = request && request.frame;
+          if (frame && frame.webContents && !frame.webContents.isDestroyed()) {
+            webContents = frame.webContents;
+          }
+        } catch (_) {}
+        if (!webContents) {
+          try {
+            webContents = findBrowserWindowForPermissionPrompt(null)?.webContents || null;
+          } catch (_) {}
+        }
+        let origin = '';
+        try {
+          origin =
+            normalizePermissionOrigin(request && request.securityOrigin) ||
+            normalizePermissionOrigin(webContents && webContents.getURL && webContents.getURL()) ||
+            '';
+        } catch (_) {}
+        void resolveDisplayCaptureStreams(request, origin, webContents)
+          .then((streams) => {
+            try {
+              callback(streams);
+            } catch (_) {
+              try {
+                callback({});
+              } catch (__) {}
+            }
+          })
+          .catch(() => {
+            try {
+              callback({});
+            } catch (_) {}
+          });
+      });
+    }
+  } catch (err) {
+    console.error('[Axis] setDisplayMediaRequestHandler failed:', err);
+  }
 }
 
 const axisConfiguredSessionPartitions = new Set();
@@ -2248,12 +2943,14 @@ function attachThemeColorHeaderSniffer(sess) {
 
 function configureAxisSessionInstance(sess) {
   if (!sess) return;
-  const key = typeof sess.getPartition === 'function' ? sess.getPartition() || 'default' : 'default';
-  if (axisConfiguredSessionPartitions.has(key)) return;
-  axisConfiguredSessionPartitions.add(key);
+  // Always (re)bind permission handlers. Electron auto-approves every request when
+  // no handler is set — never skip this, even if the partition was configured earlier.
   try {
     installSessionPermissionHandlers(sess);
   } catch (_) {}
+  const key = typeof sess.getPartition === 'function' ? sess.getPartition() || 'default' : 'default';
+  if (axisConfiguredSessionPartitions.has(key)) return;
+  axisConfiguredSessionPartitions.add(key);
   try {
     configureSpellChecker(sess);
   } catch (_) {}
@@ -2353,6 +3050,13 @@ function configureSession() {
   } catch (_) {}
   try {
     configureAxisSessionInstance(session.fromPartition('incognito'));
+  } catch (_) {}
+  // Wipe legacy auto-grants left in the root store (pre-profile migration).
+  try {
+    if (store.get('sitePermissionsPromptV3') !== true) {
+      store.set('sitePermissionOverrides', {});
+      store.set('sitePermissionsPromptV3', true);
+    }
   } catch (_) {}
 
   installAxisShellCspOnAllSessions(session);
@@ -2614,12 +3318,12 @@ async function applyAxisAdBlockerToSession(sess, enabled) {
   if (!sess) return;
   if (!enabled) {
     if (!axisAdblockBlocker) return;
-    try {
+      try {
       if (axisAdblockBlocker.isBlockingEnabled(sess)) {
         axisAdblockBlocker.disableBlockingInSession(sess);
-      }
+        }
       axisAdblockEnabledSessionKeys.delete(getAxisSessionKey(sess));
-    } catch (_) {}
+      } catch (_) {}
     return;
   }
   try {
@@ -2652,18 +3356,18 @@ async function applyAxisAdBlockerToSession(sess, enabled) {
     if (key && axisAdblockEnabledSessionKeys.has(key)) return;
     if (!blocker.isBlockingEnabled(sess)) {
       blocker.enableBlockingInSession(sess);
-    }
-    if (key) axisAdblockEnabledSessionKeys.add(key);
-  } catch (e) {
-    const msg = e && e.message ? String(e.message) : String(e);
-    if (msg.includes("Attempted to register a second handler for '@ghostery/adblocker/inject-cosmetic-filters'")) {
+        }
+        if (key) axisAdblockEnabledSessionKeys.add(key);
+      } catch (e) {
+        const msg = e && e.message ? String(e.message) : String(e);
+        if (msg.includes("Attempted to register a second handler for '@ghostery/adblocker/inject-cosmetic-filters'")) {
       const key = getAxisSessionKey(sess);
-      if (key) axisAdblockEnabledSessionKeys.add(key);
+          if (key) axisAdblockEnabledSessionKeys.add(key);
       return;
+        }
+        console.warn('Axis: enable ad blocker on session failed:', e);
+      }
     }
-    console.warn('Axis: enable ad blocker on session failed:', e);
-  }
-}
 
 async function applyAxisAdBlockerEnabled(enabled) {
   const sessions = getAxisAdblockSessions();
@@ -2941,16 +3645,16 @@ function applyVibrancyToWindow(browserWindow) {
   const opaqueBg = '#000000';
 
   if (process.platform === 'darwin') {
-    try {
-      if (solidChrome) {
-        browserWindow.setVibrancy(null);
+  try {
+    if (solidChrome) {
+      browserWindow.setVibrancy(null);
         browserWindow.setBackgroundColor(opaqueBg);
-      } else {
-        browserWindow.setVibrancy('under-window');
+    } else {
+      browserWindow.setVibrancy('under-window');
         browserWindow.setBackgroundColor('#00000000');
-      }
-    } catch (_) {
-      /* ignore */
+    }
+  } catch (_) {
+    /* ignore */
     }
     return;
   }
@@ -3112,6 +3816,57 @@ function shortcutUsesArrowKey(accel) {
   return key === 'Left' || key === 'Right' || key === 'Up' || key === 'Down';
 }
 
+/** Per-profile shortcut maps — rebuilt only when shortcuts change. */
+const axisShortcutCacheByProfile = new Map();
+
+function invalidateShortcutCache(profileId = null) {
+  if (profileId == null) {
+    axisShortcutCacheByProfile.clear();
+    return;
+  }
+  axisShortcutCacheByProfile.delete(sanitizeProfileId(profileId));
+}
+
+function buildShortcutCacheEntry(profileId) {
+  const pid = sanitizeProfileId(profileId || getActiveProfileId());
+  const defaults = getDefaultShortcuts();
+  const custom = getProfileStore(pid).get('keyboardShortcuts', null);
+  const map = {};
+  if (!custom) {
+    for (const [action, val] of Object.entries(defaults)) {
+      map[action] = normalizeAccelerator(val);
+    }
+  } else {
+    for (const action of Object.keys(defaults)) {
+      if (Object.prototype.hasOwnProperty.call(custom, action)) {
+        const val = custom[action];
+        if (val !== null && val !== '' && val !== '__disabled__') {
+          map[action] = normalizeAccelerator(val);
+        }
+      } else {
+        map[action] = normalizeAccelerator(defaults[action]);
+      }
+    }
+    for (const [action, val] of Object.entries(custom)) {
+      if (!defaults[action] && val !== null && val !== '' && val !== '__disabled__') {
+        map[action] = normalizeAccelerator(val);
+      }
+    }
+  }
+  const byAccel = new Map();
+  for (const [action, binding] of Object.entries(map)) {
+    if (binding) byAccel.set(binding, action);
+  }
+  const entry = { map, byAccel };
+  axisShortcutCacheByProfile.set(pid, entry);
+  return entry;
+}
+
+function getShortcutCacheEntry(profileId) {
+  const pid = sanitizeProfileId(profileId || getActiveProfileId());
+  return axisShortcutCacheByProfile.get(pid) || buildShortcutCacheEntry(pid);
+}
+
 function acceleratorFromInputEvent(input) {
   if (!input || input.type !== 'keyDown') return null;
   const parts = [];
@@ -3129,9 +3884,13 @@ function acceleratorFromInputEvent(input) {
   return normalizeAccelerator(parts.join('+'));
 }
 
-function findShortcutActionForAccelerator(accel, shortcuts) {
+function findShortcutActionForAccelerator(accel, shortcutsOrProfileId) {
   const norm = normalizeAccelerator(accel);
   if (!norm) return null;
+  if (typeof shortcutsOrProfileId === 'string' || shortcutsOrProfileId == null) {
+    return getShortcutCacheEntry(shortcutsOrProfileId).byAccel.get(norm) || null;
+  }
+  const shortcuts = shortcutsOrProfileId;
   for (const [action, binding] of Object.entries(shortcuts || {})) {
     if (normalizeAccelerator(binding) === norm) return action;
   }
@@ -3183,10 +3942,13 @@ function attachAxisArrowShortcutHandler(contents) {
   if (type !== 'window' && type !== 'webview') return;
   contents.__axisArrowShortcutAttached = true;
   contents.on('before-input-event', (event, input) => {
+    if (!input || input.type !== 'keyDown') return;
+    // Plain typing must not touch shortcut tables (huge win with many guest webviews).
+    if (!input.control && !input.alt && !input.meta) return;
     const accel = acceleratorFromInputEvent(input);
     if (!accel) return;
-    const shortcuts = getShortcuts(getProfileIdForWebContents(contents));
-    const action = findShortcutActionForAccelerator(accel, shortcuts);
+    const profileId = getProfileIdForWebContents(contents);
+    const action = findShortcutActionForAccelerator(accel, profileId);
     if (!action) return;
 
     let contentsType = '';
@@ -3279,35 +4041,7 @@ function getActiveProfileId() {
   return AXIS_DEFAULT_PROFILE_ID;
 }
 
-const getShortcuts = (profileId) => {
-  const pid = sanitizeProfileId(profileId || getActiveProfileId());
-  const defaults = getDefaultShortcuts();
-  const custom = getProfileStore(pid).get('keyboardShortcuts', null);
-  if (!custom) {
-    const out = {};
-    for (const [action, val] of Object.entries(defaults)) {
-      out[action] = normalizeAccelerator(val);
-    }
-    return out;
-  }
-  const out = {};
-  for (const action of Object.keys(defaults)) {
-    if (Object.prototype.hasOwnProperty.call(custom, action)) {
-      const val = custom[action];
-      if (val !== null && val !== '' && val !== '__disabled__') {
-        out[action] = normalizeAccelerator(val);
-      }
-    } else {
-      out[action] = normalizeAccelerator(defaults[action]);
-    }
-  }
-  for (const [action, val] of Object.entries(custom)) {
-    if (!defaults[action] && val !== null && val !== '' && val !== '__disabled__') {
-      out[action] = normalizeAccelerator(val);
-    }
-  }
-  return out;
-};
+const getShortcuts = (profileId) => getShortcutCacheEntry(profileId).map;
 
 /** Raw user overrides (null = disabled for that action). */
 const getShortcutOverrides = (profileId) =>
@@ -3535,7 +4269,7 @@ const unregisterShortcuts = () => {
   /* Allow Chromium to throttle timers/RAF when the window is occluded/minimized — lower idle CPU. */
   app.commandLine.appendSwitch('js-flags', '--max-old-space-size=1024 --max-semi-space-size=64 --no-expose-gc');
 
-  app.commandLine.appendSwitch('renderer-process-limit', '16');
+  app.commandLine.appendSwitch('renderer-process-limit', '24');
   app.commandLine.appendSwitch('max-active-webgl-contexts', '8');
   app.commandLine.appendSwitch('disable-hang-monitor');
   app.commandLine.appendSwitch('disable-background-networking');
@@ -3552,33 +4286,33 @@ const unregisterShortcuts = () => {
   app.commandLine.appendSwitch('enable-quic');
 
   const enableFeatures = [
-    'BackForwardCache',
-    'CanvasOopRasterization',
-    'Accelerated2dCanvas',
-    'VaapiVideoDecoder',
-    'WebGPU',
-    'WebUIDarkMode',
-    'VizDisplayCompositor',
-    'UseSkiaRenderer'
+      'BackForwardCache',
+      'CanvasOopRasterization',
+      'Accelerated2dCanvas',
+      'VaapiVideoDecoder',
+      'WebGPU',
+      'WebUIDarkMode',
+      'VizDisplayCompositor',
+      'UseSkiaRenderer'
   ];
   app.commandLine.appendSwitch('enable-features', enableFeatures.join(','));
 
   const disableFeatures = [
-    'CalculateNativeWinOcclusion',
-    'AutoExpandDetailsElement',
-    'AutofillEnableAccountWalletStorage',
-    'ChromeWhatsNewUI',
-    'DevicePosture',
-    'FedCm',
-    'InterestFeedContentSuggestions',
-    'MediaRouter',
-    'OptimizationHints',
-    'Prerender2',
-    'Translate',
-    'BlinkGenPropertyTrees',
-    'ThrottleForegroundTimers',
-    'ViewportSegments',
-    'ContentVisibility'
+      'CalculateNativeWinOcclusion',
+      'AutoExpandDetailsElement',
+      'AutofillEnableAccountWalletStorage',
+      'ChromeWhatsNewUI',
+      'DevicePosture',
+      'FedCm',
+      'InterestFeedContentSuggestions',
+      'MediaRouter',
+      'OptimizationHints',
+      'Prerender2',
+      'Translate',
+      'BlinkGenPropertyTrees',
+      'ThrottleForegroundTimers',
+      'ViewportSegments',
+      'ContentVisibility'
   ];
   app.commandLine.appendSwitch('disable-features', disableFeatures.join(','));
 })();
@@ -3635,6 +4369,7 @@ function createWindow(options = {}) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
       backgroundThrottling: true,
@@ -3686,10 +4421,12 @@ function createWindow(options = {}) {
     win.focus();
     // Show window controls by default (sidebar is visible)
     win.setWindowButtonVisibility(true);
-    setImmediate(() => {
+    // Give the shell a beat to paint before adblock/extension work competes for CPU.
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
       syncAdBlockerForProfile(profileId);
       void loadStoredAxisExtensionsForProfile(profileId);
-    });
+    }, 250);
   });
 
   // Handle window closed
@@ -3791,7 +4528,7 @@ function openSettingsWindow(section = null, profileIdHint = null) {
     if (prevId !== nextId) {
       try {
         existing.webContents.send('settings-editing-profile-changed', { profileId: nextId });
-      } catch (_) {}
+  } catch (_) {}
     }
     if (safeSection) {
       try {
@@ -3839,6 +4576,7 @@ function openSettingsWindow(section = null, profileIdHint = null) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       preload: path.join(__dirname, 'settings-preload.js'),
       partition: getProfilePartition(profileId),
       backgroundThrottling: false,
@@ -3912,7 +4650,7 @@ function menuAccel(key) {
 
 /** Open a URL in a new tab in the main Axis window (not the system browser). */
 function openUrlInAxisBrowser(url) {
-  if (!url || typeof url !== 'string') return;
+  if (!url || typeof url !== 'string' || !isSafeHttpUrl(url)) return;
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
@@ -3953,6 +4691,86 @@ function isSafeHttpUrl(url) {
   }
 }
 
+/** Block localhost / private / link-local / metadata hosts for privileged fetches. */
+function isBlockedFetchHostname(hostname) {
+  let host = String(hostname || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
+  if (!host) return true;
+
+  // IPv4-mapped IPv6 → check the embedded IPv4 (blocks [::ffff:127.0.0.1], etc.).
+  const v4MappedDotted = /(?:^|:)ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(host);
+  if (v4MappedDotted) {
+    return isBlockedFetchHostname(v4MappedDotted[1]);
+  }
+  const v4MappedHex = /(?:^|:)ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(host);
+  if (v4MappedHex) {
+    const hi = parseInt(v4MappedHex[1], 16);
+    const lo = parseInt(v4MappedHex[2], 16);
+    if (Number.isFinite(hi) && Number.isFinite(lo)) {
+      const dotted = `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
+      return isBlockedFetchHostname(dotted);
+    }
+    return true;
+  }
+
+  if (
+    host === 'localhost' ||
+    host === 'localhost.' ||
+    host.endsWith('.localhost') ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host === '::' ||
+    host === 'metadata' ||
+    host === 'metadata.google.internal'
+  ) {
+    return true;
+  }
+  // IPv4 literals (incl. decimal weirdness avoided — only dotted form).
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (m) {
+    const parts = m.slice(1).map((n) => Number(n));
+    if (parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return true;
+    const [a, b] = parts;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 0) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    if (a >= 224) return true; // multicast / reserved
+  }
+  // IPv6 literals — block loopback / link-local / ULA / IPv4-mapped prefix.
+  if (host.includes(':')) {
+    if (
+      host === '::1' ||
+      host.startsWith('fc') ||
+      host.startsWith('fd') ||
+      host.startsWith('fe80') ||
+      host.includes('ffff:')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** HTTPS-only public URL for Axis privileged net.fetch (widgets / weather). */
+function isSafePublicHttpsUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const u = new URL(url.trim());
+    if (u.protocol !== 'https:') return false;
+    if (u.username || u.password) return false;
+    if (isBlockedFetchHostname(u.hostname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Open http(s) URL in a new normal browser window (secondary window; does not replace mainWindow). */
 function openUrlInNewBrowserWindow(url) {
   if (!isSafeHttpUrl(url)) return;
@@ -3966,6 +4784,7 @@ function openUrlInNewBrowserWindow(url) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
       backgroundThrottling: true,
@@ -4538,6 +5357,7 @@ function createIncognitoWindow(initialUrl = null) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
       backgroundThrottling: true,
@@ -4723,14 +5543,6 @@ function warmUpMainProcessNativePaths() {
 app.whenReady().then(async () => {
   axisSessionLastExitClean = wasLastAxisSessionCleanExit();
   markAxisSessionRunning();
-  axisUpdateCheck.install({
-    getParentWindow: () => {
-      const focused = BrowserWindow.getFocusedWindow();
-      if (focused && !focused.isDestroyed()) return focused;
-      if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
-      return null;
-    }
-  });
   app.on('web-contents-created', (_event, contents) => {
     contents.setMaxListeners(0);
     attachAxisArrowShortcutHandler(contents);
@@ -4760,6 +5572,10 @@ app.whenReady().then(async () => {
     });
 
     // Ensure every dynamic profile partition gets handlers (cookies, downloads, permissions, spellcheck).
+    // Permission handlers are re-bound every time — required because Electron auto-approves without them.
+    try {
+      installSessionPermissionHandlers(contents.session);
+    } catch (_) {}
     try { configureAxisSessionInstance(contents.session); } catch (_) {}
 
     if (!isGuest) return;
@@ -4774,12 +5590,29 @@ app.whenReady().then(async () => {
       const url = details && details.url;
       if (typeof url === 'string' && url) {
         const lower = url.toLowerCase();
+        if (lower.startsWith('chrome-extension://')) {
+          const pid = getProfileIdFromWebContents(contents);
+          const owner =
+            BrowserWindow.fromWebContents(contents) ||
+            (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null);
+          setImmediate(() => {
+            void openAxisExtensionPageUrl(url, pid, owner || undefined).catch(() => {});
+          });
+          return { action: 'deny' };
+        }
         const blocked =
           lower.startsWith('javascript:') ||
           lower.startsWith('data:') ||
           lower.startsWith('vbscript:') ||
           lower.startsWith('file:');
-        if (!blocked) {
+        let allowed = false;
+        try {
+          const u = new URL(url);
+          allowed = u.protocol === 'http:' || u.protocol === 'https:';
+        } catch (_) {
+          allowed = false;
+        }
+        if (!blocked && allowed) {
           // Fire after handler returns; sync loadURL inside the handler can race the deny.
           setImmediate(() => {
             if (!contents.isDestroyed()) {
@@ -4793,12 +5626,16 @@ app.whenReady().then(async () => {
   });
 
   configureSession();
-  ensureSpellEngineLoaded();
-  warmUpMainProcessNativePaths();
+  // First paint path: open the window immediately; defer non-critical warmups.
   createWindow();
   updateDockMenu();
-  // First window loads ad blocker + extensions for its profile on ready-to-show; warm the rest in idle.
-  setImmediate(() => {
+
+  // After first window is up — spellcheck, clipboard/menu warm, other profiles, dock art, updates.
+  setTimeout(() => {
+    ensureSpellEngineLoaded();
+    warmUpMainProcessNativePaths();
+  }, 400);
+  setTimeout(() => {
     void (async () => {
       try {
         await syncAllProfilesAdBlocker();
@@ -4807,9 +5644,23 @@ app.whenReady().then(async () => {
         console.error('Axis: deferred profile init failed:', e);
       }
     })();
-  });
-  // Dock squircle (Jimp) runs after first window — avoids delaying initial paint; cache makes later launches cheap.
+  }, 900);
+  setTimeout(() => {
   void applyMacDockIcon();
+  }, 1200);
+  setTimeout(() => {
+    try {
+      axisUpdateCheck.install({
+        getParentWindow: () => {
+          const focused = BrowserWindow.getFocusedWindow();
+          if (focused && !focused.isDestroyed()) return focused;
+          if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
+          return null;
+        }
+      });
+    } catch (_) {}
+  }, 2500);
+
   // Ensure shortcuts are active whenever any Axis window has focus
   app.on('browser-window-focus', () => {
     unregisterShortcuts();
@@ -4926,36 +5777,140 @@ app.on('activate', () => {
   }
 });
 
+function axisAuthErrorLooksLikeCancel(err) {
+  const msg = String(err?.message || err || err?.stderr || '').toLowerCase();
+  return /cancel|cancelled|canceled|user cancel|authentication canceled|errsecusercanceled|code\s*=?\s*-2\b/.test(
+    msg
+  );
+}
+
+/**
+ * macOS LocalAuthentication with deviceOwnerAuthentication (Touch ID / Apple Watch / login password).
+ * Used when Electron's Touch ID helper is unavailable or refuses to present.
+ */
+async function axisVerifyMacDeviceOwnerPolicy(reason) {
+  const text = String(reason || 'Authenticate').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const script = `
+import LocalAuthentication
+import Foundation
+let ctx = LAContext()
+var err: NSError?
+guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err) else {
+  FileHandle.standardError.write(Data((err?.localizedDescription ?? "unavailable").utf8))
+  exit(2)
+}
+let sem = DispatchSemaphore(value: 0)
+var ok = false
+var fail = ""
+ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "${text}") { success, error in
+  ok = success
+  if let error = error { fail = error.localizedDescription }
+  sem.signal()
+}
+_ = sem.wait(timeout: .now() + 120)
+if ok { exit(0) }
+FileHandle.standardError.write(Data(fail.utf8))
+exit(1)
+`;
+  try {
+    await execFileAsync('/usr/bin/swift', ['-e', script], {
+      timeout: 130000,
+      maxBuffer: 1024 * 1024
+    });
+    return true;
+  } catch (err) {
+    if (Number(err?.code) === 2) return false;
+    return false;
+  }
+}
+
+/** Windows Hello via UserConsentVerifier when available. */
+async function axisVerifyWindowsHello(reason) {
+  const text = String(reason || 'Authenticate')
+    .replace(/'/g, "''")
+    .slice(0, 120);
+  const ps = `
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+  $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1
+})[0]
+Function Await($WinRtTask, $ResultType) {
+  $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
+  $netTask = $asTask.Invoke($null, @($WinRtTask))
+  $netTask.Wait(-1) | Out-Null
+  $netTask.Result
+}
+$r = Await ([Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync('${text}')) ([Windows.Security.Credentials.UI.UserConsentVerificationResult])
+if ($r -eq [Windows.Security.Credentials.UI.UserConsentVerificationResult]::Verified) { exit 0 }
+exit 1
+`;
+  try {
+    await execFileAsync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+      { timeout: 130000, windowsHide: true }
+    );
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Require real OS owner verification for vault secrets.
+ * Never accept a bare "Continue" click as authentication.
+ * Each sensitive action must authenticate — no unlock grace window.
+ */
 async function axisVerifyDeviceOwner(reason) {
   const text =
     typeof reason === 'string' && reason.trim()
       ? reason.trim()
-      : 'Authenticate to view saved passwords';
+      : 'Authenticate to access saved vault data';
+
+  let ok = false;
   if (process.platform === 'darwin') {
-    const canTouch =
-      typeof systemPreferences.canPromptTouchID === 'function' &&
-      systemPreferences.canPromptTouchID();
-    if (canTouch && typeof systemPreferences.promptTouchID === 'function') {
+    // Prefer Electron's prompt when present — do not gate on canPromptTouchID()
+    // (that check is Touch-ID-sensor-only and falsely skips Watch / passcode unlock).
+    if (typeof systemPreferences.promptTouchID === 'function') {
       try {
         await systemPreferences.promptTouchID(text);
-        return true;
-      } catch (_) {
-        return false;
+        ok = true;
+      } catch (err) {
+        if (axisAuthErrorLooksLikeCancel(err)) {
+          ok = false;
+        } else {
+          ok = await axisVerifyMacDeviceOwnerPolicy(text);
+        }
       }
+    } else {
+      ok = await axisVerifyMacDeviceOwnerPolicy(text);
     }
+  } else if (process.platform === 'win32') {
+    ok = await axisVerifyWindowsHello(text);
+    if (!ok) {
+      await dialog.showMessageBox({
+        type: 'warning',
+        message: text,
+        detail:
+          'Axis could not verify you with Windows Hello. Set up Windows Hello (PIN or biometrics), then try again. A simple Confirm is not enough to unlock vault data.',
+        buttons: ['OK'],
+        defaultId: 0
+      });
+    }
+  } else {
+    await dialog.showMessageBox({
+      type: 'warning',
+      message: text,
+      detail:
+        'This system does not support device authentication for Axis vault data. Sensitive vault actions are blocked until an OS unlock method is available.',
+      buttons: ['OK'],
+      defaultId: 0
+    });
+    ok = false;
   }
-  const { response } = await dialog.showMessageBox({
-    type: 'question',
-    message: text,
-    detail:
-      process.platform === 'darwin'
-        ? 'Use Touch ID on the next prompt, or confirm here to continue.'
-        : 'Confirm it is you to view sensitive information.',
-    buttons: ['Cancel', 'Continue'],
-    defaultId: 1,
-    cancelId: 0
-  });
-  return response === 1;
+
+  return ok;
 }
 
 function vaultStatusPayload(profileId = AXIS_DEFAULT_PROFILE_ID) {
@@ -4973,7 +5928,8 @@ function vaultStatusPayload(profileId = AXIS_DEFAULT_PROFILE_ID) {
     configured: true,
     unlocked: true,
     autofillEnabled: getProfileStore(pid).get('vaultAutofillEnabled', true) !== false,
-    touchIdAvailable
+    touchIdAvailable,
+    secretsEncryptedAtRest: ensureAxisVaultForProfile(pid).secretsEncryptedAtRest?.() === true
   };
 }
 
@@ -4993,9 +5949,16 @@ ipcMain.handle('axis-vault-build-autofill-show-js', (_e, payload) => {
   return buildVaultAutofillShowMenuJs(items, theme, kind);
 });
 
-ipcMain.handle('axis-vault-build-autofill-fill-js', (_e, cred) =>
-  cred && typeof cred === 'object' ? buildVaultAutofillFillLoginJs(cred) : '(function(){})()'
-);
+ipcMain.handle('axis-vault-build-autofill-fill-js', (_e, cred) => {
+  if (!cred || typeof cred !== 'object') return '(function(){})()';
+  if (cred.__axisFillKind === 'card' || cred.number) {
+    return buildVaultAutofillFillCardJs(cred);
+  }
+  if (cred.__axisFillKind === 'address' || cred.addressLine1) {
+    return buildVaultAutofillFillAddressJs(cred);
+  }
+  return buildVaultAutofillFillLoginJs(cred);
+});
 
 ipcMain.handle('axis-vault-status', (event) => vaultStatusPayload(getProfileIdForEvent(event)));
 
@@ -5005,7 +5968,16 @@ ipcMain.handle('axis-vault-reveal-login', async (event, id) => {
   const ok = await axisVerifyDeviceOwner('Show saved login');
   if (!ok) return { ok: false, cancelled: true };
   const login = ensureAxisVaultFromEvent(event).getLogin(id);
-  return { ok: true, username: login.username, password: login.password };
+  return {
+    ok: true,
+    id: login.id,
+    origin: login.origin,
+    username: login.username,
+    password: login.password,
+    title: login.title,
+    notes: login.notes,
+    updatedAt: login.updatedAt
+  };
 });
 
 ipcMain.handle('axis-vault-reveal-card', async (event, id) => {
@@ -5014,10 +5986,14 @@ ipcMain.handle('axis-vault-reveal-card', async (event, id) => {
   const card = ensureAxisVaultFromEvent(event).getCard(id);
   return {
     ok: true,
+    id: card.id,
+    label: card.label,
+    cardholder: card.cardholder,
     number: card.number,
     cvv: card.cvv,
     expMonth: card.expMonth,
-    expYear: card.expYear
+    expYear: card.expYear,
+    billingZip: card.billingZip
   };
 });
 
@@ -5026,7 +6002,9 @@ ipcMain.handle('axis-vault-list-logins', (event) => ({
   items: ensureAxisVaultFromEvent(event).listLogins()
 }));
 
-ipcMain.handle('axis-vault-get-login', (event, id) => {
+ipcMain.handle('axis-vault-get-login', async (event, id) => {
+  const ok = await axisVerifyDeviceOwner('View saved login');
+  if (!ok) return null;
   const login = ensureAxisVaultFromEvent(event).getLogin(id);
   return {
     id: login.id,
@@ -5038,38 +6016,104 @@ ipcMain.handle('axis-vault-get-login', (event, id) => {
   };
 });
 
-ipcMain.handle('axis-vault-save-login', (event, entry) => {
+ipcMain.handle('axis-vault-save-login', async (event, entry) => {
+  const ok = await axisVerifyDeviceOwner('Save password to vault');
+  if (!ok) {
+    const err = new Error('Authentication cancelled');
+    err.cancelled = true;
+    throw err;
+  }
   return ensureAxisVaultFromEvent(event).saveLogin(entry || {});
 });
 
-ipcMain.handle('axis-vault-delete-login', (event, id) => {
+ipcMain.handle('axis-vault-delete-login', async (event, id) => {
+  const ok = await axisVerifyDeviceOwner('Delete saved password');
+  if (!ok) return false;
   ensureAxisVaultFromEvent(event).deleteLogin(id);
   return true;
 });
 
-ipcMain.handle('axis-vault-get-login-for-fill', (event, id) => {
-  const login = ensureAxisVaultFromEvent(event).getLogin(id);
-  return {
-    id: login.id,
-    origin: login.origin,
-    username: login.username,
-    password: login.password,
-    title: login.title
-  };
+function isGuestWebContents(webContents) {
+  if (!webContents || webContents.isDestroyed()) return false;
+  try {
+    return typeof webContents.getType === 'function' && webContents.getType() === 'webview';
+  } catch (_) {
+    return false;
+  }
+}
+
+function getWebContentsPageOrigin(webContents) {
+  if (!webContents || webContents.isDestroyed()) return null;
+  try {
+    return normalizePermissionOrigin(webContents.getURL());
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Guest pages may only fill credentials that match the page origin.
+ * The Axis shell (non-guest) may fill after an explicit UI choice.
+ */
+function assertVaultFillAllowedForSender(event, savedOrigin) {
+  if (!isGuestWebContents(event?.sender)) return true;
+  const pageOrigin = getWebContentsPageOrigin(event.sender);
+  if (!pageOrigin || !savedOrigin) return false;
+  try {
+    const vault = ensureAxisVaultFromEvent(event);
+    return typeof vault.originsMatch === 'function'
+      ? vault.originsMatch(pageOrigin, savedOrigin)
+      : pageOrigin === savedOrigin;
+  } catch (_) {
+    return false;
+  }
+}
+
+ipcMain.handle('axis-vault-get-login-for-fill', async (event, id) => {
+  try {
+    if (!isGuestWebContents(event?.sender)) {
+      const ok = await axisVerifyDeviceOwner('Fill saved login');
+      if (!ok) return null;
+    }
+    const login = ensureAxisVaultFromEvent(event).getLogin(id);
+    if (!assertVaultFillAllowedForSender(event, login.origin)) {
+      return null;
+    }
+    return {
+      id: login.id,
+      origin: login.origin,
+      username: login.username,
+      password: login.password,
+      title: login.title
+    };
+  } catch (_) {
+    return null;
+  }
 });
 
-ipcMain.handle('axis-vault-get-card-for-fill', (event, id) => {
-  const card = ensureAxisVaultFromEvent(event).getCard(id);
-  return {
-    id: card.id,
-    label: card.label,
-    cardholder: card.cardholder,
-    number: card.number,
-    expMonth: card.expMonth,
-    expYear: card.expYear,
-    cvv: card.cvv,
-    billingZip: card.billingZip
-  };
+ipcMain.handle('axis-vault-get-card-for-fill', async (event, id) => {
+  try {
+    if (!event?.sender || event.sender.isDestroyed()) return null;
+    const isGuest = isGuestWebContents(event.sender);
+    if (!isGuest) {
+      const ok = await axisVerifyDeviceOwner('Fill saved card');
+      if (!ok) return null;
+    }
+    const card = ensureAxisVaultFromEvent(event).getCard(id);
+    return {
+      id: card.id,
+      label: card.label,
+      cardholder: card.cardholder,
+      number: card.number,
+      expMonth: card.expMonth,
+      expYear: card.expYear,
+      // Guests never receive CVV over IPC (type it yourself on the form).
+      cvv: isGuest ? '' : card.cvv,
+      billingZip: card.billingZip
+    };
+  } catch (_) {
+    return null;
+  }
 });
 
 ipcMain.handle('axis-vault-list-cards', (event) => ({
@@ -5077,7 +6121,9 @@ ipcMain.handle('axis-vault-list-cards', (event) => ({
   items: ensureAxisVaultFromEvent(event).listCards()
 }));
 
-ipcMain.handle('axis-vault-get-card', (event, id) => {
+ipcMain.handle('axis-vault-get-card', async (event, id) => {
+  const ok = await axisVerifyDeviceOwner('View saved card');
+  if (!ok) return null;
   const card = ensureAxisVaultFromEvent(event).getCard(id);
   return {
     id: card.id,
@@ -5090,11 +6136,19 @@ ipcMain.handle('axis-vault-get-card', (event, id) => {
   };
 });
 
-ipcMain.handle('axis-vault-save-card', (event, entry) => {
+ipcMain.handle('axis-vault-save-card', async (event, entry) => {
+  const ok = await axisVerifyDeviceOwner('Save card to vault');
+  if (!ok) {
+    const err = new Error('Authentication cancelled');
+    err.cancelled = true;
+    throw err;
+  }
   return ensureAxisVaultFromEvent(event).saveCard(entry || {});
 });
 
-ipcMain.handle('axis-vault-delete-card', (event, id) => {
+ipcMain.handle('axis-vault-delete-card', async (event, id) => {
+  const ok = await axisVerifyDeviceOwner('Delete saved card');
+  if (!ok) return false;
   ensureAxisVaultFromEvent(event).deleteCard(id);
   return true;
 });
@@ -5104,7 +6158,9 @@ ipcMain.handle('axis-vault-list-addresses', (event) => ({
   items: ensureAxisVaultFromEvent(event).listAddresses()
 }));
 
-ipcMain.handle('axis-vault-get-address', (event, id) => {
+ipcMain.handle('axis-vault-get-address', async (event, id) => {
+  const ok = await axisVerifyDeviceOwner('View saved address');
+  if (!ok) return null;
   const addr = ensureAxisVaultFromEvent(event).getAddress(id);
   return {
     id: addr.id,
@@ -5123,32 +6179,48 @@ ipcMain.handle('axis-vault-get-address', (event, id) => {
   };
 });
 
-ipcMain.handle('axis-vault-save-address', (event, entry) => {
+ipcMain.handle('axis-vault-save-address', async (event, entry) => {
+  const ok = await axisVerifyDeviceOwner('Save address to vault');
+  if (!ok) {
+    const err = new Error('Authentication cancelled');
+    err.cancelled = true;
+    throw err;
+  }
   return ensureAxisVaultFromEvent(event).saveAddress(entry || {});
 });
 
-ipcMain.handle('axis-vault-delete-address', (event, id) => {
+ipcMain.handle('axis-vault-delete-address', async (event, id) => {
+  const ok = await axisVerifyDeviceOwner('Delete saved address');
+  if (!ok) return false;
   ensureAxisVaultFromEvent(event).deleteAddress(id);
   return true;
 });
 
-ipcMain.handle('axis-vault-get-address-for-fill', (event, id) => {
-  const addr = ensureAxisVaultFromEvent(event).getAddress(id);
-  return {
-    id: addr.id,
-    label: addr.label,
-    fullName: addr.fullName,
-    organization: addr.organization,
-    addressLine1: addr.addressLine1,
-    addressLine2: addr.addressLine2,
-    city: addr.city,
-    state: addr.state,
-    postalCode: addr.postalCode,
-    country: addr.country,
-    phone: addr.phone,
-    email: addr.email,
-    summary: formatAddressSummary(addr)
-  };
+ipcMain.handle('axis-vault-get-address-for-fill', async (event, id) => {
+  try {
+    if (!isGuestWebContents(event?.sender)) {
+      const ok = await axisVerifyDeviceOwner('Fill saved address');
+      if (!ok) return null;
+    }
+    const addr = ensureAxisVaultFromEvent(event).getAddress(id);
+    return {
+      id: addr.id,
+      label: addr.label,
+      fullName: addr.fullName,
+      organization: addr.organization,
+      addressLine1: addr.addressLine1,
+      addressLine2: addr.addressLine2,
+      city: addr.city,
+      state: addr.state,
+      postalCode: addr.postalCode,
+      country: addr.country,
+      phone: addr.phone,
+      email: addr.email,
+      summary: formatAddressSummary(addr)
+    };
+  } catch (_) {
+    return null;
+  }
 });
 
 ipcMain.handle('axis-vault-should-offer-address-save', (event, payload) => ({
@@ -5186,7 +6258,7 @@ function forwardVaultGuestMessageToShell(event, channel, payload) {
   }
 }
 
-function vaultAutofillCandidates(profileId, payload) {
+function vaultAutofillCandidates(profileId, payload, pageOriginOverride = null) {
   const pid = sanitizeProfileId(profileId);
   const v = ensureAxisVaultForProfile(pid);
   const status = vaultStatusPayload(pid);
@@ -5206,11 +6278,10 @@ function vaultAutofillCandidates(profileId, payload) {
       label: c.label,
       cardholder: c.cardholder,
       masked: c.masked,
-      number: c.number,
       expMonth: c.expMonth,
       expYear: c.expYear,
-      cvv: c.cvv,
       billingZip: c.billingZip
+      // number/cvv intentionally omitted — fetch via get-card-for-fill on choose
     }));
     return { ok: true, kind: 'card', items: cards };
   }
@@ -5218,7 +6289,9 @@ function vaultAutofillCandidates(profileId, payload) {
     const addresses = v.matchAddresses().map((a) => ({ ...a }));
     return { ok: true, kind: 'address', items: addresses };
   }
-  let origin = v.normalizeVaultOrigin(payload && payload.origin);
+  let origin =
+    (pageOriginOverride && v.normalizeVaultOrigin(pageOriginOverride)) ||
+    v.normalizeVaultOrigin(payload && payload.origin);
   if (!origin && payload && payload.pageUrl) {
     origin = v.normalizeVaultOrigin(payload.pageUrl);
   }
@@ -5228,16 +6301,24 @@ function vaultAutofillCandidates(profileId, payload) {
     .map((e) => ({
       id: e.id,
       username: e.username,
-      password: e.password,
       title: e.title
+      // password intentionally omitted — fetch via get-login-for-fill on choose
     }));
   return { ok: true, kind: 'login', items: logins };
 }
 
 /** Guest preload: autofill menu data (invoke — reliable in webview). */
-ipcMain.handle('axis-vault-autofill-query', (event, payload) =>
-  vaultAutofillCandidates(getProfileIdFromWebContents(event.sender), payload)
-);
+ipcMain.handle('axis-vault-autofill-query', (event, payload) => {
+  // Prefer the real guest URL so a page cannot spoof another site's saved logins.
+  const pageOrigin = isGuestWebContents(event.sender)
+    ? getWebContentsPageOrigin(event.sender)
+    : null;
+  return vaultAutofillCandidates(
+    getProfileIdFromWebContents(event.sender),
+    payload,
+    pageOrigin
+  );
+});
 
 /** Guest preload → shell (invoke — reliable in sandboxed guests). */
 ipcMain.handle('axis-vault-report-credentials', (event, payload) => {
@@ -5394,21 +6475,56 @@ ipcMain.handle('print-page', (event, webContentsId) => {
 });
 
 ipcMain.handle('open-url-in-browser', (event, url) => {
-  const win = getWindowFromSender(event.sender);
-  if (win && !win.isDestroyed()) {
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
-    win.webContents.send('open-url-in-browser', url);
-  } else {
-    openUrlInAxisBrowser(url);
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed || !isSafeHttpUrl(trimmed)) return false;
+
+  const sendToBrowserWindow = (win) => {
+    if (!win || win.isDestroyed()) return false;
+    try {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send('open-url-in-browser', trimmed);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const senderWin = getWindowFromSender(event.sender);
+  // Settings (and other non-shell) windows have no tabs — never send the URL there.
+  if (senderWin && !senderWin.isDestroyed() && !senderWin.__axisIsSettingsWindow) {
+    try {
+      const pageUrl = senderWin.webContents.getURL() || '';
+      if (pageUrl.includes('index.html') && sendToBrowserWindow(senderWin)) {
+        return true;
+      }
+    } catch (_) {}
   }
+
+  const profileId = sanitizeProfileId(getProfileIdForEvent(event) || AXIS_DEFAULT_PROFILE_ID);
+  const all = BrowserWindow.getAllWindows().filter(
+    (w) => w && !w.isDestroyed() && !w.__axisIsSettingsWindow
+  );
+  const sameProfile = all.find(
+    (w) =>
+      w.__axisIsIncognito !== true &&
+      sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID) === profileId
+  );
+  const anyBrowser = all.find((w) => w.__axisIsIncognito !== true) || all[0];
+  if (sendToBrowserWindow(sameProfile || anyBrowser || mainWindow)) {
+    return true;
+  }
+  openUrlInAxisBrowser(trimmed);
   return true;
 });
 
 ipcMain.handle('get-settings', (event) => {
   const s = getSettingsStoreForEvent(event);
-  return mergeGlobalSettingsIntoProfileSettings(s.store);
+  const raw =
+    s && typeof s.store === 'object' && s.store && !Array.isArray(s.store) ? { ...s.store } : {};
+  return mergeGlobalSettingsIntoProfileSettings(raw);
 });
 
 ipcMain.handle('get-settings-editing-context', (event) => {
@@ -5481,6 +6597,13 @@ ipcMain.handle('set-site-permission-overrides', (event, obj) => {
   s.set('sitePermissionOverrides', cleaned);
   broadcastSettingsUpdated(pid);
   return cleaned;
+});
+
+ipcMain.on('axis-site-permission-response', (_event, payload) => {
+  const requestId = payload && typeof payload.requestId === 'string' ? payload.requestId : '';
+  const pending = requestId ? pendingSitePermissionPrompts.get(requestId) : null;
+  if (!pending) return;
+  pending.finish(payload && payload.allowed === true);
 });
 
 function normalizeFavoritesStoreList(items) {
@@ -5585,8 +6708,8 @@ ipcMain.handle('persist-outgoing-profile', (_event, profileId, captured) => {
 ipcMain.handle('set-setting', (event, key, value) => {
   const pid = getProfileIdForEvent(event);
   if (key === 'sidebarPosition') {
-    setGlobalSidebarPosition(value);
-    broadcastSettingsUpdated(null);
+    const next = setGlobalSidebarPosition(value);
+    broadcastSettingsUpdated(null, { key, value: next });
     return true;
   }
   const s = getSettingsStoreForEvent(event);
@@ -5594,7 +6717,31 @@ ipcMain.handle('set-setting', (event, key, value) => {
   if (key === 'adBlockerEnabled') {
     syncAdBlockerForProfile(pid);
   }
-  broadcastSettingsUpdated(pid);
+  broadcastSettingsUpdated(pid, { key, value });
+  return true;
+});
+
+/** Write several profile settings in one store flush + one settings-updated broadcast. */
+ipcMain.handle('set-settings-batch', (event, patch) => {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return false;
+  const pid = getProfileIdForEvent(event);
+  const s = getSettingsStoreForEvent(event);
+  let touchedAdblock = false;
+  let sidebarNext = null;
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === 'sidebarPosition') {
+      sidebarNext = setGlobalSidebarPosition(value);
+      continue;
+    }
+    s.set(key, value);
+    if (key === 'adBlockerEnabled') touchedAdblock = true;
+  }
+  if (touchedAdblock) syncAdBlockerForProfile(pid);
+  if (sidebarNext != null) {
+    broadcastSettingsUpdated(null, { key: 'sidebarPosition', value: sidebarNext });
+  } else {
+    broadcastSettingsUpdated(pid);
+  }
   return true;
 });
 
@@ -5685,7 +6832,9 @@ ipcMain.handle('axis-get-page-security-info', async (event, opts = {}) => {
 /** Fetch remote text (RSS feeds, weather, etc.) without renderer CORS limits. */
 ipcMain.handle('axis-fetch-text', async (_event, rawUrl) => {
   const url = typeof rawUrl === 'string' ? rawUrl.trim() : '';
-  if (!/^https?:\/\//i.test(url)) return { ok: false, text: '', error: 'invalid-url' };
+  if (!isSafePublicHttpsUrl(url)) {
+    return { ok: false, text: '', error: 'invalid-url' };
+  }
   try {
     const res = await net.fetch(url, {
       method: 'GET',
@@ -5696,6 +6845,13 @@ ipcMain.handle('axis-fetch-text', async (_event, rawUrl) => {
       }
     });
     if (!res.ok) return { ok: false, text: '', error: `http-${res.status}` };
+    // Reject redirects onto non-public targets when the final URL is visible.
+    try {
+      const finalUrl = typeof res.url === 'string' ? res.url : url;
+      if (finalUrl && finalUrl !== url && !isSafePublicHttpsUrl(finalUrl)) {
+        return { ok: false, text: '', error: 'redirect-blocked' };
+      }
+    } catch (_) {}
     const text = await res.text();
     return { ok: true, text: String(text || '').slice(0, 2_000_000) };
   } catch (err) {
@@ -5838,6 +6994,12 @@ ipcMain.handle('open-extension-popup', async (event, id) => {
   return openAxisExtensionPopup(id, pid, win || undefined);
 });
 
+ipcMain.handle('open-extension-page', async (event, url) => {
+  const pid = getProfileIdForEvent(event);
+  const win = getWindowFromSender(event.sender);
+  return openAxisExtensionPageUrl(url, pid, win || undefined);
+});
+
 // Keyboard shortcuts management
 ipcMain.handle('get-shortcuts', (event) => {
   return getShortcuts(getProfileIdForEvent(event));
@@ -5854,6 +7016,7 @@ ipcMain.handle('get-shortcut-overrides', (event) => {
 ipcMain.handle('set-shortcuts', (event, shortcuts) => {
   const pid = getProfileIdForEvent(event);
   getProfileStore(pid).set('keyboardShortcuts', shortcuts);
+  invalidateShortcutCache(pid);
   unregisterShortcuts();
   registerShortcuts();
   createMenu();
@@ -5864,6 +7027,7 @@ ipcMain.handle('set-shortcuts', (event, shortcuts) => {
 ipcMain.handle('reset-shortcuts', (event) => {
   const pid = getProfileIdForEvent(event);
   getProfileStore(pid).delete('keyboardShortcuts');
+  invalidateShortcutCache(pid);
   unregisterShortcuts();
   registerShortcuts();
   broadcastSettingsUpdated(pid);
@@ -5961,7 +7125,7 @@ ipcMain.handle('add-download', (event, downloadInfo) => {
     status: 'downloading',
     timestamp: new Date().toISOString()
   };
-
+  
   downloads.unshift(newDownload);
   setDownloadItems(pid, downloads);
   return newDownload;
@@ -6085,8 +7249,8 @@ ipcMain.handle('get-library-items', async (event, locationKey = 'all') => {
 
 ipcMain.handle('open-library-item', async (event, fullPath) => {
   try {
-    if (!fullPath) return false;
-    await shell.openPath(fullPath);
+    if (!fullPath || !isPathInsideAxisLibraryRoots(fullPath)) return false;
+    await shell.openPath(path.resolve(fullPath));
     return true;
   } catch (error) {
     console.error('open-library-item failed:', error);
@@ -6096,8 +7260,8 @@ ipcMain.handle('open-library-item', async (event, fullPath) => {
 
 ipcMain.handle('show-item-in-folder', async (event, filePath) => {
   try {
-    if (!filePath) return false;
-    shell.showItemInFolder(filePath);
+    if (!filePath || !isPathInsideAxisLibraryRoots(filePath)) return false;
+    shell.showItemInFolder(path.resolve(filePath));
     return true;
   } catch (error) {
     console.error('show-item-in-folder failed:', error);
@@ -6313,9 +7477,37 @@ ipcMain.handle('axis-open-default-browser-settings', async () => {
   }
 });
 
+/** Folders the user explicitly chose via `pick-browser-profile-folder` this session. */
+const axisAllowedImportFolders = new Set();
+
+function rememberAxisAllowedImportFolder(folderPath) {
+  try {
+    const resolved = path.resolve(String(folderPath || ''));
+    if (resolved) axisAllowedImportFolders.add(resolved);
+    return resolved;
+  } catch (_) {
+    return '';
+  }
+}
+
+function isAxisAllowedImportFolder(folderPath) {
+  try {
+    const resolved = path.resolve(String(folderPath || ''));
+    return !!(resolved && axisAllowedImportFolders.has(resolved));
+  } catch (_) {
+    return false;
+  }
+}
+
 ipcMain.handle('inspect-import-profile-folder', (_event, folderPath) => {
   try {
-    return inspectCustomProfileFolder(folderPath);
+    if (!isAxisAllowedImportFolder(folderPath)) {
+      return {
+        ok: false,
+        error: 'Choose a profile folder with the folder picker first.'
+      };
+    }
+    return inspectCustomProfileFolder(path.resolve(String(folderPath || '')));
   } catch (e) {
     return { ok: false, error: String(e?.message || e) };
   }
@@ -6328,11 +7520,20 @@ ipcMain.handle('pick-browser-profile-folder', async (event) => {
     properties: ['openDirectory']
   });
   if (result.canceled || !result.filePaths?.[0]) return { ok: false, cancelled: true };
-  return { ok: true, path: result.filePaths[0] };
+  const picked = rememberAxisAllowedImportFolder(result.filePaths[0]);
+  return { ok: true, path: picked };
 });
 
 ipcMain.handle('import-browser-profile', async (event, payload) => {
   try {
+    const body = payload && typeof payload === 'object' ? payload : {};
+    const customPath = body.customProfilePath || body.customFolderPath || body.folderPath || body.profilePath || '';
+    if (customPath && !isAxisAllowedImportFolder(customPath)) {
+      return {
+        ok: false,
+        error: 'Choose a profile folder with the folder picker before importing.'
+      };
+    }
     return await importBrowserProfileData(
       {
         allocateProfileId,
@@ -6359,7 +7560,7 @@ ipcMain.handle('import-browser-profile', async (event, payload) => {
           throw new Error('Invalid extension import spec');
         }
       },
-      payload || {}
+      body
     );
   } catch (e) {
     console.error('import-browser-profile failed:', e);
@@ -7049,7 +8250,7 @@ ipcMain.handle('show-urlbar-context-menu', async (event, x, y, contextInfo) => {
       }
     }
   );
-
+  
   const menu = Menu.buildFromTemplate(template);
   const window = BrowserWindow.fromWebContents(event.sender);
   menu.popup({ window });
