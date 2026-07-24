@@ -4,6 +4,68 @@ const fs = require('fs');
 const path = require('path');
 
 const VAULT_VERSION = 2;
+/** Prefix for OS-keychain-sealed secret fields (Electron safeStorage). */
+const SECRET_PREFIX = 'axisenc:v1:';
+
+let _safeStorage = null;
+try {
+  _safeStorage = require('electron').safeStorage;
+} catch (_) {
+  _safeStorage = null;
+}
+
+function encryptionAvailable() {
+  try {
+    return !!(
+      _safeStorage &&
+      typeof _safeStorage.isEncryptionAvailable === 'function' &&
+      _safeStorage.isEncryptionAvailable()
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function isSealedSecret(value) {
+  return typeof value === 'string' && value.startsWith(SECRET_PREFIX);
+}
+
+/** Encrypt a secret for disk. Refuses plaintext when OS encryption is unavailable. */
+function sealSecret(plain) {
+  const s = String(plain ?? '');
+  if (!s || isSealedSecret(s)) return s;
+  if (!encryptionAvailable()) {
+    const err = new Error(
+      'Cannot save secrets: this device does not provide OS encryption for Axis.'
+    );
+    err.code = 'AXIS_VAULT_ENCRYPTION_UNAVAILABLE';
+    throw err;
+  }
+  try {
+    const buf = _safeStorage.encryptString(s);
+    return SECRET_PREFIX + Buffer.from(buf).toString('base64');
+  } catch (e) {
+    const err = new Error(
+      'Cannot save secrets: OS encryption failed.'
+    );
+    err.code = 'AXIS_VAULT_ENCRYPTION_UNAVAILABLE';
+    throw err;
+  }
+}
+
+/** Decrypt a secret from disk. Returns '' if ciphertext cannot be opened. */
+function openSecret(stored) {
+  const s = String(stored ?? '');
+  if (!s) return '';
+  if (!isSealedSecret(s)) return s;
+  if (!encryptionAvailable()) return '';
+  try {
+    const b64 = s.slice(SECRET_PREFIX.length);
+    return _safeStorage.decryptString(Buffer.from(b64, 'base64'));
+  } catch (_) {
+    return '';
+  }
+}
 
 function vaultFilePathForProfile(app, profileId) {
   const id = String(profileId || 'personal')
@@ -52,25 +114,76 @@ function hostKey(hostname) {
   return hostname.replace(/^www\./i, '').toLowerCase();
 }
 
-/** Loose site match (e.g. `accounts.google.com` ↔ `google.com`). */
-function domainKey(hostname) {
+/**
+ * Multi-part public suffixes where the eTLD+1 needs three+ labels
+ * (prevents evil.github.io matching victim.github.io via naive last-two-labels).
+ */
+const MULTI_PART_PUBLIC_SUFFIXES = new Set([
+  'co.uk',
+  'org.uk',
+  'ac.uk',
+  'gov.uk',
+  'com.au',
+  'net.au',
+  'org.au',
+  'co.nz',
+  'co.jp',
+  'co.kr',
+  'com.br',
+  'com.mx',
+  'com.tr',
+  'co.in',
+  'com.sg',
+  'github.io',
+  'herokuapp.com',
+  'netlify.app',
+  'vercel.app',
+  'pages.dev',
+  'web.app',
+  'firebaseapp.com',
+  'azurewebsites.net',
+  'cloudfront.net'
+]);
+
+/** Registrable domain (approx eTLD+1) for autofill origin binding. */
+function registrableDomain(hostname) {
   const h = hostKey(hostname);
+  if (!h || h.includes(':')) return h; // IPs / empty
   const parts = h.split('.').filter(Boolean);
-  if (parts.length <= 2) return h;
+  if (parts.length <= 1) return h;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const suffix = parts.slice(i).join('.');
+    if (MULTI_PART_PUBLIC_SUFFIXES.has(suffix)) {
+      if (i === 0) return h;
+      return parts.slice(Math.max(0, i - 1)).join('.');
+    }
+  }
   return parts.slice(-2).join('.');
 }
 
+/**
+ * Site match for password autofill.
+ * Same host (www-normalized), or page is a subdomain of the saved host /
+ * same registrable domain with related host relationship — never sibling
+ * hosts under a shared public suffix (e.g. a.github.io vs b.github.io).
+ */
 function originsMatch(pageOrigin, savedOrigin) {
   if (!pageOrigin || !savedOrigin) return false;
   if (pageOrigin === savedOrigin) return true;
   try {
     const p = new URL(pageOrigin);
     const s = new URL(savedOrigin);
-    if (hostKey(p.hostname) === hostKey(s.hostname)) return true;
-    if (domainKey(p.hostname) === domainKey(s.hostname)) return true;
-    const ph = p.hostname.toLowerCase();
-    const sh = s.hostname.toLowerCase();
-    if (ph.endsWith('.' + sh) || sh.endsWith('.' + ph)) return true;
+    if (p.protocol !== 'http:' && p.protocol !== 'https:') return false;
+    if (s.protocol !== 'http:' && s.protocol !== 'https:') return false;
+    const ph = hostKey(p.hostname);
+    const sh = hostKey(s.hostname);
+    if (!ph || !sh) return false;
+    if (ph === sh) return true;
+    const pr = registrableDomain(ph);
+    const sr = registrableDomain(sh);
+    if (!pr || !sr || pr !== sr) return false;
+    // Related hosts on the same registrable domain only (not sibling tenants).
+    return ph.endsWith('.' + sh) || sh.endsWith('.' + ph);
   } catch (_) {}
   return false;
 }
@@ -109,6 +222,36 @@ function createAxisVault(app, _store, profileId = 'personal') {
 
   function persist() {
     const data = ensureLoaded();
+    // Lazy-migrate plaintext secrets to sealed form when the OS keychain is available.
+    // Never rewrite a vault file that still contains plaintext secrets if encryption is down.
+    if (encryptionAvailable()) {
+      for (const row of data.logins) {
+        if (row && row.password && !isSealedSecret(row.password)) {
+          row.password = sealSecret(row.password);
+        }
+      }
+      for (const row of data.cards) {
+        if (!row) continue;
+        if (row.number && !isSealedSecret(row.number)) row.number = sealSecret(row.number);
+        if (row.cvv && !isSealedSecret(row.cvv)) row.cvv = sealSecret(row.cvv);
+      }
+    } else {
+      const hasPlain =
+        data.logins.some((row) => row && row.password && !isSealedSecret(row.password)) ||
+        data.cards.some(
+          (row) =>
+            row &&
+            ((row.number && !isSealedSecret(row.number)) ||
+              (row.cvv && !isSealedSecret(row.cvv)))
+        );
+      if (hasPlain) {
+        const err = new Error(
+          'Cannot update the password vault: OS encryption is unavailable and plaintext secrets would be written.'
+        );
+        err.code = 'AXIS_VAULT_ENCRYPTION_UNAVAILABLE';
+        throw err;
+      }
+    }
     const fp = vaultFilePath();
     fs.writeFileSync(fp, JSON.stringify(data), { mode: 0o600 });
   }
@@ -120,6 +263,10 @@ function createAxisVault(app, _store, profileId = 'personal') {
 
   function isUnlocked() {
     return true;
+  }
+
+  function secretsEncryptedAtRest() {
+    return encryptionAvailable();
   }
 
   function listLogins() {
@@ -137,7 +284,10 @@ function createAxisVault(app, _store, profileId = 'personal') {
     const data = ensureLoaded();
     const entry = data.logins.find((e) => e.id === id);
     if (!entry) throw new Error('Login not found');
-    return { ...entry };
+    return {
+      ...entry,
+      password: openSecret(entry.password)
+    };
   }
 
   function saveLogin(entry) {
@@ -151,12 +301,13 @@ function createAxisVault(app, _store, profileId = 'personal') {
     let password = String(entry.password || '');
     if (!password) {
       if (!row) throw new Error('Password is required');
-      password = row.password;
+      password = openSecret(row.password);
     }
+    const sealed = sealSecret(password);
     if (row) {
       row.origin = origin;
       row.username = username;
-      row.password = password;
+      row.password = sealed;
       row.title = String(entry.title || '').trim();
       row.notes = String(entry.notes || '').trim();
       row.updatedAt = now;
@@ -173,7 +324,7 @@ function createAxisVault(app, _store, profileId = 'personal') {
         id: newId(),
         origin,
         username,
-        password,
+        password: sealed,
         title: autoTitle,
         notes: String(entry.notes || '').trim(),
         createdAt: now,
@@ -202,23 +353,30 @@ function createAxisVault(app, _store, profileId = 'personal') {
 
   function listCards() {
     const data = ensureLoaded();
-    return data.cards.map((c) => ({
-      id: c.id,
-      label: c.label || '',
-      cardholder: c.cardholder || '',
-      last4: String(c.number || '').replace(/\D/g, '').slice(-4),
-      masked: maskCardNumber(c.number),
-      expMonth: c.expMonth || '',
-      expYear: c.expYear || '',
-      updatedAt: c.updatedAt || c.createdAt || 0
-    }));
+    return data.cards.map((c) => {
+      const number = openSecret(c.number);
+      return {
+        id: c.id,
+        label: c.label || '',
+        cardholder: c.cardholder || '',
+        last4: String(number || '').replace(/\D/g, '').slice(-4),
+        masked: maskCardNumber(number),
+        expMonth: c.expMonth || '',
+        expYear: c.expYear || '',
+        updatedAt: c.updatedAt || c.createdAt || 0
+      };
+    });
   }
 
   function getCard(id) {
     const data = ensureLoaded();
     const card = data.cards.find((c) => c.id === id);
     if (!card) throw new Error('Card not found');
-    return { ...card };
+    return {
+      ...card,
+      number: openSecret(card.number),
+      cvv: openSecret(card.cvv)
+    };
   }
 
   function saveCard(entry) {
@@ -226,7 +384,7 @@ function createAxisVault(app, _store, profileId = 'personal') {
     const now = Date.now();
     let row = entry.id ? data.cards.find((c) => c.id === entry.id) : null;
     let number = String(entry.number || '').replace(/\s/g, '');
-    if (!number && row) number = row.number;
+    if (!number && row) number = openSecret(row.number);
     if (!/^\d{13,19}$/.test(number)) throw new Error('Enter a valid card number');
     const cardholder = String(entry.cardholder || '').trim();
     if (!cardholder) throw new Error('Cardholder name is required');
@@ -234,14 +392,16 @@ function createAxisVault(app, _store, profileId = 'personal') {
     const expYear = String(entry.expYear || '').trim();
     if (!expMonth || !expYear) throw new Error('Expiration is required');
     let cvv = String(entry.cvv || '').trim();
-    if (!cvv && row) cvv = row.cvv;
+    if (!cvv && row) cvv = openSecret(row.cvv);
+    const sealedNumber = sealSecret(number);
+    const sealedCvv = sealSecret(cvv);
     if (row) {
       row.label = String(entry.label || '').trim();
       row.cardholder = cardholder;
-      row.number = number;
+      row.number = sealedNumber;
       row.expMonth = expMonth;
       row.expYear = expYear;
-      row.cvv = cvv;
+      row.cvv = sealedCvv;
       row.billingZip = String(entry.billingZip || '').trim();
       row.updatedAt = now;
     } else {
@@ -249,10 +409,10 @@ function createAxisVault(app, _store, profileId = 'personal') {
         id: newId(),
         label: String(entry.label || '').trim(),
         cardholder,
-        number,
+        number: sealedNumber,
         expMonth,
         expYear,
-        cvv,
+        cvv: sealedCvv,
         billingZip: String(entry.billingZip || '').trim(),
         createdAt: now,
         updatedAt: now
@@ -260,7 +420,7 @@ function createAxisVault(app, _store, profileId = 'personal') {
       data.cards.push(row);
     }
     persist();
-    return { id: row.id, masked: maskCardNumber(row.number), label: row.label };
+    return { id: row.id, masked: maskCardNumber(number), label: row.label };
   }
 
   function deleteCard(id) {
@@ -417,7 +577,7 @@ function createAxisVault(app, _store, profileId = 'personal') {
         id: e.id,
         origin: e.origin,
         username: e.username,
-        password: e.password,
+        password: openSecret(e.password),
         title: e.title || ''
       }));
   }
@@ -428,12 +588,12 @@ function createAxisVault(app, _store, profileId = 'personal') {
       id: c.id,
       label: c.label || '',
       cardholder: c.cardholder,
-      number: c.number,
+      number: openSecret(c.number),
       expMonth: c.expMonth,
       expYear: c.expYear,
-      cvv: c.cvv,
+      cvv: openSecret(c.cvv),
       billingZip: c.billingZip || '',
-      masked: maskCardNumber(c.number)
+      masked: maskCardNumber(openSecret(c.number))
     }));
   }
 
@@ -446,7 +606,7 @@ function createAxisVault(app, _store, profileId = 'personal') {
     if (!u || !p) return false;
     const onSite = data.logins.filter((e) => originsMatch(o, e.origin));
     if (!onSite.length) return true;
-    if (onSite.some((e) => e.username === u && e.password === p)) return false;
+    if (onSite.some((e) => e.username === u && openSecret(e.password) === p)) return false;
     return true;
   }
 
@@ -458,7 +618,7 @@ function createAxisVault(app, _store, profileId = 'personal') {
     const p = String(password || '');
     if (!u || !p) throw new Error('Missing credentials');
     const exact = data.logins.find(
-      (e) => originsMatch(o, e.origin) && e.username === u && e.password === p
+      (e) => originsMatch(o, e.origin) && e.username === u && openSecret(e.password) === p
     );
     if (exact) {
       return { id: exact.id, updated: false };
@@ -476,7 +636,7 @@ function createAxisVault(app, _store, profileId = 'personal') {
       id: newId(),
       origin: o,
       username: u,
-      password: p,
+      password: sealSecret(p),
       title: autoTitle,
       notes: '',
       createdAt: now,
@@ -516,9 +676,16 @@ function createAxisVault(app, _store, profileId = 'personal') {
     shouldOfferLoginSave,
     captureLogin,
     flushUnlocked,
+    secretsEncryptedAtRest,
     normalizeVaultOrigin,
     originsMatch
   };
 }
 
-module.exports = { createAxisVault, formatAddressSummary };
+module.exports = {
+  createAxisVault,
+  formatAddressSummary,
+  originsMatch,
+  hostKey,
+  registrableDomain
+};
