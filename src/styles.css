@@ -7410,11 +7410,15 @@ body.light-theme .shortcut-desc {
     --ntp-widget-ring: rgba(255, 255, 255, 0.16);
     --ntp-widget-ring-hover: rgba(255, 255, 255, 0.28);
     --ntp-widget-edit-bg: rgba(255, 255, 255, 0.04);
+    --ntp-widget-bg: rgba(255, 255, 255, 0.045);
     --ntp-focus-inner: rgba(12, 14, 20, 0.55);
     --ntp-btn-bg: rgba(255, 255, 255, 0.12);
     --ntp-btn-bg-hover: rgba(255, 255, 255, 0.2);
     --ntp-edit-btn: rgba(255, 255, 255, 0.5);
     --ntp-edit-btn-hover: rgba(255, 255, 255, 0.9);
+    --ntp-done-btn-bg: rgba(255, 255, 255, 0.92);
+    --ntp-done-btn-bg-hover: #ffffff;
+    --ntp-done-btn-fg: #111111;
     --ntp-dl-bar-bg: rgba(255, 255, 255, 0.12);
     --ntp-greeting: rgba(255, 255, 255, 0.96);
     --ntp-input: rgba(255, 255, 255, 0.96);
@@ -7752,7 +7756,8 @@ body.light-theme .shortcut-desc {
     overflow: visible;
 }
 #new-tab-page:has(.new-tab-widgets-section:not(.hidden)) .new-tab-widgets-section.ntp-widgets-editing {
-    padding: 4px 20px;
+    /* Keep the same padding as view mode so tiles don’t jump when Edit opens */
+    padding: 2px 20px;
 }
 #new-tab-page:has(.new-tab-widgets-section.ntp-widgets-empty-layout:not(.hidden)) .new-tab-widgets-section {
     bottom: auto;
@@ -7937,7 +7942,26 @@ body.light-theme .shortcut-desc {
     margin-top: 10px;
     flex: 0 0 auto;
     position: relative;
-    z-index: 2;
+    /* Above widget resize grips so Add widget menu isn’t pierced by them */
+    z-index: 40;
+}
+.ntp-widget-add-strip {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 6px);
+    top: auto;
+    margin: 0;
+    padding: 8px;
+    border-radius: 12px;
+    border: 1px solid var(--ntp-add-strip-border, rgba(255, 255, 255, 0.1));
+    background: var(--ntp-add-strip-bg, #000);
+    flex: none;
+    z-index: 41;
+    max-height: min(168px, 34vh);
+    overflow-y: auto;
+    box-shadow: var(--ntp-add-strip-shadow, 0 10px 28px rgba(0, 0, 0, 0.45));
+    isolation: isolate;
 }
 #new-tab-page:has(.new-tab-widgets-section:not(.hidden)) .ntp-widgets-grid {
     flex: 0 0 auto;
@@ -7968,26 +7992,13 @@ body.light-theme .shortcut-desc {
 .ntp-widgets-add-btn.hidden {
     display: none;
 }
+.ntp-widgets-edit-btn.hidden,
+.new-tab-widgets-section.ntp-hide-widgets-edit:not(.ntp-widgets-editing) .ntp-widgets-edit-btn {
+    display: none !important;
+}
 .ntp-widgets-add-btn[aria-expanded="true"] {
     background: var(--ntp-btn-bg-hover, rgba(255, 255, 255, 0.14));
     color: var(--ntp-ink-strong, #fff);
-}
-.ntp-widget-add-strip {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: calc(100% + 6px);
-    top: auto;
-    margin: 0;
-    padding: 8px;
-    border-radius: 12px;
-    border: 1px solid var(--ntp-add-strip-border, rgba(255, 255, 255, 0.1));
-    background: var(--ntp-add-strip-bg, #000);
-    flex: none;
-    z-index: 12;
-    max-height: min(168px, 34vh);
-    overflow-y: auto;
-    box-shadow: var(--ntp-add-strip-shadow, 0 10px 28px rgba(0, 0, 0, 0.45));
 }
 .ntp-widget-add-strip.hidden {
     display: none;
@@ -8035,6 +8046,12 @@ body.light-theme .shortcut-desc {
 .ntp-widgets-empty-btn {
     display: none !important;
 }
+#new-tab-page.ntp-widget-bg-off {
+    --ntp-widget-bg: transparent;
+}
+#new-tab-page.ntp-widget-bg-off .ntp-widgets-editing .ntp-widget:hover {
+    background: var(--ntp-widget-edit-bg, rgba(255, 255, 255, 0.04));
+}
 .ntp-widgets-edit-btn {
     border: none;
     background: transparent;
@@ -8043,7 +8060,7 @@ body.light-theme .shortcut-desc {
     font-weight: 500;
     letter-spacing: 0.02em;
     cursor: pointer;
-    padding: 6px 10px;
+    padding: 6px 12px;
     border-radius: 8px;
     -webkit-app-region: no-drag;
     transition: color 0.15s ease, background 0.15s ease;
@@ -8052,9 +8069,15 @@ body.light-theme .shortcut-desc {
     color: var(--ntp-edit-btn-hover, rgba(255, 255, 255, 0.9));
     background: var(--ntp-widget-edit-bg, rgba(255, 255, 255, 0.06));
 }
+/* Done — solid accent so it reads apart from Add widget */
 .ntp-widgets-editing .ntp-widgets-edit-btn {
-    color: var(--ntp-edit-btn-hover, rgba(255, 255, 255, 0.92));
-    background: var(--ntp-btn-bg, rgba(255, 255, 255, 0.1));
+    color: var(--ntp-done-btn-fg, #111);
+    background: var(--ntp-done-btn-bg, rgba(255, 255, 255, 0.92));
+    font-weight: 650;
+}
+.ntp-widgets-editing .ntp-widgets-edit-btn:hover {
+    color: var(--ntp-done-btn-fg, #111);
+    background: var(--ntp-done-btn-bg-hover, #ffffff);
 }
 .ntp-widgets-empty.hidden {
     display: none;
@@ -8113,7 +8136,7 @@ body.light-theme .shortcut-desc {
     min-width: 0;
     border-radius: 12px;
     border: none;
-    background: transparent;
+    background: var(--ntp-widget-bg, rgba(255, 255, 255, 0.045));
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     box-shadow: none;
@@ -8127,12 +8150,13 @@ body.light-theme .shortcut-desc {
 .ntp-widgets-editing .ntp-widget {
     cursor: grab;
     touch-action: none;
-    /* Inset ring so edge widgets don't lose outline to parent overflow clipping */
-    box-shadow: inset 0 0 0 1px var(--ntp-widget-ring, rgba(255, 255, 255, 0.16));
+    /* Outline (not box-shadow) so type-specific tiles can’t wipe the edit ring */
+    outline: 1px solid var(--ntp-widget-ring, rgba(255, 255, 255, 0.16));
+    outline-offset: -1px;
 }
 .ntp-widgets-editing .ntp-widget:hover {
-    box-shadow: inset 0 0 0 1px var(--ntp-widget-ring-hover, rgba(255, 255, 255, 0.28));
-    background: var(--ntp-widget-edit-bg, rgba(255, 255, 255, 0.04));
+    outline-color: var(--ntp-widget-ring-hover, rgba(255, 255, 255, 0.28));
+    background: color-mix(in srgb, var(--ntp-widget-bg, rgba(255, 255, 255, 0.045)) 70%, var(--ntp-widget-edit-bg, rgba(255, 255, 255, 0.04)));
 }
 .ntp-widgets-grid.ntp-widgets-dragging .ntp-widget {
     cursor: grabbing;
@@ -8155,10 +8179,11 @@ body.light-theme .shortcut-desc {
 }
 .ntp-widgets-editing.ntp-widgets-layout-active .ntp-widget,
 .ntp-widgets-editing .ntp-widget:hover {
-    box-shadow: inset 0 0 0 1px var(--ntp-widget-ring-hover, rgba(255, 255, 255, 0.28));
+    outline-color: var(--ntp-widget-ring-hover, rgba(255, 255, 255, 0.28));
 }
 .ntp-widget.ntp-widget-resizing {
-    box-shadow: inset 0 0 0 1px var(--ntp-widget-ring-hover, rgba(255, 255, 255, 0.4));
+    outline: 1px solid var(--ntp-widget-ring-hover, rgba(255, 255, 255, 0.4));
+    outline-offset: -1px;
     z-index: 3;
 }
 .ntp-widget-body {
@@ -8177,7 +8202,7 @@ body.light-theme .shortcut-desc {
 /* Weather widget — centered cluster, city label at every size */
 .ntp-widget--weather {
     border: none !important;
-    background: transparent !important;
+    background: var(--ntp-widget-bg, rgba(255, 255, 255, 0.045)) !important;
     box-shadow: none !important;
     overflow: hidden;
     container-type: size;
@@ -8188,7 +8213,7 @@ body.light-theme .shortcut-desc {
 .ntp-widgets-editing.ntp-widgets-layout-active .ntp-widget--weather,
 .ntp-widget--weather.ntp-widget-resizing {
     border: none !important;
-    background: transparent !important;
+    background: var(--ntp-widget-bg, rgba(255, 255, 255, 0.045)) !important;
     box-shadow: none !important;
 }
 .ntp-widget--weather .ntp-widget-body {
@@ -8389,7 +8414,7 @@ body.light-theme .shortcut-desc {
 .ntp-widget--clock,
 .ntp-widget--worldclock {
     border: none !important;
-    background: transparent !important;
+    background: var(--ntp-widget-bg, rgba(255, 255, 255, 0.045)) !important;
     box-shadow: none !important;
     overflow: hidden;
     container-type: size;
@@ -8403,7 +8428,7 @@ body.light-theme .shortcut-desc {
 .ntp-widget--clock.ntp-widget-resizing,
 .ntp-widget--worldclock.ntp-widget-resizing {
     border: none !important;
-    background: transparent !important;
+    background: var(--ntp-widget-bg, rgba(255, 255, 255, 0.045)) !important;
     box-shadow: none !important;
 }
 .ntp-widget--clock .ntp-widget-body,
@@ -8540,7 +8565,7 @@ body.light-theme .shortcut-desc {
 /* Air Quality */
 .ntp-widget--airquality {
     border: none !important;
-    background: transparent !important;
+    background: var(--ntp-widget-bg, rgba(255, 255, 255, 0.045)) !important;
     box-shadow: none !important;
     overflow: hidden;
     container-type: size;
@@ -8622,7 +8647,7 @@ body.light-theme .shortcut-desc {
 /* Markets */
 .ntp-widget--markets {
     border: none !important;
-    background: transparent !important;
+    background: var(--ntp-widget-bg, rgba(255, 255, 255, 0.045)) !important;
     box-shadow: none !important;
     overflow: hidden;
     container-type: size;
@@ -8713,7 +8738,7 @@ body.light-theme .shortcut-desc {
 /* Calendar */
 .ntp-widget--calendar {
     border: none !important;
-    background: transparent !important;
+    background: var(--ntp-widget-bg, rgba(255, 255, 255, 0.045)) !important;
     box-shadow: none !important;
     overflow: hidden;
     container-type: size;
@@ -9046,6 +9071,11 @@ body.light-theme .shortcut-desc {
 .ntp-widgets-editing .ntp-widget:hover .ntp-widget-resize,
 .ntp-widgets-editing.ntp-widgets-layout-active .ntp-widget-resize {
     opacity: 1;
+}
+/* Keep resize grips from showing through the Add widget menu */
+.new-tab-widgets-section:has(#ntp-widget-add-strip:not(.hidden)) .ntp-widget-resize {
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 .ntp-widget-resize::after {
     content: '';
@@ -11850,6 +11880,9 @@ body.light-theme .shortcut-desc {
     opacity: 0.5;
     filter: grayscale(0.6) brightness(0.7);
     transition: none !important;
+    /* Skip layout/paint for off-screen closed pins (hundreds of imported bookmarks). */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 36px;
 }
 
 .tab.pinned.closed .tab-title {
@@ -17281,6 +17314,13 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
 #vault-save-modal.vault-save-modal[data-ui-theme="light"]:not(.hidden) {
     background: rgba(0, 0, 0, 0.28);
 }
+#site-permission-modal.vault-save-modal:not(.hidden) {
+    background: rgba(0, 0, 0, 0.42);
+    z-index: 200010;
+}
+#site-permission-modal.vault-save-modal[data-ui-theme="light"]:not(.hidden) {
+    background: rgba(0, 0, 0, 0.28);
+}
 #profile-create-modal.vault-save-modal:not(.hidden),
 #profile-delete-modal.vault-save-modal:not(.hidden) {
     background: rgba(0, 0, 0, 0.42);
@@ -17915,6 +17955,13 @@ body.axis-onboarding-active #axis-onboarding .ob-drag {
     box-sizing: border-box;
     -webkit-app-region: no-drag;
     pointer-events: auto;
+    transition: opacity 0.24s ease, visibility 0.24s ease;
+}
+/* Skip confirm replaces setup — hide steps immediately so they never show through. */
+.axis-onboarding.is-skip-confirm .ob-shell {
+    opacity: 0;
+    pointer-events: none;
+    transition: none;
 }
 .ob-screen {
     width: 100%;
@@ -17953,6 +18000,22 @@ body.axis-onboarding-active #axis-onboarding .ob-drag {
 .axis-onboarding.is-leaving .ob-shell {
     transform: none;
     opacity: 1;
+    transition: none;
+}
+/* Exiting from skip confirm: never flash the setup steps under the leave fade. */
+.axis-onboarding.is-leaving.is-skip-confirm .ob-shell {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: none !important;
+}
+.axis-onboarding.is-leaving.is-skip-confirm .ob-skip-overlay {
+    opacity: 1;
+    pointer-events: none;
+    transition: none;
+}
+.axis-onboarding.is-leaving.is-skip-confirm .ob-skip-overlay-panel {
+    opacity: 1;
+    transform: none;
     transition: none;
 }
 /* Soft reveal of the browser after setup */
@@ -19040,6 +19103,189 @@ body.axis-onboarding-leaving.axis-onboarding-revealing #app {
     gap: 8px;
 }
 
+/* Full-screen skip confirmation — replaces setup while open */
+.ob-skip-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 28px 40px;
+    background: var(--ob-veil);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.42s cubic-bezier(0.33, 1, 0.68, 1);
+    -webkit-app-region: no-drag;
+}
+.ob-skip-overlay[hidden] {
+    display: none !important;
+}
+.ob-skip-overlay.is-open {
+    opacity: 1;
+    pointer-events: auto;
+}
+.ob-skip-overlay.is-leaving {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ob-skip-overlay-panel {
+    width: min(460px, 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+    transition:
+        opacity 0.48s cubic-bezier(0.22, 1, 0.36, 1) 0.04s,
+        transform 0.54s cubic-bezier(0.16, 1, 0.3, 1) 0.04s;
+}
+.ob-skip-overlay.is-open:not(.is-leaving) .ob-skip-overlay-panel {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+}
+.ob-skip-overlay.is-leaving .ob-skip-overlay-panel {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+    transition:
+        opacity 0.26s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+    .ob-skip-overlay,
+    .ob-skip-overlay-panel,
+    .axis-onboarding.is-skip-confirm .ob-shell {
+        transition-duration: 0.01ms !important;
+        transition-delay: 0s !important;
+    }
+    .ob-skip-overlay-panel {
+        transform: none !important;
+    }
+}
+.ob-skip-overlay-progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: min(280px, 100%);
+    margin: 0 0 22px;
+}
+.ob-skip-overlay-progress-line {
+    flex: 1 1 auto;
+    height: 1px;
+    background: color-mix(in srgb, var(--ob-fg) 16%, transparent);
+}
+.ob-skip-overlay-progress-label {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--ob-muted);
+    white-space: nowrap;
+}
+.ob-skip-overlay-title {
+    margin: 0 0 10px;
+    font-size: clamp(26px, 3.6vw, 32px);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.08;
+    color: var(--ob-fg);
+}
+.ob-skip-overlay-copy {
+    max-width: 380px;
+    margin: 0 0 28px;
+}
+.ob-skip-overlay-copy p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    font-weight: 550;
+    color: color-mix(in srgb, var(--ob-fg) 68%, transparent);
+}
+.ob-skip-overlay-actions {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+}
+.ob-skip-overlay-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    text-align: left;
+    border: 1px solid transparent;
+    border-radius: var(--ob-radius-card);
+    padding: 14px 14px 14px 16px;
+    cursor: pointer;
+    font: inherit;
+    outline: none;
+    opacity: 1;
+    transition: opacity 0.2s ease, background 0.15s ease, border-color 0.15s ease;
+    -webkit-app-region: no-drag;
+}
+.ob-skip-overlay-btn:focus-visible {
+    outline: 2px solid var(--ob-fg);
+    outline-offset: 3px;
+}
+.ob-skip-overlay-btn:hover:not(:disabled) {
+    opacity: 0.88;
+}
+.ob-skip-overlay-btn:active:not(:disabled) {
+    opacity: 0.76;
+    transition-duration: 0.1s;
+}
+.ob-skip-overlay-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.ob-skip-overlay-btn-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+}
+.ob-skip-overlay-btn-title {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+}
+.ob-skip-overlay-btn-sub {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    opacity: 0.68;
+}
+.ob-skip-overlay-btn-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    opacity: 0.9;
+}
+.ob-skip-overlay-btn--stay {
+    background: color-mix(in srgb, var(--ob-surface) 94%, transparent);
+    color: var(--ob-fg);
+    border-color: color-mix(in srgb, var(--ob-fg) 20%, transparent);
+}
+.ob-skip-overlay-btn--exit {
+    background: var(--ob-primary);
+    color: var(--ob-primary-fg);
+    border-color: transparent;
+}
+.axis-onboarding[data-ob-theme="light"] .ob-skip-overlay-btn--stay {
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(0, 0, 0, 0.14);
+}
+
 @media (max-width: 640px) {
     .ob-shell { width: calc(100% - 28px); padding: 44px 0 18px; }
     .ob-seg--3 { grid-template-columns: 1fr; }
@@ -19054,5 +19300,24 @@ body.axis-onboarding-leaving.axis-onboarding-revealing #app {
     .ob-unpinned-custom-control {
         margin-left: 0;
         justify-content: flex-start;
+    }
+    .ob-skip-overlay {
+        padding: 36px 20px 28px;
+    }
+    .ob-skip-overlay-panel {
+        width: min(400px, 100%);
+    }
+    .ob-skip-overlay-actions {
+        flex-direction: column;
+        gap: 10px;
+    }
+    .ob-skip-overlay-title {
+        font-size: 26px;
+    }
+    .ob-skip-overlay-progress {
+        margin-bottom: 18px;
+    }
+    .ob-skip-overlay-copy {
+        margin-bottom: 22px;
     }
 }
