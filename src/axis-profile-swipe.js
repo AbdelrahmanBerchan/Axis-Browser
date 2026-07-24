@@ -7,43 +7,54 @@
   const SLIDE_EXIT_MS = 160;
   const SLIDE_DRAG_MS = 220;
   /* How far (fraction of pane width) or how fast (px/ms flick) before a release commits. */
-  const COMMIT_RATIO = 0.52;
-  const FLICK_VELOCITY = 0.44;
+  const COMMIT_RATIO = 0.5;
+  const FLICK_VELOCITY = 0.42;
   const FLICK_MIN_PROGRESS = 0.26;
   /* Wrong-way give — soft Arc-like resistance. */
-  const EDGE_GIVE_RATIO = 0.12;
+  const EDGE_GIVE_RATIO = 0.1;
   /* List-end rubber — only at first/last profile in the list. */
-  const EDGE_BOUNDARY_GIVE_RATIO = 0.22;
-  const EDGE_BOUNDARY_STIFFNESS = 2.1;
-  /* Finger → pane travel (< 1 = more friction; need a longer swipe to cover a pane). */
+  const EDGE_BOUNDARY_GIVE_RATIO = 0.16;
+  const EDGE_BOUNDARY_STIFFNESS = 2.85;
+  /* Finger → pane travel (< 1 = more friction; closer to 1 = tracks the finger better). */
   const DRAG_TRACK_RATIO = 0.86;
   /* Extra swipe power while crossing the midpoint between two profiles. */
-  const BORDER_BOOST = 0.42;
+  const BORDER_BOOST = 0.08;
   /* How wide the boost zone is (fraction of a pane on each side of the midpoint). */
-  const BORDER_BOOST_WIDTH = 0.32;
+  const BORDER_BOOST_WIDTH = 0.22;
   /*
    * Trackpad profile swipe:
-   * - Follow finger + natural momentum across the full profile list (with mild friction).
+   * - Follow finger closely with light friction (not sticky, not 1:1 slippery).
    * - Modest power near each profile border so crossing still feels deliberate.
    * - Release springs to the nearest profile with velocity carry.
+   * - Idle settle adapts to speed so slow swipes don’t die mid-gesture.
    * - Tiny isolated inertia ticks cannot start a new gesture.
    */
-  const WHEEL_ENGAGE_PX = 22;
-  const WHEEL_IDLE_MS = 78;
+  const WHEEL_ENGAGE_PX = 18;
+  /* Adaptive idle: slow finger motion has wider gaps between ticks. */
+  const WHEEL_IDLE_SLOW_MS = 220;
+  const WHEEL_IDLE_MS = 140;
+  const WHEEL_IDLE_FAST_MS = 95;
   /* Strong finger ticks reset the release timer; weaker decaying ticks are inertia. */
-  const WHEEL_ACTIVE_DELTA_PX = 2.2;
+  const WHEEL_ACTIVE_DELTA_PX = 1.6;
   /* A fresh gesture must begin with real finger pressure, not a sub-pixel inertia tick. */
-  const WHEEL_START_DELTA_PX = 2.5;
+  const WHEEL_START_DELTA_PX = 1.8;
   /* Keep enough in-memory profiles that normal multi-profile use does not drop tabs. */
   const MAX_RUNTIME_CACHE = 12;
+  /* Cap preview DOM so hundreds of closed pins don’t stall the gesture. */
+  const PREVIEW_MAX_PINNED_ROWS = 40;
+  const PREVIEW_MAX_UNPINNED_ROWS = 24;
+  /* How many neighbor panes get real tab DOM at engage; rest fill in as you approach. */
+  const PREVIEW_EAGER_PANES = 1;
   /* Spring settle — snappy enough that the sidebar is interactive right after release. */
-  const SPRING_STIFFNESS_COMMIT = 340;
-  const SPRING_DAMPING_COMMIT = 36;
-  const SPRING_STIFFNESS_SNAP = 380;
-  const SPRING_DAMPING_SNAP = 40;
+  const SPRING_STIFFNESS_COMMIT = 380;
+  const SPRING_DAMPING_COMMIT = 40;
+  const SPRING_STIFFNESS_SNAP = 420;
+  const SPRING_DAMPING_SNAP = 44;
   const SPRING_SETTLE_PX = 0.55;
   const SPRING_SETTLE_VEL = 0.08;
-  const SPRING_MAX_MS = 380;
+  const SPRING_MAX_MS = 300;
+  /* Theme dissolve — skip tiny progress ticks that burn main-thread during drag. */
+  const THEME_MIX_STEP = 0.035;
 
   function easeOutCubic(t) {
     const x = Math.max(0, Math.min(1, t));
@@ -434,6 +445,10 @@
       this._trackOffsetPx = value;
       track.style.transition = 'none';
       track.style.transform = `translate3d(${value.toFixed(2)}px, 0, 0)`;
+      if (this._coupledDirection && this._profilePreviewEls?.length) {
+        const travel = this._profileSwipeProgressFromOffset(value, this._coupledDirection);
+        this._ensurePreviewContentForTravel(travel);
+      }
       if (this._profileSwipeThemeActive && this._swipeShellTargetId) {
         this._syncProfileSwipeShellThemeForOffset(value);
       }
@@ -553,7 +568,11 @@
       const finishWheel = this._profileWheelFinishHandler;
       if (typeof finishWheel !== 'function') return;
       if (state.endTimer) clearTimeout(state.endTimer);
-      state.endTimer = setTimeout(finishWheel, WHEEL_IDLE_MS);
+      const vel = state.vel || 0;
+      /* Slow swipes leave wider gaps between trackpad ticks — wait longer before settling. */
+      const idleMs =
+        vel >= 0.35 ? WHEEL_IDLE_FAST_MS : vel >= 0.12 ? WHEEL_IDLE_MS : WHEEL_IDLE_SLOW_MS;
+      state.endTimer = setTimeout(finishWheel, idleMs);
     },
 
     /** Cap travel at the end of the profile list, not at the next profile. */
@@ -719,12 +738,13 @@
       if (!this._swipeShellFromPack || !this._swipeShellToPack) return;
 
       /* Soften the mid-pane dissolve so colors feel continuous, not mechanical. */
-      this.setProfileSwipeThemeMix?.(
-        smoothstep01(progress),
-        this._swipeShellFromPack,
-        this._swipeShellToPack
-      );
-      this._swipeShellLastProgress = progress;
+      const mix = smoothstep01(progress);
+      const last = this._swipeShellLastProgress;
+      if (last >= 0 && Math.abs(mix - last) < THEME_MIX_STEP && mix > 0.02 && mix < 0.98) {
+        return;
+      }
+      this.setProfileSwipeThemeMix?.(mix, this._swipeShellFromPack, this._swipeShellToPack);
+      this._swipeShellLastProgress = mix;
     },
 
     _resolveShellSnapshotForProfileState(cached) {
@@ -1285,6 +1305,11 @@
         }
 
         let orderItems = null;
+        const unpinnedById = new Map();
+        for (const t of looseUnpinned) {
+          if (t?.id != null) unpinnedById.set(String(t.id), t);
+        }
+        let orderedUnpinned = [];
         const pool = document.getElementById(this._axisProfileDomPoolId?.(pid));
         if (pool?.childElementCount) {
           const pinnedTabIds = new Set(loosePinned.map((t) => String(t.id)));
@@ -1296,8 +1321,13 @@
                 typeof this._normalizeTabMapKey === 'function'
                   ? this._normalizeTabMapKey(node.dataset.tabId)
                   : node.dataset.tabId;
-              if (id != null && pinnedTabIds.has(String(id))) {
+              if (id == null) continue;
+              if (pinnedTabIds.has(String(id))) {
                 orderItems.push({ type: 'tab', id });
+              } else if (unpinnedById.has(String(id))) {
+                /* Parked DOM order — same order the live sidebar will restore. */
+                orderedUnpinned.push(unpinnedById.get(String(id)));
+                unpinnedById.delete(String(id));
               }
             } else if (node.classList?.contains('tab-group')) {
               const id = node.dataset.tabGroupId;
@@ -1314,6 +1344,29 @@
             runtime.settings?.pinnedSidebarOrder ||
             null;
         }
+        if (!orderedUnpinned.length) {
+          const savedUnpinned =
+            (Array.isArray(runtime.unpinnedSidebarOrder) && runtime.unpinnedSidebarOrder.length
+              ? runtime.unpinnedSidebarOrder
+              : null) ||
+            (Array.isArray(runtime.settings?.unpinnedTabs) ? runtime.settings.unpinnedTabs : []);
+          const seen = new Set();
+          for (const row of savedUnpinned) {
+            const id = this._normalizeTabMapKey?.(row?.id) ?? row?.id;
+            if (id == null || seen.has(String(id))) continue;
+            const tab = unpinnedById.get(String(id));
+            if (!tab) continue;
+            seen.add(String(id));
+            orderedUnpinned.push(tab);
+            unpinnedById.delete(String(id));
+          }
+        }
+        for (const t of looseUnpinned) {
+          if (t?.id != null && unpinnedById.has(String(t.id))) {
+            orderedUnpinned.push(t);
+            unpinnedById.delete(String(t.id));
+          }
+        }
 
         return {
           ready: true,
@@ -1329,7 +1382,7 @@
             ...unpinnedGroups
               .filter((g) => groupHasTabs(g) || !g.hadTabs)
               .map((g) => ({ kind: 'group', data: g })),
-            ...looseUnpinned.map((t) => ({ kind: 'tab', data: t }))
+            ...orderedUnpinned.map((t) => ({ kind: 'tab', data: t }))
           ]
         };
       }
@@ -1401,7 +1454,7 @@
       const favs = (data.favorites || [])
         .slice()
         .sort((a, b) => (a.order || 0) - (b.order || 0));
-      for (const fav of favs) {
+      for (const fav of favs.slice(0, 24)) {
         if (!fav) continue;
         favGrid.appendChild(this._createStaticFavoriteItem(fav));
       }
@@ -1423,9 +1476,23 @@
         }
       };
 
-      for (const item of data.pinned) appendItem(item);
+      const pinnedRows = data.pinned.slice(0, PREVIEW_MAX_PINNED_ROWS);
+      for (const item of pinnedRows) appendItem(item);
+      if (data.pinned.length > pinnedRows.length) {
+        const more = document.createElement('div');
+        more.className = 'tab pinned closed axis-profile-preview-more';
+        more.innerHTML = `<div class="tab-content"><div class="tab-left"><span class="tab-title">+${data.pinned.length - pinnedRows.length} more pinned</span></div></div>`;
+        container.appendChild(more);
+      }
       this._appendPreviewSidebarChrome(container, data.pinned.length > 0);
-      for (const item of data.unpinned) appendItem(item);
+      const unpinnedRows = data.unpinned.slice(0, PREVIEW_MAX_UNPINNED_ROWS);
+      for (const item of unpinnedRows) appendItem(item);
+      if (data.unpinned.length > unpinnedRows.length) {
+        const more = document.createElement('div');
+        more.className = 'tab axis-profile-preview-more';
+        more.innerHTML = `<div class="tab-content"><div class="tab-left"><span class="tab-title">+${data.unpinned.length - unpinnedRows.length} more</span></div></div>`;
+        container.appendChild(more);
+      }
 
       section.appendChild(container);
       return { section, ready: data.ready };
@@ -1449,6 +1516,28 @@
       else preview.appendChild(section);
     },
 
+    /** Fill deferred preview panes as the finger approaches them (avoids engage hitch). */
+    _fillPreviewPaneContent(preview) {
+      if (!preview?.dataset?.previewFor) return;
+      if (preview.dataset.deferredContent !== '1') return;
+      delete preview.dataset.deferredContent;
+      const pid = preview.dataset.previewFor;
+      const { section, ready } = this._buildPreviewSection(pid);
+      preview.replaceChildren(section);
+      preview.dataset.needsHydration = ready ? '0' : '1';
+      if (!ready) void this._hydratePreviewPane(pid);
+    },
+
+    _ensurePreviewContentForTravel(travel) {
+      const previews = this._profilePreviewEls;
+      if (!previews?.length) return;
+      /* Keep the current pane + one ahead filled so the next profile is ready before you land. */
+      const needThrough = Math.min(previews.length - 1, Math.max(0, Math.ceil(travel + 0.65)));
+      for (let i = 0; i <= needThrough; i++) {
+        this._fillPreviewPaneContent(previews[i]);
+      }
+    },
+
     /** Build profile preview panes in the swipe direction (one for shortcuts, many for wheel). */
     _buildProfilePreviewPane(direction, targetId, { singleStep = false } = {}) {
       this._destroyProfilePreviewPane();
@@ -1467,14 +1556,21 @@
       }
       if (!ids.length) return false;
 
-      const previews = ids.map((pid) => {
+      const eager = singleStep ? ids.length : Math.min(ids.length, PREVIEW_EAGER_PANES);
+      const previews = ids.map((pid, index) => {
         const preview = document.createElement('div');
         preview.className = 'sidebar-profile-pane sidebar-profile-pane--preview';
         preview.setAttribute('aria-hidden', 'true');
         preview.dataset.previewFor = pid;
-        const { section, ready } = this._buildPreviewSection(pid);
-        preview.appendChild(section);
-        preview.dataset.needsHydration = ready ? '0' : '1';
+        if (index < eager) {
+          const { section, ready } = this._buildPreviewSection(pid);
+          preview.appendChild(section);
+          preview.dataset.needsHydration = ready ? '0' : '1';
+        } else {
+          /* Cheap empty shell — tab DOM fills in as travel approaches this pane. */
+          preview.dataset.deferredContent = '1';
+          preview.dataset.needsHydration = '0';
+        }
         return preview;
       });
 
@@ -1533,16 +1629,20 @@
         const warmIds = this._swipeTargetIds?.length
           ? this._swipeTargetIds
           : [sanitizeProfileId(targetId)];
-        for (const pid of warmIds) {
+        /* Warm the first neighbor immediately; prefetch the rest without blocking the gesture. */
+        const first = warmIds[0];
+        if (first) {
+          void this._prefetchProfileBootstrap?.(first);
+          void this._warmProfileSwipeTarget?.(first);
+        }
+        for (const pid of warmIds.slice(1)) {
           void this._prefetchProfileBootstrap?.(pid);
-          void this._warmProfileSwipeTarget?.(pid);
         }
         this._armProfileSwipeShellTheme(targetId);
       } else {
         this._clearProfileSwipeShellThemeState();
       }
       document.getElementById('sidebar')?.classList.add('is-profile-swiping');
-      this._refreshBuiltInTabFavicons?.();
       this._sidebarProfileStage?.classList.add('axis-sidebar-drag-active');
       if (!hasNeighbor) track.classList.add('axis-sidebar-coupled');
       const rest = hasNeighbor ? this._coupledRestOffset(direction) : this._trackOffsetPx || 0;
@@ -1695,62 +1795,33 @@
       }
 
       /*
-       * Rebuild pinned order from this profile's saved order — pool DOM order alone can
-       * briefly show “all tabs, then all groups” until a later sync catches up.
+       * Keep park-time DOM order for pinned and unpinned. Rebuilding from saved lists
+       * (or Map order) made the swipe preview and the landed sidebar disagree for a beat.
        */
       const pinnedFrag = document.createDocumentFragment();
       const used = new Set();
-      const savedOrder = Array.isArray(this.settings?.pinnedSidebarOrder)
-        ? this.settings.pinnedSidebarOrder
-        : [];
-      for (const item of savedOrder) {
-        if (!item) continue;
-        if (item.type === 'group') {
-          const node =
-            groupNodeById.get(String(item.id)) || groupNodeById.get(String(Number(item.id)));
-          if (node && !used.has(node)) {
-            pinnedFrag.appendChild(node);
-            used.add(node);
-          }
-        } else if (item.type === 'tab') {
-          const tid =
-            typeof this._normalizeTabMapKey === 'function'
-              ? this._normalizeTabMapKey(item.id)
-              : item.id;
-          const node = tabNodeById.get(tid);
-          if (node && !used.has(node)) {
-            pinnedFrag.appendChild(node);
-            used.add(node);
-          }
-        }
-      }
-      /* Append any leftover pinned nodes the saved order missed (stable pool order). */
       for (const node of nodes) {
-        if (used.has(node) || this._isSidebarNodeUnpinned(node)) continue;
+        if (this._isSidebarNodeUnpinned(node) || used.has(node)) continue;
         pinnedFrag.appendChild(node);
         used.add(node);
       }
+      /* If anything was missed (e.g. classified after the first pass), append stably. */
+      for (const node of tabNodeById.values()) {
+        if (!used.has(node)) {
+          pinnedFrag.appendChild(node);
+          used.add(node);
+        }
+      }
+      for (const node of groupNodeById.values()) {
+        if (!used.has(node)) {
+          pinnedFrag.appendChild(node);
+          used.add(node);
+        }
+      }
 
       const unpinnedFrag = document.createDocumentFragment();
-      const unpinnedById = new Map();
       for (const node of unpinnedNodes) {
-        const tid =
-          typeof this._normalizeTabMapKey === 'function'
-            ? this._normalizeTabMapKey(node.dataset?.tabId)
-            : node.dataset?.tabId;
-        if (tid != null) unpinnedById.set(tid, node);
-      }
-      const looseUnpinnedIds = [...unpinnedById.keys()];
-      const orderedUnpinned =
-        typeof this._sortLooseUnpinnedTabIds === 'function'
-          ? this._sortLooseUnpinnedTabIds(looseUnpinnedIds)
-          : looseUnpinnedIds;
-      for (const id of orderedUnpinned) {
-        const node = unpinnedById.get(id);
-        if (node) unpinnedFrag.appendChild(node);
-      }
-      for (const node of unpinnedNodes) {
-        if (!node.parentNode) unpinnedFrag.appendChild(node);
+        unpinnedFrag.appendChild(node);
       }
 
       Array.from(container.children).forEach((child) => {
@@ -1869,13 +1940,43 @@
       this._purgeOrphanSidebarNodes?.();
       this._relinkFavoriteRuntimeTabs?.();
       /*
-       * Always apply this profile’s saved sidebar order before reveal. Skipping the sync when
-       * the pool “matched” by count left a one-frame wrong organization (tabs/groups shuffled).
+       * After a successful pool restore, do not rebuild the sidebar — that redraw is what
+       * made order look wrong for a frame after the swipe preview. Only refresh chrome and
+       * keep settings aligned with the parked DOM the user already saw.
        */
       if (restored) {
         this._syncTabGroupsPresentationFromState?.();
+        this.updatePinnedSeparatorVisibility?.();
+        this.updateEmptyState?.();
+        this.renderFavorites?.();
+        try {
+          if (
+            typeof this._collectUnpinnedTabsPayload === 'function' &&
+            this._shouldPersistUnpinnedItems?.('profile-switch')
+          ) {
+            this.settings.unpinnedTabs =
+              this._collectUnpinnedTabsPayload({ context: 'profile-switch' }) || [];
+          }
+          this._rememberPinnedSidebarOrder?.();
+          const runtime = this._profileRuntime?.get(pid);
+          if (runtime) {
+            runtime.settings = this.settings ? { ...this.settings } : runtime.settings;
+            if (Array.isArray(this.settings?.pinnedSidebarOrder)) {
+              runtime.pinnedSidebarOrder = this.settings.pinnedSidebarOrder.map((item) => ({
+                ...item
+              }));
+            }
+            if (Array.isArray(this.settings?.unpinnedTabs)) {
+              runtime.unpinnedSidebarOrder = this.settings.unpinnedTabs.map((row, index) => ({
+                id: this._normalizeTabMapKey?.(row?.id) ?? row?.id,
+                order: typeof row?.order === 'number' ? row.order : index
+              }));
+            }
+          }
+        } catch (_) {}
+      } else {
+        this._syncProfileSidebarDom({ setupDrag: false, preferDom: false });
       }
-      this._syncProfileSidebarDom({ setupDrag: false, preferDom: false });
       this._refreshBuiltInTabFavicons?.();
     },
 
@@ -1974,6 +2075,36 @@
         }
       }
 
+      /*
+       * Capture the live sidebar organization before parking. Runtime Maps do not
+       * preserve visual order — without this, switch-away/back reshuffles tabs.
+       */
+      try {
+        if (!this.settings || typeof this.settings !== 'object') this.settings = {};
+        this._rememberPinnedSidebarOrder?.();
+        if (
+          typeof this._collectUnpinnedTabsPayload === 'function' &&
+          this._shouldPersistUnpinnedItems?.('profile-switch')
+        ) {
+          this.settings.unpinnedTabs =
+            this._collectUnpinnedTabsPayload({ context: 'profile-switch' }) || [];
+        }
+      } catch (_) {}
+
+      const pinnedSidebarOrder =
+        (Array.isArray(this.settings?.pinnedSidebarOrder) && this.settings.pinnedSidebarOrder.length
+          ? this.settings.pinnedSidebarOrder
+          : this._rememberPinnedSidebarOrder?.()) || [];
+      const unpinnedSidebarOrder = Array.isArray(this.settings?.unpinnedTabs)
+        ? this.settings.unpinnedTabs.map((row, index) => ({
+            id: this._normalizeTabMapKey?.(row?.id) ?? row?.id,
+            order: typeof row?.order === 'number' ? row.order : index
+          }))
+        : (this._readUnpinnedSidebarOrderFromDom?.() || []).map((item, index) => ({
+            id: item.id,
+            order: index
+          }));
+
       let state = {
         profileId: pid,
         tabs: new Map(
@@ -1985,12 +2116,25 @@
         currentTab: this.currentTab,
         recentTabStack: Array.isArray(this._recentTabStack) ? [...this._recentTabStack] : [],
         favorites: Array.isArray(this.favorites) ? this.favorites.map((f) => ({ ...f })) : [],
-        settings: this.settings ? { ...this.settings } : {},
-        pinnedSidebarOrder:
-          this._rememberPinnedSidebarOrder?.() ||
-          (Array.isArray(this.settings?.pinnedSidebarOrder)
-            ? this.settings.pinnedSidebarOrder.map((item) => ({ ...item }))
-            : []),
+        settings: this.settings
+          ? {
+              ...this.settings,
+              unpinnedTabs: Array.isArray(this.settings.unpinnedTabs)
+                ? this.settings.unpinnedTabs.map((t) =>
+                    t && typeof t === 'object' ? { ...t } : t
+                  )
+                : [],
+              pinnedSidebarOrder: pinnedSidebarOrder.map((item) => ({
+                type: item.type,
+                id: item.id
+              }))
+            }
+          : {},
+        pinnedSidebarOrder: pinnedSidebarOrder.map((item) => ({
+          type: item.type,
+          id: item.id
+        })),
+        unpinnedSidebarOrder,
         windowProfileIcon: this.windowProfileIcon,
         sidebarMediaDock: this._sidebarMediaDock ? { ...this._sidebarMediaDock } : null,
         shellChromeSnapshot: this._shellSnapshotForProfile(pid),
@@ -2037,6 +2181,7 @@
       let pinnedOrder = 0;
       let unpinnedOrder = 0;
       const loosePinned = [];
+      const looseUnpinned = [];
       for (const [rawId, tab] of state.tabs.entries()) {
         if (!tab || tab.isFavoriteTab) continue;
         const tabId = this._normalizeTabMapKey?.(rawId) ?? rawId;
@@ -2053,8 +2198,7 @@
         if (tab.pinned && !tab.tabGroupId) {
           loosePinned.push(payload);
         } else if (!tab.pinned && !tab.tabGroupId && keepUnpinned) {
-          payload.order = unpinnedOrder++;
-          unpinnedTabs.push(payload);
+          looseUnpinned.push(payload);
         }
       }
       loosePinned
@@ -2071,6 +2215,34 @@
         .forEach((payload) => {
           payload.order = pinnedOrder++;
           pinnedTabs.push(payload);
+        });
+
+      /* Prefer captured sidebar order — never Map insertion order. */
+      const unpinnedOrderById = new Map();
+      const savedUnpinned =
+        (Array.isArray(state.unpinnedSidebarOrder) && state.unpinnedSidebarOrder.length
+          ? state.unpinnedSidebarOrder
+          : null) ||
+        (Array.isArray(state.settings?.unpinnedTabs) ? state.settings.unpinnedTabs : []);
+      savedUnpinned.forEach((row, index) => {
+        const id = this._normalizeTabMapKey?.(row?.id) ?? row?.id;
+        if (id == null) return;
+        unpinnedOrderById.set(id, typeof row.order === 'number' ? row.order : index);
+      });
+      looseUnpinned
+        .sort((a, b) => {
+          const ao = unpinnedOrderById.has(a.id)
+            ? unpinnedOrderById.get(a.id)
+            : Number.MAX_SAFE_INTEGER;
+          const bo = unpinnedOrderById.has(b.id)
+            ? unpinnedOrderById.get(b.id)
+            : Number.MAX_SAFE_INTEGER;
+          if (ao !== bo) return ao - bo;
+          return String(a.id).localeCompare(String(b.id));
+        })
+        .forEach((payload) => {
+          payload.order = unpinnedOrder++;
+          unpinnedTabs.push(payload);
         });
 
       const tabGroups = [];
@@ -2407,6 +2579,12 @@
         this._profileUrlBarRestoredFromCache = false;
         this._profileShellThemeFromSnapshot = false;
         void this.populateExtensionsMenu?.();
+        const ntpTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (ntpTab?.url === this.NEWTAB_URL) {
+          this.applyNewTabCustomization?.();
+        } else {
+          this._syncNtpNewTabChrome?.();
+        }
       } catch (e) {
         console.error('profile chrome apply failed', e);
       }
@@ -2629,7 +2807,12 @@
         const commit = this._shouldCommitProfileWheel(ws, progress);
         if (commit) {
           const targets = this._swipeTargetIds || [ws.targetId];
-          const steps = Math.max(1, Math.min(targets.length, Math.round(progress)));
+          let steps = Math.max(1, Math.min(targets.length, Math.round(progress)));
+          /* Fast flick past halfway into the next pane should advance even if round() sits low. */
+          if (releaseVel >= FLICK_VELOCITY && progress - Math.floor(progress) >= FLICK_MIN_PROGRESS) {
+            steps = Math.max(steps, Math.min(targets.length, Math.ceil(progress)));
+          }
+          this._ensurePreviewContentForTravel(steps);
           const targetId = targets[steps - 1] || ws.targetId;
           /*
            * Do not settle-hide the live (outgoing) pane here. That blanked the profile
@@ -2659,7 +2842,7 @@
         if (this.isIncognitoWindow) return;
         const absX = Math.abs(e.deltaX);
         const absY = Math.abs(e.deltaY);
-        const horizontal = absX > absY * 1.15;
+        const horizontal = absX > absY * 1.05;
 
         let s = this._wheelSwipe;
         if (!s) {
@@ -2667,6 +2850,11 @@
           if (shouldIgnoreSwipeTarget(e.target)) return;
           /* Ignore isolated tiny tail ticks; real finger input starts above this floor. */
           if (absX < WHEEL_START_DELTA_PX) return;
+          /* Let a new swipe take over a snap-back spring immediately. */
+          if (this._trackSpringRaf && !this._profileSwipeFinalizing) {
+            this._cancelTrackMotion();
+            this._flushTrackTransform();
+          }
           this._cancelSidebarSlideAnimation();
           s = this._wheelSwipe = {
             direction: 0,
@@ -2689,7 +2877,7 @@
         s.peakDelta = Math.max(s.peakDelta || 0, absX);
 
         /* Follow the full stream, including natural momentum, until it actually stops. */
-        if (absX >= 0.15) {
+        if (absX >= 0.12) {
           const naturalBefore = s.direction
             ? this._wheelNaturalPx(s.accumX, s.direction)
             : Math.abs(s.accumX);
@@ -2712,18 +2900,22 @@
           }
           if (s.engaged) {
             const offset = this._coupledOffsetFor(-s.accumX, s.direction, !!s.targetId, s.targetId);
-            this._setTrackTransform(offset, { immediate: true });
+            /* Batch to the next frame — sync transforms every wheel tick felt laggy. */
+            this._setTrackTransform(offset);
           }
 
-          if (strong && s.direction) {
+          if (s.direction && absX >= 0.35) {
             const v = ((s.direction > 0 ? e.deltaX : -e.deltaX) * borderGain) / dt;
-            this._pushSwipeVelocitySample(s, v);
+            this._pushSwipeVelocitySample(s, Math.max(0, v));
+          } else if (!strong && s.vel) {
+            /* Decay estimated velocity between soft ticks so idle adapts correctly. */
+            s.vel *= 0.82;
           }
         }
 
         s.lastTs = now;
 
-        if (absX >= 0.15) {
+        if (absX >= 0.12) {
           /* The gesture is still moving — settle only after the stream really stops. */
           this._armProfileWheelIdle(s);
         } else if (s.engaged && !s.endTimer) {
