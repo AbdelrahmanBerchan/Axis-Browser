@@ -1,10 +1,8 @@
 /**
- * First-run setup overlay.
- * Testing: forced every launch via AXIS_ONBOARDING_FORCE_EVERY_LAUNCH.
+ * First-run setup overlay — shown once until the user finishes or skips setup.
  */
 (function (global) {
-    /** @type {boolean} Set false later to only show once. */
-    const AXIS_ONBOARDING_FORCE_EVERY_LAUNCH = true;
+    const AXIS_ONBOARDING_FORCE_EVERY_LAUNCH = false;
 
     const FLOW_STEPS = [
         { id: 'default', label: 'Default', titleId: 'ob-default-title' },
@@ -142,6 +140,9 @@
         const stepCaption = document.getElementById('ob-step-caption');
         const startBtn = document.getElementById('ob-start-btn');
         const skipBtn = document.getElementById('ob-skip-btn');
+        const skipOverlay = document.getElementById('ob-skip-overlay');
+        const skipConfirmBtn = document.getElementById('ob-skip-confirm-btn');
+        const skipContinueBtn = document.getElementById('ob-skip-continue-btn');
         const backBtn = document.getElementById('ob-back-btn');
         const nextBtn = document.getElementById('ob-next-btn');
         const nextLabel = document.getElementById('ob-next-label');
@@ -152,6 +153,8 @@
         let step = 'welcome';
         let flowIndex = 0;
         let busy = false;
+        let skipConfirmOpen = false;
+        let skipConfirmCloseTimer = 0;
         let browsersCache = [];
         let profilesCache = [];
         let defaultStatusChecked = false;
@@ -405,10 +408,85 @@
             return true;
         }
 
+        function setSkipConfirmOpen(open) {
+            const next = !!open;
+            if (next === skipConfirmOpen) return;
+            skipConfirmOpen = next;
+            if (skipConfirmCloseTimer) {
+                window.clearTimeout(skipConfirmCloseTimer);
+                skipConfirmCloseTimer = 0;
+            }
+            if (skipBtn) {
+                skipBtn.setAttribute('aria-expanded', skipConfirmOpen ? 'true' : 'false');
+            }
+
+            const shell = root.querySelector('.ob-shell');
+            if (!skipOverlay) {
+                root.classList.toggle('is-skip-confirm', skipConfirmOpen);
+                return;
+            }
+
+            if (skipConfirmOpen) {
+                skipOverlay.classList.remove('is-leaving');
+                skipOverlay.hidden = false;
+                skipOverlay.setAttribute('aria-hidden', 'false');
+                root.classList.add('is-skip-confirm');
+                if (shell) {
+                    shell.setAttribute('inert', '');
+                    shell.setAttribute('aria-hidden', 'true');
+                }
+                /* Double rAF so the closed styles paint before the open transition runs. */
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        if (!skipConfirmOpen || !skipOverlay) return;
+                        skipOverlay.classList.add('is-open');
+                    });
+                });
+                root.setAttribute('aria-labelledby', 'ob-skip-overlay-title');
+                window.setTimeout(() => {
+                    if (skipConfirmOpen) skipContinueBtn?.focus?.({ preventScroll: true });
+                }, 120);
+            } else {
+                skipOverlay.classList.add('is-leaving');
+                skipOverlay.setAttribute('aria-hidden', 'true');
+                skipConfirmCloseTimer = window.setTimeout(() => {
+                    skipConfirmCloseTimer = 0;
+                    skipOverlay.classList.remove('is-open', 'is-leaving');
+                    if (!skipConfirmOpen) skipOverlay.hidden = true;
+                    root.classList.remove('is-skip-confirm');
+                    if (shell) {
+                        shell.removeAttribute('inert');
+                        shell.removeAttribute('aria-hidden');
+                    }
+                    if (visible) {
+                        const current =
+                            step === 'welcome'
+                                ? 'ob-welcome-title'
+                                : activeSteps()[flowIndex]?.titleId || 'ob-welcome-title';
+                        root.setAttribute('aria-labelledby', current);
+                        skipBtn?.focus?.();
+                    }
+                }, 320);
+            }
+        }
+
+        /** Tear down skip confirm without flashing setup — used when leaving to the app. */
+        function clearSkipConfirmSilent() {
+            if (skipConfirmCloseTimer) {
+                window.clearTimeout(skipConfirmCloseTimer);
+                skipConfirmCloseTimer = 0;
+            }
+            skipConfirmOpen = false;
+            if (skipBtn) skipBtn.setAttribute('aria-expanded', 'false');
+            // Keep covering setup until the whole overlay is gone; cleaned in finishHide.
+        }
+
         function updateNextEnabled() {
             if (nextBtn) nextBtn.disabled = busy || !canContinue();
             if (backBtn) backBtn.disabled = busy;
             if (skipBtn) skipBtn.disabled = busy;
+            if (skipConfirmBtn) skipConfirmBtn.disabled = busy;
+            if (skipContinueBtn) skipContinueBtn.disabled = busy;
         }
 
         async function refreshDefaultStatus() {
@@ -429,6 +507,7 @@
         }
 
         function showScreen(name, { animate = true } = {}) {
+            setSkipConfirmOpen(false);
             const prev = step;
             step = name;
             const isWelcome = name === 'welcome';
@@ -493,14 +572,16 @@
             }
             browsersCache = Array.isArray(list) ? list : [];
             if (!browsersCache.length) {
-                state.browserId = null;
-                browserList.hidden = false;
-                browserList.innerHTML = `<div class="ob-empty">No supported browsers with profiles were found. You can import later from Settings → Profiles, or go back and start fresh.</div>`;
-                if (browserSelected) {
-                    browserSelected.hidden = true;
-                    browserSelected.innerHTML = '';
+                // Keep an existing choice if a transient scan comes back empty.
+                if (!state.browserId) {
+                    browserList.hidden = false;
+                    browserList.innerHTML = `<div class="ob-empty">No supported browsers with profiles were found. You can import later from Settings → Profiles, or go back and start fresh.</div>`;
+                    if (browserSelected) {
+                        browserSelected.hidden = true;
+                        browserSelected.innerHTML = '';
+                    }
+                    if (profilesWrap) profilesWrap.hidden = true;
                 }
-                if (profilesWrap) profilesWrap.hidden = true;
                 updateNextEnabled();
                 return;
             }
@@ -910,6 +991,13 @@
         function hide({ animate = true } = {}) {
             if (!visible) return;
             visible = false;
+            const exitingFromSkip = skipConfirmOpen || root.classList.contains('is-skip-confirm');
+            if (exitingFromSkip) {
+                /* Keep the confirm screen covering setup so we fade straight to the app. */
+                clearSkipConfirmSilent();
+            } else {
+                setSkipConfirmOpen(false);
+            }
             const revealApp = () => {
                 // Two-step opacity: hold at 0 for one frame, then fade to 1.
                 document.body.classList.add('axis-onboarding-leaving');
@@ -927,7 +1015,17 @@
                 });
             };
             const finishHide = () => {
-                root.classList.remove('is-visible', 'is-leaving');
+                root.classList.remove('is-visible', 'is-leaving', 'is-skip-confirm');
+                skipOverlay?.classList.remove('is-open', 'is-leaving');
+                if (skipOverlay) {
+                    skipOverlay.hidden = true;
+                    skipOverlay.setAttribute('aria-hidden', 'true');
+                }
+                const shell = root.querySelector('.ob-shell');
+                if (shell) {
+                    shell.removeAttribute('inert');
+                    shell.removeAttribute('aria-hidden');
+                }
                 root.classList.add('hidden');
                 root.hidden = true;
                 revealApp();
@@ -939,6 +1037,7 @@
             // Keep axis-onboarding-active until fade ends — otherwise the shell
             // pops under a translucent overlay and the leave looks glitchy.
             root.classList.add('is-leaving');
+            if (exitingFromSkip) root.classList.add('is-skip-confirm');
             root.classList.remove('is-visible');
             window.setTimeout(finishHide, 460);
         }
@@ -960,7 +1059,15 @@
         });
         skipBtn?.addEventListener('click', () => {
             if (busy) return;
+            setSkipConfirmOpen(true);
+        });
+        skipConfirmBtn?.addEventListener('click', () => {
+            if (busy) return;
             finishSkip();
+        });
+        skipContinueBtn?.addEventListener('click', () => {
+            if (busy) return;
+            setSkipConfirmOpen(false);
         });
         nextBtn?.addEventListener('click', () => {
             if (busy || !canContinue()) return;
@@ -1139,7 +1246,26 @@
             if (!visible || busy) return;
             if (e.key === 'Escape') {
                 e.preventDefault();
-                finishSkip();
+                if (skipConfirmOpen) {
+                    setSkipConfirmOpen(false);
+                    return;
+                }
+                setSkipConfirmOpen(true);
+                return;
+            }
+            if (!skipConfirmOpen) return;
+            if (e.key === 'Tab' && skipOverlay) {
+                const focusables = [skipContinueBtn, skipConfirmBtn].filter(Boolean);
+                if (focusables.length < 2) return;
+                const first = focusables[0];
+                const last = focusables[focusables.length - 1];
+                if (e.shiftKey && document.activeElement === first) {
+                    e.preventDefault();
+                    last.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    e.preventDefault();
+                    first.focus();
+                }
             }
         });
 
