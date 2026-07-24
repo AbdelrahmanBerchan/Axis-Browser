@@ -7,7 +7,7 @@ const path = require('path');
  * Keep in sync with <meta http-equiv="Content-Security-Policy"> in index.html / settings.html.
  *
  * Goals: block third-party <script> (and eval); allow local scripts only on the main shell;
- * Settings keeps inline scripts (large embedded UI) but still blocks external script URLs.
+ * Settings keeps local script files only (no inline / no external script URLs).
  */
 
 /** Main browser chrome (`index.html` + `renderer.js`). No third-party script sources. */
@@ -27,10 +27,10 @@ const AXIS_MAIN_SHELL_CSP =
   "worker-src 'self' blob:; " +
   "manifest-src 'self'";
 
-/** Settings tab (`settings.html` in a guest webview). Inline scripts only — no external script URLs. */
+/** Settings tab (`settings.html` in a guest webview). Local scripts only — no inline / external. */
 const AXIS_SETTINGS_SHELL_CSP =
   "default-src 'none'; " +
-  "script-src 'self' 'unsafe-inline'; " +
+  "script-src 'self'; " +
   "style-src 'self' 'unsafe-inline'; " +
   "font-src 'self' data:; " +
   "img-src 'self' data: blob: https: http: file: chrome-extension:; " +
