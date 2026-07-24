@@ -25,6 +25,14 @@
       } catch (_) {}
     }
 
+    function vaultUiTheme() {
+      try {
+        const d = document.documentElement.getAttribute('data-axis-vault-theme');
+        if (d === 'light' || d === 'dark') return d;
+      } catch (_) {}
+      return window.__axisVaultUiTheme === 'dark' ? 'dark' : 'light';
+    }
+
     function pageOrigin() {
       try {
         return location.origin || '';
@@ -470,6 +478,12 @@
 
     function touchCredentialEdit() {
       window.__axisVaultCredentialEditAt = Date.now();
+      try {
+        document.documentElement.setAttribute(
+          'data-axis-vault-cred-edit-at',
+          String(window.__axisVaultCredentialEditAt)
+        );
+      } catch (_) {}
     }
 
     function shouldSkipDuplicateSaveOffer(key) {
@@ -811,7 +825,19 @@
     function ensureVaultAutofillStyles() {
       if (document.getElementById('axis-vault-autofill-style')) return;
       try {
-        const { AXIS_VAULT_AUTOFILL_STYLE_CSS } = require('./axis-vault-autofill-inject');
+        // Keep CSS inline so sandboxed guest preloads do not need a sibling require().
+        const AXIS_VAULT_AUTOFILL_STYLE_CSS =
+          '#axis-vault-autofill-menu{position:fixed;z-index:2147483647;margin:0;padding:4px 0;list-style:none;border-radius:10px;font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-height:280px;overflow-y:auto;min-width:260px;box-sizing:border-box}' +
+          '#axis-vault-autofill-menu[data-axis-theme="light"]{background:#fff;color:#1d1d1f;border:1px solid rgba(0,0,0,.12);box-shadow:0 8px 28px rgba(0,0,0,.16)}' +
+          '#axis-vault-autofill-menu[data-axis-theme="dark"]{background:#2c2c2e;color:#f5f5f7;border:1px solid rgba(255,255,255,.14);box-shadow:0 8px 28px rgba(0,0,0,.45)}' +
+          '#axis-vault-autofill-menu li{margin:0;padding:0}' +
+          '#axis-vault-autofill-menu button{display:block;width:100%;text-align:left;border:none;background:transparent;padding:10px 14px;cursor:pointer;color:inherit;border-radius:6px;margin:0 4px;width:calc(100% - 8px)}' +
+          '#axis-vault-autofill-menu[data-axis-theme="light"] button:hover,#axis-vault-autofill-menu[data-axis-theme="light"] button:focus{background:rgba(0,0,0,.06);outline:none}' +
+          '#axis-vault-autofill-menu[data-axis-theme="dark"] button:hover,#axis-vault-autofill-menu[data-axis-theme="dark"] button:focus{background:rgba(255,255,255,.1);outline:none}' +
+          '#axis-vault-autofill-menu .axis-af-title{display:block;font-weight:600;font-size:13px;line-height:1.3}' +
+          '#axis-vault-autofill-menu .axis-af-sub{display:block;font-size:12px;margin-top:2px;line-height:1.3}' +
+          '#axis-vault-autofill-menu[data-axis-theme="light"] .axis-af-sub{color:#86868b}' +
+          '#axis-vault-autofill-menu[data-axis-theme="dark"] .axis-af-sub{color:#98989d}';
         const style = document.createElement('style');
         style.id = 'axis-vault-autofill-style';
         style.textContent = AXIS_VAULT_AUTOFILL_STYLE_CSS;
@@ -872,7 +898,7 @@
       menu.className = 'axis-vault-autofill-menu';
       menu.id = 'axis-vault-autofill-menu';
       menu.setAttribute('role', 'listbox');
-      menu.setAttribute('data-axis-theme', window.__axisVaultUiTheme === 'dark' ? 'dark' : 'light');
+      menu.setAttribute('data-axis-theme', vaultUiTheme());
       for (const cred of logins) {
         const li = document.createElement('li');
         const btn = document.createElement('button');
@@ -885,7 +911,12 @@
         btn.addEventListener('mousedown', (e) => {
           e.preventDefault();
           hideAutofillMenu();
-          fillLogin(cred, anchorEl);
+          void (async () => {
+            try {
+              const full = await ipcRenderer.invoke('axis-vault-get-login-for-fill', cred.id);
+              if (full) fillLogin(full, anchorEl);
+            } catch (_) {}
+          })();
         });
         li.appendChild(btn);
         menu.appendChild(li);
@@ -903,7 +934,7 @@
       const menu = document.createElement('ul');
       menu.className = 'axis-vault-autofill-menu';
       menu.id = 'axis-vault-autofill-menu';
-      menu.setAttribute('data-axis-theme', window.__axisVaultUiTheme === 'dark' ? 'dark' : 'light');
+      menu.setAttribute('data-axis-theme', vaultUiTheme());
       for (const card of cards) {
         const li = document.createElement('li');
         const btn = document.createElement('button');
@@ -914,13 +945,18 @@
         title.textContent = card.label || card.cardholder || 'Card';
         const sub = document.createElement('span');
         sub.className = 'axis-af-sub';
-        sub.textContent = card.masked || `•••• ${String(card.number || '').slice(-4)}`;
+        sub.textContent = card.masked || '••••';
         btn.appendChild(title);
         btn.appendChild(sub);
         btn.addEventListener('mousedown', (e) => {
           e.preventDefault();
           hideAutofillMenu();
-          fillCard(card, anchorEl);
+          void (async () => {
+            try {
+              const full = await ipcRenderer.invoke('axis-vault-get-card-for-fill', card.id);
+              if (full) fillCard(full, anchorEl);
+            } catch (_) {}
+          })();
         });
         li.appendChild(btn);
         menu.appendChild(li);
@@ -938,7 +974,7 @@
       const menu = document.createElement('ul');
       menu.className = 'axis-vault-autofill-menu';
       menu.id = 'axis-vault-autofill-menu';
-      menu.setAttribute('data-axis-theme', window.__axisVaultUiTheme === 'dark' ? 'dark' : 'light');
+      menu.setAttribute('data-axis-theme', vaultUiTheme());
       for (const addr of addresses) {
         const li = document.createElement('li');
         const btn = document.createElement('button');
@@ -1244,7 +1280,11 @@
     });
 
     ipcRenderer.on('axis-vault-scan-now', () => {
-      const editAt = window.__axisVaultCredentialEditAt || 0;
+      const editAt = Number(
+        document.documentElement.getAttribute('data-axis-vault-cred-edit-at') ||
+          window.__axisVaultCredentialEditAt ||
+          0
+      );
       if (Date.now() - editAt < SAVE_OFFER_DEBOUNCE_MS + 200) return;
       tryOfferSaves();
     });
