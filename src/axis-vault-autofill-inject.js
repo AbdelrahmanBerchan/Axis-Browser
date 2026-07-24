@@ -22,6 +22,10 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
   const STYLE_CSS = ${JSON.stringify(AXIS_VAULT_AUTOFILL_STYLE_CSS)};
 
   function uiTheme() {
+    try {
+      const d = document.documentElement.getAttribute('data-axis-vault-theme');
+      if (d === 'light' || d === 'dark') return d;
+    } catch (_) {}
     if (window.__axisVaultUiTheme === 'light' || window.__axisVaultUiTheme === 'dark') return window.__axisVaultUiTheme;
     try {
       return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -202,8 +206,10 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     if (!menu) return false;
     const active = document.activeElement;
     if (active && menu.contains(active)) return true;
+    // Only keep the menu while focus is still on a fillable field.
+    // Do not keep it merely because menuAnchor still points at the old input —
+    // that prevented dismiss when clicking away.
     if (active && vis(active) && (fillKind(active) || likelyUser(active))) return true;
-    if (api.menuAnchor && document.contains(api.menuAnchor) && fillKind(api.menuAnchor)) return true;
     return false;
   }
 
@@ -390,7 +396,10 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
           e.stopPropagation();
           hideMenu();
           if (row.number) fillCard(row, anchor);
-          else api.pendingPickId = row.id;
+          else {
+            api.pendingPickId = row.id;
+            api.pendingPickKind = 'card';
+          }
         });
       } else if (offerKind === 'address') {
         title.textContent = row.label || row.fullName || 'Address';
@@ -402,7 +411,10 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
           e.stopPropagation();
           hideMenu();
           if (row.addressLine1 || row.fullName) fillAddress(row, anchor);
-          else api.pendingPickId = row.id;
+          else {
+            api.pendingPickId = row.id;
+            api.pendingPickKind = 'address';
+          }
         });
       } else {
         const username = row.username || '';
@@ -418,7 +430,10 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
           e.stopPropagation();
           hideMenu();
           if (row.password) fillLogin(row, anchor);
-          else api.pendingPickId = row.id;
+          else {
+            api.pendingPickId = row.id;
+            api.pendingPickKind = 'login';
+          }
         });
       }
       li.appendChild(btn);
@@ -436,6 +451,7 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     focusAt: 0,
     focusAnchor: null,
     pendingPickId: null,
+    pendingPickKind: null,
     menuAnchor: null,
     showMenu,
     hideMenu,
@@ -518,8 +534,10 @@ const AXIS_VAULT_AUTOFILL_PROBE_JS = `(function(){
   if (!v || !v.ready) return null;
   if (v.pendingPickId) {
     const id = v.pendingPickId;
+    const kind = v.pendingPickKind || 'login';
     v.pendingPickId = null;
-    return { pick: id };
+    v.pendingPickKind = null;
+    return { pick: id, pickKind: kind };
   }
   const f = v.focusedField;
   const menu = document.getElementById('axis-vault-autofill-menu');
@@ -610,6 +628,24 @@ function buildVaultAutofillFillLoginJs(cred) {
   })()`;
 }
 
+function buildVaultAutofillFillCardJs(card) {
+  const json = JSON.stringify(card && typeof card === 'object' ? card : {});
+  return `(function(){
+    var c=${json};
+    var v=window.__axisVault;
+    if(v&&v.fillCard)v.fillCard(c,v.menuAnchor||v.focusAnchor);
+  })()`;
+}
+
+function buildVaultAutofillFillAddressJs(address) {
+  const json = JSON.stringify(address && typeof address === 'object' ? address : {});
+  return `(function(){
+    var c=${json};
+    var v=window.__axisVault;
+    if(v&&v.fillAddress)v.fillAddress(c,v.menuAnchor||v.focusAnchor);
+  })()`;
+}
+
 module.exports = {
   AXIS_VAULT_AUTOFILL_STYLE_CSS,
   AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS,
@@ -617,5 +653,7 @@ module.exports = {
   AXIS_VAULT_AUTOFILL_HIDE_JS,
   buildVaultAutofillThemeJs,
   buildVaultAutofillShowMenuJs,
-  buildVaultAutofillFillLoginJs
+  buildVaultAutofillFillLoginJs,
+  buildVaultAutofillFillCardJs,
+  buildVaultAutofillFillAddressJs
 };
