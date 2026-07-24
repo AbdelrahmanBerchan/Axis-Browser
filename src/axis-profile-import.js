@@ -8,7 +8,7 @@ const {
   extractBrowserSession,
   AXIS_GROUP_COLORS
 } = require('./axis-session-import');
-const { extractBrowserSecrets } = require('./axis-browser-secrets-import');
+const { extractBrowserSecrets, normalizeImportedCvv } = require('./axis-browser-secrets-import');
 const {
   extractBrowserExtras,
   mergeSitePermissionOverrides
@@ -24,6 +24,7 @@ const {
 const { AXIS_PROFILE_HISTORY_MAX, trimProfileHistoryItems } = require('./axis-history-store');
 
 const FAVORITES_IMPORT_LIMIT = 500;
+const PINNED_TABS_IMPORT_LIMIT = 150;
 const HISTORY_IMPORT_LIMIT = 2000;
 const SIDEBAR_PROFILE_BROWSERS = new Set(['arc', 'dia', 'sidekick']);
 
@@ -814,6 +815,7 @@ function buildAxisImportLayout({
 
   const usedUrls = new Set();
   const duplicateSkips = [];
+  const layoutWarnings = [];
   const pinnedTabs = [];
   const tabGroups = [];
   const unpinnedTabs = [];
@@ -920,9 +922,17 @@ function buildAxisImportLayout({
   }
 
   if (importBookmarks) {
+    let pinnedFromBookmarks = 0;
     for (const item of bookmarkUrls || []) {
+      if (pinnedFromBookmarks >= PINNED_TABS_IMPORT_LIMIT) {
+        layoutWarnings.push(
+          `Only the first ${PINNED_TABS_IMPORT_LIMIT} bookmarks were added as pinned tabs so Axis stays fast. Extra bookmarks were skipped — pin the ones you need, or use Favorites.`
+        );
+        break;
+      }
       if (!claim(item.url, 'pinned tab')) continue;
       pinnedTabs.push(makeAxisTabEntry(item, nextTabId(), pinOrder++));
+      pinnedFromBookmarks += 1;
     }
   }
 
@@ -934,7 +944,6 @@ function buildAxisImportLayout({
     }
   }
 
-  const layoutWarnings = [];
   if (duplicateSkips.length > 0) {
     layoutWarnings.push(
       `${duplicateSkips.length} duplicate link${duplicateSkips.length === 1 ? '' : 's'} appeared in more than one place and ${duplicateSkips.length === 1 ? 'was' : 'were'} only imported once.`
@@ -1208,7 +1217,7 @@ function importVaultEntries(vault, extracted) {
         number: card.number,
         expMonth: card.expMonth,
         expYear: card.expYear,
-        cvv: card.cvv || '',
+        cvv: normalizeImportedCvv(card.cvv, card.cvc, card.securityCode, card.security_code),
         billingZip: card.billingZip || ''
       });
       cards += 1;
@@ -1466,6 +1475,9 @@ const AXIS_PROFILE_EXPORT_KEYS = [
   'ntpAiSearchEnabled',
   'ntpWidgetsEnabled',
   'ntpWidgetLayout',
+  'ntpWidgetBackgrounds',
+  'ntpShowSettingsShortcut',
+  'ntpShowWidgetsEditButton',
   'ambientAudioEnabled',
   'ambientAudioPreset',
   'ambientAudioVolume',
