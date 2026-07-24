@@ -747,6 +747,7 @@ class AxisBrowser {
         this._vaultAutofillWebview = null;
         this._vaultAutofillPayload = null;
         this.setupVaultUi();
+        this.setupSitePermissionPrompts();
         this.setupProfileUi();
         this.ensureProfileSwipeChrome?.();
         this.setupProfileSwipeGestures?.();
@@ -931,11 +932,18 @@ class AxisBrowser {
         return false;
     }
 
-    _syncWebviewBackgroundThrottling(activeTabId, deferSuspendTabId = null) {
+    _syncWebviewBackgroundThrottling(activeTabId, deferSuspendTabId = null, prevTabId = null) {
         const active = this._normalizeTabMapKey(activeTabId);
         const deferSuspend = this._normalizeTabMapKey(deferSuspendTabId);
-        this.tabs.forEach((tab, id) => {
-            if (!tab?.webview) return;
+        const prev = this._normalizeTabMapKey(prevTabId);
+        const touch = new Set();
+        if (active != null) touch.add(active);
+        if (deferSuspend != null) touch.add(deferSuspend);
+        if (prev != null) touch.add(prev);
+        // Fast path: only touch the tabs involved in this switch (not every open tab).
+        for (const id of touch) {
+            const tab = this.tabs.get(id);
+            if (!tab?.webview) continue;
             try {
                 const wc = tab.webview.getWebContents?.();
                 if (wc && typeof wc.setBackgroundThrottling === 'function' && !wc.isDestroyed?.()) {
@@ -952,7 +960,7 @@ class AxisBrowser {
             } else {
                 this._suspendInactiveTabGuest(tab.webview, tab, id);
             }
-        });
+        }
     }
 
     _ensureBackgroundMediaPlayback(webview, tab) {
@@ -1519,16 +1527,17 @@ class AxisBrowser {
     }
 
     /**
-     * Before showing the target tab, force every other webview into the inactive/hidden state.
-     * Avoids transparent pages briefly compositing over another tab’s pixels (ordering bugs, missed updates).
+     * Before showing the target tab, hide the previous guest (not every open tab).
+     * Other tabs are already inactive from earlier switches.
      */
-    _prepareWebviewsForTabSwitch(targetTabId) {
+    _prepareWebviewsForTabSwitch(targetTabId, prevTabId = null) {
         const tid = this._normalizeTabMapKey(targetTabId);
         if (tid == null) return;
-        this.tabs.forEach((tab, id) => {
-            if (!tab?.webview || id === tid) return;
-            this._styleInactiveTabWebview(tab.webview);
-        });
+        const prev = this._normalizeTabMapKey(prevTabId);
+        if (prev != null && prev !== tid) {
+            const prevTab = this.tabs.get(prev);
+            if (prevTab?.webview) this._styleInactiveTabWebview(prevTab.webview);
+        }
     }
 
     /**
@@ -1577,6 +1586,7 @@ class AxisBrowser {
 
     /** After any close, drop orphan guests and fix `currentTab` if it points at a removed id. */
     _syncAfterTabClose() {
+        this._invalidateKeyboardTabOrderCache();
         this._purgeStaleWebviewsInContainer();
         const ct = this._normalizeTabMapKey(this.currentTab);
         if (ct != null && !this.tabs.has(ct)) {
@@ -1778,7 +1788,37 @@ class AxisBrowser {
     }
 
     setNewTabAiChatChromeVisible(enabled) {
-        document.getElementById('new-tab-menu-btn')?.classList.toggle('hidden', enabled);
+        this._syncNtpNewTabChrome(!!enabled);
+    }
+
+    _syncNtpNewTabChrome(inAiChat = null) {
+        const s = this.settings || {};
+        const page = document.getElementById('new-tab-page');
+        const section = document.getElementById('new-tab-widgets-section');
+        const inChat = inAiChat != null ? !!inAiChat : this.isNewTabInChat();
+        const showGear = s.ntpShowSettingsShortcut !== false;
+        const showEdit = s.ntpShowWidgetsEditButton !== false;
+        const showBg = s.ntpWidgetBackgrounds !== false;
+
+        page?.classList.toggle('ntp-widget-bg-off', !showBg);
+        section?.classList.toggle('ntp-hide-widgets-edit', !showEdit);
+        // Ink vars set --ntp-widget-bg inline; override explicitly so the setting wins.
+        if (page) {
+            if (showBg) {
+                const sc = this.getNewTabSurfaceChromeStyle?.();
+                if (sc?.ntpWidgetBg != null) page.style.setProperty('--ntp-widget-bg', sc.ntpWidgetBg);
+            } else {
+                page.style.setProperty('--ntp-widget-bg', 'transparent');
+            }
+        }
+
+        document.getElementById('new-tab-menu-btn')?.classList.toggle('hidden', inChat || !showGear);
+
+        const editBtn = document.getElementById('ntp-widgets-edit-btn');
+        if (editBtn) {
+            // Keep Done visible while editing even if the idle Edit control is hidden.
+            editBtn.classList.toggle('hidden', !showEdit && !this._ntpEditMode);
+        }
     }
 
     _scrollNewTabAskMessagesToBottom() {
@@ -2956,7 +2996,7 @@ class AxisBrowser {
                             this.tabs.set(tabId, tab);
                             const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
                             if (tabElement) this.updateTabIcon(tabElement, tabId);
-                            if (tab.pinned) this.savePinnedTabs();
+                            if (tab.pinned) this._scheduleSavePinnedTabs();
                             if (tab.isFavoriteTab && tab.favoriteId) {
                                 const fav = this.favorites.find((f) => f.id === tab.favoriteId);
                                 if (fav) {
@@ -3672,11 +3712,12 @@ class AxisBrowser {
             ) {
                 return;
             }
-            if (this._settingsUpdatedRaf != null) cancelAnimationFrame(this._settingsUpdatedRaf);
-            this._settingsUpdatedRaf = requestAnimationFrame(() => {
+            // Apply immediately — no rAF delay (Settings should feel live).
+            if (this._settingsUpdatedRaf != null) {
+                cancelAnimationFrame(this._settingsUpdatedRaf);
                 this._settingsUpdatedRaf = null;
-                void this.applySettingsUpdateFromMain();
-            });
+            }
+            void this.applySettingsUpdateFromMain(data);
         });
 
         window.electronAPI.onExtensionsReady?.((data) => {
@@ -4430,11 +4471,17 @@ class AxisBrowser {
         await this.confirmProfileForm();
     }
 
-    async applySettingsUpdateFromMain() {
+    async applySettingsUpdateFromMain(data) {
         try {
             const prevJs = this._lastJavascriptEnabled;
             const before = this._settingsApplySnapshot();
-            await this.loadSettings();
+            // Prefer the value just written (instant) over waiting on another get-settings IPC.
+            if (data && typeof data.key === 'string') {
+                this.settings = this.settings || {};
+                this.settings[data.key] = data.value;
+            } else {
+                await this.loadSettings();
+            }
             const after = this._settingsApplySnapshot();
 
             // Setup overlay is covering the shell — keep store in sync but skip chrome
@@ -4469,9 +4516,29 @@ class AxisBrowser {
             const linkPreviewChanged = before.linkPreview !== after.linkPreview;
             const windowChromeChanged = before.windowChromeLight !== after.windowChromeLight;
             const sidebarZoomChanged = before.sidebarZoom !== after.sidebarZoom;
+            const unpinnedClearChanged =
+                before.unpinnedClearMode !== after.unpinnedClearMode ||
+                before.unpinnedClearCustomMinutes !== after.unpinnedClearCustomMinutes;
+            const aiFeaturesChanged = before.aiFeatures !== after.aiFeatures;
+            const ntpChanged =
+                before.ntpWidgets !== after.ntpWidgets ||
+                before.ntpWidgetLayout !== after.ntpWidgetLayout ||
+                before.ntpWidgetBg !== after.ntpWidgetBg ||
+                before.ntpShowGear !== after.ntpShowGear ||
+                before.ntpShowEdit !== after.ntpShowEdit ||
+                before.ntpWelcome !== after.ntpWelcome ||
+                before.ntpWelcomeGreeting !== after.ntpWelcomeGreeting ||
+                before.ntpGreetingName !== after.ntpGreetingName ||
+                before.ntpAiSearch !== after.ntpAiSearch ||
+                aiFeaturesChanged;
 
+            // Lightweight settings: apply UI now — skip shortcut cache / theme rebuilds.
             if (
-                (ambientChanged || linkPreviewChanged || sidebarZoomChanged) &&
+                (ambientChanged ||
+                    linkPreviewChanged ||
+                    sidebarZoomChanged ||
+                    unpinnedClearChanged ||
+                    ntpChanged) &&
                 !themeChanged &&
                 !transparentChanged &&
                 !sidebarChanged &&
@@ -4483,6 +4550,16 @@ class AxisBrowser {
                 if (ambientChanged) void this.applyAmbientFromSettings();
                 if (linkPreviewChanged) this._applyLinkPreviewSetting();
                 if (sidebarZoomChanged) this.applySidebarZoom();
+                if (unpinnedClearChanged) this._setupUnpinnedClearTimer();
+                if (aiFeaturesChanged) this.applyAiFeaturesVisibility();
+                if (ntpChanged) {
+                    const ntpTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+                    if (ntpTab?.url === this.NEWTAB_URL) {
+                        this.applyNewTabCustomization();
+                    } else {
+                        this._syncNtpNewTabChrome();
+                    }
+                }
                 this._notifySettingsTabWebviewsStoreUpdated();
                 return;
             }
@@ -4559,8 +4636,9 @@ class AxisBrowser {
             this._notifySettingsTabWebviewsStoreUpdated();
             const ntpTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
             if (ntpTab?.url === this.NEWTAB_URL) {
-                this.syncNtpWidgetsVisibility();
-                this.renderNtpWidgets();
+                this.applyNewTabCustomization();
+            } else if (ntpChanged) {
+                this._syncNtpNewTabChrome();
             }
         } catch (e) {
             console.error('applySettingsUpdateFromMain failed', e);
@@ -4584,6 +4662,7 @@ class AxisBrowser {
         const s = this.settings || {};
         let ambientVol = Number(s.ambientAudioVolume);
         if (!Number.isFinite(ambientVol)) ambientVol = 48;
+        const unpinnedMins = Number(s.unpinnedClearCustomMinutes);
         return {
             js: s.javascriptEnabled !== false,
             transparent: !!s.transparentSites,
@@ -4602,8 +4681,21 @@ class AxisBrowser {
             linkPreview: s.linkPreview !== false,
             windowChromeLight: this._normalizeWindowChromeLight(s.windowChromeLight),
             sidebarZoom: this._normalizeSidebarZoom(s.sidebarZoom),
+            unpinnedClearMode: s.unpinnedClearMode || 'app-close',
+            unpinnedClearCustomMinutes: Math.max(
+                1,
+                Math.min(10080, Number.isFinite(unpinnedMins) ? unpinnedMins : 60)
+            ),
+            aiFeatures: s.aiFeaturesEnabled !== false,
+            ntpWelcome: s.ntpWelcomeEnabled !== false,
+            ntpWelcomeGreeting: s.ntpWelcomeGreeting !== false,
+            ntpGreetingName: String(s.ntpGreetingName ?? 'User'),
+            ntpAiSearch: s.ntpAiSearchEnabled !== false,
             ntpWidgets: s.ntpWidgetsEnabled === true,
-            ntpWidgetLayout: JSON.stringify(s.ntpWidgetLayout || [])
+            ntpWidgetLayout: JSON.stringify(s.ntpWidgetLayout || []),
+            ntpWidgetBg: s.ntpWidgetBackgrounds !== false,
+            ntpShowGear: s.ntpShowSettingsShortcut !== false,
+            ntpShowEdit: s.ntpShowWidgetsEditButton !== false
         };
     }
 
@@ -5449,8 +5541,17 @@ class AxisBrowser {
         webview.addEventListener('did-fail-load', didFailLoadHandler);
 
         const willNavigateHandler = (event) => {
-            if (!isActiveTab()) return;
             const nextUrl = event.url || '';
+            if (nextUrl.startsWith('chrome-extension://') && event.isMainFrame !== false) {
+                event.preventDefault();
+                if (window.electronAPI && typeof window.electronAPI.openExtensionPage === 'function') {
+                    void window.electronAPI.openExtensionPage(nextUrl).catch((err) => {
+                        console.error('Failed to open extension page', err);
+                    });
+                }
+                return;
+            }
+            if (!isActiveTab()) return;
             if (
                 this.settings?.httpsOnlyMode &&
                 nextUrl &&
@@ -8275,11 +8376,15 @@ class AxisBrowser {
                 ntpWidgetRing: 'rgba(0, 0, 0, 0.12)',
                 ntpWidgetRingHover: 'rgba(0, 0, 0, 0.2)',
                 ntpWidgetEditBg: 'rgba(0, 0, 0, 0.03)',
+                ntpWidgetBg: 'rgba(0, 0, 0, 0.035)',
                 ntpFocusInner: 'rgba(255, 255, 255, 0.9)',
                 ntpBtnBg: 'rgba(0, 0, 0, 0.06)',
                 ntpBtnBgHover: 'rgba(0, 0, 0, 0.1)',
                 ntpEditBtn: 'rgba(0, 0, 0, 0.5)',
                 ntpEditBtnHover: 'rgba(0, 0, 0, 0.88)',
+                ntpDoneBtnBg: 'rgba(29, 29, 31, 0.92)',
+                ntpDoneBtnBgHover: '#1d1d1f',
+                ntpDoneBtnFg: '#ffffff',
                 ntpDlBarBg: 'rgba(0, 0, 0, 0.08)',
                 ntpGreeting: 'rgba(0, 0, 0, 0.88)',
                 ntpInput: 'rgba(0, 0, 0, 0.9)',
@@ -8368,11 +8473,15 @@ class AxisBrowser {
             ntpWidgetRing: 'rgba(255, 255, 255, 0.16)',
             ntpWidgetRingHover: 'rgba(255, 255, 255, 0.28)',
             ntpWidgetEditBg: 'rgba(255, 255, 255, 0.04)',
+            ntpWidgetBg: 'rgba(255, 255, 255, 0.045)',
             ntpFocusInner: 'rgba(12, 14, 20, 0.55)',
             ntpBtnBg: 'rgba(255, 255, 255, 0.12)',
             ntpBtnBgHover: 'rgba(255, 255, 255, 0.2)',
             ntpEditBtn: 'rgba(255, 255, 255, 0.5)',
             ntpEditBtnHover: 'rgba(255, 255, 255, 0.9)',
+            ntpDoneBtnBg: 'rgba(255, 255, 255, 0.92)',
+            ntpDoneBtnBgHover: '#ffffff',
+            ntpDoneBtnFg: '#111111',
             ntpDlBarBg: 'rgba(255, 255, 255, 0.12)',
             ntpGreeting: 'rgba(255, 255, 255, 0.96)',
             ntpInput: 'rgba(255, 255, 255, 0.96)',
@@ -8435,11 +8544,15 @@ class AxisBrowser {
             ['ntpWidgetRing', '--ntp-widget-ring'],
             ['ntpWidgetRingHover', '--ntp-widget-ring-hover'],
             ['ntpWidgetEditBg', '--ntp-widget-edit-bg'],
+            ['ntpWidgetBg', '--ntp-widget-bg'],
             ['ntpFocusInner', '--ntp-focus-inner'],
             ['ntpBtnBg', '--ntp-btn-bg'],
             ['ntpBtnBgHover', '--ntp-btn-bg-hover'],
             ['ntpEditBtn', '--ntp-edit-btn'],
             ['ntpEditBtnHover', '--ntp-edit-btn-hover'],
+            ['ntpDoneBtnBg', '--ntp-done-btn-bg'],
+            ['ntpDoneBtnBgHover', '--ntp-done-btn-bg-hover'],
+            ['ntpDoneBtnFg', '--ntp-done-btn-fg'],
             ['ntpDlBarBg', '--ntp-dl-bar-bg'],
             ['ntpGreeting', '--ntp-greeting'],
             ['ntpInput', '--ntp-input'],
@@ -8467,7 +8580,12 @@ class AxisBrowser {
             ['ntpDropPreviewBorder', '--ntp-drop-preview-border'],
         ];
         for (const [key, cssVar] of ink) {
-            if (sc[key] != null) page.style.setProperty(cssVar, sc[key]);
+            if (sc[key] == null) continue;
+            if (key === 'ntpWidgetBg' && this.settings?.ntpWidgetBackgrounds === false) {
+                page.style.setProperty(cssVar, 'transparent');
+            } else {
+                page.style.setProperty(cssVar, sc[key]);
+            }
         }
     }
 
@@ -8872,8 +8990,10 @@ class AxisBrowser {
     }
 
     getTabWebpreferencesString() {
+        // Guest tabs: isolate page JS from preload IPC and sandbox the guest process.
+        // Autofill coordinates via DOM (shared) + IPC — not shared window globals.
         const base =
-            'contextIsolation=false,nodeIntegration=false,sandbox=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes';
+            'contextIsolation=true,nodeIntegration=false,sandbox=true,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes';
         return this.settings?.javascriptEnabled === false ? `${base},javascript=no` : base;
     }
 
@@ -8905,7 +9025,7 @@ class AxisBrowser {
 
     getSettingsTabWebpreferencesString() {
         // Internal Settings UI must always run JS (even when browsing tabs disable it).
-        return 'contextIsolation=true,nodeIntegration=false,sandbox=false,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false,spellcheck=yes';
+        return 'contextIsolation=true,nodeIntegration=false,sandbox=true,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=false,offscreen=false,spellcheck=yes';
     }
 
     _isSettingsTab(tab) {
@@ -9431,8 +9551,18 @@ class AxisBrowser {
         this.updateTabFavicon(tabId, tabElement);
         this.updateTabTooltip(tabId);
 
-        this.savePinnedTabs();
-        this.renderTabGroups();
+            this._invalidateKeyboardTabOrderCache();
+        if (tab.pinned) {
+            this._scheduleSavePinnedTabs();
+            this.renderTabGroups();
+        } else {
+            this._scheduleUnpinnedTabsRecoverySave();
+            if (this._unpinnedSessionSaveTimer) clearTimeout(this._unpinnedSessionSaveTimer);
+            this._unpinnedSessionSaveTimer = setTimeout(() => {
+                this._unpinnedSessionSaveTimer = null;
+                void this.saveUnpinnedTabs();
+            }, 1500);
+        }
         return tabId;
     }
 
@@ -9490,22 +9620,12 @@ class AxisBrowser {
             }
         };
         
-        // Update icon immediately based on current state
+        // Update icon immediately based on current state — no MutationObserver
+        // (hundreds of observers on closed pins was a major idle/close cost).
         updateIcon();
         
-        // Class changes (e.g. closed) and active swaps can accompany webview attach/detach
-        const observer = new MutationObserver(() => {
-            updateIcon();
-        });
-        
-        observer.observe(tabElement, {
-            attributes: true,
-            attributeFilter: ['class']
-        });
-        
-        // Store handlers for cleanup
+        // Store handlers for cleanup / updatePinnedTabClosedState
         tabElement._pinnedCloseHandlers = {
-            observer: observer,
             updateIcon: updateIcon
         };
     }
@@ -9677,10 +9797,10 @@ class AxisBrowser {
             if (prevTabElement) prevTabElement.classList.remove('active');
         }
 
-        // Demote other webviews before the active tab paints (always fully hide — avoids multi-guest bleed)
+        // Demote previous webview before the active tab paints (avoid O(n) over all guests)
         this._purgeStaleWebviewsInContainer();
-        this._prepareWebviewsForTabSwitch(tabId);
-        this._syncWebviewBackgroundThrottling(tabId, deferSuspendForPipTabId);
+        this._prepareWebviewsForTabSwitch(tabId, prevTabId);
+        this._syncWebviewBackgroundThrottling(tabId, deferSuspendForPipTabId, prevTabId);
         
         // Hide PIP if switching back to the tab that has PIP
         if (this.pipTabId === tabId) {
@@ -10080,6 +10200,7 @@ class AxisBrowser {
         this._applyNewTabPageChrome();
         this.updateNewTabHero();
         this.syncNtpWidgetsVisibility();
+        this._syncNtpNewTabChrome();
         this.renderNtpWidgets();
         const input = document.getElementById('new-tab-input');
         if (input?.value?.trim() && !this.isNewTabInChat()) {
@@ -10188,6 +10309,7 @@ class AxisBrowser {
             layout?.classList.remove('ntp-has-tiles');
         }
         this._syncNtpHeroAnchor();
+        this._syncNtpNewTabChrome();
         if (!showWidgets) {
             this.setNtpEditMode(false);
             this.setNtpPickerOpen(false);
@@ -10207,6 +10329,7 @@ class AxisBrowser {
             grid.style.gridTemplateRows = '';
         }
         this._syncNtpHeroAnchor();
+        this._syncNtpNewTabChrome();
     }
 
     _syncNtpHeroAnchor() {
@@ -10350,6 +10473,7 @@ class AxisBrowser {
             editBtn.textContent = this._ntpEditMode ? 'Done' : 'Edit';
             editBtn.setAttribute('aria-pressed', this._ntpEditMode ? 'true' : 'false');
         }
+        this._syncNtpNewTabChrome();
         if (!this._ntpEditMode) {
             this.setNtpPickerOpen(false);
             this._ntpClearDropPreview(document.getElementById('ntp-widgets-grid'));
@@ -10487,10 +10611,33 @@ class AxisBrowser {
             this._addNtpWidget(btn.dataset.widgetType);
         });
 
+        const layout = document.getElementById('new-tab-page-layout');
+        layout?.addEventListener('contextmenu', (e) => {
+            if (section.classList.contains('hidden')) return;
+            // Only when the Edit control is hidden — enter edit immediately (no menu).
+            if (this.settings?.ntpShowWidgetsEditButton !== false) return;
+            if (this._ntpEditMode) return;
+            // Leave search, greeting, and controls alone.
+            if (
+                e.target.closest(
+                    '#new-tab-hero-zone, .new-tab-search-section, .new-tab-menu-btn, a, input, textarea, select, button'
+                )
+            ) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            this.setNtpEditMode(true);
+        });
+
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Escape') return;
             if (!document.getElementById('ntp-widget-add-strip')?.classList.contains('hidden')) {
                 this.setNtpPickerOpen(false);
+                return;
+            }
+            if (this._ntpEditMode) {
+                this.setNtpEditMode(false);
             }
         });
 
@@ -12763,7 +12910,12 @@ class AxisBrowser {
     }
 
     /** Tabs in sidebar visual order for ⌘1–9 / Ctrl+1–9 (favorites grid, then pinned/unpinned rows). */
+    _invalidateKeyboardTabOrderCache() {
+        this._keyboardTabOrderCache = null;
+    }
+
     _getKeyboardSwitchableTabEntries() {
+        if (Array.isArray(this._keyboardTabOrderCache)) return this._keyboardTabOrderCache;
         const entries = [];
         if (!this.isIncognitoWindow && Array.isArray(this.favorites)) {
             for (const favorite of this.favorites) {
@@ -12776,6 +12928,7 @@ class AxisBrowser {
                 entries.push({ kind: 'tab', tabId });
             }
         });
+        this._keyboardTabOrderCache = entries;
         return entries;
     }
 
@@ -12825,9 +12978,9 @@ class AxisBrowser {
         const t = this.tabs.get(tabId);
         if (!t) return false;
         if (!t.pinned) return true;
-        const el = document.querySelector(`[data-tab-id="${tabId}"]`);
-        if (el?.classList.contains('closed')) return false;
-        return !!t.webview;
+        // Closed pinned slots have no webview — don't query the DOM for every candidate.
+        if (t.closed || !t.webview) return false;
+        return true;
     }
 
     _recordTabActivation(rawTabId) {
@@ -13108,11 +13261,10 @@ class AxisBrowser {
             this.hideSidebarMediaDock();
         }
 
-        // Save pinned tabs before closing (in case it was pinned)
-        this.savePinnedTabs();
+        // Save pinned tabs only when this close actually changes pin state (not every unpinned close).
         const tidChat = this._normalizeTabIdForChatState(tid);
         if (tidChat != null) this.aiChatPanelOpenByTabId.delete(tidChat);
-        const tabElement = document.querySelector(`[data-tab-id="${tid}"]`);
+        const tabElement = this._getTabElement(tid) || document.querySelector(`[data-tab-id="${tid}"]`);
         const tab = this.tabs.get(tid);
         const cur = this._normalizeTabMapKey(this.currentTab);
         this._removeTabFromRecentStack(tid);
@@ -13123,7 +13275,7 @@ class AxisBrowser {
         // For pinned tabs, check if it's inactive (no webview or already closed)
         // If inactive, completely remove it. If active, just close the webview.
         if (isPinned) {
-            const isInactive = !tab.webview || tabElement?.classList.contains('closed');
+            const isInactive = !tab.webview || tab.closed || tabElement?.classList.contains('closed');
             
             if (isInactive) {
                 const closingCurrent = cur === tid;
@@ -13142,7 +13294,7 @@ class AxisBrowser {
                 }
                 
                 // Save pinned tabs after removal and update separator immediately
-                this.savePinnedTabs();
+                this._scheduleSavePinnedTabs();
                 this.updatePinnedSeparatorVisibility();
                 this.updateEmptyState();
                 this._syncAfterTabClose();
@@ -13163,6 +13315,7 @@ class AxisBrowser {
                         tab.webview.parentNode.removeChild(tab.webview);
                     }
                     tab.webview = null;
+                    tab.closed = true;
                     this.tabs.set(tid, tab);
                 } catch (e) {
                     console.error('Error removing webview:', e);
@@ -13178,7 +13331,7 @@ class AxisBrowser {
             if (closingPinnedActive) {
                 this._applyFocusAfterTabClose(tid, neighborPinnedPref);
             }
-            this.savePinnedTabs();
+            this._scheduleSavePinnedTabs();
             this.updatePinnedSeparatorVisibility();
             this._syncAfterTabClose();
             this.applyAmbientFromSettings();
@@ -13951,6 +14104,14 @@ class AxisBrowser {
         
         const sanitizedUrl = this.sanitizeUrl(url);
         if (!sanitizedUrl) return;
+        if (sanitizedUrl.startsWith('chrome-extension://')) {
+            if (window.electronAPI && typeof window.electronAPI.openExtensionPage === 'function') {
+                void window.electronAPI.openExtensionPage(sanitizedUrl).catch((err) => {
+                    console.error('Failed to open extension page', err);
+                });
+            }
+            return;
+        }
         if (!options.skipHttpsConfirm && !this.confirmInsecureHttpNavigation(sanitizedUrl)) {
             return;
         }
@@ -16514,7 +16675,7 @@ class AxisBrowser {
         const shouldPin = this._isTabDomInPinnedSection(tabEl);
         if (!!tab.pinned === shouldPin) {
             if (save) {
-                void this.savePinnedTabs();
+                void this._scheduleSavePinnedTabs();
                 this._scheduleUnpinnedTabsRecoverySave();
             }
             return;
@@ -16531,7 +16692,7 @@ class AxisBrowser {
             this.removePinnedTabCloseButton(tabEl);
         }
         if (save) {
-            void this.savePinnedTabs();
+            void this._scheduleSavePinnedTabs();
             this._scheduleUnpinnedTabsRecoverySave();
         }
     }
@@ -17104,6 +17265,7 @@ class AxisBrowser {
     }
 
     renderFavorites() {
+        this._invalidateKeyboardTabOrderCache();
         const section = this.elements?.favoritesSection;
         const grid = this.elements?.favoritesGrid;
         if (!section || !grid) return;
@@ -17231,13 +17393,20 @@ class AxisBrowser {
 
         const pinnedTabs = [];
         let pinnedOrder = 0;
+        const separator = this.elements.tabsSeparator;
         const allChildren = Array.from(tabsContainer.children);
-        for (const child of allChildren) {
+        const sepIndex = separator ? allChildren.indexOf(separator) : -1;
+        // Only walk the pinned section above the separator (not hundreds of unpinned rows).
+        const range =
+            sepIndex >= 0 ? allChildren.slice(0, sepIndex) : allChildren;
+        const seen = new Set();
+        for (const child of range) {
             if (!child.classList.contains('tab')) continue;
             const tabId = this._normalizeTabMapKey(child.dataset.tabId);
             if (tabId == null) continue;
             const tab = this.tabs.get(tabId);
             if (tab && tab.pinned && !tab.isFavoriteTab && !tab.tabGroupId) {
+                seen.add(tabId);
                 const payload = {
                     id: tabId,
                     url: tab.savedLinkUrl || tab.url,
@@ -17252,6 +17421,25 @@ class AxisBrowser {
                 if (newTabPageState) payload.newTabPageState = newTabPageState;
                 pinnedTabs.push(payload);
             }
+        }
+        // Include any pinned Map entries missing from DOM (should be rare).
+        for (const [rawId, tab] of this.tabs.entries()) {
+            const tabId = this._normalizeTabMapKey(rawId);
+            if (tabId == null || seen.has(tabId)) continue;
+            if (!tab || !tab.pinned || tab.isFavoriteTab || tab.tabGroupId) continue;
+            const payload = {
+                id: tabId,
+                url: tab.savedLinkUrl || tab.url,
+                title: tab.title,
+                favicon: tab.favicon || null,
+                customIcon: tab.customIcon || null,
+                customIconType: tab.customIconType || null,
+                customTitle: tab.customTitle || null,
+                order: pinnedOrder++
+            };
+            const newTabPageState = this._serializeNewTabPageStateForSave(tab);
+            if (newTabPageState) payload.newTabPageState = newTabPageState;
+            pinnedTabs.push(payload);
         }
         return pinnedTabs;
     }
@@ -17386,14 +17574,40 @@ class AxisBrowser {
         }
     }
 
+    _scheduleSavePinnedTabs(delayMs = 450) {
+        if (this.isIncognitoWindow) return;
+        if (this._profileScopedPersistBlocked?.('pinnedTabs')) return;
+        if (this._pinnedTabsSaveTimer) clearTimeout(this._pinnedTabsSaveTimer);
+        this._pinnedTabsSaveTimer = setTimeout(() => {
+            this._pinnedTabsSaveTimer = null;
+            void this.savePinnedTabs();
+        }, delayMs);
+    }
+
     async savePinnedTabs() {
         if (this._profileScopedPersistBlocked?.('pinnedTabs')) return;
+        if (this._pinnedTabsSaveTimer) {
+            clearTimeout(this._pinnedTabsSaveTimer);
+            this._pinnedTabsSaveTimer = null;
+        }
         const pinnedTabs = this._collectPinnedTabsPayload();
         const pinnedSidebarOrder = this._rememberPinnedSidebarOrder();
-        await this.saveSetting('pinnedTabs', pinnedTabs);
+        this.settings.pinnedTabs = pinnedTabs;
         if (pinnedSidebarOrder?.length) {
-            await this.saveSetting('pinnedSidebarOrder', pinnedSidebarOrder);
+            this.settings.pinnedSidebarOrder = pinnedSidebarOrder;
         }
+        const patch = { pinnedTabs };
+        if (pinnedSidebarOrder?.length) patch.pinnedSidebarOrder = pinnedSidebarOrder;
+        if (typeof window.electronAPI?.setSettingsBatch === 'function') {
+            await window.electronAPI.setSettingsBatch(patch);
+            return;
+        }
+        await Promise.all([
+            this.saveSetting('pinnedTabs', pinnedTabs),
+            pinnedSidebarOrder?.length
+                ? this.saveSetting('pinnedSidebarOrder', pinnedSidebarOrder)
+                : Promise.resolve()
+        ]);
     }
     
     async loadPinnedTabs() {
@@ -17413,7 +17627,7 @@ class AxisBrowser {
             for (const pinnedData of pinnedTabsData) {
                 const tabId = this._createUniqueTabId(pinnedData.id);
                 const tabElement = document.createElement('div');
-                tabElement.className = 'tab pinned';
+                tabElement.className = 'tab pinned closed';
                 tabElement.dataset.tabId = tabId;
                 
                 const inAiChat = this._savedNewTabInAiChatFromPayload(pinnedData);
@@ -17437,6 +17651,8 @@ class AxisBrowser {
                         </div>
                     </div>
                 `;
+                const favImg = tabElement.querySelector('img.tab-favicon, .tab-favicon img');
+                if (favImg) favImg.loading = 'lazy';
                 
                 // Store tab data (no webview initially - will be created when opened)
                 this.tabs.set(tabId, {
@@ -17452,6 +17668,7 @@ class AxisBrowser {
                     history: pinnedData.url ? [pinnedData.url] : [],
                     historyIndex: pinnedData.url ? 0 : -1,
                     pinned: true,
+                    closed: true,
                     savedLinkUrl: pinnedData.url || null,
                     webview: null, // No webview initially - tab is closed
                     ...(pinnedData.newTabPageState ? { newTabPageState: pinnedData.newTabPageState } : {}),
@@ -17465,19 +17682,13 @@ class AxisBrowser {
                         : {})
                 });
                 
-                // Mark as closed since it has no webview
-                tabElement.classList.add('closed');
-                
                 pinnedFrag.appendChild(tabElement);
                 
                 // Set up event listeners
                 this.setupTabEventListeners(tabElement, tabId);
-                
-                // Update favicon
-                this.updateTabFavicon(tabId, tabElement);
-                
-                // Update closed state (tabs loaded from saved state have no webview initially)
-                this.updatePinnedTabClosedState(tabId);
+                this.setupPinnedTabCloseButton(tabElement, tabId);
+                // Skip updateTabFavicon on load — iconHTML already has the cached icon.
+                // Refetching hundreds of favicons at once freezes the sidebar.
             }
 
             tabsContainer.insertBefore(pinnedFrag, separator);
@@ -17582,24 +17793,24 @@ class AxisBrowser {
         
         // Toggle sidebar position
         const isRight = mainArea.classList.contains('sidebar-right');
-        
-        if (isRight) {
-            // Move to left
+        const next = isRight ? 'left' : 'right';
+
+        if (next === 'left') {
             mainArea.classList.remove('sidebar-right');
             sidebar.classList.remove('sidebar-right');
-            this.settings.sidebarPosition = 'left';
-            void this.saveSetting('sidebarPosition', 'left');
             if (positionText) positionText.textContent = 'Move Sidebar Right';
             if (contextText) contextText.textContent = 'Move Sidebar Right';
         } else {
-            // Move to right
             mainArea.classList.add('sidebar-right');
             sidebar.classList.add('sidebar-right');
-            this.settings.sidebarPosition = 'right';
-            void this.saveSetting('sidebarPosition', 'right');
             if (positionText) positionText.textContent = 'Move Sidebar Left';
             if (contextText) contextText.textContent = 'Move Sidebar Left';
         }
+        if (!this.settings || typeof this.settings !== 'object') this.settings = {};
+        this.settings.sidebarPosition = next;
+        void this.saveSetting('sidebarPosition', next).finally(() => {
+            this._notifySettingsTabWebviewsStoreUpdated();
+        });
         this.syncMacOSTrafficLayout();
     }
 
@@ -20600,16 +20811,17 @@ class AxisBrowser {
                     });
                 });
 
-                const tabIdSet = new Set();
-                savedTabIds.forEach((id) => {
-                    const nid = this._normalizeTabMapKey(id);
-                    if (nid != null && this.tabs.has(nid)) tabIdSet.add(nid);
-                });
-                savedTabs.forEach((saved) => {
-                    const nid = this._normalizeTabMapKey(saved?.id);
-                    if (nid != null && this.tabs.has(nid)) tabIdSet.add(nid);
-                });
-                group.tabIds = Array.from(tabIdSet);
+                const orderedIds = [];
+                const seenIds = new Set();
+                const pushId = (raw) => {
+                    const nid = this._normalizeTabMapKey(raw);
+                    if (nid == null || !this.tabs.has(nid) || seenIds.has(nid)) return;
+                    seenIds.add(nid);
+                    orderedIds.push(nid);
+                };
+                savedTabIds.forEach((id) => pushId(id));
+                savedTabs.forEach((saved) => pushId(saved?.id));
+                group.tabIds = orderedIds;
 
                 if (group.tabIds.length === 0 && hadTabs) {
                     return;
@@ -21112,8 +21324,15 @@ class AxisBrowser {
         // Separator visibility is based on actual DOM content above it
         this.updatePinnedSeparatorVisibility();
         this._syncFavoriteTabsUi?.();
-        this._refreshSidebarDragHandlers?.();
-        if (!this._suppressTabGroupsAutosave) void this.saveTabGroups();
+        // Only wire drag on rows that aren't set up yet (full rebind over hundreds of pins is costly).
+        this._refreshSidebarDragHandlers?.({ onlyNew: true });
+        if (!this._suppressTabGroupsAutosave) {
+            if (this._tabGroupsSaveTimer) clearTimeout(this._tabGroupsSaveTimer);
+            this._tabGroupsSaveTimer = setTimeout(() => {
+                this._tabGroupsSaveTimer = null;
+                void this.saveTabGroups();
+            }, 500);
+        }
     }
 
     getOrCreateGroupElement(group) {
@@ -21140,13 +21359,11 @@ class AxisBrowser {
                 }
                 let tabEl = existingTabEls.find(t => parseInt(t.dataset.tabId, 10) === tabId);
                 if (!tabEl) tabEl = this.getOrCreateTabElement(tabId);
-                if (tabEl && tabEl.parentNode !== container) {
-                    tabEl.classList.add('pinned');
-                    container.appendChild(tabEl);
-                    if (this.makeTabDraggable) this.makeTabDraggable(tabEl);
-                } else if (tabEl && tabEl.parentNode === container) {
-                    tabEl.classList.add('pinned');
-                }
+                if (!tabEl) return;
+                tabEl.classList.add('pinned');
+                /* Always re-append so group.tabIds order wins over leftover DOM order. */
+                container.appendChild(tabEl);
+                if (this.makeTabDraggable) this.makeTabDraggable(tabEl);
             });
             if (group.tabIds.length === 0) {
                 if (this._pendingEmptyGroupCollapseId === group.id) {
@@ -22147,15 +22364,20 @@ class AxisBrowser {
         history.forEach(item => {
             const historyItem = document.createElement('div');
             historyItem.className = 'history-item';
+            const title = this.escapeHtml(String(item.title || ''));
+            const url = this.escapeHtml(String(item.url || ''));
+            const time = this.escapeHtml(String(item.time || ''));
+            const id = this.escapeHtml(String(item.id || ''));
+            const favicon = this.safeHistoryFaviconUrl(item.favicon);
             historyItem.innerHTML = `
-                <img class="history-favicon" src="${item.favicon}" alt="" onerror="this.style.display='none'">
+                <img class="history-favicon" src="${favicon}" alt="" onerror="this.style.display='none'">
                 <div class="history-info">
-                    <div class="history-title">${item.title}</div>
-                    <div class="history-url">${item.url}</div>
+                    <div class="history-title">${title}</div>
+                    <div class="history-url">${url}</div>
                 </div>
-                <div class="history-time">${item.time}</div>
+                <div class="history-time">${time}</div>
                 <div class="history-actions">
-                    <button class="history-delete" data-id="${item.id}" title="Delete">
+                    <button class="history-delete" data-id="${id}" title="Delete">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -22255,11 +22477,14 @@ class AxisBrowser {
         filteredHistory.forEach(item => {
             const historyItem = document.createElement('div');
             historyItem.className = 'history-item';
+            const title = this.escapeHtml(String(item.title || ''));
+            const url = this.escapeHtml(String(item.url || ''));
+            const time = this.escapeHtml(String(this.formatTimeAgo(item.timestamp) || ''));
             historyItem.innerHTML = `
                 <div class="history-info">
-                    <div class="history-title">${item.title}</div>
-                    <div class="history-url">${item.url}</div>
-                    <div class="history-time">${this.formatTimeAgo(item.timestamp)}</div>
+                    <div class="history-title">${title}</div>
+                    <div class="history-url">${url}</div>
+                    <div class="history-time">${time}</div>
                 </div>
                 <div class="history-actions">
                     <button class="history-delete" title="Delete">
@@ -23010,16 +23235,19 @@ class AxisBrowser {
                             : 'fas fa-file');
                 
                 const meta = this.formatLibraryMeta(file);
+                const name = this.escapeHtml(String(file.name || ''));
+                const filePath = this.escapeHtml(String(file.path || ''));
+                const metaEsc = this.escapeHtml(String(meta || ''));
 
                 downloadItem.innerHTML = `
                     <i class="${iconClass} download-icon"></i>
                     <div class="download-info">
-                        <div class="download-name">${file.name}</div>
-                        <div class="download-progress">${meta}</div>
-                        <div class="download-url">${file.path}</div>
+                        <div class="download-name">${name}</div>
+                        <div class="download-progress">${metaEsc}</div>
+                        <div class="download-url">${filePath}</div>
                     </div>
                     <div class="download-actions">
-                        <button class="download-btn" title="Open" data-path="${file.path}">
+                        <button class="download-btn" title="Open" data-path="${filePath}">
                             <i class="fas fa-external-link-alt"></i>
                         </button>
                     </div>
@@ -24864,7 +25092,7 @@ class AxisBrowser {
                         }
                     }
                 }
-                void this.savePinnedTabs();
+                void this._scheduleSavePinnedTabs();
                 this._scheduleUnpinnedTabsRecoverySave();
                 if (reorderNeeded) {
                     void this.saveUnpinnedTabs();
@@ -25184,15 +25412,20 @@ class AxisBrowser {
 
         this.makeTabGroupSmoothDraggable = setupTabGroupDrag;
 
-        this._refreshSidebarDragHandlers = () => {
+        this._refreshSidebarDragHandlers = (opts = {}) => {
             if (!tabsContainer) return;
+            const onlyNew = opts.onlyNew === true;
             tabsContainer.querySelectorAll(':scope > .tab').forEach((el) => {
                 if (el.classList.contains('tab-favorite-host')) return;
+                if (onlyNew && el._dragSetup) return;
                 setupTabDrag(el);
             });
             tabsContainer.querySelectorAll(':scope > .tab-group').forEach((el) => {
-                setupTabGroupDrag(el);
-                el.querySelectorAll('.tab-group-content .tab').forEach(setupTabDrag);
+                if (!onlyNew || !el._dragSetup) setupTabGroupDrag(el);
+                el.querySelectorAll('.tab-group-content .tab').forEach((tabEl) => {
+                    if (onlyNew && tabEl._dragSetup) return;
+                    setupTabDrag(tabEl);
+                });
             });
         };
         
@@ -27228,6 +27461,15 @@ class AxisBrowser {
         return div.innerHTML;
     }
 
+    /** Allow only http(s)/data-image favicons in shell HTML (blocks javascript: XSS). */
+    safeHistoryFaviconUrl(url) {
+        if (!url || typeof url !== 'string') return '';
+        const s = url.trim();
+        if (/^https?:\/\//i.test(s)) return this.escapeHtml(s);
+        if (/^data:image\/[a-z0-9+.-]+;/i.test(s)) return this.escapeHtml(s);
+        return '';
+    }
+
     showQuitConfirmation() {
         let backdrop = document.getElementById('quit-modal-backdrop');
         if (!backdrop) {
@@ -27750,7 +27992,7 @@ class AxisBrowser {
             el.axisStoreInstallHostOpen.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                void this.openExtensionsMenu();
+                void this.toggleExtensionsMenu();
             });
         }
 
@@ -29885,7 +30127,7 @@ class AxisBrowser {
     }
 
     async isVaultCredentialTypingIdle(webview) {
-        const js = `(function(){var t=window.__axisVaultCredentialEditAt||0;return Date.now()-t>2200})()`;
+        const js = `(function(){var t=Number(document.documentElement.getAttribute('data-axis-vault-cred-edit-at')||window.__axisVaultCredentialEditAt||0);return Date.now()-t>2200})()`;
         let idle = true;
         const visit = async (frame) => {
             if (!frame) return;
@@ -30050,9 +30292,10 @@ class AxisBrowser {
         if (!webview) return;
         try {
             const theme = this.getVaultAutofillUiTheme();
+            // DOM attribute is visible to both isolated preload and page-world inject.
             await this.executeInGuestFrames(
                 webview,
-                `window.__axisVaultUiTheme=${JSON.stringify(theme)};`,
+                `(function(){try{document.documentElement.setAttribute('data-axis-vault-theme',${JSON.stringify(theme)});window.__axisVaultUiTheme=${JSON.stringify(theme)};}catch(e){}})();`,
                 false
             );
             const menu = document.getElementById('vault-autofill-panel');
@@ -30226,9 +30469,14 @@ class AxisBrowser {
             }
             if (probe.pick) {
                 try {
-                    const login = await window.electronAPI.vaultGetLoginForFill(probe.pick);
-                    const fillJs = await window.electronAPI.vaultBuildAutofillFillJs(login);
-                    if (fillJs) await this.executeInGuestFrames(webview, fillJs, true);
+                    const kind = probe.pickKind || 'login';
+                    if (kind === 'card') {
+                        await this.applyVaultAutofillCard(webview, probe.pick);
+                    } else if (kind === 'address') {
+                        await this.applyVaultAutofillAddress(webview, probe.pick);
+                    } else {
+                        await this.applyVaultAutofillLogin(webview, probe.pick);
+                    }
                 } catch (_) {}
                 return;
             }
@@ -30259,6 +30507,103 @@ class AxisBrowser {
         } catch (_) {}
         await new Promise((r) => setTimeout(r, 600));
         return !!(saveModal && wasHidden && !saveModal.classList.contains('hidden'));
+    }
+
+    setupSitePermissionPrompts() {
+        if (this._sitePermissionPromptsSetup) return;
+        this._sitePermissionPromptsSetup = true;
+        this._sitePermissionQueue = [];
+        this._sitePermissionActive = null;
+        this._sitePermissionSeenIds = new Set();
+
+        const modal = document.getElementById('site-permission-modal');
+        const titleEl = document.getElementById('site-permission-title');
+        const siteEl = document.getElementById('site-permission-site');
+        const detailEl = document.getElementById('site-permission-detail');
+        const allowBtn = document.getElementById('site-permission-allow');
+        const denyBtn = document.getElementById('site-permission-deny');
+
+        const hostLabel = (origin) => {
+            try {
+                return new URL(origin).hostname.replace(/^www\./i, '') || origin || 'This site';
+            } catch (_) {
+                return origin || 'This site';
+            }
+        };
+
+        const respond = (allowed) => {
+            const active = this._sitePermissionActive;
+            this._sitePermissionActive = null;
+            modal?.classList.add('hidden');
+            if (active?.requestId) {
+                this._sitePermissionSeenIds.delete(active.requestId);
+                window.electronAPI?.respondSitePermissionPrompt?.({
+                    requestId: active.requestId,
+                    allowed: !!allowed
+                });
+            }
+            this._showNextSitePermissionPrompt();
+        };
+
+        allowBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            respond(true);
+        });
+        denyBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            respond(false);
+        });
+        modal?.addEventListener('mousedown', (e) => {
+            if (e.target === modal) respond(false);
+        });
+        document.addEventListener(
+            'keydown',
+            (e) => {
+                if (!this._sitePermissionActive) return;
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    respond(false);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    respond(true);
+                }
+            },
+            true
+        );
+
+        this._showNextSitePermissionPrompt = () => {
+            if (this._sitePermissionActive) return;
+            const next = this._sitePermissionQueue.shift();
+            if (!next) return;
+            this._sitePermissionActive = next;
+            if (titleEl) titleEl.textContent = next.title || 'Allow this site?';
+            if (siteEl) siteEl.textContent = hostLabel(next.origin);
+            if (detailEl) detailEl.textContent = next.detail || 'This site is asking for an extra permission.';
+            const theme = this.getEffectiveUiTheme?.() === 'light' ? 'light' : 'dark';
+            modal?.setAttribute('data-ui-theme', theme);
+            modal?.classList.remove('hidden');
+            try {
+                allowBtn?.focus?.({ preventScroll: true });
+            } catch (_) {
+                try {
+                    allowBtn?.focus?.();
+                } catch (__) {}
+            }
+        };
+
+        window.electronAPI?.onSitePermissionPrompt?.((data) => {
+            if (!data || !data.requestId) return;
+            if (this._sitePermissionSeenIds.has(data.requestId)) return;
+            if (this._sitePermissionActive?.requestId === data.requestId) return;
+            if (this._sitePermissionQueue.some((q) => q.requestId === data.requestId)) return;
+            this._sitePermissionSeenIds.add(data.requestId);
+            this._sitePermissionQueue.push(data);
+            this._showNextSitePermissionPrompt();
+        });
     }
 
     setupVaultUi() {
@@ -30311,14 +30656,17 @@ class AxisBrowser {
             const panel = this.elements.vaultAutofillPanel;
             if (!panel || panel.classList.contains('hidden')) return;
             if (panel.contains(e.target)) return;
-            const tag = e.target && e.target.tagName;
-            if (tag === 'WEBVIEW' || (e.target && e.target.closest && e.target.closest('webview'))) {
-                return;
-            }
-            this.hideVaultAutofillPanel();
+            // Clicking the page (webview) or anywhere else should dismiss the overlay.
+            const wv = this._vaultAutofillWebview || this.getActiveWebview();
+            this.hideVaultAutofillPanel(true);
+            if (wv) this._voidGuestTask(this.hideVaultAutofillInPage(wv));
         });
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') this.hideVaultAutofillPanel();
+            if (e.key === 'Escape') {
+                const wv = this._vaultAutofillWebview || this.getActiveWebview();
+                this.hideVaultAutofillPanel(true);
+                if (wv) this._voidGuestTask(this.hideVaultAutofillInPage(wv));
+            }
         });
         window.addEventListener(
             'scroll',
@@ -30336,12 +30684,19 @@ class AxisBrowser {
         }
     }
 
-    hideVaultAutofillPanel() {
-        if (this._vaultAutofillShownAt && Date.now() - this._vaultAutofillShownAt < 500) return;
+    hideVaultAutofillPanel(force = false) {
+        if (
+            !force &&
+            this._vaultAutofillShownAt &&
+            Date.now() - this._vaultAutofillShownAt < 500
+        ) {
+            return;
+        }
         const panel = this.elements.vaultAutofillPanel;
         if (panel) panel.classList.add('hidden');
         this._vaultAutofillWebview = null;
         this._vaultAutofillPayload = null;
+        this._vaultAutofillShownAt = 0;
     }
 
     repositionVaultAutofillPanel() {
@@ -30420,7 +30775,7 @@ class AxisBrowser {
                 btn.innerHTML = `<span class="vault-autofill-item-title">${this.escapeHtml(row.title || row.username || 'Saved login')}</span><span class="vault-autofill-item-sub">${this.escapeHtml(row.username || '')}</span>`;
                 btn.addEventListener('mousedown', (e) => {
                     e.preventDefault();
-                    this.hideVaultAutofillPanel();
+                    this.hideVaultAutofillPanel(true);
                     void this.applyVaultAutofillLogin(webview, row.id);
                 });
             } else if (kind === 'address') {
@@ -30429,7 +30784,7 @@ class AxisBrowser {
                 btn.innerHTML = `<span class="vault-autofill-item-title">${this.escapeHtml(label)}</span><span class="vault-autofill-item-sub">${this.escapeHtml(sub)}</span>`;
                 btn.addEventListener('mousedown', (e) => {
                     e.preventDefault();
-                    this.hideVaultAutofillPanel();
+                    this.hideVaultAutofillPanel(true);
                     void this.applyVaultAutofillAddress(webview, row.id);
                 });
             } else {
@@ -30438,7 +30793,7 @@ class AxisBrowser {
                 btn.innerHTML = `<span class="vault-autofill-item-title">${this.escapeHtml(label)}</span><span class="vault-autofill-item-sub">${this.escapeHtml(sub)}</span>`;
                 btn.addEventListener('mousedown', (e) => {
                     e.preventDefault();
-                    this.hideVaultAutofillPanel();
+                    this.hideVaultAutofillPanel(true);
                     void this.applyVaultAutofillCard(webview, row.id);
                 });
             }
@@ -30455,7 +30810,20 @@ class AxisBrowser {
         if (!webview || !id) return;
         try {
             const login = await window.electronAPI.vaultGetLoginForFill(id);
-            webview.send('axis-vault-apply-login', login);
+            if (!login || (!login.username && !login.password)) return;
+            // Fill in the page world so it works even when guest preload IPC is unavailable.
+            try {
+                let fillJs = null;
+                try {
+                    fillJs = await window.electronAPI.vaultBuildAutofillFillJs(login);
+                } catch (_) {}
+                if (fillJs) await this.executeInGuestFrames(webview, fillJs, true);
+            } catch (_) {}
+            try {
+                webview.send('axis-vault-apply-login', login);
+            } catch (_) {}
+            this._voidGuestTask(this.hideVaultAutofillInPage(webview));
+            this.hideVaultAutofillPanel(true);
         } catch (_) {}
     }
 
@@ -30463,7 +30831,20 @@ class AxisBrowser {
         if (!webview || !id) return;
         try {
             const card = await window.electronAPI.vaultGetCardForFill(id);
-            webview.send('axis-vault-apply-card', card);
+            if (!card || !card.number) return;
+            const payload = { ...card, __axisFillKind: 'card' };
+            try {
+                let fillJs = null;
+                try {
+                    fillJs = await window.electronAPI.vaultBuildAutofillFillJs(payload);
+                } catch (_) {}
+                if (fillJs) await this.executeInGuestFrames(webview, fillJs, true);
+            } catch (_) {}
+            try {
+                webview.send('axis-vault-apply-card', card);
+            } catch (_) {}
+            this._voidGuestTask(this.hideVaultAutofillInPage(webview));
+            this.hideVaultAutofillPanel(true);
         } catch (_) {}
     }
 
@@ -30471,7 +30852,20 @@ class AxisBrowser {
         if (!webview || !id) return;
         try {
             const address = await window.electronAPI.vaultGetAddressForFill(id);
-            webview.send('axis-vault-apply-address', address);
+            if (!address) return;
+            const payload = { ...address, __axisFillKind: 'address' };
+            try {
+                let fillJs = null;
+                try {
+                    fillJs = await window.electronAPI.vaultBuildAutofillFillJs(payload);
+                } catch (_) {}
+                if (fillJs) await this.executeInGuestFrames(webview, fillJs, true);
+            } catch (_) {}
+            try {
+                webview.send('axis-vault-apply-address', address);
+            } catch (_) {}
+            this._voidGuestTask(this.hideVaultAutofillInPage(webview));
+            this.hideVaultAutofillPanel(true);
         } catch (_) {}
     }
 
