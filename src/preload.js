@@ -18,11 +18,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('system-ui-theme-changed', handler);
   },
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
+  setSettingsBatch: (patch) => ipcRenderer.invoke('set-settings-batch', patch),
   /** Sync write before quit — avoids losing tab groups when async setSetting does not finish. */
   flushSessionSync: (payload) => ipcRenderer.sendSync('axis-flush-session-sync', payload),
   flushSessionAsync: (payload) => ipcRenderer.invoke('axis-flush-session-async', payload),
   getSitePermissionOverrides: () => ipcRenderer.invoke('get-site-permission-overrides'),
   setSitePermissionOverrides: (obj) => ipcRenderer.invoke('set-site-permission-overrides', obj),
+  respondSitePermissionPrompt: (payload) => ipcRenderer.send('axis-site-permission-response', payload),
+  onSitePermissionPrompt: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('axis-site-permission-prompt', handler);
+    return () => ipcRenderer.removeListener('axis-site-permission-prompt', handler);
+  },
   sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
   openSettingsWindow: (tab) => ipcRenderer.invoke('open-settings-window', tab),
   listImportableBrowsers: () => ipcRenderer.invoke('list-importable-browsers'),
@@ -61,6 +68,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeExtension: (id) => ipcRenderer.invoke('remove-extension', id),
   openExtensionOptions: (id) => ipcRenderer.invoke('open-extension-options', id),
   openExtensionPopup: (id) => ipcRenderer.invoke('open-extension-popup', id),
+  openExtensionPage: (url) => ipcRenderer.invoke('open-extension-page', url),
   
   // History management
   getHistory: () => ipcRenderer.invoke('get-history'),
@@ -177,7 +185,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onFavoriteContextMenuAction: (callback) =>
     ipcRenderer.on('favorite-context-menu-action', (event, action, data) => callback(action, data)),
 
-  // Password & card vault (encrypted local store)
+  // Password & card vault (OS-encrypted at rest when available)
   vaultStatus: () => ipcRenderer.invoke('axis-vault-status'),
   vaultGetPageScanJs: () => ipcRenderer.invoke('axis-vault-get-page-scan-js'),
   vaultGetAutofillInjectJs: () => ipcRenderer.invoke('axis-vault-get-autofill-inject-js'),
