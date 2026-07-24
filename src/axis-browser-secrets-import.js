@@ -183,10 +183,40 @@ function decryptAes256Gcm(payload, masterKey) {
   }
 }
 
+function asCryptBuffer(encrypted) {
+  if (encrypted == null || encrypted === '') return null;
+  if (Buffer.isBuffer(encrypted)) return encrypted;
+  if (encrypted instanceof Uint8Array) return Buffer.from(encrypted);
+  if (Array.isArray(encrypted)) return Buffer.from(encrypted);
+  if (typeof encrypted === 'string') {
+    // Preserve byte values 0–255 from SQLite TEXT/BLOB coercion.
+    return Buffer.from(encrypted, 'latin1');
+  }
+  if (encrypted.type === 'Buffer' && Array.isArray(encrypted.data)) {
+    return Buffer.from(encrypted.data);
+  }
+  try {
+    return Buffer.from(encrypted);
+  } catch (_) {
+    return null;
+  }
+}
+
+function decodeDecryptedSecret(buf) {
+  if (!buf || !buf.length) return '';
+  const utf8 = buf.toString('utf8').replace(/\0/g, '').trim();
+  if (utf8) return utf8;
+  // Some Chromium builds store EncryptString16 as UTF-16LE.
+  if (buf.length >= 2 && buf.length % 2 === 0) {
+    const utf16 = buf.toString('utf16le').replace(/\0/g, '').trim();
+    if (utf16) return utf16;
+  }
+  return '';
+}
+
 function decryptChromiumBlob(encrypted, keys) {
-  if (!encrypted) return '';
-  const buf = Buffer.isBuffer(encrypted) ? encrypted : Buffer.from(encrypted);
-  if (buf.length < 4) return '';
+  const buf = asCryptBuffer(encrypted);
+  if (!buf || buf.length < 4) return '';
   const prefix = buf.subarray(0, 3).toString('utf8');
   if (!/^v\d\d$/.test(prefix)) return '';
   const payload = buf.subarray(3);
@@ -198,9 +228,10 @@ function decryptChromiumBlob(encrypted, keys) {
   if (key16) {
     const cbc = decryptAes128Cbc(payload, key16);
     if (cbc?.length) {
-      const text = cbc.toString('utf8').replace(/\0/g, '').trim();
+      const text = decodeDecryptedSecret(cbc);
       if (text) return text;
-      const trimmed = cbc.length > 32 ? cbc.subarray(32).toString('utf8').replace(/\0/g, '').trim() : '';
+      const trimmed =
+        cbc.length > 32 ? decodeDecryptedSecret(cbc.subarray(32)) : '';
       if (trimmed) return trimmed;
     }
   }
@@ -316,18 +347,92 @@ function pushUniqueAddress(list, seen, addr) {
   list.push(addr);
 }
 
+function normalizeImportedCvv(...candidates) {
+  for (const raw of candidates) {
+    if (raw == null) continue;
+    const digits = String(raw).replace(/\D/g, '');
+    if (/^\d{3,4}$/.test(digits)) return digits;
+  }
+  return '';
+}
+
+function normalizeImportedExpYear(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (/^\d{4}$/.test(s)) return s;
+  if (/^\d{2}$/.test(s)) {
+    const n = Number(s);
+    // Chrome sometimes stores 2-digit years.
+    return String(n >= 70 ? 1900 + n : 2000 + n);
+  }
+  return s;
+}
+
+function readChromiumStoredCvcMap(webDataDb, keys) {
+  const byGuid = new Map();
+  const byInstrumentId = new Map();
+
+  for (const row of querySqliteDb(
+    webDataDb,
+    `SELECT guid, value_encrypted FROM local_stored_cvc`
+  )) {
+    const guid = String(row.guid || '').trim();
+    if (!guid || byGuid.has(guid)) continue;
+    const cvv = normalizeImportedCvv(decryptChromiumBlob(row.value_encrypted, keys));
+    if (cvv) byGuid.set(guid, cvv);
+  }
+
+  for (const row of querySqliteDb(
+    webDataDb,
+    `SELECT CAST(instrument_id AS TEXT) AS instrument_id, value_encrypted FROM server_stored_cvc`
+  )) {
+    const id = String(row.instrument_id || '').trim();
+    if (!id || byInstrumentId.has(id)) continue;
+    const cvv = normalizeImportedCvv(decryptChromiumBlob(row.value_encrypted, keys));
+    if (cvv) byInstrumentId.set(id, cvv);
+  }
+
+  return { byGuid, byInstrumentId };
+}
+
+function readChromiumUnmaskedNumberById(webDataDb, keys) {
+  const byId = new Map();
+  for (const row of querySqliteDb(
+    webDataDb,
+    `SELECT id, card_number_encrypted FROM unmasked_credit_cards`
+  )) {
+    const id = String(row.id || '').trim();
+    if (!id) continue;
+    const number = decryptChromiumBlob(row.card_number_encrypted, keys).replace(/\D/g, '');
+    if (/^\d{13,19}$/.test(number)) byId.set(id, number);
+  }
+  return byId;
+}
+
 function readChromiumCards(profilePath, userDataPath, browserId) {
   const webDataDb = path.join(profilePath, 'Web Data');
   if (!pathExists(webDataDb)) return [];
   const keys = buildChromiumDecryptKeys(userDataPath || path.dirname(profilePath), browserId);
   if (!keys.key16 && !keys.key32) return [];
 
+  // Prefer JOIN so CVC rides with the card row when Chromium stored it.
   let rows = querySqliteDb(
     webDataDb,
-    `SELECT guid, name_on_card, expiration_month, expiration_year, card_number_encrypted,
-            nickname, billing_address_id
-     FROM credit_cards`
+    `SELECT c.guid AS guid, c.name_on_card AS name_on_card, c.expiration_month AS expiration_month,
+            c.expiration_year AS expiration_year, c.card_number_encrypted AS card_number_encrypted,
+            c.nickname AS nickname, c.billing_address_id AS billing_address_id,
+            cvc.value_encrypted AS cvc_value_encrypted
+     FROM credit_cards c
+     LEFT JOIN local_stored_cvc cvc ON cvc.guid = c.guid`
   );
+  if (!rows.length) {
+    rows = querySqliteDb(
+      webDataDb,
+      `SELECT guid, name_on_card, expiration_month, expiration_year, card_number_encrypted,
+              nickname, billing_address_id
+       FROM credit_cards`
+    );
+  }
   if (!rows.length) {
     rows = querySqliteDb(
       webDataDb,
@@ -337,32 +442,89 @@ function readChromiumCards(profilePath, userDataPath, browserId) {
   }
 
   const zipByGuid = new Map();
+  const addressByGuid = new Map();
   try {
     for (const a of collectChromiumAddresses(profilePath, { keepGuid: true })) {
-      if (a._guid && a.postalCode) zipByGuid.set(a._guid, a.postalCode);
+      if (!a._guid) continue;
+      addressByGuid.set(a._guid, a);
+      if (a.postalCode) zipByGuid.set(a._guid, a.postalCode);
     }
   } catch (_) {}
 
+  const cvcMaps = readChromiumStoredCvcMap(webDataDb, keys);
+  const unmaskedById = readChromiumUnmaskedNumberById(webDataDb, keys);
+
   const cards = [];
+  const seenNumbers = new Set();
+
   for (const row of rows) {
-    const number = decryptChromiumBlob(row.card_number_encrypted, keys).replace(/\D/g, '');
+    let number = decryptChromiumBlob(row.card_number_encrypted, keys).replace(/\D/g, '');
     if (!/^\d{13,19}$/.test(number)) continue;
+    if (seenNumbers.has(number)) continue;
+    seenNumbers.add(number);
     let cardholder = String(row.name_on_card || '').trim();
     if (!cardholder) cardholder = `Card •••• ${number.slice(-4)}`;
     const expMonth = String(row.expiration_month || '').padStart(2, '0');
-    const expYear = String(row.expiration_year || '').trim();
+    const expYear = normalizeImportedExpYear(row.expiration_year);
     if (!/^\d{1,2}$/.test(String(row.expiration_month || '')) || !expYear) continue;
     const billingId = String(row.billing_address_id || '').trim();
+    const guid = String(row.guid || '').trim();
+    const billing = billingId ? addressByGuid.get(billingId) : null;
+    const nickname = String(row.nickname || '').trim();
+    const last4 = number.slice(-4);
     cards.push({
-      label: String(row.nickname || '').trim(),
+      label: nickname || `•••• ${last4}`,
       cardholder,
       number,
       expMonth,
       expYear,
-      cvv: '',
-      billingZip: billingId ? zipByGuid.get(billingId) || '' : ''
+      // Chromium stores this as CVC; Axis vault field is always `cvv`.
+      cvv: normalizeImportedCvv(
+        decryptChromiumBlob(row.cvc_value_encrypted, keys),
+        guid ? cvcMaps.byGuid.get(guid) : '',
+        row.cvc,
+        row.cvv,
+        row.card_cvc,
+        row.security_code
+      ),
+      billingZip:
+        (billingId ? zipByGuid.get(billingId) || '' : '') ||
+        String(billing?.postalCode || '').trim()
     });
   }
+
+  // Masked Google Pay / server cards only have a full PAN if Chromium cached one in unmasked_credit_cards.
+  const masked = querySqliteDb(
+    webDataDb,
+    `SELECT id, name_on_card, network, last_four, exp_month, exp_year, nickname, bank_name, instrument_id
+     FROM masked_credit_cards`
+  );
+  for (const row of masked) {
+    const id = String(row.id || '').trim();
+    const number = (id && unmaskedById.get(id)) || '';
+    if (!/^\d{13,19}$/.test(number) || seenNumbers.has(number)) continue;
+    seenNumbers.add(number);
+    const last4 = String(row.last_four || number.slice(-4)).replace(/\D/g, '').slice(-4);
+    const network = String(row.network || '').trim();
+    const bank = String(row.bank_name || '').trim();
+    const nickname = String(row.nickname || '').trim();
+    let cardholder = String(row.name_on_card || '').trim();
+    if (!cardholder) cardholder = nickname || `${network || 'Card'} •••• ${last4}`;
+    const expMonth = String(row.exp_month || '').padStart(2, '0');
+    const expYear = normalizeImportedExpYear(row.exp_year);
+    if (!/^\d{1,2}$/.test(String(row.exp_month || '')) || !expYear) continue;
+    const instrumentId = String(row.instrument_id || '').trim();
+    cards.push({
+      label: nickname || [network, bank].filter(Boolean).join(' · ') || `•••• ${last4}`,
+      cardholder,
+      number,
+      expMonth,
+      expYear,
+      cvv: normalizeImportedCvv(instrumentId ? cvcMaps.byInstrumentId.get(instrumentId) : ''),
+      billingZip: ''
+    });
+  }
+
   return cards;
 }
 
@@ -761,6 +923,17 @@ function extractBrowserSecrets(source, options = {}) {
         warnings.push(
           'Could not read payment cards — allow Keychain access for the source browser or quit it and try again.'
         );
+      } else if (cards.length > 0) {
+        const withCvv = cards.filter((c) => c.cvv).length;
+        if (withCvv === 0) {
+          warnings.push(
+            'Payment cards were imported, but no security codes (CVC/CVV) were found. The other browser only saves those when you chose to store them — Axis cannot invent missing codes.'
+          );
+        } else if (withCvv < cards.length) {
+          warnings.push(
+            `Imported ${cards.length} cards; ${withCvv} included a security code. The others had no CVC saved in the other browser.`
+          );
+        }
       }
     }
     if (importAddresses) {
@@ -788,6 +961,7 @@ function extractBrowserSecrets(source, options = {}) {
 
 module.exports = {
   extractBrowserSecrets,
+  normalizeImportedCvv,
   readChromiumLogins,
   readChromiumCards,
   readChromiumAddresses,
