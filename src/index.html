@@ -295,8 +295,8 @@
                                     <div class="new-tab-widgets-section ntp-widgets-empty-layout hidden" id="new-tab-widgets-section" aria-label="Widgets">
                                         <div id="ntp-widgets-grid" class="ntp-widgets-grid"></div>
                                         <div class="ntp-widgets-foot">
-                                            <button type="button" id="ntp-widgets-edit-btn" class="ntp-widgets-edit-btn" aria-pressed="false">Edit</button>
                                             <button type="button" id="ntp-widgets-add-btn" class="ntp-widgets-add-btn hidden" aria-expanded="false">Add widget</button>
+                                            <button type="button" id="ntp-widgets-edit-btn" class="ntp-widgets-edit-btn" aria-pressed="false">Edit</button>
                                             <div id="ntp-widget-add-strip" class="ntp-widget-add-strip hidden" aria-label="Add a widget">
                                                 <div id="ntp-widget-catalog" class="ntp-widget-add-chips"></div>
                                             </div>
@@ -1008,6 +1008,18 @@
     </div><!-- /#app -->
 
     <!-- Vault modals on <body> so they paint above guest <webview> layers -->
+    <div id="site-permission-modal" class="vault-modal vault-save-modal hidden" role="dialog" aria-labelledby="site-permission-title" aria-modal="true">
+        <div class="vault-save-modal__card">
+            <h2 id="site-permission-title" class="vault-save-modal__title">Allow this site?</h2>
+            <p id="site-permission-site" class="vault-save-modal__site">—</p>
+            <p id="site-permission-detail" class="vault-save-modal__hint">This site is asking for an extra permission.</p>
+            <div class="vault-save-modal__actions">
+                <button type="button" class="vault-save-modal__btn" id="site-permission-deny">Block</button>
+                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--primary" id="site-permission-allow">Allow</button>
+            </div>
+        </div>
+    </div>
+
     <div id="vault-save-modal" class="vault-modal vault-save-modal hidden" role="dialog" aria-labelledby="vault-save-title" aria-modal="true">
         <div class="vault-save-modal__card">
             <h2 id="vault-save-title" class="vault-save-modal__title">Save password?</h2>
@@ -1069,7 +1081,7 @@
         </div>
     </div>
 
-    <!-- App onboarding (forced every launch while testing) -->
+    <!-- App onboarding (first launch only) -->
     <div id="axis-onboarding" class="axis-onboarding hidden" role="dialog" aria-modal="true" aria-labelledby="ob-welcome-title" hidden>
         <div class="ob-drag" aria-hidden="true"></div>
         <div class="ob-backdrop" aria-hidden="true">
@@ -1319,7 +1331,7 @@
                 </div>
 
                 <footer class="ob-footer">
-                    <button type="button" class="ob-btn ob-btn--ghost" id="ob-skip-btn">Skip setup</button>
+                    <button type="button" class="ob-btn ob-btn--ghost" id="ob-skip-btn" aria-haspopup="dialog" aria-controls="ob-skip-overlay">Skip setup</button>
                     <div class="ob-footer-right">
                         <button type="button" class="ob-btn ob-btn--ghost" id="ob-back-btn">Back</button>
                         <button type="button" class="ob-btn ob-btn--primary" id="ob-next-btn">
@@ -1328,6 +1340,53 @@
                     </div>
                 </footer>
             </section>
+        </div>
+
+        <div
+            class="ob-skip-overlay"
+            id="ob-skip-overlay"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="ob-skip-overlay-title"
+            aria-describedby="ob-skip-overlay-desc"
+            aria-hidden="true"
+            hidden
+        >
+            <div class="ob-skip-overlay-panel">
+                <div class="ob-skip-overlay-progress" aria-hidden="true">
+                    <span class="ob-skip-overlay-progress-line"></span>
+                    <span class="ob-skip-overlay-progress-label">Less than a minute left</span>
+                    <span class="ob-skip-overlay-progress-line"></span>
+                </div>
+                <h2 class="ob-skip-overlay-title" id="ob-skip-overlay-title">Are you sure?</h2>
+                <div class="ob-skip-overlay-copy" id="ob-skip-overlay-desc">
+                    <p>Setup usually takes less than a minute — it doesn’t collect personal information or install bloatware. You can always change things later in Settings.</p>
+                </div>
+                <div class="ob-skip-overlay-actions">
+                    <button type="button" class="ob-skip-overlay-btn ob-skip-overlay-btn--stay" id="ob-skip-continue-btn">
+                        <span class="ob-skip-overlay-btn-text">
+                            <span class="ob-skip-overlay-btn-title">Stay in Setup</span>
+                            <span class="ob-skip-overlay-btn-sub">Recommended</span>
+                        </span>
+                        <span class="ob-skip-overlay-btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M5 12h14M13 6l6 6-6 6" />
+                            </svg>
+                        </span>
+                    </button>
+                    <button type="button" class="ob-skip-overlay-btn ob-skip-overlay-btn--exit" id="ob-skip-confirm-btn">
+                        <span class="ob-skip-overlay-btn-text">
+                            <span class="ob-skip-overlay-btn-title">Exit Setup</span>
+                            <span class="ob-skip-overlay-btn-sub">Not advised</span>
+                        </span>
+                        <span class="ob-skip-overlay-btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                                <path d="M6 6l12 12M18 6L6 18" />
+                            </svg>
+                        </span>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
