@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
 
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  getSidebarPosition: () => ipcRenderer.sendSync('axis-get-sidebar-position'),
   getSettingsWindowBootstrap: () => ipcRenderer.sendSync('axis-settings-window-bootstrap'),
   getSettingsProfileBootstrap: () => ipcRenderer.sendSync('axis-settings-profile-bootstrap'),
   getSystemUiTheme: () => ipcRenderer.invoke('get-system-ui-theme'),
