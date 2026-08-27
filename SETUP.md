@@ -1,190 +1,85 @@
-# Axis Browser - Setup Guide
+# Axis setup
 
-A minimalistic, customizable, and beautiful browser built on Electron with a modern dark theme and smooth animations.
+How to run Axis on your machine from this repo.
 
-## 📋 Prerequisites
+## Requirements
 
-Before you begin, make sure you have the following installed on your system:
+- Node.js 18 or newer
+- npm (comes with Node.js)
 
-- **Node.js** (version 16.0.0 or higher recommended)
-- **npm** (comes with Node.js)
-- **Git** (for cloning the repository)
-
-### Checking Your Installation
+Check:
 
 ```bash
 node --version
 npm --version
-git --version
 ```
 
-## 🛠️ Installation
+## Install
 
-### 1. Clone the Repository
-
-```bash
-git clone <repository-url>
-cd "Axis Browser"
-```
-
-### 2. Install Dependencies
-
-Install all required Node.js packages:
+From the project folder:
 
 ```bash
 npm install
 ```
 
-This will install:
-- **Electron** (v35.7.5) - The core framework
-- **electron-builder** (v25.1.8) - For building distributables
-- **electron-store** (v8.1.0) - For persistent data storage
-
-### 3. Run the Browser
-
-Start the development version:
+## Run
 
 ```bash
 npm start
 ```
 
-Or run with development flags:
+For a developer launch (DevTools available):
 
 ```bash
 npm run dev
 ```
 
-## 🎯 Available Scripts
+## Useful commands
 
-| Command | Description |
-|---------|-------------|
-| `npm start` | Launch the browser in production mode |
-| `npm run dev` | Launch with development flags |
-| `npm run build` | Build the application |
-| `npm run dist` | Create distributable packages |
+| Command | What it does |
+|---------|----------------|
+| `npm start` | Start Axis |
+| `npm run dev` | Start Axis with developer flags |
+| `npm run i18n:sync` | Fill missing UI translations offline |
+| `npm run build` | Build the app with electron-builder |
+| `npm run dist` | Build installers (no publish) |
 
-## 🏗️ Building for Distribution
-
-### Create Installers
-
-Build platform-specific installers:
+## Build installers
 
 ```bash
 npm run dist
 ```
 
-This creates installers for:
-- **macOS**: `.dmg` file
-- **Windows**: `.exe` installer
-- **Linux**: `.AppImage` file
+Output goes in `dist/`. What you get depends on your OS (for example `.dmg` on macOS, `.exe` on Windows, `.AppImage` on Linux).
 
-### Build Output
+## If something fails
 
-Distributables will be created in the `dist/` directory.
+**`npm install` fails**
 
-
-## ⚡ Features
-
-- **🌙 Dark Theme**: Modern, easy-on-the-eyes interface
-- **📱 Responsive Design**: Adapts to different screen sizes
-- **🎨 Smooth Animations**: Professional, minimalistic transitions
-- **📚 History Management**: Real browsing history tracking
-- **⬇️ Downloads Manager**: Built-in download management
-- **⌨️ Keyboard Shortcuts**: Full keyboard navigation support
-- **🔍 Search Integration**: Quick access to search functionality
-- **📑 Tab Management**: Drag-and-drop tab reordering
-- **⚙️ Customizable Sidebar**: Resizable sidebar with smooth interactions
-
-## 🎮 Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Cmd/Ctrl + T` | New Tab |
-| `Cmd/Ctrl + W` | Close Tab |
-| `Cmd/Ctrl + Y` | Open History |
-| `Cmd/Ctrl + J` | Open Downloads |
-| `Cmd/Ctrl + B` | Open Bookmarks |
-| `Cmd/Ctrl + K` | Focus Search |
-| `Cmd/Ctrl + +` | Zoom In |
-| `Cmd/Ctrl + -` | Zoom Out |
-| `Cmd/Ctrl + 0` | Reset Zoom |
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**Issue**: `npm install` fails with permission errors
 ```bash
-# Solution: Use sudo (macOS/Linux) or run as administrator (Windows)
-sudo npm install
-```
-
-**Issue**: Electron fails to start
-```bash
-# Solution: Clear npm cache and reinstall
 npm cache clean --force
 rm -rf node_modules package-lock.json
 npm install
 ```
 
-**Issue**: Build process fails
-```bash
-# Solution: Update electron-builder
-npm install electron-builder@latest
-```
+On macOS or Linux you may need to fix folder permissions instead of using `sudo` for npm.
 
-### Node.js Version Issues
+**Axis will not start**
 
-If you encounter Node.js version warnings:
-- **Recommended**: Update to Node.js 18+ for best compatibility
-- **Alternative**: Use Node Version Manager (nvm) to switch versions
+1. Confirm Node.js is 18+.
+2. Reinstall dependencies with the steps above.
+3. Try `npm run dev` and check the terminal for errors.
 
-## 🔧 Development
+## Project layout (short)
 
-### Adding New Features
+- `src/main.js` - Electron main process
+- `src/renderer.js` - Browser UI
+- `src/index.html` / `src/styles.css` - Shell layout and styles
+- `src/settings.html` / `src/settings-app.js` - Settings
+- `scripts/` - Launch, i18n sync, and build helpers
 
-1. **Main Process**: Edit `src/main.js` for Electron APIs
-2. **Renderer Process**: Edit `src/renderer.js` for UI logic
-3. **Styling**: Update `src/styles.css` for visual changes
-4. **HTML Structure**: Modify `src/index.html` for layout changes
+## Notes
 
-### Debugging
-
-Enable developer tools:
-```bash
-npm run dev
-```
-
-This opens the browser with developer tools enabled.
-
-## 📦 Dependencies
-
-### Core Dependencies
-- **electron**: ^35.7.5 - Main framework
-- **electron-store**: ^8.1.0 - Data persistence
-
-### Development Dependencies
-- **electron-builder**: ^25.1.8 - Build system
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-
-## 🆘 Support
-
-If you encounter any issues:
-
-1. Check this setup guide
-2. Review the troubleshooting section
-3. Check Node.js and npm versions
-4. Clear cache and reinstall dependencies
-5. Open an issue on the repository
-
----
-
-**Happy browsing with Axis! 🎉**
+- Fully quit Axis before testing main-process or preload changes.
+- Do not commit secrets or API keys into the repo.
+- UI language and New Tab widgets are per profile unless Universal language is on.
