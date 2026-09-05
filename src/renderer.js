@@ -45,7 +45,7 @@ ytd-section-list-renderer, ytd-feed-filter-chip-bar-renderer {
   background-color: transparent !important;
   background: transparent !important;
 }
-/* YouTube player must stay opaque — transparent tokens break hardware video compositing */
+/* YouTube player must stay opaque - transparent tokens break hardware video compositing */
 #movie_player, #player, #player-container, #player-api, ytd-player,
 .html5-video-player, .html5-video-container, #player-container-inner,
 ytd-watch-flexy, ytd-watch-flexy #primary, ytd-watch-flexy #primary-inner {
@@ -54,23 +54,60 @@ ytd-watch-flexy, ytd-watch-flexy #primary, ytd-watch-flexy #primary-inner {
 }
 `.replace(/\s+/g, ' ').trim();
 
-/** Nudge YouTube watch-page `<video>` after tab switch / guest hide-show (black player recovery). */
-const AXIS_YOUTUBE_PLAYER_RECOVERY_JS = `
+/** Nudge guest `<video>` after tab switch / guest hide-show (black player recovery). */
+const AXIS_GUEST_VIDEO_RECOVERY_JS = `
 (function(){
 try{
-var href=String(location.href||"");
-if(!/(^|\\/\\/)((www\\.)?youtube\\.com\\/(watch|shorts|live|embed)|youtu\\.be\\/)/.test(href))return;
-var player=document.querySelector("#movie_player,ytd-player,.html5-video-player");
-if(!player)return;
-var pr=player.getBoundingClientRect();
-if(pr.width<120||pr.height<80)return;
 window.dispatchEvent(new Event("resize"));
-var v=player.querySelector("video")||document.querySelector("video");
-if(!v){return;}
-var broken=v.readyState===0&&!v.error;
-if(!broken&&(v.videoWidth||0)===0&&(v.videoHeight||0)===0&&pr.width>200&&pr.height>150)broken=true;
-if(!broken)return;
-try{v.load();}catch(e){}
+var href=String(location.href||"");
+var isYt=/(^|\\/\\/)((www\\.)?youtube\\.com\\/(watch|shorts|live|embed)|youtu\\.be\\/)/.test(href);
+function repaintVideo(v){
+  try{
+    v.style.willChange="transform";
+    v.style.transform="translateZ(0)";
+    requestAnimationFrame(function(){try{v.style.transform="";v.style.willChange="";}catch(e){}});
+  }catch(e){}
+}
+function nudgeVideo(v,playerRect){
+  if(!v)return;
+  var r=v.getBoundingClientRect();
+  if(r.width<40||r.height<30)return;
+  var pr=playerRect||r;
+  var broken=v.readyState===0||((v.videoWidth||0)===0&&(v.videoHeight||0)===0&&pr.width>80&&pr.height>60);
+  var pausedStuck=!v.paused&&v.readyState<2&&!v.error;
+  var playingBlack=v.readyState>=2&&!v.paused&&v.currentTime>0&&(v.videoWidth||0)===0&&(v.videoHeight||0)===0;
+  if(broken||pausedStuck||playingBlack){
+    try{v.load();}catch(e){}
+  }
+  try{
+    if(v.paused||broken||pausedStuck){
+      var p=v.play();
+      if(p&&typeof p.catch==="function")p.catch(function(){});
+    }
+  }catch(e){}
+  if(broken||pausedStuck||playingBlack)repaintVideo(v);
+}
+if(isYt){
+  var player=document.querySelector("#movie_player,ytd-player,.html5-video-player");
+  if(player){
+    var pr=player.getBoundingClientRect();
+    if(pr.width>=80&&pr.height>=60){
+      var yv=player.querySelector("video")||document.querySelector("video.html5-main-video")||document.querySelector("video");
+      nudgeVideo(yv,pr);
+      try{
+        var yt=player.player_||(player.getPlayer?player.getPlayer():null)||window.ytplayer;
+        if(yt&&typeof yt.playVideo==="function")yt.playVideo();
+      }catch(e){}
+    }
+  }
+}
+var videos=document.querySelectorAll("video");
+for(var i=0;i<videos.length;i++){
+  var v=videos[i];
+  if(!v)continue;
+  if(isYt&&v.classList&&v.classList.contains("html5-main-video"))continue;
+  nudgeVideo(v,null);
+}
 }catch(e){}
 })();
 `.replace(/\s+/g, ' ').trim();
@@ -134,34 +171,38 @@ if(!had)cleanupOldInline();
 /** Keyboard shortcut editor rows (must match settings.html SHORTCUT_ACTIONS). */
 function getShortcutEditorActions() {
     return [
-        { action: 'spotlight-search', label: 'New Tab / Spotlight' },
-        { action: 'close-tab', label: 'Close Tab' },
-        { action: 'new-tab', label: 'New Window' },
-        { action: 'next-tab', label: 'Show Next Tab' },
-        { action: 'previous-tab', label: 'Show Previous Tab' },
-        { action: 'next-profile', label: 'Switch to Next Profile' },
-        { action: 'previous-profile', label: 'Switch to Previous Profile' },
-        { action: 'recover-tab', label: 'Undo' },
-        { action: 'refresh', label: 'Refresh Page' },
-        { action: 'focus-url', label: 'Focus URL Bar' },
-        { action: 'duplicate-tab', label: 'Duplicate Tab' },
-        { action: 'find', label: 'Find in Page' },
-        { action: 'select-all', label: 'Select All' },
-        { action: 'paste-match-style', label: 'Paste and Match Style' },
-        { action: 'print', label: 'Print Page' },
-        { action: 'copy-url', label: 'Copy Current URL' },
-        { action: 'copy-url-markdown', label: 'Copy URL as Markdown' },
-        { action: 'pin-tab', label: 'Pin / Unpin Tab' },
-        { action: 'toggle-mute-tab', label: 'Mute / Unmute Tab' },
-        { action: 'zoom-in', label: 'Zoom In' },
-        { action: 'zoom-out', label: 'Zoom Out' },
-        { action: 'reset-zoom', label: 'Reset Zoom' },
-        { action: 'toggle-sidebar', label: 'Toggle Sidebar' },
-        { action: 'history', label: 'Open History' },
-        { action: 'downloads', label: 'Open Downloads' },
-        { action: 'toggle-chat', label: 'Open Chat' },
-        { action: 'settings', label: 'Open Settings' },
-        { action: 'clear-history', label: 'Clear History' },
+        { action: 'spotlight-search', labelKey: 'shortcut.newTabSpotlight' },
+        { action: 'close-tab', labelKey: 'shortcut.closeTab' },
+        { action: 'new-tab', labelKey: 'shortcut.newWindow' },
+        { action: 'next-tab', labelKey: 'shortcut.nextTab' },
+        { action: 'previous-tab', labelKey: 'shortcut.prevTab' },
+        { action: 'next-profile', labelKey: 'shortcut.nextProfile' },
+        { action: 'previous-profile', labelKey: 'shortcut.prevProfile' },
+        { action: 'recover-tab', labelKey: 'shortcut.undo' },
+        { action: 'go-back', labelKey: 'shortcut.goBack' },
+        { action: 'go-forward', labelKey: 'shortcut.goForward' },
+        { action: 'refresh', labelKey: 'shortcut.refresh' },
+        { action: 'hard-reload', labelKey: 'shortcut.hardReload' },
+        { action: 'focus-url', labelKey: 'shortcut.focusUrl' },
+        { action: 'duplicate-tab', labelKey: 'shortcut.duplicateTab' },
+        { action: 'add-to-favorites', labelKey: 'shortcut.addFavorite' },
+        { action: 'find', labelKey: 'shortcut.find' },
+        { action: 'select-all', labelKey: 'shortcut.selectAll' },
+        { action: 'paste-match-style', labelKey: 'shortcut.pasteMatch' },
+        { action: 'print', labelKey: 'shortcut.print' },
+        { action: 'copy-url', labelKey: 'shortcut.copyUrl' },
+        { action: 'copy-url-markdown', labelKey: 'shortcut.copyMd' },
+        { action: 'pin-tab', labelKey: 'shortcut.pinUnpin' },
+        { action: 'toggle-mute-tab', labelKey: 'shortcut.muteUnmute' },
+        { action: 'zoom-in', labelKey: 'shortcut.zoomIn' },
+        { action: 'zoom-out', labelKey: 'shortcut.zoomOut' },
+        { action: 'reset-zoom', labelKey: 'shortcut.resetZoom' },
+        { action: 'toggle-sidebar', labelKey: 'shortcut.toggleSidebar' },
+        { action: 'history', labelKey: 'shortcut.openHistory' },
+        { action: 'downloads', labelKey: 'shortcut.openDownloads' },
+        { action: 'toggle-chat', labelKey: 'shortcut.openChat' },
+        { action: 'settings', labelKey: 'shortcut.openSettings' },
+        { action: 'clear-history', labelKey: 'shortcut.clearHistory' },
         ...Array.from({ length: 9 }, (_, i) => ({
             action: `switch-tab-${i + 1}`,
             label: `Switch to tab ${i + 1}`
@@ -354,7 +395,7 @@ class AxisBrowser {
         this._unpinnedRecoveryInterval = null;
         /** Cached dominant RGB per favicon URL for favorite active outlines. */
         this._favoriteAccentCache = new Map();
-        /** In-flight disk writes per profile — load waits so evicted data is not read stale. */
+        /** In-flight disk writes per profile - load waits so evicted data is not read stale. */
         this._profilePersistInflight = new Map();
         /** During `syncSidebarFromTabGroups`, empty group that will run close animation (last tab dragged out). */
         this._pendingEmptyGroupCollapseId = null;
@@ -421,7 +462,9 @@ class AxisBrowser {
         this.currentPreviewFile = null; // Current file being previewed
         this.currentPreviewIndex = -1; // Index of current file in library items
         this.previewListenersSetup = false; // Track if preview listeners are set up
-        this.aiChatMessages = []; // Store chat message history
+        this.aiChatMessages = []; // Active tab's sidebar chat history (mirrors aiChatMessagesByTabId)
+        /** Sidebar AI chat messages keyed by normalized tab id. */
+        this.aiChatMessagesByTabId = new Map();
         this._sidebarChatImages = [];
         this._newTabChatImages = [];
         this._aiChatMaxImages = 4;
@@ -454,18 +497,18 @@ class AxisBrowser {
         this._lastShellThemeColors = null;
         /** Profile commit: skip the next switchToTab rAF URL bar refresh (chrome already restored). */
         this._skipNextUrlBarRefresh = false;
-        /** Profile switch restored URL bar from runtime cache — skip async extract until tab changes. */
+        /** Profile switch restored URL bar from runtime cache - skip async extract until tab changes. */
         this._profileUrlBarRestoredFromCache = false;
-        /** Profile switch applied shell palette from settings/cache — skip webview re-theme flash. */
+        /** Profile switch applied shell palette from settings/cache - skip webview re-theme flash. */
         this._profileShellThemeFromSnapshot = false;
-        /** Tab switch restored URL bar from per-tab snapshot — skip async extract on first refresh. */
+        /** Tab switch restored URL bar from per-tab snapshot - skip async extract on first refresh. */
         this._tabUrlBarRestoredFromCache = false;
-        /** Tab switch applied shell + URL bar synchronously — rAF only updates navigation chrome. */
+        /** Tab switch applied shell + URL bar synchronously - rAF only updates navigation chrome. */
         this._tabSwitchChromeReady = false;
         /** Skip redundant settings shell repaints when the palette did not change. */
         this._lastSettingsShellKey = '';
         this._lastSettingsShellKeyByProfile = new Map();
-        /** Link preview chip — debounced target URL from guest `update-target-url`. */
+        /** Link preview chip - debounced target URL from guest `update-target-url`. */
         this._linkStatusVisibleUrl = '';
         this._linkStatusTargetUrl = '';
         this._linkStatusShowTimer = null;
@@ -482,7 +525,7 @@ class AxisBrowser {
         this._downloadsPopupRefreshTimer = null;
         this._downloadsPopupPollInterval = null;
         this._downloadsPopupRenderInFlight = false;
-        /** Absolute path to `webview-preload-bundle.js` — nav gestures + CWS/AMO store UI (guest preload). */
+        /** Absolute path to `webview-preload-bundle.js` - nav gestures + CWS/AMO store UI (guest preload). */
         this._webviewCwsPreloadPath = null;
         this._settingsWebviewPreloadPath = null;
         this._vaultPageScanJs = null;
@@ -549,7 +592,6 @@ class AxisBrowser {
             closeDownloads: document.getElementById('close-downloads'),
             refreshDownloads: document.getElementById('refresh-downloads'),
             closeSecurity: document.getElementById('close-security'),
-            securitySettings: document.getElementById('security-settings'),
             securityPanel: document.getElementById('security-panel'),
             searchClose: document.getElementById('search-close'),
             emptyState: document.getElementById('empty-state'),
@@ -587,6 +629,13 @@ class AxisBrowser {
             linkStatusHitLeft: document.querySelector('.axis-link-status-hit--left'),
             linkStatusHitRight: document.querySelector('.axis-link-status-hit--right'),
             linkStatusText: document.querySelector('#axis-link-status .axis-link-status-text'),
+            sidebarUpdateBanner: document.getElementById('sidebar-update-banner'),
+            sidebarUpdateBannerTitle: document.getElementById('sidebar-update-banner-title'),
+            sidebarUpdateBannerMeta: document.getElementById('sidebar-update-banner-meta'),
+            sidebarUpdateBannerHint: document.getElementById('sidebar-update-banner-hint'),
+            sidebarUpdateBannerRestart: document.getElementById('sidebar-update-banner-restart'),
+            sidebarUpdateBannerNotes: document.getElementById('sidebar-update-banner-notes'),
+            sidebarUpdateBannerDismiss: document.getElementById('sidebar-update-banner-dismiss'),
             sidebarMediaDock: document.getElementById('sidebar-media-dock'),
             sidebarMediaDockCard: document.querySelector('#sidebar-media-dock .sidebar-media-dock-card'),
             sidebarMediaTitle: document.getElementById('sidebar-media-title'),
@@ -674,7 +723,7 @@ class AxisBrowser {
 
         // Set `data-ui-theme` before any theme apply so CSS fallback rules for the light
         // shell land on the first paint (incognito stays dark regardless).
-        const initialUiTheme = !this.isIncognitoWindow && this.isLightUiTheme() ? 'light' : 'dark';
+        const initialUiTheme = this.isLightUiTheme() ? 'light' : 'dark';
         document.documentElement.setAttribute('data-ui-theme', initialUiTheme);
 
         if (window.electronAPI?.platform === 'darwin') {
@@ -700,14 +749,10 @@ class AxisBrowser {
         await this.refreshProfilesMenu();
         this.syncProfileSwitcherState();
         
-        // ALWAYS apply theme on startup (incognito: always black, unchangable)
+        // ALWAYS apply theme on startup
         const applyThemeNow = () => {
             try {
                 if (document.body) {
-                    if (this.isIncognitoWindow) {
-                        this.resetToBlackTheme();
-                        return;
-                    }
                     if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
                         this.applyCustomThemeFromSettings();
                     } else {
@@ -720,9 +765,7 @@ class AxisBrowser {
                 console.error('Error applying theme on init:', error);
                 setTimeout(() => {
                     try {
-                        if (this.isIncognitoWindow) {
-                            this.resetToBlackTheme();
-                        } else if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
+                        if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
                             this.applyCustomThemeFromSettings();
                         } else {
                             this.resetToBlackTheme();
@@ -753,13 +796,16 @@ class AxisBrowser {
         this.setupProfileSwipeGestures?.();
         this.setupEventListeners();
         this.setupSidebarMediaDockListeners();
+        this.setupUpdateBanner();
+        this.setupFullscreenChrome();
+        this.setupSiteHtmlFullscreenSync();
         this.setupNewTabPage();
         this.setupTabSearch();
         this.setupLoadingScreen();
         this.setupSidebarResize();
         this.setupWebviewGuestResizeSync();
 
-        // Load pinned tabs and tab groups (skip in incognito – start fresh)
+        // Load pinned tabs and tab groups (skip in incognito - start fresh)
         if (!this.isIncognitoWindow) {
             this._suppressTabGroupsAutosave = true;
             try {
@@ -795,8 +841,18 @@ class AxisBrowser {
         
         // Initialize URL bar with default state
         this.updateUrlBar(null);
+
+        if (this.isIncognitoWindow) {
+            this.applyIncognitoShellChrome();
+            this.createNewTab(null, { skipEnterAnimation: true });
+            if (this.settings?.themeColor || this.settings?.gradientColor) {
+                this.applyCustomThemeFromSettings();
+            } else {
+                this.resetToBlackTheme();
+            }
+        }
         
-        if (!this.isIncognitoWindow && this.settings?.transparentSites) {
+        if (this.settings?.transparentSites) {
             this.applyTransparentSitesToAllWebviews();
         }
 
@@ -809,6 +865,7 @@ class AxisBrowser {
     }
 
     setupOnboarding() {
+        if (this.isIncognitoWindow) return;
         if (this._onboardingSetup) return;
         const api = typeof AxisOnboarding !== 'undefined' ? AxisOnboarding : null;
         if (!api?.createController) return;
@@ -864,7 +921,7 @@ class AxisBrowser {
         }
     }
 
-    /** Run non-critical guest work after first paint — keeps navigation off the hot path. */
+    /** Run non-critical guest work after first paint - keeps navigation off the hot path. */
     _runGuestIdleTask(webview, fn, opts = {}) {
         if (!webview || typeof fn !== 'function') return;
         const timeout = opts.timeout != null ? opts.timeout : 900;
@@ -954,7 +1011,7 @@ class AxisBrowser {
             if (id === active) {
                 this._resumeActiveTabGuest(tab.webview, tab);
             } else if (deferSuspend != null && id === deferSuspend) {
-                /* PiP check in flight — do not pause/mute yet. */
+                /* PiP check in flight - do not pause/mute yet. */
             } else if (this._shouldKeepBackgroundMediaAlive(id)) {
                 this._ensureBackgroundMediaPlayback(tab.webview, tab);
             } else {
@@ -1039,7 +1096,13 @@ class AxisBrowser {
                 } catch (_) {}
             }
         }
-        if (!webview.__axisMediaSuspendDone) return;
+        if (!webview.__axisMediaSuspendDone) {
+            // Still nudge YouTube after a bare show (no prior Axis pause list).
+            try {
+                this._nudgeGuestVideoIfNeeded(webview, tab?.url || '');
+            } catch (_) {}
+            return;
+        }
         webview.__axisMediaSuspendDone = false;
         try {
             this._voidGuestTask(
@@ -1049,13 +1112,41 @@ class AxisBrowser {
                 window.__axisMediaPausedByAxis = null;
                 if (!list || !list.length) return;
                 for (const el of list) {
-                    try { el.play(); } catch (_) {}
+                    try {
+                      const p = el.play();
+                      if (p && typeof p.catch === 'function') p.catch(function(){});
+                    } catch (_) {}
                 }
             })();`,
                     false
                 )
             );
         } catch (_) {}
+        try {
+            this._scheduleGuestVideoRecovery(webview, tab?.url || '');
+        } catch (_) {}
+    }
+
+    _shouldNudgeGuestVideo(rawUrl) {
+        if (!rawUrl || typeof rawUrl !== 'string') return false;
+        if (rawUrl === this.NEWTAB_URL || rawUrl === 'about:blank') return false;
+        if (/^axis:/i.test(rawUrl)) return false;
+        return /^https?:/i.test(rawUrl);
+    }
+
+    _nudgeGuestVideoIfNeeded(webview, rawUrl) {
+        if (!webview || !this._shouldNudgeGuestVideo(rawUrl)) return;
+        try {
+            webview.executeJavaScript(AXIS_GUEST_VIDEO_RECOVERY_JS, true).catch(() => {});
+        } catch (_) {}
+    }
+
+    _scheduleGuestVideoRecovery(webview, rawUrl) {
+        if (!webview || !this._shouldNudgeGuestVideo(rawUrl)) return;
+        this._nudgeGuestVideoIfNeeded(webview, rawUrl);
+        setTimeout(() => this._nudgeGuestVideoIfNeeded(webview, rawUrl), 200);
+        setTimeout(() => this._nudgeGuestVideoIfNeeded(webview, rawUrl), 500);
+        setTimeout(() => this._nudgeGuestVideoIfNeeded(webview, rawUrl), 1200);
     }
     
     // Batch DOM updates to reduce reflows
@@ -1087,6 +1178,300 @@ class AxisBrowser {
                 blockAds: true
             };
         }
+        this.applyUiLanguage(this.settings?.uiLanguage);
+        this.applyUiFont(this.settings?.uiFont);
+    }
+
+    /**
+     * Keep parked profile runtime + bootstrap caches aligned when Settings edits
+     * a profile that is not currently active in this window.
+     */
+    _patchParkedProfileSettingsFromUpdate(profileId, data) {
+        const pid = String(profileId || '').trim();
+        if (!pid || !data || typeof data.key !== 'string') return;
+        const key = data.key;
+        const langKeys = new Set([
+            'uiLanguage',
+            'universalBrowserLanguage',
+            'universalUiLanguage',
+            'uiFont',
+            'universalBrowserFont',
+            'universalUiFont'
+        ]);
+        if (!langKeys.has(key) && key !== 'ntpWidgetLayout' && key !== 'ntpWidgetsEnabled') {
+            // Still drop bootstrap so the next swipe remounts from disk for any setting.
+            try {
+                this._profileBootstrapCache?.delete?.(pid);
+            } catch (_) {}
+            return;
+        }
+        try {
+            this._profileBootstrapCache?.delete?.(pid);
+        } catch (_) {}
+        const state = this._profileRuntime?.get?.(pid);
+        if (!state || typeof state !== 'object') return;
+        if (!state.settings || typeof state.settings !== 'object') {
+            state.settings = {};
+        }
+        const s = state.settings;
+        if (key === 'universalBrowserLanguage') {
+            s.universalBrowserLanguage = !!data.value;
+            if (data.universalUiLanguage) s.universalUiLanguage = data.universalUiLanguage;
+            if (data.value && data.uiLanguage) {
+                if (!s.profileUiLanguage && s.uiLanguage) s.profileUiLanguage = s.uiLanguage;
+                s.uiLanguage = data.uiLanguage;
+            } else if (!data.value && s.profileUiLanguage) {
+                s.uiLanguage = s.profileUiLanguage;
+            }
+            return;
+        }
+        if (key === 'universalUiLanguage' && data.value) {
+            s.universalUiLanguage = data.value;
+            if (s.universalBrowserLanguage) s.uiLanguage = data.value;
+            return;
+        }
+        if (key === 'uiLanguage' && data.value) {
+            s.uiLanguage = data.value;
+            s.profileUiLanguage = data.value;
+            return;
+        }
+        if (key === 'universalBrowserFont') {
+            s.universalBrowserFont = !!data.value;
+            if (data.universalUiFont) s.universalUiFont = data.universalUiFont;
+            if (data.value && (data.uiFont || data.universalUiFont)) {
+                if (!s.profileUiFont && s.uiFont) s.profileUiFont = s.uiFont;
+                s.uiFont = data.uiFont || data.universalUiFont;
+            } else if (!data.value && s.profileUiFont) {
+                s.uiFont = s.profileUiFont;
+            }
+            return;
+        }
+        if (key === 'universalUiFont' && data.value) {
+            s.universalUiFont = data.value;
+            if (s.universalBrowserFont) s.uiFont = data.value;
+            return;
+        }
+        if (key === 'uiFont' && data.value) {
+            s.uiFont = data.value;
+            s.profileUiFont = data.value;
+            return;
+        }
+        if (Object.prototype.hasOwnProperty.call(data, 'value')) {
+            s[key] = data.value;
+        }
+    }
+
+    /**
+     * Keep parked profile snapshots aligned with Universal language/font so a swipe
+     * does not revive a stale locale or typeface after the global toggle changes.
+     */
+    _syncProfileRuntimeLanguageFlags(settings) {
+        if (!settings || !this._profileRuntime) return;
+        const uniOn = settings.universalBrowserLanguage === true;
+        const uniLang = settings.universalUiLanguage || settings.uiLanguage;
+        const uniFontOn = settings.universalBrowserFont === true;
+        const uniFont = settings.universalUiFont || settings.uiFont;
+        for (const state of this._profileRuntime.values()) {
+            if (!state || typeof state !== 'object') continue;
+            if (!state.settings || typeof state.settings !== 'object') {
+                state.settings = {};
+            }
+            const s = state.settings;
+            s.universalBrowserLanguage = uniOn;
+            if (uniLang) s.universalUiLanguage = uniLang;
+            if (uniOn) {
+                if (!s.profileUiLanguage && s.uiLanguage) {
+                    s.profileUiLanguage = s.uiLanguage;
+                }
+                if (uniLang) s.uiLanguage = uniLang;
+            } else if (s.profileUiLanguage) {
+                s.uiLanguage = s.profileUiLanguage;
+            }
+            s.universalBrowserFont = uniFontOn;
+            if (uniFont) s.universalUiFont = uniFont;
+            if (uniFontOn) {
+                if (!s.profileUiFont && s.uiFont) {
+                    s.profileUiFont = s.uiFont;
+                }
+                if (uniFont) s.uiFont = uniFont;
+            } else if (s.profileUiFont) {
+                s.uiFont = s.profileUiFont;
+            }
+        }
+    }
+
+    t(key, vars) {
+        try {
+            if (window.AxisI18n) return window.AxisI18n.t(key, vars);
+        } catch (_) {}
+        return key;
+    }
+
+    /** Apply UI font from the shared AxisUiFonts catalog. */
+    applyUiFont(code) {
+        const F = window.AxisUiFonts;
+        const next = F
+            ? F.sanitizeId(code || this.settings?.uiFont)
+            : String(code || this.settings?.uiFont || 'default')
+                  .trim()
+                  .toLowerCase() || 'default';
+        const stack = F
+            ? F.getStack(next)
+            : "'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        if (this.settings) {
+            this.settings.uiFont = next;
+            this.settings.uiFontStack = stack;
+            if (!this.settings.universalBrowserFont) {
+                this.settings.profileUiFont = next;
+            }
+        }
+        try {
+            if (F) {
+                F.applyToDocument(document, next);
+            } else {
+                document.documentElement.style.setProperty('--axis-ui-font', stack);
+                document.documentElement.setAttribute('data-ui-font', next);
+            }
+        } catch (_) {}
+    }
+
+    applyUiLanguage(code, opts = {}) {
+        const I = window.AxisI18n;
+        if (!I) return;
+        const skipNtpWidgets = !!opts.skipNtpWidgets || !!this._profileNtpIsolating;
+        const next = I.sanitizeLocale(code || this.settings?.uiLanguage) || I.detectSystemLocale() || 'en';
+        if (this.settings) this.settings.uiLanguage = next;
+        // Keep onboarding's remembered language in sync even when setup is hidden,
+        // so a later show/apply cannot snap back to English.
+        try { this._onboarding?.syncUiLanguage?.(next); } catch (_) {}
+        I.setLocale(next);
+        I.applyToDom(document);
+        I.observeDom?.(document);
+        // Only refresh the setup overlay while it is open - never let a stale
+        // onboarding language default undo a Settings language change.
+        if (this._onboarding?.isVisible?.()) {
+            try { this._onboarding.applyLanguage?.(); } catch (_) {}
+        }
+        this.refreshTranslatedTabTitles?.();
+        try { this.updateAIChatSetupState?.(); } catch (_) {}
+        try { this.syncNewTabInputChrome?.(); } catch (_) {}
+        try { this.updateNewTabHero?.(); } catch (_) {}
+        if (!skipNtpWidgets) {
+        try {
+            const catalog = document.getElementById('ntp-widget-catalog');
+            if (catalog) delete catalog.dataset.built;
+            this._buildNtpWidgetCatalog?.();
+            // Drop cached weather/AQ/markets so labels re-render in the new language.
+            try {
+                this._ntpFetchCache?.clear?.();
+            } catch (_) {}
+            this._ntpWidgetStructureKeyCached = '';
+            this.renderNtpWidgets?.({ force: true });
+            try {
+                const api = this._ntpWidgetsApi?.();
+                const layout = this.getNtpWidgetLayout?.() || [];
+                const applyGen = (this._uiLanguageApplyGen = (this._uiLanguageApplyGen || 0) + 1);
+                layout
+                    .filter((w) => api?.isAsyncType?.(w.type))
+                    .forEach((w) => void this._hydrateNtpWidget?.(w, { force: true }));
+                // Localize world-clock city labels (no network weather fetch).
+                void (async () => {
+                    try {
+                        for (const w of layout) {
+                            if (applyGen !== this._uiLanguageApplyGen || this._profileNtpIsolating) {
+                                return;
+                            }
+                            const t = api?.resolveType?.(w.type) || w.type;
+                            if (t !== 'worldclock' && t !== 'weather' && t !== 'airquality') continue;
+                            const city = String(w.config?.city || '').trim();
+                            if (!city || typeof api?.resolveLocalizedPlace !== 'function') continue;
+                            try {
+                                const resolved = await api.resolveLocalizedPlace(w.config || {}, city);
+                                if (applyGen !== this._uiLanguageApplyGen || this._profileNtpIsolating) {
+                                    return;
+                                }
+                                if (resolved?.localizedName) {
+                                    w.config = { ...(w.config || {}), _localizedCity: resolved.localizedName };
+                                }
+                            } catch (_) {}
+                        }
+                        if (applyGen !== this._uiLanguageApplyGen || this._profileNtpIsolating) {
+                            return;
+                        }
+                        this.renderNtpWidgets?.({ force: true });
+                        this._paintNtpWorldclockDom?.();
+                    } catch (_) {}
+                })();
+                // Sync clocks/calendars that paint from Intl without a network fetch.
+                this._paintNtpClockDom?.();
+                this._paintNtpWorldclockDom?.();
+                layout
+                    .filter((w) => (api?.resolveType?.(w.type) || w.type) === 'calendar')
+                    .forEach((w) => this._refreshNtpWidgetAt?.(w.id));
+            } catch (_) {}
+        } catch (_) {}
+        }
+        try { this.refreshAdblockPanel?.(); } catch (_) {}
+        try { this.syncAdBlockerUrlBarState?.(); } catch (_) {}
+        try { this.updateRefreshButton?.(this.isWebviewLoading); } catch (_) {}
+        try {
+            if (this._lastUpdateBannerStatus) {
+                this.applyUpdateBannerStatus?.(this._lastUpdateBannerStatus);
+            }
+        } catch (_) {}
+        try { this.populateExtensionsMenu?.(); } catch (_) {}
+        try { this.refreshSecurityPanel?.(); } catch (_) {}
+        try { this.populateNotes?.(); } catch (_) {}
+        try {
+            const popup = document.getElementById('downloads-popup');
+            const list = document.getElementById('downloads-popup-list');
+            if (popup && list && !popup.classList.contains('hidden')) {
+                void this.populateDownloadsPopupList?.(list);
+            }
+        } catch (_) {}
+        try { this.updateTabList?.(); } catch (_) {}
+        try {
+            // Rebuild open suggestion rows so badges like Search / Ask AI / Switch to tab update live.
+            const ntpInput = document.getElementById('new-tab-search-input');
+            const ntpBox = document.getElementById('new-tab-suggestions');
+            if (ntpInput && ntpBox && !ntpBox.classList.contains('hidden')) {
+                void this.updateNewTabSuggestions?.(ntpInput.value || '');
+            }
+            const addr = this.elements?.urlInput || document.getElementById('url-input');
+            const addrBox = document.getElementById('spotlight-suggestions') || document.querySelector('.spotlight-suggestions');
+            if (addr && addrBox && !addrBox.classList.contains('hidden') && typeof this.updateSuggestions === 'function') {
+                void this.updateSuggestions?.(addr.value || '');
+            }
+        } catch (_) {}
+        try { this.syncProfileSwitcherState?.(); } catch (_) {}
+        try { this.updateUrlBar?.(this.getActiveWebview?.(), { skipExtractTheme: true }); } catch (_) {}
+        // JS-painted chrome that does not use data-i18n*
+        try { this.applySidebarPosition?.(); } catch (_) {}
+        try { this.applySidebarZoom?.(); } catch (_) {}
+        try {
+            const posText = document.getElementById('sidebar-position-text');
+            const ctxText = document.getElementById('sidebar-position-context-text');
+            const right = this.isSidebarRight?.();
+            const label = right ? this.t('menu.moveSidebarLeft') : this.t('menu.moveSidebarRight');
+            if (posText) posText.textContent = label;
+            if (ctxText) ctxText.textContent = label;
+        } catch (_) {}
+    }
+
+    refreshTranslatedTabTitles() {
+        const I = window.AxisI18n;
+        if (!I || !this.tabs) return;
+        for (const tab of this.tabs.values()) {
+            if (!tab || tab.customTitle) continue;
+            if (tab.isSettings || tab.url === 'axis://settings') {
+                tab.title = this.t('chrome.settings');
+            } else if (this.isTabInNtpAiChat?.(tab.id)) {
+                tab.title = this.t('chrome.aiChat');
+            } else if (tab.url === this.NEWTAB_URL || I.isBuiltinChromeTitle(tab.title)) {
+                tab.title = tab.incognito ? this.t('chrome.newIncognito') : this.t('chrome.newTab');
+            }
+        }
+        try { this.updateTabList?.(); } catch (_) {}
     }
 
     /** Stored Appearance preference: `light`, `dark`, or `system`. */
@@ -1106,7 +1491,6 @@ class AxisBrowser {
 
     /** Resolved overlay theme for popups/menus (`light` or `dark`). */
     getEffectiveUiTheme() {
-        if (this.isIncognitoWindow) return 'dark';
         const pref = this.getUiThemePreference();
         if (pref === 'light') return 'light';
         if (pref === 'dark') return 'dark';
@@ -1132,10 +1516,6 @@ class AxisBrowser {
         const preferLightUi = this.isLightUiTheme();
         document.documentElement.setAttribute('data-ui-theme', preferLightUi ? 'light' : 'dark');
         void this.syncVaultAutofillUiTheme(this.getActiveWebview()).catch(() => {});
-        if (this.isIncognitoWindow) {
-            this.resetToBlackTheme();
-            return;
-        }
         if (this.settings && (this.settings.themeColor || this.settings.gradientColor)) {
             this.applyCustomThemeFromSettings();
         } else {
@@ -1338,14 +1718,14 @@ class AxisBrowser {
             .catch(() => {});
     }
 
-    /** Fire-and-forget async guest work — never leave unhandled rejections in the terminal. */
+    /** Fire-and-forget async guest work - never leave unhandled rejections in the terminal. */
     _voidGuestTask(promise) {
         if (promise && typeof promise.catch === 'function') {
             promise.catch(() => {});
         }
     }
 
-    /** Origin + pathname — hash/query-only in-page nav should not re-theme or re-inject transparency. */
+    /** Origin + pathname - hash/query-only in-page nav should not re-theme or re-inject transparency. */
     _urlStablePageKey(url) {
         try {
             const u = new URL(String(url || ''));
@@ -1371,6 +1751,7 @@ class AxisBrowser {
             'dom-header': 45,
             header: 45, // legacy alias for DOM chrome samples
             surface: 40,
+            'surface-fallback': 35,
             default: 0,
             error: 0
         };
@@ -1379,7 +1760,13 @@ class AxisBrowser {
 
     _urlBarThemeSnapshotMatchesTab(tab, snap) {
         if (!tab?.url || !snap) return false;
-        if (!snap.pageKey) return true;
+        const internalTab =
+            tab.url === this.NEWTAB_URL ||
+            tab.url === 'axis://settings' ||
+            !!tab.isSettings;
+        if (!!snap.internalShell !== internalTab) return false;
+        if (internalTab) return true;
+        if (!snap.pageKey) return false;
         return snap.pageKey === this._urlStablePageKey(tab.url);
     }
 
@@ -1543,7 +1930,7 @@ class AxisBrowser {
     /**
      * Remove guest webviews that no longer have a tab row (e.g. close raced a stale Map key, or DOM drift).
      * Prevents “sidebar updated but last page stays on screen”.
-     * Never destroy parked other-profile guests or active PiP / mini-player media — profile
+     * Never destroy parked other-profile guests or active PiP / mini-player media - profile
      * switch calls this via switchToTab and used to blank those pages permanently.
      */
     _purgeStaleWebviewsInContainer() {
@@ -1558,8 +1945,10 @@ class AxisBrowser {
         for (const wv of Array.from(container.querySelectorAll('webview'))) {
             if (protect.has(wv)) continue;
             const wvPid = String(wv.dataset?.axisProfile || '');
-            /* Other profiles keep live guests in the container while cached — do not purge. */
+            /* Other profiles keep live guests in the container while cached - do not purge. */
             if (wvPid && curPid && wvPid !== curPid) continue;
+
+            if (wv.dataset?.axisDeferredDestroy === '1') continue;
 
             const nid = this._normalizeTabMapKey(wv.dataset.tabId);
             let remove = false;
@@ -1596,10 +1985,11 @@ class AxisBrowser {
         const cur = this._normalizeTabMapKey(this.currentTab);
         const active = cur != null ? this.tabs.get(cur) : null;
         if (active?.isFavoriteTab) {
-            /* Layout only — closing another tab must not rebuild favorites (accent flash). */
+            /* Layout only - closing another tab must not rebuild favorites (accent flash). */
             this._forceGuestLayoutSync();
         }
         this._scheduleUnpinnedTabsRecoverySave();
+        this._refreshTabsScrollEdges?.();
     }
 
     _scheduleTransparentSitesTouchForBackgroundWebview(webview) {
@@ -1658,27 +2048,119 @@ class AxisBrowser {
 
     getTimeGreeting(name) {
         const greetingName = name ?? this.getNewTabGreetingName();
-        if (typeof window !== 'undefined' && window.AXIS_NTP_GREETINGS?.getTimeGreeting) {
-            return window.AXIS_NTP_GREETINGS.getTimeGreeting(new Date(), greetingName);
-        }
+        // Always resolve through the live UI locale so greetings switch with language.
+        try {
+            if (window.AXIS_NTP_GREETINGS?.getTimeGreeting) {
+                return window.AXIS_NTP_GREETINGS.getTimeGreeting(new Date(), greetingName);
+            }
+        } catch (_) {}
         const h = new Date().getHours();
-        if (h < 12) return `Good Morning, ${greetingName}.`;
-        if (h < 17) return `Good Afternoon, ${greetingName}.`;
-        if (h < 22) return `Good Evening, ${greetingName}`;
-        return 'Good night.';
+        const key =
+            h < 4
+                ? 'ntp.greet.late1'
+                : h < 6
+                  ? 'ntp.greet.early1'
+                  : h < 13
+                    ? 'ntp.greet.morning1'
+                    : h < 17
+                      ? 'ntp.greet.afternoon1'
+                      : h < 21
+                        ? 'ntp.greet.evening1'
+                        : 'ntp.greet.night1';
+        const raw = this.t(key, { name: greetingName });
+        return String(raw || '')
+            .replace(/\$name/g, greetingName)
+            .replace(/\{name\}/g, greetingName);
     }
 
     updateNewTabHero() {
         const greetingEl = document.getElementById('new-tab-greeting');
         const newTabPage = document.getElementById('new-tab-page');
         const input = document.getElementById('new-tab-input');
+        const hero = document.getElementById('new-tab-hero');
         if (!greetingEl) return;
         const name = this.getNewTabGreetingName();
-        greetingEl.textContent = this.getTimeGreeting(name);
+        try {
+            const api = window.AXIS_NTP_GREETINGS;
+            const parts =
+                (api && typeof api.getGreetingDomParts === 'function'
+                    ? api.getGreetingDomParts(new Date(), name)
+                    : null) || null;
+            while (greetingEl.firstChild) greetingEl.removeChild(greetingEl.firstChild);
+            const uiLang = String(
+                this.settings?.uiLanguage ||
+                    window.AxisI18n?.getResolvedLocale?.() ||
+                    window.AxisI18n?.getLocale?.() ||
+                    ''
+            ).toLowerCase();
+            const rtlFromUi = /^(ar|he|fa|ur|yi|ps|sd|ug|dv)([-_]|$)/.test(uiLang);
+            const rtl = !!(parts?.rtl || rtlFromUi || (parts && (api?.textLooksRtl?.(parts.before) || api?.textLooksRtl?.(parts.after))));
+            greetingEl.classList.toggle('is-rtl-greet', rtl);
+            hero?.classList.toggle('is-rtl-greet', rtl);
+            // dir drives flex start edge - rtl puts the phrase (first segment) on the right.
+            greetingEl.setAttribute('dir', rtl ? 'rtl' : 'ltr');
+            hero?.setAttribute('dir', rtl ? 'rtl' : 'ltr');
+            if (parts?.locale || uiLang) {
+                greetingEl.setAttribute(
+                    'lang',
+                    String(parts?.locale || uiLang).split(/[-_]/)[0]
+                );
+            } else greetingEl.removeAttribute('lang');
+
+            const before = parts?.before ?? '';
+            const after = parts?.after ?? '';
+            const displayName = parts?.hasName ? parts.name : '';
+            const plain =
+                parts?.plain ||
+                `${before}${displayName}${after}` ||
+                this.getTimeGreeting(name);
+            greetingEl.setAttribute('aria-label', plain);
+
+            const make = (role, text, nameDir) => {
+                if (!text && role !== 'name') return null;
+                if (role === 'name' && !text) return null;
+                const el =
+                    role === 'name' ? document.createElement('bdi') : document.createElement('span');
+                el.className = role === 'name' ? 'ntp-g-name' : `ntp-g-${role}`;
+                if (role === 'name') el.setAttribute('dir', nameDir || 'ltr');
+                else if (rtl) el.setAttribute('dir', 'rtl');
+                el.textContent = text || '';
+                return el;
+            };
+            // Always phrase → name → trailing (DOM). dir=rtl flips physical placement.
+            const order = ['before', 'name', 'after'];
+            let mounted = false;
+            for (const role of order) {
+                const node = make(
+                    role,
+                    role === 'name' ? displayName : role === 'before' ? before : after,
+                    parts?.nameDir || 'ltr'
+                );
+                if (node) {
+                    greetingEl.appendChild(node);
+                    mounted = true;
+                }
+            }
+            if (!mounted) {
+                const span = document.createElement('span');
+                span.className = 'ntp-g-before';
+                if (rtl) span.setAttribute('dir', 'rtl');
+                span.textContent = plain;
+                greetingEl.appendChild(span);
+            }
+        } catch (_) {
+            while (greetingEl.firstChild) greetingEl.removeChild(greetingEl.firstChild);
+            const span = document.createElement('span');
+            span.className = 'ntp-g-before';
+            span.textContent = this.getTimeGreeting(name);
+            greetingEl.appendChild(span);
+            greetingEl.setAttribute('dir', 'ltr');
+            greetingEl.classList.remove('is-rtl-greet');
+            hero?.classList.remove('is-rtl-greet');
+        }
         const s = this.settings || {};
         const welcomeOn = s.ntpWelcomeEnabled !== false;
         const greetingOn = welcomeOn && s.ntpWelcomeGreeting !== false;
-        const hero = document.getElementById('new-tab-hero');
         hero?.classList.toggle('hidden', !welcomeOn);
         if (greetingEl) greetingEl.style.display = greetingOn ? '' : 'none';
         const hasQuery = !!(input?.value?.trim());
@@ -1740,6 +2222,7 @@ class AxisBrowser {
         if (!force && this.isNewTabInChat()) return;
 
         if (!animate) {
+            page.classList.add('ntp-ai-chat-instant');
             this._finishNewTabAiChatLayout();
             page.classList.add('ntp-ai-chat-mode');
             this._applyNewTabPageChrome();
@@ -1821,12 +2304,33 @@ class AxisBrowser {
         }
     }
 
-    _scrollNewTabAskMessagesToBottom() {
+    _releaseNtpAiChatInstantSoon() {
+        const page = document.getElementById('new-tab-page');
+        if (!page?.classList.contains('ntp-ai-chat-instant')) return;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                page.classList.remove('ntp-ai-chat-instant');
+            });
+        });
+    }
+
+    _markChatMessageEnter(el, enterClass) {
+        if (!el || !enterClass) return;
+        el.classList.add(enterClass);
+        el.addEventListener('animationend', () => {
+            el.classList.remove(enterClass);
+        }, { once: true });
+    }
+
+    _scrollNewTabAskMessagesToBottom({ instant = false } = {}) {
         const messages = document.getElementById('new-tab-ask-messages');
         if (!messages) return;
-        requestAnimationFrame(() => {
+        const apply = () => {
+            if (instant) messages.classList.add('ntp-ask-instant-scroll');
             messages.scrollTop = messages.scrollHeight;
-        });
+            if (instant) messages.classList.remove('ntp-ask-instant-scroll');
+        };
+        requestAnimationFrame(apply);
     }
 
     _focusNewTabInput() {
@@ -1844,7 +2348,7 @@ class AxisBrowser {
         if (!tab || tab.url !== this.NEWTAB_URL || tab.customTitle) return;
 
         const inAiChat = this.isTabInNtpAiChat(tabId);
-        const title = inAiChat ? 'AI Chat' : 'New Tab';
+        const title = inAiChat ? this.t('chrome.aiChat') : this.t('chrome.newTab');
         const favicon = inAiChat ? this.NTP_AI_CHAT_FAVICON : this.NTP_DEFAULT_FAVICON;
         tab.title = title;
         tab.favicon = favicon;
@@ -1858,8 +2362,8 @@ class AxisBrowser {
         }
 
         if (tabId === this.currentTab && window.electronAPI?.setWindowTitle) {
-            const fallback = this.isIncognitoWindow ? 'Axis — Incognito' : 'Axis Browser';
-            window.electronAPI.setWindowTitle(inAiChat ? 'AI Chat' : fallback);
+            const fallback = this.isIncognitoWindow ? this.t('chrome.incognitoTitle') : this.t('app.browser');
+            window.electronAPI.setWindowTitle(inAiChat ? this.t('chrome.aiChat') : fallback);
         }
     }
 
@@ -1891,8 +2395,8 @@ class AxisBrowser {
         const page = document.getElementById('new-tab-page');
         const inChat = this.isNewTabInChat();
         if (input) {
-            input.placeholder = inChat ? 'Message AI…' : 'Search or Enter URL...';
-            input.setAttribute('aria-label', inChat ? 'Message AI' : 'Search or URL');
+            input.placeholder = inChat ? this.t('chrome.messageAi') : this.t('chrome.searchOrUrl');
+            input.setAttribute('aria-label', inChat ? this.t('chrome.messageAiAria') : this.t('chrome.searchOrUrlAria'));
         }
         page?.classList.toggle('ntp-in-chat', inChat);
         this.updateNewTabSendButtonState();
@@ -1978,7 +2482,7 @@ class AxisBrowser {
     }
 
     /**
-     * Maps settings slider (0–1) to master gain. Gentle perceptual curve so mid
+     * Maps settings slider (0-1) to master gain. Gentle perceptual curve so mid
      * positions are audible and the top of the slider stays usable as a bed.
      */
     _ambientUiToMaxNodeGain(volume01) {
@@ -2494,8 +2998,8 @@ class AxisBrowser {
 
         // Security panel
         el.closeSecurity?.addEventListener('click', () => this.closeSecurityPanel());
-        el.securitySettings?.addEventListener('click', () => this.openSecuritySettings());
         document.getElementById('security-panel-backdrop')?.addEventListener('click', () => this.closeSecurityPanel());
+        document.getElementById('tab-ancestry-backdrop')?.addEventListener('click', () => this.closeTabAncestryPanel());
 
         // Backdrop click closes any open modal - use cached elements
         if (el.modalBackdrop) {
@@ -2574,7 +3078,7 @@ class AxisBrowser {
             }
         });
 
-        // Sidebar context menu (DOM template — order matches native menu)
+        // Sidebar context menu (DOM template - order matches native menu)
         document.getElementById('sidebar-new-tab-option')?.addEventListener('click', () => {
             this.createNewTab();
             this.hideSidebarContextMenu();
@@ -2629,7 +3133,11 @@ class AxisBrowser {
                 case 'search-selection': {
                     const q = data && data.selectionText ? String(data.selectionText).trim() : '';
                     if (q) {
-                        this.createNewTab(this.getSearchUrl(q));
+                        this.createNewTab(this.getSearchUrl(q), {
+                            ancestryKind: 'selection-search',
+                            searchQuery: q,
+                            ancestryFromContext: true
+                        });
                     }
                     break;
                 }
@@ -2643,13 +3151,14 @@ class AxisBrowser {
                     break;
                 case 'open-link-new-tab':
                     if (data && data.linkURL) {
-                        this.createNewTab(data.linkURL);
+                        this.createNewTab(data.linkURL, { ancestryKind: 'link', ancestryFromContext: true });
                     }
                     break;
                 case 'copy-link':
                     if (data && data.linkURL) {
-                        navigator.clipboard.writeText(data.linkURL).then(() => {
-                            this.showNotification('Link copied to clipboard', 'success');
+                        const cleaned = this._cleanUrlForClipboard(data.linkURL);
+                        navigator.clipboard.writeText(cleaned).then(() => {
+                            this.showNotification(this.t('note.copiedLink'), 'success');
                         });
                     }
                     break;
@@ -2703,7 +3212,7 @@ class AxisBrowser {
                         }
                     }
                     if (ok) {
-                        this.showNotification('Image copied to clipboard', 'success');
+                        this.showNotification(this.t('note.copiedImage'), 'success');
                     }
                     break;
                 }
@@ -2715,12 +3224,12 @@ class AxisBrowser {
                     if (prepared) {
                         const ok = await this.writeTextToClipboard(prepared);
                         if (ok) {
-                            this.showNotification('Image URL copied to clipboard', 'success');
+                            this.showNotification(this.t('note.copiedImageUrl'), 'success');
                         } else {
-                            this.showNotification('Could not copy to clipboard', 'error');
+                            this.showNotification(this.t('note.copyFailed'), 'error');
                         }
                     } else {
-                        this.showNotification('Could not resolve image address', 'error');
+                        this.showNotification(this.t('note.imageUrlFailed'), 'error');
                     }
                     break;
                 }
@@ -2736,7 +3245,7 @@ class AxisBrowser {
                     void this.copyCurrentUrlAsMarkdown();
                     break;
                 case 'print':
-                    this.printPage();
+                    this.printPage({ fromContextMenu: true });
                     break;
                 case 'inspect': {
                     const inspectWv = this.getContextMenuWebview();
@@ -2855,7 +3364,7 @@ class AxisBrowser {
             }
         });
         
-        // Favorites tile — native context menu (main process)
+        // Favorites tile - native context menu (main process)
         window.electronAPI.onFavoriteContextMenuAction?.((action) => {
             if (this.isIncognitoWindow) {
                 this.contextMenuFavoriteId = null;
@@ -2874,20 +3383,8 @@ class AxisBrowser {
                     const fav = findFav();
                     const url = fav ? this.normalizeFavoriteUrl(fav.url) : '';
                     if (url) {
-                        this.createNewTab(url);
-                        this.showNotification('Opened in new tab', 'success');
-                    }
-                    this.contextMenuFavoriteId = null;
-                    break;
-                }
-                case 'copy-link': {
-                    const fav = findFav();
-                    const url = fav ? this.normalizeFavoriteUrl(fav.url) : '';
-                    if (url) {
-                        navigator.clipboard.writeText(url).then(
-                            () => this.showNotification('Link copied to clipboard', 'success'),
-                            () => this.showNotification('Could not copy link', 'error')
-                        );
+                        this.createNewTab(url, { ancestryKind: 'favorite' });
+                        this.showNotification(this.t('note.openedNewTab'), 'success');
                     }
                     this.contextMenuFavoriteId = null;
                     break;
@@ -2899,30 +3396,36 @@ class AxisBrowser {
                     this.contextMenuFavoriteId = null;
                     break;
                 }
-                case 'rename': {
+                case 'duplicate': {
                     const fav = findFav();
                     if (fav) {
-                        const cur = fav.title || '';
-                        const next = window.prompt('Favorite name:', cur);
-                        if (next != null) {
-                            const t = String(next).trim();
-                            if (t) {
-                                fav.title = t;
-                                const rt = this._normalizeTabMapKey(fav.runtimeTabId);
-                                if (rt != null && this.tabs.has(rt)) {
-                                    const tab = this.tabs.get(rt);
-                                    tab.title = t;
-                                    this.tabs.set(rt, tab);
-                                    const tabElement = document.querySelector(`[data-tab-id="${rt}"]`);
-                                    if (tabElement) {
-                                        const titleElement = tabElement.querySelector('.tab-title');
-                                        if (titleElement) titleElement.textContent = t;
-                                        this.updateTabTooltip(rt);
-                                    }
-                                }
-                                this.saveFavorites();
-                                this.renderFavorites();
-                            }
+                        const copy = {
+                            ...fav,
+                            id: `fav-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                            title: fav.title || '',
+                            runtimeTabId: null
+                        };
+                        const idx = this.favorites.findIndex((f) => f.id === fav.id);
+                        if (idx >= 0) this.favorites.splice(idx + 1, 0, copy);
+                        else this.favorites.push(copy);
+                        this.saveFavorites();
+                        this.renderFavorites();
+                    }
+                    this.contextMenuFavoriteId = null;
+                    break;
+                }
+                case 'move-left':
+                case 'move-right': {
+                    const fav = findFav();
+                    if (fav) {
+                        const idx = this.favorites.findIndex((f) => f.id === fav.id);
+                        const swap = action === 'move-left' ? idx - 1 : idx + 1;
+                        if (idx >= 0 && swap >= 0 && swap < this.favorites.length) {
+                            const tmp = this.favorites[idx];
+                            this.favorites[idx] = this.favorites[swap];
+                            this.favorites[swap] = tmp;
+                            this.saveFavorites();
+                            this.renderFavorites();
                         }
                     }
                     this.contextMenuFavoriteId = null;
@@ -2948,7 +3451,7 @@ class AxisBrowser {
                         }
                         this.saveFavorites();
                         this.renderFavorites();
-                        this.showNotification('Icon reset', 'success');
+                        this.showNotification(this.t('note.iconReset'), 'success');
                     }
                     this.contextMenuFavoriteId = null;
                     break;
@@ -3030,6 +3533,11 @@ class AxisBrowser {
                     if (this.contextMenuTabId && data && data.tabGroupId != null) {
                         const gid = this.findTabGroupKey(data.tabGroupId);
                         if (gid != null) this.removeTabFromTabGroup(this.contextMenuTabId, gid);
+                    }
+                    break;
+                case 'show-ancestry':
+                    if (this.contextMenuTabId) {
+                        this.showTabAncestryPanel(this.contextMenuTabId);
                     }
                     break;
             }
@@ -3211,7 +3719,7 @@ class AxisBrowser {
             this.searchNext();
         });
 
-        // Search input — live find + keyboard navigation
+        // Search input - live find + keyboard navigation
         const searchInput = document.getElementById('search-input');
         const runFind = (value) => {
             this.performIncrementalFind(value);
@@ -3291,7 +3799,7 @@ class AxisBrowser {
                 this.closeProfileRowMenu();
             }
 
-            // Row menu lives on document.body — keep the profile popover open while using it.
+            // Row menu lives on document.body - keep the profile popover open while using it.
             if (onRowMenu || onMoreBtn) {
                 return;
             }
@@ -3303,10 +3811,12 @@ class AxisBrowser {
             if (e.target.closest('#sidebar-plus-btn') || e.target.closest('#sidebar-plus-menu')) {
                 return;
             }
-            if (e.target.closest('#sidebar-profile-footer') || e.target.closest('#sidebar-profile-switcher')) {
-                return;
-            }
-            if (e.target.closest('#profile-switcher-menu') || e.target.closest('.profile-switcher-menu--ported')) {
+            if (
+                e.target.closest('#profile-switcher-trigger') ||
+                e.target.closest('#profile-switcher-menu') ||
+                e.target.closest('.profile-switcher-menu--ported') ||
+                e.target.closest('#profile-switcher-backdrop')
+            ) {
                 return;
             }
             
@@ -3333,7 +3843,7 @@ class AxisBrowser {
             }
         });
 
-        // Shell text fields — Cut/Copy/Paste + Emoji and Symbols (URL bar has its own menu)
+        // Shell text fields - Cut/Copy/Paste + Emoji and Symbols (URL bar has its own menu)
         document.addEventListener(
             'contextmenu',
             (e) => {
@@ -3452,7 +3962,11 @@ class AxisBrowser {
             const ctx = this.webviewContextInfo || {};
             const q = ctx.selectionText ? String(ctx.selectionText).trim() : '';
             if (q) {
-                this.createNewTab(this.getSearchUrl(q));
+                this.createNewTab(this.getSearchUrl(q), {
+                    ancestryKind: 'selection-search',
+                    searchQuery: q,
+                    ancestryFromContext: true
+                });
             }
             this.hideWebpageContextMenu();
         });
@@ -3461,7 +3975,7 @@ class AxisBrowser {
         document.getElementById('webpage-open-link-new-tab')?.addEventListener('click', () => {
             const ctx = this.webviewContextInfo || {};
             if (ctx.linkURL) {
-                this.createNewTab(ctx.linkURL);
+                this.createNewTab(ctx.linkURL, { ancestryKind: 'link', ancestryFromContext: true });
             }
             this.hideWebpageContextMenu();
         });
@@ -3469,8 +3983,8 @@ class AxisBrowser {
         document.getElementById('webpage-copy-link')?.addEventListener('click', async () => {
             const ctx = this.webviewContextInfo || {};
             if (ctx.linkURL) {
-                await navigator.clipboard.writeText(ctx.linkURL);
-                this.showNotification('Link copied to clipboard', 'success');
+                await navigator.clipboard.writeText(this._cleanUrlForClipboard(ctx.linkURL));
+                this.showNotification(this.t('note.copiedLink'), 'success');
             }
             this.hideWebpageContextMenu();
         });
@@ -3538,7 +4052,7 @@ class AxisBrowser {
                 }
             }
             if (ok) {
-                this.showNotification('Image copied to clipboard', 'success');
+                this.showNotification(this.t('note.copiedImage'), 'success');
             }
             this.hideWebpageContextMenu();
         });
@@ -3551,12 +4065,12 @@ class AxisBrowser {
                 if (prepared) {
                     const ok = await this.writeTextToClipboard(prepared);
                     if (ok) {
-                        this.showNotification('Image URL copied to clipboard', 'success');
+                        this.showNotification(this.t('note.copiedImageUrl'), 'success');
                     } else {
-                        this.showNotification('Could not copy to clipboard', 'error');
+                        this.showNotification(this.t('note.copyFailed'), 'error');
                     }
                 } else {
-                    this.showNotification('Could not resolve image address', 'error');
+                    this.showNotification(this.t('note.imageUrlFailed'), 'error');
                 }
             }
             this.hideWebpageContextMenu();
@@ -3574,7 +4088,7 @@ class AxisBrowser {
         });
 
         document.getElementById('webpage-print')?.addEventListener('click', () => {
-            this.printPage();
+            this.printPage({ fromContextMenu: true });
             this.hideWebpageContextMenu();
         });
         
@@ -3694,25 +4208,41 @@ class AxisBrowser {
         
         // Listen for URL open from settings tab (navigate in main window)
         window.electronAPI.onOpenUrlInBrowser?.((url) => {
-            if (url) this.createNewTab(url);
+            if (url) this.createNewTab(url, { skipEnterAnimation: true, ancestryKind: 'external' });
+        });
+
+        window.electronAPI.onGuestOpenUrlInNewTab?.((payload) => {
+            const url = payload && typeof payload === 'object' ? payload.url : payload;
+            const sourceId =
+                payload && typeof payload === 'object' ? Number(payload.sourceWebContentsId) || 0 : 0;
+            const fromTabId = sourceId ? this._findTabIdByWebContentsId(sourceId) : this.currentTab;
+            if (url) {
+                this.createNewTab(url, {
+                    skipEnterAnimation: true,
+                    ancestryKind: 'link',
+                    fromTabId
+                });
+            }
         });
 
         window.electronAPI.onOpenSettingsTab?.((section) => {
-            void window.electronAPI.openSettingsWindow(section || null);
+            void this.openSettingsTab(section || null);
         });
         
         // Listen for settings updates from the settings tab / store (refresh theme)
         window.electronAPI.onSettingsUpdated?.((data) => {
             const updatedProfile =
                 data && typeof data.profileId === 'string' ? data.profileId : null;
-            if (
-                updatedProfile &&
-                String(updatedProfile).toLowerCase() !==
-                    String(this.profileId || 'personal').toLowerCase()
-            ) {
+            const myId = String(this.profileId || 'personal').toLowerCase();
+            if (updatedProfile && String(updatedProfile).toLowerCase() !== myId) {
+                // Keep parked profile snapshots / bootstrap caches from serving a
+                // stale language (or font) after Settings edits another profile.
+                try {
+                    this._patchParkedProfileSettingsFromUpdate?.(updatedProfile, data);
+                } catch (_) {}
                 return;
             }
-            // Apply immediately — no rAF delay (Settings should feel live).
+            // Apply immediately - no rAF delay (Settings should feel live).
             if (this._settingsUpdatedRaf != null) {
                 cancelAnimationFrame(this._settingsUpdatedRaf);
                 this._settingsUpdatedRaf = null;
@@ -3804,9 +4334,9 @@ class AxisBrowser {
         }
         trigger.setAttribute(
             'aria-label',
-            isIncog ? 'Private browsing — switch profile' : `Current profile: ${activeName}`
+            isIncog ? this.t('chrome.switchProfilePrivate') : this.t('chrome.currentProfile', { name: activeName })
         );
-        trigger.title = isIncog ? 'Switch profile' : `Switch profile (${activeName})`;
+        trigger.title = isIncog ? this.t('chrome.switchProfile') : this.t('chrome.switchProfileNamed', { name: activeName });
     }
 
     profileAvatarMarkup(_profileId, _name, icon) {
@@ -3841,8 +4371,8 @@ class AxisBrowser {
             const dragBtn = document.createElement('button');
             dragBtn.type = 'button';
             dragBtn.className = 'profile-switch-drag';
-            dragBtn.title = 'Reorder profile';
-            dragBtn.setAttribute('aria-label', 'Reorder profile');
+            dragBtn.title = this.t('chrome.reorderProfile');
+            dragBtn.setAttribute('aria-label', this.t('chrome.reorderProfile'));
             dragBtn.innerHTML = '<i class="fas fa-grip-vertical" aria-hidden="true"></i>';
             dragBtn.addEventListener('mousedown', () => {
                 this._profileDragFromHandle = true;
@@ -3879,8 +4409,8 @@ class AxisBrowser {
             const moreBtn = document.createElement('button');
             moreBtn.type = 'button';
             moreBtn.className = 'profile-switch-more-btn';
-            moreBtn.title = 'Profile options';
-            moreBtn.setAttribute('aria-label', `Options for ${name}`);
+            moreBtn.title = this.t('chrome.profileOptions');
+            moreBtn.setAttribute('aria-label', this.t('chrome.profileOptions'));
             moreBtn.setAttribute('aria-haspopup', 'menu');
             moreBtn.setAttribute('aria-expanded', 'false');
             moreBtn.innerHTML = '<i class="fas fa-ellipsis-vertical" aria-hidden="true"></i>';
@@ -3987,7 +4517,7 @@ class AxisBrowser {
         editItem.type = 'button';
         editItem.className = 'profile-switch-row-menu-item';
         editItem.setAttribute('role', 'menuitem');
-        editItem.textContent = 'Edit profile';
+        editItem.textContent = this.t('profile.editProfile');
         editItem.addEventListener('click', (e) => {
             e.stopPropagation();
             this.closeProfileRowMenu();
@@ -3999,7 +4529,7 @@ class AxisBrowser {
             deleteItem.type = 'button';
             deleteItem.className = 'profile-switch-row-menu-item profile-switch-row-menu-item--danger';
             deleteItem.setAttribute('role', 'menuitem');
-            deleteItem.textContent = 'Delete profile';
+            deleteItem.textContent = this.t('profile.deleteConfirm');
             deleteItem.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.closeProfileRowMenu();
@@ -4071,8 +4601,37 @@ class AxisBrowser {
                 root.classList.add('is-open');
                 menu.classList.add('is-open');
                 switcher?.classList.add('is-open');
+                this._showProfileSwitcherBackdrop();
             });
         });
+    }
+
+    _ensureProfileSwitcherBackdrop() {
+        if (this._profileSwitcherBackdrop) return this._profileSwitcherBackdrop;
+        const el = document.createElement('div');
+        el.id = 'profile-switcher-backdrop';
+        el.className = 'profile-switcher-backdrop hidden';
+        el.setAttribute('aria-hidden', 'true');
+        el.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            this.hideProfileSwitcherMenu();
+        });
+        document.body.appendChild(el);
+        this._profileSwitcherBackdrop = el;
+        return el;
+    }
+
+    _showProfileSwitcherBackdrop() {
+        const backdrop = this._ensureProfileSwitcherBackdrop();
+        backdrop.classList.remove('hidden');
+        backdrop.setAttribute('aria-hidden', 'false');
+    }
+
+    _hideProfileSwitcherBackdrop() {
+        const backdrop = this._profileSwitcherBackdrop;
+        if (!backdrop) return;
+        backdrop.classList.add('hidden');
+        backdrop.setAttribute('aria-hidden', 'true');
     }
 
     /** Escape sidebar zoom/overflow so the popover keeps a solid glass background. */
@@ -4155,6 +4714,7 @@ class AxisBrowser {
         const trigger = this.elements?.profileSwitcherTrigger;
         const switcher = document.getElementById('sidebar-profile-switcher');
         if (!root || !menu || !trigger) return;
+        this._hideProfileSwitcherBackdrop();
         if (!root.classList.contains('is-open')) {
         menu.classList.add('hidden');
             menu.classList.remove('is-open');
@@ -4280,9 +4840,9 @@ class AxisBrowser {
         this.hideProfileSwitcherMenu();
         this._profileModalMode = 'edit';
         this._profileEditId = profile.id;
-        if (title) title.textContent = 'Edit profile';
-        if (hint) hint.textContent = 'Change the name or icon for this profile.';
-        if (confirmBtn) confirmBtn.textContent = 'Save';
+        if (title) title.textContent = this.t('profile.editProfile');
+        if (hint) hint.textContent = this.t('profile.hint');
+        if (confirmBtn) confirmBtn.textContent = this.t('common.save');
         this.setupProfileCreateIconGrid();
         this.setProfileCreateIcon(profile.icon || 'user');
         input.value = String(profile.name || '');
@@ -4308,9 +4868,9 @@ class AxisBrowser {
         if (!modal || !input) return;
         this._profileModalMode = 'create';
         this._profileEditId = null;
-        if (title) title.textContent = 'New profile';
-        if (hint) hint.textContent = 'Separate tabs, cookies, and settings from your other profiles.';
-        if (confirmBtn) confirmBtn.textContent = 'Create';
+        if (title) title.textContent = this.t('profile.new');
+        if (hint) hint.textContent = this.t('profile.hint');
+        if (confirmBtn) confirmBtn.textContent = this.t('common.create');
         this.setupProfileCreateIconGrid();
         this.setProfileCreateIcon('user');
         input.value = '';
@@ -4353,9 +4913,9 @@ class AxisBrowser {
         if (!modal || !profile?.id || profile.id === 'personal') return;
         this._profileDeleteId = profile.id;
         const name = String(profile.name || profile.id);
-        if (title) title.textContent = `Delete “${name}”?`;
+        if (title) title.textContent = this.t('profile.deleteNamed', { name });
         if (message) {
-            message.textContent = `“${name}” will be moved to trash with its tabs, cookies, history, passwords, extensions, and settings. You can restore it from trash or press ⌘Z right after deleting.`;
+            message.textContent = this.t('profile.deleteBodyNamed', { name });
         }
         this.setProfileFormModalTheme(modal);
         modal.classList.remove('hidden');
@@ -4479,12 +5039,90 @@ class AxisBrowser {
             if (data && typeof data.key === 'string') {
                 this.settings = this.settings || {};
                 this.settings[data.key] = data.value;
+                if (data.key === 'universalBrowserLanguage') {
+                    this.settings.universalBrowserLanguage = !!data.value;
+                    if (data.value) {
+                        if (!this.settings.profileUiLanguage && this.settings.uiLanguage) {
+                            this.settings.profileUiLanguage = this.settings.uiLanguage;
+                        }
+                        if (data.uiLanguage) {
+                            this.settings.uiLanguage = data.uiLanguage;
+                        }
+                    }
+                    if (data.universalUiLanguage) {
+                        this.settings.universalUiLanguage = data.universalUiLanguage;
+                    }
+                    // Turning Universal off: reload this profile's own language.
+                    if (!data.value) {
+                        await this.loadSettings();
+                    }
+                }
+                if (data.key === 'universalUiLanguage' && data.value) {
+                    this.settings.universalUiLanguage = data.value;
+                    if (this.settings.universalBrowserLanguage) {
+                        this.settings.uiLanguage = data.value;
+                    }
+                }
+                if (data.key === 'uiLanguage' && data.value) {
+                    this.settings.uiLanguage = data.value;
+                    if (!this.settings.universalBrowserLanguage) {
+                        this.settings.profileUiLanguage = data.value;
+                    }
+                }
+                if (data.key === 'universalBrowserFont') {
+                    this.settings.universalBrowserFont = !!data.value;
+                    if (data.value) {
+                        if (!this.settings.profileUiFont && this.settings.uiFont) {
+                            this.settings.profileUiFont = this.settings.uiFont;
+                        }
+                        if (data.uiFont || data.universalUiFont) {
+                            this.settings.uiFont = data.uiFont || data.universalUiFont;
+                        }
+                    }
+                    if (data.universalUiFont) {
+                        this.settings.universalUiFont = data.universalUiFont;
+                    }
+                    if (!data.value) {
+                        await this.loadSettings();
+                    }
+                }
+                if (data.key === 'universalUiFont' && data.value) {
+                    this.settings.universalUiFont = data.value;
+                    if (this.settings.universalBrowserFont) {
+                        this.settings.uiFont = data.value;
+                    }
+                }
+                if (data.key === 'uiFont' && data.value) {
+                    this.settings.uiFont = data.value;
+                    if (!this.settings.universalBrowserFont) {
+                        this.settings.profileUiFont = data.value;
+                    }
+                }
+                this._syncProfileRuntimeLanguageFlags?.(this.settings);
             } else {
                 await this.loadSettings();
             }
             const after = this._settingsApplySnapshot();
+            const languageChanged =
+                data?.key === 'uiLanguage' ||
+                data?.key === 'universalBrowserLanguage' ||
+                data?.key === 'universalUiLanguage' ||
+                before.uiLanguage !== after.uiLanguage;
+            const fontChanged =
+                data?.key === 'uiFont' ||
+                data?.key === 'universalBrowserFont' ||
+                data?.key === 'universalUiFont' ||
+                before.uiFont !== after.uiFont;
 
-            // Setup overlay is covering the shell — keep store in sync but skip chrome
+            // Language must update immediately - never wait for restart or a full theme rebuild.
+            if (languageChanged) {
+                this.applyUiLanguage(after.uiLanguage || this.settings?.uiLanguage);
+            }
+            if (fontChanged) {
+                this.applyUiFont(after.uiFont || this.settings?.uiFont);
+            }
+
+            // Setup overlay is covering the shell - keep store in sync but skip chrome
             // refreshes that make the setup UI flash/reload.
             if (this._onboarding?.isVisible?.()) {
                 this._onboarding?.syncTheme?.();
@@ -4532,13 +5170,14 @@ class AxisBrowser {
                 before.ntpAiSearch !== after.ntpAiSearch ||
                 aiFeaturesChanged;
 
-            // Lightweight settings: apply UI now — skip shortcut cache / theme rebuilds.
+            // Lightweight settings: apply UI now - skip shortcut cache / theme rebuilds.
             if (
                 (ambientChanged ||
                     linkPreviewChanged ||
                     sidebarZoomChanged ||
                     unpinnedClearChanged ||
-                    ntpChanged) &&
+                    ntpChanged ||
+                    languageChanged) &&
                 !themeChanged &&
                 !transparentChanged &&
                 !sidebarChanged &&
@@ -4695,7 +5334,9 @@ class AxisBrowser {
             ntpWidgetLayout: JSON.stringify(s.ntpWidgetLayout || []),
             ntpWidgetBg: s.ntpWidgetBackgrounds !== false,
             ntpShowGear: s.ntpShowSettingsShortcut !== false,
-            ntpShowEdit: s.ntpShowWidgetsEditButton !== false
+            ntpShowEdit: s.ntpShowWidgetsEditButton !== false,
+            uiLanguage: s.uiLanguage || 'en',
+            uiFont: s.uiFont || 'default'
         };
     }
 
@@ -4742,11 +5383,13 @@ class AxisBrowser {
         btn.classList.toggle('url-bar-adblock-off', !active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
         if (!globalOn) {
-            btn.title = 'Ad blocker off everywhere';
+            btn.title = this.t('adblock.statusOff');
         } else if (ctx.pageHostname && this.isAdblockDisabledForHostname(ctx.pageHostname)) {
-            btn.title = `Ad blocker off on ${ctx.pageLabel}`;
+            btn.title = this.t('adblock.statusAllowed', { site: ctx.pageLabel });
         } else {
-            btn.title = 'Ad blocker on';
+            btn.title = ctx.pageLabel
+                ? this.t('adblock.statusOnSite', { site: ctx.pageLabel })
+                : this.t('adblock.title');
         }
         const panel = document.getElementById('adblock-panel');
         if (panel && !panel.classList.contains('hidden')) {
@@ -4781,6 +5424,13 @@ class AxisBrowser {
             siteDisabled: false,
             active: this.isAdBlockerEnabled(),
             pageBlocked: 0,
+            pageByCategory: { ads: 0, trackers: 0, other: 0 },
+            pageByType: [],
+            recentHosts: [],
+            totalBlocked: 0,
+            fingerprintProtected: false,
+            fingerprintProtection: false,
+            sessionByCategory: { ads: 0, trackers: 0, other: 0 },
         };
         try {
             stats = await window.electronAPI.getAdblockStats(ctx);
@@ -4789,7 +5439,12 @@ class AxisBrowser {
         const siteDisabled = !!stats.siteDisabled;
         const active = globalOn && !siteDisabled;
         const hasSite = !!ctx.pageHostname;
-        const pageBlocked = Number(stats.pageBlocked) || 0;
+        const sessionBlocked = Number(stats.totalBlocked) || 0;
+        const sessionCats = stats.sessionByCategory || { ads: 0, trackers: 0, other: 0 };
+        const pageCats = stats.pageByCategory || { ads: 0, trackers: 0, other: 0 };
+        const ads = Number(sessionCats.ads) || 0;
+        const trackers = Number(sessionCats.trackers) || 0;
+        const other = Number(sessionCats.other) || 0;
 
         const badge = document.getElementById('adblock-panel-badge');
         const statWrap = document.getElementById('adblock-panel-stat-wrap');
@@ -4798,9 +5453,15 @@ class AxisBrowser {
         const globalBtn = document.getElementById('adblock-panel-global-btn');
         const siteBtn = document.getElementById('adblock-panel-site-btn');
         const iconWrap = panel.querySelector('.adblock-panel-icon-wrap');
+        const chips = document.getElementById('adblock-panel-chips');
+        const details = document.getElementById('adblock-panel-details');
 
         if (badge) {
-            badge.textContent = !globalOn ? 'Off' : siteDisabled ? 'Allowed' : 'On';
+            badge.textContent = !globalOn
+                ? this.t('adblock.off')
+                : siteDisabled
+                  ? this.t('adblock.allowed')
+                  : this.t('common.on');
             badge.classList.toggle('adblock-badge--on', active);
             badge.classList.toggle('adblock-badge--warn', globalOn && siteDisabled);
             badge.classList.toggle('adblock-badge--off', !globalOn);
@@ -4811,34 +5472,139 @@ class AxisBrowser {
             iconWrap.classList.toggle('adblock-panel-icon-wrap--off', !globalOn);
         }
         if (statWrap) {
-            statWrap.classList.toggle('hidden', !active || !hasSite);
+            // Session totals still useful with protection on, even on new-tab / no site.
+            statWrap.classList.toggle('hidden', !active);
         }
         if (pageCount) {
-            pageCount.textContent = pageBlocked.toLocaleString();
+            pageCount.textContent = sessionBlocked.toLocaleString();
+        }
+        const setChip = (id, n) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = String(n);
+        };
+        setChip('adblock-chip-ads', ads);
+        setChip('adblock-chip-trackers', trackers);
+        setChip('adblock-chip-other', other);
+        if (chips) {
+            chips.classList.toggle('hidden', !active);
+            chips.setAttribute('aria-hidden', active ? 'false' : 'true');
         }
         if (statusEl) {
             if (!globalOn) {
-                statusEl.textContent = 'Ads and trackers are not blocked in this profile.';
+                statusEl.textContent = this.t('adblock.statusOff');
             } else if (!hasSite) {
-                statusEl.textContent = 'Open a website to allow or block a specific site.';
+                statusEl.textContent = this.t('adblock.statusNoSite');
             } else if (siteDisabled) {
-                statusEl.textContent = `${ctx.pageLabel} is allowed — nothing is blocked here.`;
+                statusEl.textContent = this.t('adblock.statusAllowed', { site: ctx.pageLabel });
             } else {
-                statusEl.textContent = `Blocking ads and trackers on ${ctx.pageLabel}.`;
+                statusEl.textContent = this.t('adblock.statusOnSite', { site: ctx.pageLabel });
             }
         }
         if (globalBtn) {
-            globalBtn.textContent = globalOn ? 'Turn off everywhere' : 'Turn on everywhere';
+            globalBtn.textContent = globalOn ? this.t('adblock.turnOffEverywhere') : this.t('adblock.turnOnEverywhere');
         }
         if (siteBtn) {
             if (!hasSite || !globalOn) {
                 siteBtn.classList.add('hidden');
             } else {
                 siteBtn.classList.remove('hidden');
-                siteBtn.textContent = siteDisabled ? 'Block this site' : 'Allow this site';
+                siteBtn.textContent = siteDisabled ? this.t('adblock.blockThisSite') : this.t('adblock.allowSite');
+            }
+        }
+
+        if (details) {
+            const showDetails = active && hasSite;
+            details.classList.toggle('hidden', !showDetails);
+            if (showDetails) {
+                this._renderAdblockPanelDetails(stats, pageCats);
             }
         }
         panel.classList.toggle('adblock-panel--off', !active);
+    }
+
+    _adblockCategoryLabel(category) {
+        if (category === 'ads') return this.t('adblock.cat.ads');
+        if (category === 'trackers') return this.t('adblock.cat.trackers');
+        return this.t('adblock.cat.other');
+    }
+
+    _adblockTypeLabel(type) {
+        const key = `adblock.type.${type}`;
+        const translated = this.t(key);
+        if (translated && translated !== key) return translated;
+        const map = {
+            script: 'Script',
+            request: 'Network request',
+            xhr: 'Network request',
+            fetch: 'Network request',
+            image: 'Image / pixel',
+            stylesheet: 'Stylesheet',
+            font: 'Font',
+            media: 'Media',
+            websocket: 'WebSocket',
+            ping: 'Beacon',
+            cspReport: 'Report',
+            frame: 'Embedded frame',
+            page: 'Page',
+            misc: 'Request',
+            other: 'Request',
+            mainFrame: 'Page',
+            subFrame: 'Embedded frame',
+        };
+        return map[type] || type;
+    }
+
+    _renderAdblockPanelDetails(stats, pageCats = null) {
+        const cats = pageCats || stats.pageByCategory || { ads: 0, trackers: 0, other: 0 };
+        const breakdown = document.getElementById('adblock-panel-breakdown');
+        const blockedWrap = document.getElementById('adblock-panel-blocked-wrap');
+        const blockedList = document.getElementById('adblock-panel-blocked');
+
+        if (breakdown) {
+            const ads = Number(cats.ads) || 0;
+            const trackers = Number(cats.trackers) || 0;
+            const others = Number(cats.other) || 0;
+            const rows = [
+                [this.t('adblock.cat.ads'), ads, 'ads'],
+                [this.t('adblock.cat.trackers'), trackers, 'trackers'],
+                [this.t('adblock.cat.other'), others, 'other'],
+            ];
+            breakdown.innerHTML = rows
+                .map(
+                    ([label, n, cat]) =>
+                        `<div class="adblock-fact-row"><dt><span class="adblock-cat-dot adblock-cat-dot--${this.escapeHtml(cat)}"></span>${this.escapeHtml(label)}</dt><dd>${n.toLocaleString()}</dd></div>`
+                )
+                .join('');
+        }
+
+        const items = Array.isArray(stats.blockedItems) ? stats.blockedItems : [];
+        if (blockedWrap && blockedList) {
+            if (!items.length) {
+                blockedWrap.classList.add('hidden');
+                blockedList.innerHTML = '';
+            } else {
+                blockedWrap.classList.remove('hidden');
+                blockedList.innerHTML = items
+                    .map((row) => {
+                        const host = this.escapeHtml(String(row.host || ''));
+                        const cat = row.category === 'ads' || row.category === 'trackers' ? row.category : 'other';
+                        const catLabel = this.escapeHtml(this._adblockCategoryLabel(cat));
+                        const typeLabel = this.escapeHtml(this._adblockTypeLabel(row.type));
+                        const count = Number(row.count) || 0;
+                        return `<li class="adblock-blocked-row">
+                            <div class="adblock-blocked-main">
+                                <span class="adblock-blocked-host" title="${host}">${host}</span>
+                                <span class="adblock-blocked-count">${count.toLocaleString()}</span>
+                            </div>
+                            <div class="adblock-blocked-meta">
+                                <span class="adblock-blocked-tag adblock-blocked-tag--${cat}">${catLabel}</span>
+                                <span class="adblock-blocked-type">${typeLabel}</span>
+                            </div>
+                        </li>`;
+                    })
+                    .join('');
+            }
+        }
     }
 
     positionAdblockPanel() {
@@ -4848,7 +5614,8 @@ class AxisBrowser {
         const rect = btn.getBoundingClientRect();
         const margin = 8;
         const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-        const popupWidth = Math.min(300, viewportWidth - margin * 2);
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+        const popupWidth = Math.min(340, viewportWidth - margin * 2);
         panel.style.width = `${popupWidth}px`;
         let left = rect.right - popupWidth;
         if (left < margin) left = rect.left;
@@ -4856,9 +5623,15 @@ class AxisBrowser {
             left = viewportWidth - popupWidth - margin;
         }
         left = Math.max(margin, left);
+        let top = rect.bottom + margin;
+        const maxPanelHeight = Math.min(viewportHeight * 0.78, 620);
+        if (top + Math.min(280, maxPanelHeight) > viewportHeight - margin) {
+            top = Math.max(margin, viewportHeight - maxPanelHeight - margin);
+        }
         panel.style.left = `${left}px`;
-        panel.style.top = `${rect.bottom + margin}px`;
+        panel.style.top = `${top}px`;
         panel.style.right = 'auto';
+        panel.style.maxHeight = `${Math.min(maxPanelHeight, viewportHeight - top - margin)}px`;
     }
 
     closeAdblockPanel() {
@@ -4873,6 +5646,7 @@ class AxisBrowser {
             backdrop.setAttribute('aria-hidden', 'true');
         }
         document.body.classList.remove('adblock-panel-open');
+        document.getElementById('url-bar-adblock')?.setAttribute('aria-expanded', 'false');
         if (panel) panel.classList.add('hidden');
     }
 
@@ -4899,6 +5673,7 @@ class AxisBrowser {
             backdrop.setAttribute('aria-hidden', 'false');
         }
         document.body.classList.add('adblock-panel-open');
+        document.getElementById('url-bar-adblock')?.setAttribute('aria-expanded', 'true');
         panel.classList.remove('hidden');
         if (this._adblockPanelRefreshTimer) clearInterval(this._adblockPanelRefreshTimer);
         this._adblockPanelRefreshTimer = setInterval(() => {
@@ -4954,34 +5729,73 @@ class AxisBrowser {
         await this.setAdblockSiteException(ctx.pageHostname, disabled);
     }
     
-    // Copy the current tab's URL to clipboard
+    // Copy the current tab's URL to clipboard (tracking params stripped)
     copyCurrentUrl() {
-        // Check if current tab is settings
-        if (this.currentTab) {
-            const tab = this.tabs.get(this.currentTab);
-            if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
-                try {
-                    navigator.clipboard.writeText('axis://settings');
-                    this.showNotification('Settings URL copied', 'success');
-                    return;
-                } catch (e) {
-                    console.error('Failed to copy URL:', e);
-                    return;
-                }
-            }
-        }
-        
-        const webview = this.getActiveWebview();
-        if (!webview) return;
-        
+        void this.copyCurrentUrlAsync();
+    }
+
+    _cleanUrlForClipboard(url) {
         try {
-            const url = webview.getURL();
-            if (url && url !== 'about:blank') {
-                navigator.clipboard.writeText(url);
+            const api = typeof window !== 'undefined' ? window.AxisCleanUrl : null;
+            if (api && typeof api.stripTrackingParams === 'function') {
+                return api.stripTrackingParams(url) || url;
             }
-        } catch (e) {
-            console.error('Failed to copy URL:', e);
+        } catch (_) {}
+        return url;
+    }
+
+    /** Keep URL-bar actions visible briefly and swap copy → check after a successful copy. */
+    flashUrlBarCopySuccess() {
+        const btn = this.elements?.urlBarCopy || document.getElementById('url-bar-copy');
+        if (!btn) return;
+        const icon = btn.querySelector('i');
+        if (this._urlBarCopyFlashTimer) {
+            clearTimeout(this._urlBarCopyFlashTimer);
+            this._urlBarCopyFlashTimer = null;
         }
+        if (this._urlBarCopyLeaveTimer) {
+            clearTimeout(this._urlBarCopyLeaveTimer);
+            this._urlBarCopyLeaveTimer = null;
+        }
+        document.body.classList.remove('url-bar-copy-leaving');
+        btn.classList.remove('is-copied-out', 'is-copied-restore');
+
+        document.body.classList.add('url-bar-copy-done');
+        btn.classList.add('is-copied');
+        if (icon) {
+            icon.classList.remove('fa-link');
+            if (!icon.classList.contains('fa-check')) icon.classList.add('fa-check');
+        }
+        // Restart CSS pop when copying again quickly.
+        btn.classList.remove('is-copied-pop');
+        void btn.offsetWidth;
+        btn.classList.add('is-copied-pop');
+        this._urlBarCopyFlashTimer = setTimeout(() => {
+            this._urlBarCopyFlashTimer = null;
+            this._endUrlBarCopySuccess(btn, icon);
+        }, 2000);
+    }
+
+    _endUrlBarCopySuccess(btn, icon) {
+        if (!btn) return;
+        btn.classList.remove('is-copied-pop');
+        btn.classList.add('is-copied-out');
+        document.body.classList.add('url-bar-copy-leaving');
+
+        this._urlBarCopyLeaveTimer = setTimeout(() => {
+            if (icon) {
+                icon.classList.remove('fa-check');
+                if (!icon.classList.contains('fa-link')) icon.classList.add('fa-link');
+            }
+            btn.classList.remove('is-copied', 'is-copied-out');
+            btn.classList.add('is-copied-restore');
+            // Keep the controls visible briefly after the link icon returns, then fade.
+            this._urlBarCopyLeaveTimer = setTimeout(() => {
+                btn.classList.remove('is-copied-restore');
+                document.body.classList.remove('url-bar-copy-done', 'url-bar-copy-leaving');
+                this._urlBarCopyLeaveTimer = null;
+            }, 1000);
+        }, 240);
     }
 
     async refreshShortcutCache() {
@@ -5058,6 +5872,18 @@ class AxisBrowser {
             case 'refresh':
                 this.refresh();
                 break;
+            case 'hard-reload': {
+                const wv = this.getActiveWebview();
+                if (!wv) break;
+                try {
+                    if (typeof wv.reloadIgnoringCache === 'function') {
+                        wv.reloadIgnoringCache();
+                    } else {
+                        wv.reload();
+                    }
+                } catch (_) {}
+                break;
+            }
             case 'go-back':
                 this.goBack();
                 break;
@@ -5073,11 +5899,12 @@ class AxisBrowser {
                 break;
             }
             case 'focus-url':
-                // Focus the new webview URL bar input
-                const urlBarInput = document.getElementById('url-bar-input');
-                const urlBarDisplay = document.getElementById('url-bar-display');
-                if (urlBarDisplay && urlBarInput) {
-                    urlBarDisplay.click(); // This will trigger the edit mode
+                {
+                    const urlBarInput = document.getElementById('url-bar-input');
+                    const urlBarDisplay = document.getElementById('url-bar-display');
+                    if (urlBarDisplay && urlBarInput) {
+                        urlBarDisplay.click();
+                    }
                 }
                 break;
             case 'pin-tab':
@@ -5105,6 +5932,10 @@ class AxisBrowser {
                 break;
             case 'duplicate-tab':
                 this.duplicateCurrentTab();
+                break;
+            case 'add-to-favorites':
+                if (this.isIncognitoWindow) break;
+                if (this.currentTab) this.addTabToFavorites(this.currentTab);
                 break;
             case 'settings':
                 this.toggleSettings();
@@ -5282,7 +6113,7 @@ class AxisBrowser {
                     if (isActiveTab()) {
                         this.isWebviewLoading = false;
                         this.updateRefreshButton(false);
-                        this.showNotification('Page is taking too long to load. You can try refreshing.', 'warning');
+                        this.showNotification(this.t('note.pageSlow'), 'warning');
                     }
                 }
                 clearLoadingTimeout();
@@ -5293,15 +6124,26 @@ class AxisBrowser {
 
         const didStartNavigationHandler = (e) => {
             if (!e || e.isMainFrame === false) return;
+            const navUrl = e.url || '';
+            const tab = getTab();
+            const oldKey = this._urlStablePageKey(tab?.url || '');
+            const nextKey = this._urlStablePageKey(navUrl);
+            if (navUrl && nextKey && nextKey !== oldKey) {
+                this._resetWebviewUrlBarThemeTracking(webview);
+                if (tab) {
+                    tab.urlBarChromeSnapshot = null;
+                    tab.siteThemeRgb = null;
+                }
+                this._urlBarPendingByWebview.delete(webview);
+                ++this._urlBarThemeSeq;
+            }
             try {
                 const wcId = typeof webview.getWebContentsId === 'function' ? webview.getWebContentsId() : 0;
-                const navUrl = e.url || '';
                 if (wcId && navUrl) {
                     void window.electronAPI?.resetAdblockPageStats?.(wcId, navUrl);
                 }
             } catch (_) {}
             if (!isActiveTab()) return;
-            const navUrl = e.url || '';
             if (this.isBenchmarking) return;
             this._hideLinkStatusNow();
             if (navUrl && navUrl !== 'about:blank') {
@@ -5418,7 +6260,7 @@ class AxisBrowser {
                 } catch (_) {}
             }
             if (isMainFrame && finishUrl) {
-                this._nudgeYouTubePlayerIfNeeded(webview, finishUrl);
+                this._scheduleGuestVideoRecovery(webview, finishUrl);
             }
             if (isMainFrame && finishUrl && this.settings?.transparentSites && !this.isBenchmarking) {
                 this._touchTransparentSitesForWebview(webview);
@@ -5436,6 +6278,15 @@ class AxisBrowser {
                 this.loadingBarTabId = null;
             }
             webview.__axisMainNavPending = false;
+            if (!isActiveTab()) {
+                this._clearUrlBarNavThemeHold(webview);
+            } else if (
+                !this.isBenchmarking &&
+                webview.__axisUrlBarNavHold &&
+                !webview.__axisUrlBarNavRevealed
+            ) {
+                this._revealUrlBarThemeWithPage(webview);
+            }
             if (tabId === this.currentTab) {
                 this.isWebviewLoading = false;
                 this.updateRefreshButton(false);
@@ -5452,6 +6303,13 @@ class AxisBrowser {
             ]);
             if (this.settings?.transparentSites && !this.isBenchmarking) {
                 this._touchTransparentSitesForWebview(webview);
+            }
+            let stopUrl = '';
+            try {
+                stopUrl = webview.getURL() || '';
+            } catch (_) {}
+            if (stopUrl) {
+                this._scheduleGuestVideoRecovery(webview, stopUrl);
             }
         };
         webview.__eventHandlers.didStopLoading = didStopLoadingHandler;
@@ -5490,7 +6348,7 @@ class AxisBrowser {
             // a new navigation is already in progress so don't touch loading state.
             if (event.errorCode === -3) return;
 
-            // Only handle main-frame failures — sub-frame errors (ad iframes,
+            // Only handle main-frame failures - sub-frame errors (ad iframes,
             // tracking pixels, etc.) must NOT interfere with the main page load.
             if (event.isMainFrame === false) return;
 
@@ -5516,7 +6374,7 @@ class AxisBrowser {
             const count = this[retryKey] || 0;
             if (count >= 5) {
                 if (isActiveTab()) {
-                    this.showErrorPage('Unable to load page. Please check your internet connection.', webview);
+                    this.showErrorPage(this.t('chrome.loadErrorOffline'), webview);
                 }
                 return;
             }
@@ -5551,15 +6409,31 @@ class AxisBrowser {
                 }
                 return;
             }
+            // Block http(s) pages from following links into file: (address-bar loads set a one-shot allow flag).
+            if (
+                /^file:/i.test(nextUrl) &&
+                event.isMainFrame !== false &&
+                !webview.__axisAllowNextFileNav
+            ) {
+                let priorUrl = '';
+                try {
+                    priorUrl = webview.getURL() || '';
+                } catch (_) {}
+                if (/^https?:/i.test(priorUrl)) {
+                    event.preventDefault();
+                    return;
+                }
+            }
+            if (webview.__axisAllowNextFileNav && /^file:/i.test(nextUrl)) {
+                webview.__axisAllowNextFileNav = false;
+            }
             if (!isActiveTab()) return;
             if (
                 this.settings?.httpsOnlyMode &&
                 nextUrl &&
                 event.isMainFrame !== false &&
                 this.isNonSecureHttpUrl(nextUrl) &&
-                !window.confirm(
-                    'This page uses HTTP (not HTTPS). Your connection would not be encrypted on this site.\n\nContinue to:\n' + nextUrl
-                )
+                !window.confirm(this.t('note.httpsOnly', { url: nextUrl }))
             ) {
                 event.preventDefault();
                 return;
@@ -5595,8 +6469,9 @@ class AxisBrowser {
             }
             try {
                 const navUrl = webview.getURL();
-                if (navUrl) this._nudgeYouTubePlayerIfNeeded(webview, navUrl);
+                if (navUrl) this._scheduleGuestVideoRecovery(webview, navUrl);
             } catch (_) {}
+            this._recordTabAncestryNavigation(tabId, webview);
             if (isActiveTab() && !this.isBenchmarking) {
                 try {
                     const navUrl = webview.getURL() || '';
@@ -5611,6 +6486,8 @@ class AxisBrowser {
                 ]);
                 // Update themed URL bar
                 this.updateUrlBar(webview);
+                // After navigation, offer to save if the page cleared the login form.
+                void this.tryOfferVaultSaveFromWebview?.(webview);
         };
         webview.__eventHandlers.didNavigate = didNavigateHandler;
         webview.addEventListener('did-navigate', didNavigateHandler);
@@ -5639,7 +6516,7 @@ class AxisBrowser {
                 this._touchTransparentSitesForWebview(webview);
             }
             try {
-                if (navUrl) this._nudgeYouTubePlayerIfNeeded(webview, navUrl);
+                if (navUrl) this._scheduleGuestVideoRecovery(webview, navUrl);
             } catch (_) {}
             if (isActiveTab() && !this.isBenchmarking) {
                 try {
@@ -5652,6 +6529,7 @@ class AxisBrowser {
                 () => (pageChanged ? this.updateTabTitle() : undefined),
                 () => this.updateUrlBar(webview, { skipExtractTheme: !pageChanged })
                 ]);
+            if (pageChanged) void this.tryOfferVaultSaveFromWebview?.(webview);
         };
         webview.__eventHandlers.didNavigateInPage = didNavigateInPageHandler;
         webview.addEventListener('did-navigate-in-page', didNavigateInPageHandler);
@@ -5662,6 +6540,7 @@ class AxisBrowser {
                 if (!tab.customTitle) {
                 tab.title = webview.getTitle() || tab.title;
                 }
+                this._updateTabAncestryMeta(tabId, { title: tab.customTitle || tab.title });
             }
 
             if (!isActiveTab() || this.isBenchmarking) return;
@@ -5702,6 +6581,16 @@ class AxisBrowser {
             const tab = getTab();
             if (tab) {
                 tab.favicon = faviconUrl;
+                this._updateTabAncestryMeta(tabId, { favicon: faviconUrl });
+                try {
+                    const origin = new URL(tab.url || '').origin;
+                    if (origin && origin !== 'null') {
+                        const cache =
+                            this._vaultFaviconDataCache ||
+                            (this._vaultFaviconDataCache = new Map());
+                        cache.set(origin, faviconUrl);
+                    }
+                } catch (_) {}
                 if (tab.isFavoriteTab && tab.favoriteId && !tab.customIcon) {
                     const fav = this.favorites.find((f) => f.id === tab.favoriteId);
                     if (fav && !fav.customIcon) {
@@ -5772,6 +6661,25 @@ class AxisBrowser {
         
         const ipcMessageHandler = (event) => {
             const { channel, args } = event;
+            if (channel === 'axis-guest-html-fullscreen') {
+                const payload = (args && args[0]) || {};
+                let guestId = 0;
+                try {
+                    guestId = typeof webview.getWebContentsId === 'function' ? webview.getWebContentsId() : 0;
+                } catch (_) {}
+                this._handleGuestHtmlFullscreen(!!payload.active, guestId, tabId);
+                return;
+            }
+            if (channel === 'axis-guest-visible') {
+                if (!isActiveTab()) return;
+                const tab = getTab();
+                let pageUrl = tab?.url || '';
+                try {
+                    if (!pageUrl) pageUrl = webview.getURL() || '';
+                } catch (_) {}
+                this._scheduleGuestVideoRecovery(webview, pageUrl);
+                return;
+            }
             if (channel === 'axis-nav-gesture') {
                 const dir = args && args[0];
                 this.tryNavigateWithAxisGesture(dir, webview, tabId);
@@ -5856,6 +6764,25 @@ class AxisBrowser {
         };
         webview.__eventHandlers.ipcMessage = ipcMessageHandler;
         webview.addEventListener('ipc-message', ipcMessageHandler);
+
+        const enterHtmlFullscreenHandler = () => {
+            let guestId = 0;
+            try {
+                guestId = typeof webview.getWebContentsId === 'function' ? webview.getWebContentsId() : 0;
+            } catch (_) {}
+            this._handleGuestHtmlFullscreen(true, guestId, tabId);
+        };
+        const leaveHtmlFullscreenHandler = () => {
+            let guestId = 0;
+            try {
+                guestId = typeof webview.getWebContentsId === 'function' ? webview.getWebContentsId() : 0;
+            } catch (_) {}
+            this._handleGuestHtmlFullscreen(false, guestId, tabId);
+        };
+        webview.__eventHandlers.enterHtmlFullscreen = enterHtmlFullscreenHandler;
+        webview.__eventHandlers.leaveHtmlFullscreen = leaveHtmlFullscreenHandler;
+        webview.addEventListener('enter-html-full-screen', enterHtmlFullscreenHandler);
+        webview.addEventListener('leave-html-full-screen', leaveHtmlFullscreenHandler);
         
         // Settings tabs persist through their own preload IPC. Do not poll and
         // rewrite Settings controls from the host; that races normal click/change
@@ -5883,6 +6810,8 @@ class AxisBrowser {
             contextMenu:       'context-menu',
             updateTargetUrl:   'update-target-url',
             ipcMessage:        'ipc-message',
+            enterHtmlFullscreen: 'enter-html-full-screen',
+            leaveHtmlFullscreen: 'leave-html-full-screen',
         };
 
         const handlers = webview.__eventHandlers;
@@ -6085,7 +7014,7 @@ class AxisBrowser {
 
     setupPerformanceOptimizations() {
         // Real browsing: Chromium lazy image/frame loading stays enabled (see main.js flags).
-        // Link hover dns-prefetch / preconnect runs in guest preload — zero cost until you point at a link.
+        // Link hover dns-prefetch / preconnect runs in guest preload - zero cost until you point at a link.
         this._syncWebviewBackgroundThrottling(this.currentTab);
     }
 
@@ -6268,7 +7197,6 @@ class AxisBrowser {
     }
 
     applyCustomThemeFromSettings() {
-        if (this.isIncognitoWindow) return;
         if (this._profileSwipeThemeActive) return;
         this._siteThemeColorActiveHex = null;
         if (!this.settings) {
@@ -6307,7 +7235,7 @@ class AxisBrowser {
     }
 
     _isSiteThemeColorEnabled() {
-        return !this.isIncognitoWindow && !!this.settings?.siteThemeColor;
+        return !!this.settings?.siteThemeColor;
     }
 
     _rgbToHex(rgb) {
@@ -6343,7 +7271,6 @@ class AxisBrowser {
     }
 
     _reapplySettingsShellIfNeeded(force = false) {
-        if (this.isIncognitoWindow) return;
         if (this._profileSwipeThemeActive) return;
         const key = this._settingsShellKey();
         const pid = String(this.profileId || 'personal');
@@ -6359,7 +7286,7 @@ class AxisBrowser {
     }
 
     _applyTabShellForSwitch(tab) {
-        if (this.isIncognitoWindow || !tab) return;
+        if (!tab) return;
         const url = tab.url || '';
         const internal =
             url === this.NEWTAB_URL ||
@@ -6372,6 +7299,8 @@ class AxisBrowser {
             if (this._siteThemeColorActiveHex) this._siteThemeColorActiveHex = null;
             return;
         }
+
+        this._setUrlBarInternalShellMode(null);
 
         const snap = tab.urlBarChromeSnapshot;
         if (!this._urlBarThemeSnapshotMatchesTab(tab, snap)) {
@@ -6570,7 +7499,7 @@ class AxisBrowser {
         return 0.2126 * r + 0.7152 * g + 0.0722 * b;
     }
 
-    /** Shell paint: exact theme RGB — never shifted toward grey or a lighter tint. */
+    /** Shell paint: exact theme RGB - never shifted toward grey or a lighter tint. */
     resolveShellGlassPaint(hexInput, transmissionAlpha) {
         const alpha =
             typeof transmissionAlpha === 'number' && Number.isFinite(transmissionAlpha)
@@ -6592,7 +7521,7 @@ class AxisBrowser {
 
     /**
      * Bright shells on vibrancy: dark / saturated tints need a small alpha bump so hue survives
-     * see-through glass. **Pale / light theme colors already read at low alpha** — boosting them
+     * see-through glass. **Pale / light theme colors already read at low alpha** - boosting them
      * turns the frame into a solid pastel slab. This curve preserves transmission from `baseAlpha`
      * while only adding chroma insurance where luminance is low.
      */
@@ -6684,7 +7613,7 @@ class AxisBrowser {
         }
     }
 
-    /** Blend two theme hex colors (for gradient shell text / contrast). `weightTowardB` in 0–1. */
+    /** Blend two theme hex colors (for gradient shell text / contrast). `weightTowardB` in 0-1. */
     mixHexColors(hexA, hexB, weightTowardB = 0.5) {
         const t = Math.max(0, Math.min(1, weightTowardB));
         const a = this.hexToRgb(hexA || '#808080');
@@ -6795,7 +7724,7 @@ class AxisBrowser {
         return keys;
     }
 
-    /** Page-first keys for URL bar tint cache — avoids wrong colors across paths on one host. */
+    /** Page-first keys for URL bar tint cache - avoids wrong colors across paths on one host. */
     _urlBarThemeCacheLookupKeys(url) {
         const keys = [];
         const page = this._urlStablePageKey(url);
@@ -6831,6 +7760,13 @@ class AxisBrowser {
 
     _beginUrlBarNavThemeHold(webview, url) {
         if (!webview) return;
+        const nextKey = this._urlStablePageKey(url);
+        const holdKey = this._urlStablePageKey(webview.__axisUrlBarNavHoldUrl || '');
+        // did-start-loading can fire after load-commit already revealed this page.
+        // Re-arming the hold here stages later extracts forever and leaves a black bar.
+        if (webview.__axisUrlBarNavRevealed && nextKey && nextKey === holdKey) {
+            return;
+        }
         webview.__axisUrlBarNavHold = true;
         webview.__axisUrlBarNavRevealed = false;
         webview.__axisUrlBarNavHoldUrl = url || '';
@@ -6886,7 +7822,7 @@ class AxisBrowser {
         return this._urlStablePageKey(fromUrl) !== this._urlStablePageKey(toUrl);
     }
 
-    /** Stage tint during navigation — applied when the page commits, not before. */
+    /** Stage tint during navigation - apply cached color immediately when possible. */
     _prepareUrlBarThemeForNav(url, webview, fromUrl = '') {
         if (!url || url === 'about:blank' || !webview) return false;
         if (String(url).startsWith('axis://') || String(url).startsWith('axis:note://')) return false;
@@ -6900,42 +7836,51 @@ class AxisBrowser {
         }
         if (!this._shouldHoldUrlBarThemeForNav(priorUrl, url)) return false;
         this._beginUrlBarNavThemeHold(webview, url);
-        // Only exact-page cache — host fallback paints the wrong site color on new paths.
-        const found = this._lookupUrlBarThemeEntry(url, { pageOnly: true });
+        // Exact page first; host cache is a soft preview so the bar never waits black.
+        const found =
+            this._lookupUrlBarThemeEntry(url, { pageOnly: true }) ||
+            this._lookupUrlBarThemeEntry(url, { pageOnly: false });
         if (found && found.entry.transparentSites === !!this.settings?.transparentSites) {
+            const exactPage = String(found.key || '').startsWith('p:');
             this._stageUrlBarThemeForWebview(webview, { kind: 'cache', entry: found.entry });
+            // Paint cached tint immediately on the active tab - don't wait for load-commit.
+            if (this.getActiveWebview() === webview) {
+                this._beginUrlBarNavThemeSnap();
+                this._applyPendingUrlBarTheme({ kind: 'cache', entry: found.entry });
+                if (exactPage) {
+                    webview.__axisUrlBarNavRevealed = true;
+                    webview.__axisUrlBarNavHold = false;
+                    this._urlBarPendingByWebview.delete(webview);
+                }
+                this._releaseUrlBarNavThemeSnapIfNeeded();
+                this._scheduleUrlBarThemeRefine(webview, { afterRestore: true });
+            }
             return true;
         }
         return false;
     }
 
-    /** Reveal staged URL bar tint on the same frame as the new document's first paint. */
+    /** Reveal staged URL bar tint as soon as the new document paints (no extra frame delay). */
     _revealUrlBarThemeWithPage(webview) {
         if (!webview || this.isBenchmarking) return;
         if (!webview.__axisUrlBarNavHold || webview.__axisUrlBarNavRevealed) return;
         if (this.getActiveWebview() !== webview) return;
 
-        const runReveal = () => {
-            if (!webview.__axisUrlBarNavHold || webview.__axisUrlBarNavRevealed) return;
-            if (this.getActiveWebview() !== webview) return;
-            webview.__axisUrlBarNavRevealed = true;
-            webview.__axisUrlBarNavHold = false;
+        webview.__axisUrlBarNavRevealed = true;
+        webview.__axisUrlBarNavHold = false;
 
-            const pending = this._urlBarPendingByWebview.get(webview);
-            this._beginUrlBarNavThemeSnap();
-            if (pending) {
-                this._applyPendingUrlBarTheme(pending);
-                this._urlBarPendingByWebview.delete(webview);
-            } else if (this.settings?.transparentSites) {
-                this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
-            } else {
-                this._voidGuestTask(this.extractUrlBarTheme(webview));
-            }
-            requestAnimationFrame(() => {
-                this._releaseUrlBarNavThemeSnapIfNeeded();
-            });
-        };
-        requestAnimationFrame(() => requestAnimationFrame(runReveal));
+        const pending = this._urlBarPendingByWebview.get(webview);
+        this._beginUrlBarNavThemeSnap();
+        if (pending) {
+            this._applyPendingUrlBarTheme(pending);
+            this._urlBarPendingByWebview.delete(webview);
+        } else if (this.settings?.transparentSites) {
+            this.applyTransparentSitesUrlBarStyle({ skipShellReset: true });
+        } else {
+            this._voidGuestTask(this.extractUrlBarTheme(webview, { early: true }));
+            this._voidGuestTask(this.extractUrlBarTheme(webview));
+        }
+        this._releaseUrlBarNavThemeSnapIfNeeded();
     }
 
     _snapUrlBarThemeForUrl(url) {
@@ -6947,7 +7892,7 @@ class AxisBrowser {
     }
 
     _prefetchUrlBarThemeForUrl(url) {
-        /* Hover prefetch warms network only — do not change URL bar before navigation. */
+        /* Hover prefetch warms network only - do not change URL bar before navigation. */
         void url;
         return false;
     }
@@ -6977,10 +7922,18 @@ class AxisBrowser {
         if (!rgb) return false;
         const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
         const headerPageKey = url ? this._urlStablePageKey(url) : '';
-        const tabPageKey = tab?.url ? this._urlStablePageKey(tab.url) : '';
-        if (headerPageKey && tabPageKey && headerPageKey !== tabPageKey) return false;
         const webview = this.getActiveWebview();
         if (!webview) return false;
+        let activePageUrl = webview.__axisUrlBarNavHoldUrl || '';
+        if (!activePageUrl) {
+            try { activePageUrl = webview.getURL() || ''; } catch (_) {}
+        }
+        const activePageKey = activePageUrl
+            ? this._urlStablePageKey(activePageUrl)
+            : tab?.url
+              ? this._urlStablePageKey(tab.url)
+              : '';
+        if (headerPageKey && activePageKey && headerPageKey !== activePageKey) return false;
         if (webview && this._isUrlBarThemeHeldForWebview(webview)) {
             this._stageUrlBarThemeForWebview(webview, { kind: 'rgb', rgb, source: 'http-header' });
             return true;
@@ -7204,7 +8157,7 @@ class AxisBrowser {
 
     /** Deterministic shell palette from a profile's saved settings (not whatever is on screen now). */
     _shellChromeSnapshotFromSettings(settings) {
-        if (!settings || this.isIncognitoWindow) return null;
+        if (!settings) return null;
         const themeColor = settings.themeColor || '#1a1a1a';
         const gradientColor = settings.gradientColor || '#2a2a2a';
         const colors = this.generateHarmoniousColors(themeColor);
@@ -7222,7 +8175,7 @@ class AxisBrowser {
 
     /**
      * Precompute stable shell backgrounds for profile-swipe crossfade.
-     * Uses each profile's own settings — never the live screen palette.
+     * Uses each profile's own settings - never the live screen palette.
      */
     resolveProfileSwipeThemePack(settings) {
         if (!settings || this.isIncognitoWindow) return null;
@@ -7403,7 +8356,7 @@ class AxisBrowser {
     _styleProfileSwipeThemeLayer(layer, shellBg) {
         if (!layer) return;
         /*
-         * Only the colored glass tint lives on the layer — the blur is applied once on the
+         * Only the colored glass tint lives on the layer - the blur is applied once on the
          * overlay container. Two blurred layers stacked with opacity produced a muddy,
          * double-blurred midpoint; a single shared blur keeps the crossfade clean.
          */
@@ -7453,13 +8406,13 @@ class AxisBrowser {
         });
     }
 
-    /** GPU crossfade between two fixed profile shells — transforms, not stepped recolors. */
+    /** GPU crossfade between two fixed profile shells - transforms, not stepped recolors. */
     armProfileSwipeThemeCrossfade(fromPack, toPack, opts = {}) {
         if (this.isIncognitoWindow || !fromPack || !toPack) return;
         this._pinWebPanelRingForProfileSwipe();
         const overlay = this._ensureProfileSwipeThemeOverlay();
         const alreadyActive = overlay.classList.contains('is-active');
-        /* Single shared blur for both layers — clean crossfade, no double-blur midpoint. */
+        /* Single shared blur for both layers - clean crossfade, no double-blur midpoint. */
         const chrome = this.getShellChromeStyle();
         if (chrome) {
             overlay.style.setProperty('backdrop-filter', chrome.backdropMain, 'important');
@@ -7507,21 +8460,21 @@ class AxisBrowser {
         const to = toPack || this._profileSwipeOverlayToPack;
         if (!from || !to) return;
         const t = Math.max(0, Math.min(1, progress));
-        /* Finer updates for a continuous dissolve — still skip near-identical frames. */
+        /* Finer updates for a continuous dissolve - still skip near-identical frames. */
         if (Math.abs(t - (this._profileSwipeThemeMix ?? -1)) < 0.0015) return;
         this._profileSwipeThemeMix = t;
 
         const overlay = document.getElementById('axis-profile-swipe-theme-overlay');
         if (!overlay?.classList.contains('is-active')) return;
 
-        /* True opacity crossfade — fixed layer paints, no per-frame gradient rebuild. */
+        /* True opacity crossfade - fixed layer paints, no per-frame gradient rebuild. */
         overlay.style.setProperty('--profile-swipe-mix', String(t));
         const fromLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--from');
         const toLayer = overlay.querySelector('.axis-profile-swipe-theme-layer--to');
         if (fromLayer) fromLayer.style.opacity = String(1 - t);
         if (toLayer) toLayer.style.opacity = String(t);
 
-        /* Keep the sidebar panel opaque and crossfaded — never hollow it out during swipe. */
+        /* Keep the sidebar panel opaque and crossfaded - never hollow it out during swipe. */
         const blended = this.blendProfileSwipeThemePacks(from, to, t);
         const root = document.documentElement.style;
         if (blended?.shellBg) {
@@ -7529,7 +8482,7 @@ class AxisBrowser {
             root.setProperty('--sidebar-slide-out-background', blended.shellBg);
         }
 
-        /* Text/icon contrast only — cheap compared to rebuilding shellBg. */
+        /* Text/icon contrast only - cheap compared to rebuilding shellBg. */
         if (from.shellInkRgb || to.shellInkRgb) {
             root.setProperty(
                 '--shell-ink-rgb',
@@ -7566,7 +8519,7 @@ class AxisBrowser {
          */
     }
 
-    /** Set root theme vars to match the swipe overlay target — safe while overlay is still up. */
+    /** Set root theme vars to match the swipe overlay target - safe while overlay is still up. */
     _paintRealThemeFromSwipePack(pack) {
         if (!pack || this.isIncognitoWindow) return;
         const root = document.documentElement.style;
@@ -7617,7 +8570,7 @@ class AxisBrowser {
         }
     }
 
-    /** Lightweight shell tint during profile swipe — no full applyCustomTheme pipeline. */
+    /** Lightweight shell tint during profile swipe - no full applyCustomTheme pipeline. */
     applyProfileSwipeThemePack(pack) {
         if (!pack || this.isIncognitoWindow) return;
         if (document.body?.classList.contains('profile-swipe-theme-active')) return;
@@ -7862,18 +8815,38 @@ class AxisBrowser {
                 } else {
                     this.applyInternalShellUrlBarStyle();
                 }
-            } else if (this._applyTabSiteThemeFromMemory(tab)) {
-                restored = true;
-            } else if (
-                tab.url &&
-                tab.url !== 'about:blank' &&
-                !String(tab.url).startsWith('axis:note://')
-            ) {
-                this._applyTabShellForSwitch(tab);
-                this.applyAppThemeToUrlBar({ skipShellReset: true });
             } else {
-                this._applyTabShellForSwitch(tab);
-                this.applyAppThemeToUrlBar({ skipShellReset: true });
+                this._setUrlBarInternalShellMode(null);
+                if (this._applyTabSiteThemeFromMemory(tab)) {
+                    restored = true;
+                } else {
+                    // Prefer a page cache / quick extract over painting the dark app theme
+                    // (reads as a black flash) before the site color arrives.
+                    const cached = tab.url
+                        ? this.applyCachedUrlBarTheme(tab.url, { pageOnly: true })
+                        : false;
+                    if (cached) {
+                        restored = true;
+                    } else {
+                        this._applyTabShellForSwitch(tab);
+                        const wvEarly = tab.webview;
+                        if (wvEarly && this._webviewThemeReady(wvEarly) && !this.settings?.transparentSites) {
+                            this._voidGuestTask(this.extractUrlBarTheme(wvEarly, { early: true }));
+                            this._voidGuestTask(this.extractUrlBarTheme(wvEarly));
+                        } else if (!this.settings?.transparentSites) {
+                            // Soft neutral placeholder - not the user's dark theme color.
+                            const urlBar = this.elements?.webviewUrlBar;
+                            if (urlBar) {
+                                const soft = this.isLightUiTheme?.()
+                                    ? { r: 242, g: 242, b: 244, source: 'surface-fallback' }
+                                    : { r: 24, g: 24, b: 26, source: 'surface-fallback' };
+                                this._applyUrlBarColorInfo(soft, urlBar, { force: true });
+                            }
+                        } else {
+                            this.applyAppThemeToUrlBar({ skipShellReset: true });
+                        }
+                    }
+                }
             }
 
             if (restored) this._tabUrlBarRestoredFromCache = true;
@@ -7881,8 +8854,16 @@ class AxisBrowser {
             this._tabSwitchChromeReady = true;
 
             const wv = tab.webview || this.getActiveWebview();
-            if (!restored && wv && this._webviewThemeReady(wv) && !this.settings?.transparentSites) {
+            const websiteTab =
+                tab.url &&
+                tab.url !== this.NEWTAB_URL &&
+                tab.url !== 'axis://settings' &&
+                !tab.isSettings &&
+                !this._isInternalSiteThemeUrl(tab.url);
+            if (!restored && websiteTab && wv && this._webviewThemeReady(wv) && !this.settings?.transparentSites) {
                 this._voidGuestTask(this.extractUrlBarTheme(wv));
+            } else if (restored && websiteTab && wv && !this.settings?.transparentSites) {
+                this._scheduleUrlBarThemeRefine(wv, { afterRestore: true });
             }
         } catch (e) {
             console.error('tab chrome immediate apply failed', e);
@@ -7910,7 +8891,7 @@ class AxisBrowser {
             return;
         }
 
-        // No custom theme saved – fall back to the default subtle black theme.
+        // No custom theme saved - fall back to the default subtle black theme.
         const colors = {
             primary: '#1a1a1a', // Lighter black instead of pure black
             secondary: '#222222', // Less contrast
@@ -7983,7 +8964,7 @@ class AxisBrowser {
         const gradientEnabled = !!gradientColorResolved;
         const shellGradientSecondary = gradientColorResolved;
 
-        const forceOpaqueBlack = this.isIncognitoWindow;
+        const forceOpaqueBlack = false;
         const chrome = this.getShellChromeStyle();
         let glassPrim = 1;
         let glassGrad = 1;
@@ -8068,7 +9049,7 @@ class AxisBrowser {
                 this.shellGlassRgba(shellBase, glassPrim),
                 this.shellGlassRgba(shellGradientSecondary, glassGrad)
             );
-            /* Overlay sits on the page — keep it solid enough to read (not window-glass airy). */
+            /* Overlay sits on the page - keep it solid enough to read (not window-glass airy). */
             const slideFloor = 0.92;
             const slidePrim = Math.max(
                 slideFloor,
@@ -8180,7 +9161,7 @@ class AxisBrowser {
         const app = document.getElementById('app');
         
         if (hasTabs) {
-            // Single shell paint on #app — avoid stacking the same gradient on #main-area (visible seam at sidebar edge).
+            // Single shell paint on #app - avoid stacking the same gradient on #main-area (visible seam at sidebar edge).
             if (mainArea) {
                 mainArea.style.setProperty('background', 'transparent', 'important');
                 mainArea.style.setProperty('backdrop-filter', 'none', 'important');
@@ -8246,7 +9227,7 @@ class AxisBrowser {
             }
         }
 
-        // New tab / AI chat glass (fixed tint — not tied to Window transparency)
+        // New tab / AI chat glass (fixed tint - not tied to Window transparency)
         this._applyNewTabSurfaceChromeVars();
         this._applyNewTabPageChrome();
         if (!forceOpaqueBlack) {
@@ -8267,7 +9248,19 @@ class AxisBrowser {
         return !!urlBar?.classList.contains('url-bar-internal-shell');
     }
 
-    /** NTP / Settings URL chrome — never reuse overlay class `new-tab-page` on `#webview-url-bar`. */
+    _clearUrlBarInlineChrome(urlBar = this.elements?.webviewUrlBar) {
+        if (!urlBar) return;
+        urlBar.style.removeProperty('background');
+        urlBar.style.removeProperty('backdrop-filter');
+        urlBar.style.removeProperty('-webkit-backdrop-filter');
+        urlBar.style.removeProperty('--url-bar-bg');
+        urlBar.style.removeProperty('--url-bar-border');
+        urlBar.style.removeProperty('--url-bar-text');
+        urlBar.style.removeProperty('--url-bar-text-muted');
+        urlBar.style.removeProperty('--url-bar-btn-hover');
+    }
+
+    /** NTP / Settings URL chrome - never reuse overlay class `new-tab-page` on `#webview-url-bar`. */
     _setUrlBarInternalShellMode(mode) {
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
@@ -8275,6 +9268,7 @@ class AxisBrowser {
             'url-bar-internal-shell',
             'url-bar-ntp-chrome',
             'url-bar-ntp-ai-chrome',
+            'url-bar-incognito-ntp',
             'settings-page',
             'new-tab-page'
         );
@@ -8283,7 +9277,12 @@ class AxisBrowser {
         } else if (mode === 'settings') {
             urlBar.classList.add('url-bar-internal-shell', 'settings-page');
         } else {
-            urlBar.style.removeProperty('background');
+            // During nav hold, keep the previous tint until the new page color is ready -
+            // clearing here flashes the dark CSS fallback (looks black) on every navigation.
+            const wv = this.getActiveWebview();
+            if (!this._isUrlBarThemeHeldForWebview(wv)) {
+                this._clearUrlBarInlineChrome(urlBar);
+            }
         }
     }
 
@@ -8296,12 +9295,14 @@ class AxisBrowser {
         } else if (curTab?.url === 'axis://settings' || curTab?.isSettings) {
             this._setUrlBarInternalShellMode('settings');
             this.applyInternalShellUrlBarStyle();
+        } else if (this._isInternalShellUrlBar()) {
+            this._setUrlBarInternalShellMode(null);
+            this.applyAppThemeToUrlBar({ skipShellReset: true });
         }
     }
 
     /** 0 = opaque chrome, 1 = most desktop light through (settings slider / 100). */
     getShellChromeTransmissionT() {
-        if (this.isIncognitoWindow) return 0;
         const raw = this.settings?.windowChromeLight;
         const n = Number(raw);
         const v = Number.isFinite(n) ? n : 50;
@@ -8309,7 +9310,7 @@ class AxisBrowser {
     }
 
     /**
-     * New tab + AI chat page glass — fixed tint/blur (not tied to Window transparency).
+     * New tab + AI chat page glass - fixed tint/blur (not tied to Window transparency).
      * Light mode: white frosted glass. Dark mode: dark frosted glass.
      */
     getNewTabSurfaceChromeStyle() {
@@ -8331,9 +9332,9 @@ class AxisBrowser {
                 askBg: 'rgba(255, 255, 255, 0.88)',
                 askBlur: 28,
                 askSat: 152,
-                aiPanelBg: 'rgba(255, 255, 255, 0.90)',
-                aiPanelBlur: 44,
-                aiPanelSat: 155,
+                aiPanelBg: '#ffffff',
+                aiPanelBlur: 0,
+                aiPanelSat: 100,
                 chatPanelBorder: 'rgba(0, 0, 0, 0.08)',
                 chatPanelText: 'rgba(0, 0, 0, 0.9)',
                 chatPanelTextMuted: 'rgba(0, 0, 0, 0.5)',
@@ -8376,7 +9377,7 @@ class AxisBrowser {
                 ntpWidgetRing: 'rgba(0, 0, 0, 0.12)',
                 ntpWidgetRingHover: 'rgba(0, 0, 0, 0.2)',
                 ntpWidgetEditBg: 'rgba(0, 0, 0, 0.03)',
-                ntpWidgetBg: 'rgba(0, 0, 0, 0.035)',
+                ntpWidgetBg: 'rgba(0, 0, 0, 0.06)',
                 ntpFocusInner: 'rgba(255, 255, 255, 0.9)',
                 ntpBtnBg: 'rgba(0, 0, 0, 0.06)',
                 ntpBtnBgHover: 'rgba(0, 0, 0, 0.1)',
@@ -8428,9 +9429,9 @@ class AxisBrowser {
             askBg: 'rgba(10, 11, 14, 0.24)',
             askBlur: 28,
             askSat: 152,
-            aiPanelBg: 'rgba(9, 10, 13, 0.72)',
-            aiPanelBlur: 44,
-            aiPanelSat: 155,
+            aiPanelBg: '#000000',
+            aiPanelBlur: 0,
+            aiPanelSat: 100,
             chatPanelBorder: 'rgba(255, 255, 255, 0.1)',
             chatPanelText: 'rgba(255, 255, 255, 0.96)',
             chatPanelTextMuted: 'rgba(255, 255, 255, 0.55)',
@@ -8681,7 +9682,7 @@ class AxisBrowser {
         }
     }
 
-    /** One body class drives panel fill / overscan — keeps idle, NTP, AI chat, and sites consistent. */
+    /** One body class drives panel fill / overscan - keeps idle, NTP, AI chat, and sites consistent. */
     _syncWebPanelVisualState() {
         if (this._profileSwipeThemeActive || document.body?.classList.contains('profile-swipe-theme-active')) {
             return;
@@ -8736,7 +9737,7 @@ class AxisBrowser {
         }
     }
 
-    /** Solid theme paint for shell rgba (exact hex — never shifted). */
+    /** Solid theme paint for shell rgba (exact hex - never shifted). */
     _paintAppShellBackground(app, { shellBase, shellGradientSecondary, gradientEnabled, gradientDirection, glassPrim, glassGrad, backdrop }) {
         if (!app) return;
         for (const id of ['axis-shell-veil-layer', 'axis-shell-tint-layer']) {
@@ -8771,7 +9772,7 @@ class AxisBrowser {
         const ntSearchRGB = lightUi ? '252, 250, 247' : '14, 15, 18';
         const ntAskRGB = lightUi ? '250, 248, 245' : '10, 11, 14';
         const ntToggleRGB = lightUi ? '0, 0, 0' : '255, 255, 255';
-        /** Slider 0: solid theme colors, no blur — `AXIS_SHELL_CHROME_OPAQUE` is still partly translucent for the old "opaque" *blend endpoint* at t>0. */
+        /** Slider 0: solid theme colors, no blur - `AXIS_SHELL_CHROME_OPAQUE` is still partly translucent for the old "opaque" *blend endpoint* at t>0. */
         if (tSlider <= 0) {
             const none = 'none';
             return {
@@ -8804,7 +9805,7 @@ class AxisBrowser {
                 newTabAskSat: 140,
             };
         }
-        /** Alpha + blur both move linearly — wide alpha range is what lets light through. */
+        /** Alpha + blur both move linearly - wide alpha range is what lets light through. */
         const La = (a, b) => a + (b - a) * tSlider;
         const Lb = (a, b) => a + (b - a) * tSlider;
         const o = AXIS_SHELL_CHROME_OPAQUE;
@@ -8991,7 +9992,7 @@ class AxisBrowser {
 
     getTabWebpreferencesString() {
         // Guest tabs: isolate page JS from preload IPC and sandbox the guest process.
-        // Autofill coordinates via DOM (shared) + IPC — not shared window globals.
+        // Autofill coordinates via DOM (shared) + IPC - not shared window globals.
         const base =
             'contextIsolation=true,nodeIntegration=false,sandbox=true,webSecurity=true,accelerated2dCanvas=true,enableWebGL=true,enableWebGL2=true,enableGpuRasterization=true,enableZeroCopy=false,enableHardwareAcceleration=true,backgroundThrottling=true,offscreen=false,spellcheck=yes';
         return this.settings?.javascriptEnabled === false ? `${base},javascript=no` : base;
@@ -9196,6 +10197,13 @@ class AxisBrowser {
     }
 
     _scheduleWebviewHostBoundsLiveSync() {
+        if (document.body.classList.contains('axis-site-html-fullscreen')) {
+            return;
+        }
+        const contentArea = document.getElementById('content-area');
+        if (contentArea?.classList.contains('chat-sliding') || document.body.classList.contains('axis-chat-sliding')) {
+            return;
+        }
         this._webviewHostBoundsLastLiveAt = performance.now();
         if (!this._webviewHostBoundsTracking) {
             this._webviewHostBoundsTracking = true;
@@ -9242,6 +10250,9 @@ class AxisBrowser {
      * Cheap layout poke so Electron’s guest embedding matches settled host bounds.
      */
     _nudgeWebviewGuestLayout() {
+        if (document.body.classList.contains('axis-site-html-fullscreen')) {
+            return;
+        }
         const container = document.getElementById('webviews-container');
         let containerRect = null;
         if (container) {
@@ -9270,7 +10281,7 @@ class AxisBrowser {
     /** True when this tab already had a loaded guest before the current switch (getURL can lie while inactive). */
     _tabGuestSessionEstablished(tab, currentSrc) {
         if (currentSrc && currentSrc !== 'about:blank' && String(currentSrc).trim() !== '') {
-            // Internal pseudo-URLs / file guests — only count when the guest document is real.
+            // Internal pseudo-URLs / file guests - only count when the guest document is real.
             if (currentSrc.includes('settings.html')) return true;
             if (/^axis:/i.test(currentSrc) || currentSrc === this.NEWTAB_URL) return false;
             return true;
@@ -9447,28 +10458,25 @@ class AxisBrowser {
             return this._findSettingsTabId();
         }
 
-        const tabId = Date.now();
+        const tabId = this._createUniqueTabId();
         const tabElement = document.createElement('div');
         tabElement.className = 'tab';
         tabElement.dataset.tabId = tabId;
         tabElement.dataset.axisProfile = this._activeProfileDomKey();
         
-        // Create tab object first to check for custom icon / favicon
-        const tab = {
+        const initialUrl = effectiveUrl || this.NEWTAB_URL;
+        const tabForIcon = {
             id: tabId,
-            url: effectiveUrl || this.NEWTAB_URL,
+            url: initialUrl,
             title: 'New Tab',
-            // Use a simple search icon for the default new tab favicon
             favicon: effectiveUrl ? null : this.NTP_DEFAULT_FAVICON,
             customIcon: null,
             customIconType: null,
             pinned: false,
             webview: null
         };
-        this.tabs.set(tabId, tab);
         
-        // Determine icon HTML based on type
-        const iconHTML = this.tabFaviconIconHtml(tab, tabId);
+        const iconHTML = this.tabFaviconIconHtml(tabForIcon, tabId);
         
         tabElement.innerHTML = `
             <div class="tab-content">
@@ -9478,7 +10486,7 @@ class AxisBrowser {
                     <span class="tab-title">New Tab</span>
                 </div>
                 <div class="tab-right">
-                    <button class="tab-close"><i class="fas fa-times"></i></button>
+                    ${this._tabCloseButtonHtml()}
                 </div>
             </div>
         `;
@@ -9487,9 +10495,9 @@ class AxisBrowser {
         const separator = this.elements.tabsSeparator;
         const tabData = {
             id: tabId,
-            url: this.NEWTAB_URL,
+            url: initialUrl,
             title: 'New Tab',
-            favicon: tab.favicon,
+            favicon: tabForIcon.favicon,
             canGoBack: false,
             canGoForward: false,
             history: [],
@@ -9497,8 +10505,11 @@ class AxisBrowser {
             pinned: false,
             webview: null,
             isMuted: false,
-            isPlayingAudio: false
+            isPlayingAudio: false,
+            ancestry: []
         };
+
+        tabData.ancestry = this._buildTabAncestryForNewTab(tabData, effectiveUrl, options);
         
         if (this._tabNeedsGuestWebview(tabData)) {
             const webview = this.createTabWebview(tabId, this._settingsWebviewOptionsForTab(tabData));
@@ -9517,6 +10528,10 @@ class AxisBrowser {
             tabsContainer.appendChild(tabElement);
         }
 
+        this._tabElementById.set(tabId, tabElement);
+        const animatingEnter = this._shouldAnimateTabEnter(options);
+        this._animateTabEnter(tabElement, options);
+
         // Set up tab event listeners
         this.setupTabEventListeners(tabElement, tabId);
 
@@ -9525,34 +10540,40 @@ class AxisBrowser {
             !options.preserveNewTabState && (!effectiveUrl || effectiveUrl === this.NEWTAB_URL);
         // Switch to new tab (navigate() below is the single place that sets webview.src)
         if (!options.skipActivate) {
-        this.switchToTab(tabId);
-        }
-
-        this.updateEmptyState();
-
-        if (effectiveUrl) {
-            if (options.skipActivate) {
-                const restoredTab = this.tabs.get(tabId);
-                if (restoredTab) {
-                    restoredTab.url = effectiveUrl;
-                    this.tabs.set(tabId, restoredTab);
-                    const wv = restoredTab.webview;
-                    if (wv && effectiveUrl !== this.NEWTAB_URL && effectiveUrl !== 'axis://settings') {
-                        wv.src = effectiveUrl;
-                    }
+            const switchOpts = animatingEnter ? { deferGuestChores: true } : undefined;
+            const afterSwitch = () => {
+                if (effectiveUrl) {
+                    this._navigateOpenedTab(tabId, effectiveUrl, options);
                 }
+            };
+            if (animatingEnter) {
+                requestAnimationFrame(() => {
+                    this.switchToTab(tabId, switchOpts);
+                    afterSwitch();
+                });
             } else {
-            this.navigate(effectiveUrl, {
-                skipHttpsConfirm: true,
-                trustedContextImage: !!(options && options.trustedContextImage)
-            });
+                this.switchToTab(tabId, switchOpts);
+                afterSwitch();
+            }
+        } else if (effectiveUrl) {
+            const restoredTab = this.tabs.get(tabId);
+            if (restoredTab) {
+                restoredTab.url = effectiveUrl;
+                this.tabs.set(tabId, restoredTab);
+                const wv = restoredTab.webview;
+                if (wv && effectiveUrl !== this.NEWTAB_URL && effectiveUrl !== 'axis://settings') {
+                    wv.src = effectiveUrl;
+                }
             }
         }
+
         this.updateTabFavicon(tabId, tabElement);
         this.updateTabTooltip(tabId);
 
+        this.updateEmptyState();
+
             this._invalidateKeyboardTabOrderCache();
-        if (tab.pinned) {
+        if (tabData.pinned) {
             this._scheduleSavePinnedTabs();
             this.renderTabGroups();
         } else {
@@ -9564,6 +10585,28 @@ class AxisBrowser {
             }, 1500);
         }
         return tabId;
+    }
+
+    _navigateOpenedTab(tabId, url, options = {}) {
+        if (!url || this._normalizeTabMapKey(this.currentTab) !== tabId) return;
+        this.navigate(url, {
+            skipHttpsConfirm: true,
+            trustedContextImage: !!(options && options.trustedContextImage)
+        });
+    }
+
+    applyIncognitoShellChrome() {
+        if (!this.isIncognitoWindow) return;
+        document.body.classList.add('incognito-window');
+        this.applyAiFeaturesVisibility();
+    }
+
+    _findTabIdForWebview(webview) {
+        if (!webview) return null;
+        for (const [tabId, tab] of this.tabs.entries()) {
+            if (tab?.webview === webview) return tabId;
+        }
+        return null;
     }
 
     updatePinnedTabClosedState(tabId) {
@@ -9595,10 +10638,7 @@ class AxisBrowser {
     setupPinnedTabCloseButton(tabElement, tabId) {
         const closeBtn = tabElement.querySelector('.tab-close');
         if (!closeBtn) return;
-        
-        const icon = closeBtn.querySelector('i');
-        if (!icon) return;
-        
+
         // Remove any existing handlers to avoid duplicates
         const existingHandlers = tabElement._pinnedCloseHandlers;
         if (existingHandlers) {
@@ -9606,30 +10646,24 @@ class AxisBrowser {
                 existingHandlers.observer.disconnect();
             }
         }
-        
+
         // Minus = pinned tab with an open webview; × = empty pinned slot (no webview)
         const updateIcon = () => {
             const tab = this.tabs.get(tabId);
             const open = !!(tab && tab.webview);
-            if (open) {
-                icon.classList.remove('fa-times');
-                icon.classList.add('fa-minus');
-            } else {
-                icon.classList.remove('fa-minus');
-                icon.classList.add('fa-times');
-            }
+            closeBtn.innerHTML = this._tabCloseGlyphHtml(open ? 'minus' : 'x');
         };
-        
-        // Update icon immediately based on current state — no MutationObserver
+
+        // Update icon immediately based on current state - no MutationObserver
         // (hundreds of observers on closed pins was a major idle/close cost).
         updateIcon();
-        
+
         // Store handlers for cleanup / updatePinnedTabClosedState
         tabElement._pinnedCloseHandlers = {
             updateIcon: updateIcon
         };
     }
-    
+
     removePinnedTabCloseButton(tabElement) {
         const existingHandlers = tabElement._pinnedCloseHandlers;
         if (existingHandlers) {
@@ -9638,15 +10672,11 @@ class AxisBrowser {
             }
             delete tabElement._pinnedCloseHandlers;
         }
-        
+
         // Reset icon to times (unpinned tabs always show X)
         const closeBtn = tabElement.querySelector('.tab-close');
         if (closeBtn) {
-            const icon = closeBtn.querySelector('i');
-            if (icon) {
-                icon.classList.remove('fa-minus');
-                icon.classList.add('fa-times');
-            }
+            closeBtn.innerHTML = this._tabCloseGlyphHtml('x');
         }
     }
 
@@ -9727,7 +10757,7 @@ class AxisBrowser {
                 this.updateEmptyState();
                 this.updateUrlBar();
                 this.updateNavigationButtons();
-                this.syncAIChatPanelForCurrentTab();
+                this.syncAIChatPanelForCurrentTab({ animate: false });
             } else {
                 const fallback = Array.from(this.tabs.keys()).find((id) => this._canFocusTabAsActive(id));
                 if (fallback != null) {
@@ -9740,7 +10770,7 @@ class AxisBrowser {
                     this.updateEmptyState();
                     this.updateUrlBar();
                     this.updateNavigationButtons();
-                    this.syncAIChatPanelForCurrentTab();
+                    this.syncAIChatPanelForCurrentTab({ animate: false });
                 }
             }
             return;
@@ -9750,6 +10780,8 @@ class AxisBrowser {
         if (prevCur === tabId && !fromProfileSwitch) {
             return;
         }
+        const previousWebview = prevCur != null ? this.tabs.get(prevCur)?.webview : null;
+        if (previousWebview) this._clearUrlBarNavThemeHold(previousWebview);
 
         if (this._sidebarMediaDock && this._normalizeTabMapKey(this._sidebarMediaDock.tabId) === tabId) {
             this.hideSidebarMediaDock();
@@ -9757,13 +10789,24 @@ class AxisBrowser {
 
         const switchedDifferentTab = prevCur != null && prevCur !== tabId;
 
-        // Save new-tab-page state and URL bar chrome for the tab we're leaving
+        if (
+            this._siteHtmlFullscreenTabId != null &&
+            prevCur === this._siteHtmlFullscreenTabId &&
+            tabId !== prevCur
+        ) {
+            this._siteHtmlFullscreenTabId = null;
+            this._applySiteHtmlFullscreenChrome(false);
+            this._nudgeWebviewGuestLayout?.();
+        }
+
+        // Save new-tab-page state, sidebar chat, and URL bar chrome for the tab we're leaving
         if (prevCur != null && prevCur !== tabId && this.tabs.has(prevCur)) {
             const prevTab = this.tabs.get(prevCur);
             if (prevTab) {
+                this._persistSidebarChatForTab(prevCur);
                 if (prevTab.url === this.NEWTAB_URL) {
-                this.saveNewTabPageStateToTab(prevCur);
-                this._ntpUiBoundTabId = null;
+                    this.saveNewTabPageStateToTab(prevCur);
+                    this._ntpUiBoundTabId = null;
                 }
                 this._persistUrlBarChromeToTab(prevCur);
             }
@@ -9778,6 +10821,9 @@ class AxisBrowser {
         }
 
         const prevTabId = prevCur;
+        try {
+            void window.electronAPI?.setSettingsUiActive?.(!!this._isSettingsTab(tab));
+        } catch (_) {}
         let deferSuspendForPipTabId = null;
         if (prevTabId != null && prevTabId !== tabId) {
             const prevTab = this.tabs.get(prevTabId);
@@ -9798,9 +10844,21 @@ class AxisBrowser {
         }
 
         // Demote previous webview before the active tab paints (avoid O(n) over all guests)
-        this._purgeStaleWebviewsInContainer();
-        this._prepareWebviewsForTabSwitch(tabId, prevTabId);
-        this._syncWebviewBackgroundThrottling(tabId, deferSuspendForPipTabId, prevTabId);
+        if (!opts.deferGuestChores) {
+            this._purgeStaleWebviewsInContainer();
+            this._prepareWebviewsForTabSwitch(tabId, prevTabId);
+            this._syncWebviewBackgroundThrottling(tabId, deferSuspendForPipTabId, prevTabId);
+        } else {
+            this._prepareWebviewsForTabSwitch(tabId, prevTabId);
+            const capturedPrev = prevTabId;
+            const capturedPip = deferSuspendForPipTabId;
+            const capturedCur = tabId;
+            this._deferTabSidebarGuestChores(() => {
+                if (this._normalizeTabMapKey(this.currentTab) !== capturedCur) return;
+                this._purgeStaleWebviewsInContainer();
+                this._syncWebviewBackgroundThrottling(capturedCur, capturedPip, capturedPrev);
+            }, 160);
+        }
         
         // Hide PIP if switching back to the tab that has PIP
         if (this.pipTabId === tabId) {
@@ -9811,7 +10869,8 @@ class AxisBrowser {
         this.currentTab = tabId;
         this._recordTabActivation(tabId);
         this.updateEmptyState();
-        this.syncAIChatPanelForCurrentTab();
+        // Instant: do not play open/close slide when applying another tab's remembered chat state
+        this.syncAIChatPanelForCurrentTab({ animate: false });
 
         // CRITICAL: Add active to new tab instantly
         if (activeTab) {
@@ -9885,6 +10944,9 @@ class AxisBrowser {
                         tab.url = 'axis://settings';
                         this.tabs.set(tabId, tab);
                     }
+                    try {
+                        void window.electronAPI?.setSettingsUiActive?.(true);
+                    } catch (_) {}
                     if (this._settingsGuestNeedsLoad(currentSrc)) {
                         void this.loadSettingsInWebview(tab.settingsSection || null, tabId);
                     } else if (tab.settingsSection) {
@@ -9897,7 +10959,7 @@ class AxisBrowser {
                         }
                     } catch (_) {}
                 } else if (skipGuestSrcReload) {
-                    // Inactive guests often report about:blank from getURL() — never reassign src.
+                    // Inactive guests often report about:blank from getURL() - never reassign src.
                     if (currentSrc && currentSrc !== 'about:blank') {
                         try {
                             const cur = new URL(currentSrc);
@@ -9919,9 +10981,9 @@ class AxisBrowser {
                     const sanitizedTabUrl = this.sanitizeUrl(loadTarget);
                     const webviewHasContent = currentSrc && currentSrc !== 'about:blank' && currentSrc.trim() !== '';
                     if (!webviewHasContent) {
-                        webview.src = sanitizedTabUrl || 'https://www.google.com';
+                        this._assignWebviewSrc(webview, sanitizedTabUrl || 'https://www.google.com');
                     } else {
-                        // Guest already has a document — never reassign `src` here or SPAs (e.g. YouTube)
+                        // Guest already has a document - never reassign `src` here or SPAs (e.g. YouTube)
                         // full-reload when `tab.url` lags behind in-page URL changes (query/hash).
                         try {
                             const cur = new URL(currentSrc);
@@ -9975,7 +11037,7 @@ class AxisBrowser {
                 }
             }
 
-            /* Shared #new-tab-page overlay — must sync even when the tab has no guest webview
+            /* Shared #new-tab-page overlay - must sync even when the tab has no guest webview
              * (axis://newtab never creates one). Otherwise profile switch leaves the previous
              * profile’s New Tab painted on top of the incoming profile. */
             if (tab.url === this.NEWTAB_URL) {
@@ -10007,8 +11069,7 @@ class AxisBrowser {
             this._nudgeWebviewGuestLayout();
             this._syncGuestWindowResizeEvent();
             if (tab?.webview && tab.url) {
-                this._nudgeYouTubePlayerIfNeeded(tab.webview, tab.url);
-                setTimeout(() => this._nudgeYouTubePlayerIfNeeded(tab.webview, tab.url), 420);
+                this._scheduleGuestVideoRecovery(tab.webview, tab.url);
                 if (!this.isBenchmarking && /^https?:/i.test(tab.url)) {
                     this._deferGuestLoadChores(tab.webview, tabId);
                 }
@@ -10224,6 +11285,7 @@ class AxisBrowser {
     }
 
     async saveNtpWidgetLayout(layout) {
+        if (this._suppressNtpWidgetPersist) return;
         const api = this._ntpWidgetsApi();
         if (!api || !Array.isArray(layout)) return;
         this.settings = this.settings || {};
@@ -10349,7 +11411,7 @@ class AxisBrowser {
             const gap = 18;
             const anchor = Math.round(heroH / 2 + gap);
             layout.style.setProperty('--ntp-widgets-anchor', `${anchor}px`);
-            // Keep the new tab viewport-sized — widgets must not grow the page or create scroll.
+            // Keep the new tab viewport-sized - widgets must not grow the page or create scroll.
             layout.style.removeProperty('min-height');
             this._clampNtpWidgetsToViewport();
         };
@@ -10428,7 +11490,9 @@ class AxisBrowser {
         if (clamped.changed) {
             layout = clamped.layout;
             this._ntpWidgetLayout = layout;
-            void this.saveNtpWidgetLayout(layout);
+            if (!this._suppressNtpWidgetPersist) {
+                void this.saveNtpWidgetLayout(layout);
+            }
             layout.forEach((w) => {
                 const el = grid.querySelector(`[data-widget-id="${w.id}"]`);
                 if (!el) return;
@@ -10614,7 +11678,7 @@ class AxisBrowser {
         const layout = document.getElementById('new-tab-page-layout');
         layout?.addEventListener('contextmenu', (e) => {
             if (section.classList.contains('hidden')) return;
-            // Only when the Edit control is hidden — enter edit immediately (no menu).
+            // Only when the Edit control is hidden - enter edit immediately (no menu).
             if (this.settings?.ntpShowWidgetsEditButton !== false) return;
             if (this._ntpEditMode) return;
             // Leave search, greeting, and controls alone.
@@ -11404,7 +12468,7 @@ class AxisBrowser {
         if (!list || !api) return;
         const id = input.dataset.widgetId || '';
         if (!results?.length) {
-            list.innerHTML = `<div class="ntp-w-weather-suggest-empty">No matches</div>`;
+            list.innerHTML = `<div class="ntp-w-weather-suggest-empty">${this.escapeHtml(this.t('chrome.noMatches'))}</div>`;
             list.classList.remove('hidden');
             return;
         }
@@ -11560,7 +12624,7 @@ class AxisBrowser {
                     : days < 0
                       ? `${Math.abs(days)}d ago`
                       : `${days}d left`;
-        const num = days == null ? '—' : String(days < 0 ? Math.abs(days) : days);
+        const num = days == null ? '-' : String(days < 0 ? Math.abs(days) : days);
         card.querySelectorAll('.ntp-w-until-num').forEach((el) => {
             el.textContent = num;
         });
@@ -11684,15 +12748,21 @@ class AxisBrowser {
         const i = Number(index);
         if (!Number.isFinite(i) || i < 0 || i >= this.closedTabs.length) return;
         const closedTab = this.closedTabs.splice(i, 1)[0];
-        const urlToLoad = this.sanitizeUrl(closedTab.url) || closedTab.url || 'https://www.google.com';
-        const preserveNewTabState = !!closedTab.newTabPageState;
-        const newTabId = this.createNewTab(urlToLoad, { preserveNewTabState });
-        const tab = this.tabs.get(newTabId);
-        if (tab) {
-            this._applyRecoveredTabState(newTabId, closedTab);
-            this.showNotification(`Reopened: ${closedTab.title}`, 'success');
+        this._forgetUndoCloseForTab?.(closedTab.oldTabId || closedTab.id, closedTab);
+        const restoredId =
+            typeof this._restoreTabFromSnapshot === 'function'
+                ? this._restoreTabFromSnapshot(closedTab, { activate: closedTab.wasActive !== false })
+                : null;
+        if (restoredId == null) {
+            const urlToLoad = this.sanitizeUrl(closedTab.url) || closedTab.url || 'https://www.google.com';
+            const newTabId = this.createNewTab(urlToLoad, {
+                preserveNewTabState: !!closedTab.newTabPageState
+            });
+            if (this.tabs.get(newTabId)) this._applyRecoveredTabState(newTabId, closedTab);
         }
+        this.showNotification(this.t('note.reopened', { title: closedTab.customTitle || closedTab.title }), 'success');
         this._syncUndoShortcutState?.();
+        this._refreshTabsScrollEdges?.();
         this._refreshNtpWidgetsByType('reopen');
         this._refreshNtpWidgetsByType('stats');
         this._refreshNtpWidgetsByType('pinned');
@@ -11724,7 +12794,11 @@ class AxisBrowser {
             if (!city) return { needsSetup: true };
             const lat = widget.config?.latitude;
             const lon = widget.config?.longitude;
-            const key = `weather:${city}:${lat ?? ''}:${lon ?? ''}:${widget.config?.unit || 'C'}`;
+            const lang =
+                (typeof api.geoLanguage === 'function' && api.geoLanguage()) ||
+                window.AxisI18n?.getResolvedLocale?.()?.split?.('-')?.[0] ||
+                'en';
+            const key = `weather:${city}:${lat ?? ''}:${lon ?? ''}:${widget.config?.unit || 'C'}:${lang}`;
             const hit = cache.get(key);
             if (hit && now - hit.at < ttl && !force) return hit.data;
             const data = await api.fetchWeather(widget.config);
@@ -11739,7 +12813,11 @@ class AxisBrowser {
             const lat = widget.config?.latitude;
             const lon = widget.config?.longitude;
             const scale = widget.config?.scale === 'eu' ? 'eu' : 'us';
-            const key = `aq:${city}:${lat ?? ''}:${lon ?? ''}:${scale}`;
+            const lang =
+                (typeof api.geoLanguage === 'function' && api.geoLanguage()) ||
+                window.AxisI18n?.getResolvedLocale?.()?.split?.('-')?.[0] ||
+                'en';
+            const key = `aq:${city}:${lat ?? ''}:${lon ?? ''}:${scale}:${lang}`;
             const hit = cache.get(key);
             if (hit && now - hit.at < ttl && !force) return hit.data;
             const data = await api.fetchAirQuality(widget.config);
@@ -11765,19 +12843,26 @@ class AxisBrowser {
     _shiftNtpCalendar(widgetId, delta) {
         if (!widgetId || !delta) return;
         const map = this._ntpCalView || (this._ntpCalView = new Map());
+        const api = this._ntpWidgetsApi?.() || window.AxisNtpWidgets;
+        const layout = Array.isArray(this.settings?.ntpWidgetLayout)
+            ? this.settings.ntpWidgetLayout
+            : [];
+        const widget = layout.find((w) => w && w.id === widgetId) || null;
+        const calendar = api?.normalizeCalendarSystem
+            ? api.normalizeCalendarSystem(widget?.config?.calendarSystem)
+            : 'gregory';
         const now = new Date();
-        const cur = map.get(widgetId) || { year: now.getFullYear(), month: now.getMonth() };
-        let month = cur.month + delta;
-        let year = cur.year;
-        while (month < 0) {
-            month += 12;
-            year -= 1;
-        }
-        while (month > 11) {
-            month -= 12;
-            year += 1;
-        }
-        map.set(widgetId, { year, month });
+        const cur = map.get(widgetId);
+        const anchor =
+            cur?.anchorMs != null
+                ? new Date(Number(cur.anchorMs))
+                : cur?.year != null && cur?.month != null
+                  ? new Date(Number(cur.year), Number(cur.month), 1)
+                  : now;
+        const next = api?.shiftCalendarMonth
+            ? api.shiftCalendarMonth(anchor, calendar, delta)
+            : new Date(anchor.getFullYear(), anchor.getMonth() + delta, 1);
+        map.set(widgetId, { anchorMs: next.getTime() });
         this._refreshNtpWidgetAt(widgetId);
     }
 
@@ -11909,6 +12994,9 @@ class AxisBrowser {
                     wide: Number(w.colSpan) >= 3
                 };
                 const parts = api.clockParts({ ...(w.config || {}), _shape: shape });
+                card.querySelectorAll('.ntp-w-clockface-place').forEach((el) => {
+                    el.textContent = this.t('ntp.widget.local');
+                });
                 card.querySelectorAll('.ntp-w-clock-time').forEach((el) => {
                     el.textContent = parts.time;
                 });
@@ -11930,9 +13018,17 @@ class AxisBrowser {
             .filter((w) => (api.resolveType(w.type) || w.type) === 'worldclock')
             .forEach((w) => {
                 const tz = String(w.config?.timezone || '').trim();
-                if (!tz) return;
                 const card = document.querySelector(`.ntp-widget--worldclock[data-widget-id="${w.id}"]`);
                 if (!card) return;
+                if (!tz) {
+                    card.querySelectorAll('.ntp-w-clockface-place').forEach((el) => {
+                        el.textContent = this.t('ntp.widget.worldclock');
+                    });
+                    card.querySelectorAll('.ntp-w-clockface-meta').forEach((el) => {
+                        el.textContent = this.t('ntp.widget.pickCity');
+                    });
+                    return;
+                }
                 const shape = {
                     density: api.contentDensity?.(w) || 'md',
                     tall: Number(w.rowSpan) >= 2,
@@ -12145,9 +13241,9 @@ class AxisBrowser {
             container.appendChild(el);
         };
 
-        addRow('new-tab-action-search', 'fa-magnifying-glass', 'Search', () => this.performNewTabSearch());
+        addRow('new-tab-action-search', 'fa-magnifying-glass', this.t('common.search'), () => this.performNewTabSearch());
         if (aiOn) {
-            addRow('new-tab-action-ask', 'fa-message', 'Ask AI', () => this.triggerNewTabAskFromSearch());
+            addRow('new-tab-action-ask', 'fa-message', this.t('ntp.askAi'), () => this.triggerNewTabAskFromSearch());
         }
     }
 
@@ -12202,7 +13298,7 @@ class AxisBrowser {
                 el.innerHTML = `
                 <div class="spotlight-suggestion-icon">${iconHtml}${fallbackIconHtml}</div>
                 <div class="spotlight-suggestion-text">${this.escapeHtml(s.text)}</div>
-                ${(s.isTab && s.tabId != null) ? '<div class="spotlight-suggestion-action">Switch to Tab</div>' : ''}
+                ${(s.isTab && s.tabId != null) ? `<div class="spotlight-suggestion-action">${this.escapeHtml(this.t('chrome.goToTab'))}</div>` : ''}
             `;
                 el.addEventListener('click', () => this.performSuggestionAction(s, selectedEngine, true));
                 frag.appendChild(el);
@@ -12236,10 +13332,7 @@ class AxisBrowser {
             return;
         }
         if (images.length && !this.activeProviderSupportsImages()) {
-            this.showNotification?.(
-                'Your active provider does not support images. Switch to a vision-capable key in Settings → AI Chat.',
-                'error'
-            );
+            this.showNotification?.(this.t('ai.noVision'), 'error');
             return;
         }
 
@@ -12273,6 +13366,7 @@ class AxisBrowser {
                 <div class="new-tab-ask-bubble">${bubbleInner}</div>
             </div>
         `;
+        this._markChatMessageEnter(userDiv, 'ntp-ask-message-enter');
         messagesContainer.appendChild(userDiv);
         this._scrollNewTabAskMessagesToBottom();
 
@@ -12291,11 +13385,12 @@ class AxisBrowser {
         loadingDiv.innerHTML = `
             <div class="new-tab-ask-avatar assistant" aria-hidden="true"><i class="fas fa-message"></i></div>
             <div class="new-tab-ask-body">
-                <div class="new-tab-ask-bubble new-tab-ask-bubble-loading" aria-live="polite" aria-label="Thinking">
+                <div class="new-tab-ask-bubble new-tab-ask-bubble-loading" aria-live="polite" aria-label="${this.escapeHtml(this.t('ai.thinking'))}">
                     <span class="new-tab-ask-loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
                 </div>
             </div>
         `;
+        this._markChatMessageEnter(loadingDiv, 'ntp-ask-message-enter');
         messagesContainer.appendChild(loadingDiv);
         this._scrollNewTabAskMessagesToBottom();
         this._focusNewTabInput();
@@ -12351,16 +13446,25 @@ class AxisBrowser {
             this.openNoteAsTab(suggestion.noteId);
         } else if (suggestion.isSearch) {
             const url = this.getSearchUrl(suggestion.searchQuery, selectedEngine);
-            isNewTabPage ? this.navigate(url) : this.createNewTab(url);
+            const opts = { ancestryKind: 'search', searchQuery: suggestion.searchQuery };
+            isNewTabPage ? this.navigate(url) : this.createNewTab(url, opts);
         } else if (suggestion.isHistory) {
             const url = selectedEngine ? this.getSearchUrl(suggestion.text || suggestion.url, selectedEngine) : suggestion.url;
-            isNewTabPage ? this.navigate(url) : this.createNewTab(url);
+            const histOpts = selectedEngine
+                ? { ancestryKind: 'search', searchQuery: suggestion.text || suggestion.url }
+                : { ancestryKind: 'history' };
+            isNewTabPage ? this.navigate(url) : this.createNewTab(url, histOpts);
         } else if (suggestion.isCompletion) {
             const url = this.getSearchUrl(suggestion.searchQuery, selectedEngine);
-            isNewTabPage ? this.navigate(url) : this.createNewTab(url);
+            isNewTabPage
+                ? this.navigate(url)
+                : this.createNewTab(url, { ancestryKind: 'search', searchQuery: suggestion.searchQuery });
         } else if (suggestion.isUrl) {
             const url = selectedEngine ? this.getSearchUrl(suggestion.text || suggestion.url, selectedEngine) : suggestion.url;
-            isNewTabPage ? this.navigate(url) : this.createNewTab(url);
+            const urlOpts = selectedEngine
+                ? { ancestryKind: 'search', searchQuery: suggestion.text || suggestion.url }
+                : {};
+            isNewTabPage ? this.navigate(url) : this.createNewTab(url, urlOpts);
         } else {
             const input = document.getElementById('new-tab-input');
             if (input) input.value = suggestion.text;
@@ -12416,7 +13520,7 @@ class AxisBrowser {
         return this._hasNewTabAiChatState(data?.newTabPageState, data);
     }
 
-    /** Built-in tab icons (New Tab / AI Chat) — works from live tabs, saved payloads, and swipe previews. */
+    /** Built-in tab icons (New Tab / AI Chat) - works from live tabs, saved payloads, and swipe previews. */
     resolveTabFaviconForData(data, tabId = null) {
         if (!data || data.customIcon) return null;
         const url = data.url || data.savedLinkUrl || null;
@@ -12438,7 +13542,7 @@ class AxisBrowser {
         return null;
     }
 
-    /** Font Awesome sidebar icon for New Tab / AI Chat — safe in HTML (data-URI SVG breaks when escaped). */
+    /** Font Awesome sidebar icon for New Tab / AI Chat - safe in HTML (data-URI SVG breaks when escaped). */
     builtInTabFaviconIconHtml(data, tabId = null) {
         const url = data?.url || data?.savedLinkUrl;
         if (url !== this.NEWTAB_URL) return null;
@@ -12447,23 +13551,79 @@ class AxisBrowser {
                 ? this.isTabInNtpAiChat(tabId)
                 : this._savedNewTabInAiChatFromPayload(data);
         const fa = inChat ? 'fa-message' : 'fa-search';
-        return `<i class="fas ${fa} tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:13px;color:rgba(255,255,255,0.7);"></i>`;
+        return `<span class="tab-favicon tab-favicon-builtin" aria-hidden="true"><i class="fas ${fa}" aria-hidden="true"></i></span>`;
+    }
+
+    /** Detect emoji vs Font Awesome when type was not stored. */
+    resolveCustomIconType(icon, iconType) {
+        if (iconType === 'emoji' || iconType === 'fa') return iconType;
+        const value = String(icon || '').trim();
+        if (!value) return 'emoji';
+        if (/^fa[srl]?\s+fa-/i.test(value) || /^fa-[a-z0-9-]+$/i.test(value)) return 'fa';
+        return 'emoji';
+    }
+
+    /** Normalize stored FA values (`star`, `fa-star`, `fas fa-star`) to `fa-*` class suffix. */
+    normalizeFaIconClass(icon) {
+        const value = String(icon || '').trim();
+        if (!value) return 'fa-circle';
+        const token = value.split(/\s+/).find((part) => /^fa-[a-z0-9-]+$/i.test(part));
+        if (token) return token;
+        if (/^[a-z0-9-]+$/i.test(value)) return `fa-${value}`;
+        return 'fa-circle';
+    }
+
+    /** Shared markup for custom emoji / FA icons in tabs and tab groups. */
+    customTabIconHtml(icon, iconType, { group = false, favorite = false } = {}) {
+        const value = String(icon || '').trim();
+        if (!value) return '';
+        const resolvedType = this.resolveCustomIconType(value, iconType);
+        const isEmoji = resolvedType === 'emoji';
+        if (favorite) {
+            const base = 'favorite-favicon favorite-favicon-custom';
+            const variant = isEmoji ? 'favorite-favicon-custom--emoji' : 'favorite-favicon-custom--fa';
+            const cls = `${base} ${variant}`;
+            if (isEmoji) {
+                return `<span class="${cls}" aria-hidden="true">${this.escapeHtml(value)}</span>`;
+            }
+            const faClass = this.escapeHtml(this.normalizeFaIconClass(value));
+            return `<span class="${cls}" aria-hidden="true"><i class="fas ${faClass}" aria-hidden="true"></i></span>`;
+        }
+        const base = group
+            ? 'tab-favicon tab-group-icon tab-favicon-custom'
+            : 'tab-favicon tab-favicon-custom';
+        const variant = isEmoji ? 'tab-favicon-custom--emoji' : 'tab-favicon-custom--fa';
+        const cls = `${base} ${variant}`;
+        if (isEmoji) {
+            return `<span class="${cls}" aria-hidden="true">${this.escapeHtml(value)}</span>`;
+        }
+        const faClass = this.escapeHtml(this.normalizeFaIconClass(value));
+        return `<span class="${cls}" aria-hidden="true"><i class="fas ${faClass}" aria-hidden="true"></i></span>`;
+    }
+
+    tabGroupDefaultIconHtml() {
+        return '<span class="tab-favicon tab-group-icon tab-favicon-custom--fa tab-group-icon--builtin" aria-hidden="true"><i class="fas fa-layer-group" aria-hidden="true"></i></span>';
+    }
+
+    tabGroupIconHtml(tabGroup) {
+        if (!tabGroup?.icon) {
+            return this.tabGroupDefaultIconHtml();
+        }
+        const iconType = this.resolveCustomIconType(tabGroup.icon, tabGroup.iconType);
+        return this.customTabIconHtml(tabGroup.icon, iconType, { group: true });
     }
 
     escapeHtmlAttribute(value) {
         return String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     }
 
-    /** Sidebar tab icon markup — previews, pinned restore, and live tabs share one path. */
+    /** Sidebar tab icon markup - previews, pinned restore, and live tabs share one path. */
     tabFaviconIconHtml(data, tabId = null) {
         if (!data) {
             return '<img class="tab-favicon" src="" alt="" draggable="false" onerror="this.style.visibility=\'hidden\'">';
         }
         if (data.customIcon) {
-            if (data.customIconType === 'emoji') {
-                return `<span class="tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;">${this.escapeHtml(data.customIcon)}</span>`;
-            }
-            return `<i class="fas ${this.escapeHtml(data.customIcon)} tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;color:rgba(255,255,255,0.7);"></i>`;
+            return this.customTabIconHtml(data.customIcon, data.customIconType);
         }
         const builtIn = this.builtInTabFaviconIconHtml(data, tabId);
         if (builtIn) return builtIn;
@@ -12486,7 +13646,14 @@ class AxisBrowser {
         const faviconEl = tabElement.querySelector('.tab-favicon');
         if (!faviconEl) return false;
         const wantFa = inChat ? 'fa-message' : 'fa-search';
-        if (faviconEl.tagName === 'I' && faviconEl.classList.contains(wantFa)) return true;
+        const inner =
+            faviconEl.querySelector?.('i.fas') || (faviconEl.tagName === 'I' ? faviconEl : null);
+        if (
+            faviconEl.classList.contains('tab-favicon-builtin') &&
+            inner?.classList.contains(wantFa)
+        ) {
+            return true;
+        }
         const wrap = document.createElement('div');
         wrap.innerHTML = iconHtml;
         const next = wrap.firstElementChild;
@@ -12563,16 +13730,23 @@ class AxisBrowser {
         const askMessages = document.getElementById('new-tab-ask-messages');
         const inputValue = input ? input.value : '';
         const askMessagesHtml = askMessages ? askMessages.innerHTML : '';
-        const askMessageHistory = Array.isArray(tab.newTabAskHistory) && tab.newTabAskHistory.length
+        const fromMemory = Array.isArray(tab.newTabAskHistory)
             ? tab.newTabAskHistory.map((m) => ({ role: m.role, content: m.content }))
-            : this._extractNewTabAskHistoryFromDom();
+            : [];
+        const fromDom = this._extractNewTabAskHistoryFromDom();
+        // Prefer the longer of memory vs DOM so a mid-switch race cannot wipe the conversation.
+        const askMessageHistory = fromDom.length > fromMemory.length ? fromDom : fromMemory;
         tab.newTabAskHistory = askMessageHistory;
         const hasChatHistory = askMessageHistory.length > 0;
         const hasChatDom = !!(askMessagesHtml && String(askMessagesHtml).trim());
+        const inChat = this.isNewTabInChat() || hasChatHistory || hasChatDom;
         tab.newTabPageState = {
             inputValue,
-            inChat: this.isNewTabInChat() || hasChatHistory || hasChatDom,
-            askMessagesHtml,
+            inChat,
+            askMessagesHtml:
+                hasChatDom || !hasChatHistory
+                    ? askMessagesHtml
+                    : this._buildNewTabAskMessagesHtmlFromHistory(askMessageHistory),
             askMessageHistory
         };
         this.tabs.set(tabId, tab);
@@ -12650,7 +13824,11 @@ class AxisBrowser {
             }
         }
         if (askMessages) {
+            askMessages.classList.add('ntp-ask-instant-scroll');
             askMessages.innerHTML = askMessagesHtml;
+            askMessages.querySelectorAll('.ntp-ask-message-enter').forEach((el) => {
+                el.classList.remove('ntp-ask-message-enter');
+            });
             askMessages.classList.toggle('hidden', !inChat);
         }
         if (history.length) {
@@ -12661,8 +13839,11 @@ class AxisBrowser {
         this.tabs.set(tabId, tab);
         if (inChat) {
             void this.beginNewTabAiChatTransition({ animate: false, force: true });
-            this._scrollNewTabAskMessagesToBottom();
+            this._scrollNewTabAskMessagesToBottom({ instant: true });
+            document.getElementById('new-tab-ask-messages')?.classList.remove('ntp-ask-instant-scroll');
             this._focusNewTabInput();
+            // Re-save so the next leave cannot race against a half-applied restore.
+            this.saveNewTabPageStateToTab(tabId);
         } else {
             const startView = document.getElementById('new-tab-start-view');
             const chatView = document.getElementById('new-tab-ai-chat-view');
@@ -12687,6 +13868,7 @@ class AxisBrowser {
     updateNewTabPageVisibility(show) {
         const newTabPage = document.getElementById('new-tab-page');
         const urlBar = this.elements.webviewUrlBar;
+
         const activeTab = this.currentTab && this.tabs.has(this.currentTab) ? this.tabs.get(this.currentTab) : null;
         const activeWv = activeTab?.webview;
 
@@ -12740,6 +13922,7 @@ class AxisBrowser {
                     }
                 }
                 newTabPage.classList.remove('hidden');
+                this._releaseNtpAiChatInstantSoon();
                 if (!this.isNewTabInChat()) this.mountNewTabSearchBarToStart();
                 if (ntpNeedsPaint) {
                     this.updateNewTabHero();
@@ -12797,12 +13980,13 @@ class AxisBrowser {
         // `currentTab === null` here was wrong: during focus handoff (or edge cases with
         // tabs still in the map) we poisoned every guest with `opacity: 0.3 !important`
         // + `inactive`, which sticks under non-!important clears and triggers the
-        // heavy `webview::before` blur overlay — "new tab looks blurred".
+        // heavy `webview::before` blur overlay - "new tab looks blurred".
         const trulyNoTabs = this.tabs.size === 0;
 
         if (trulyNoTabs) {
             document.body.classList.add('chrome-no-tabs');
             this._resetSiteThemeColorToSettings();
+
             this.updateNewTabPageVisibility(false);
             emptyState.classList.remove('hidden');
             if (emptyContent) emptyContent.classList.add('hidden');
@@ -12816,7 +14000,7 @@ class AxisBrowser {
             // When there are no tabs, set a neutral native title (Dock / window list)
             if (window.electronAPI?.setWindowTitle) {
                 window.electronAPI.setWindowTitle(
-                    this.isIncognitoWindow ? 'Axis — Incognito' : 'Axis Browser'
+                    this.isIncognitoWindow ? 'Axis - Incognito' : 'Axis Browser'
                 );
             }
             
@@ -12841,7 +14025,7 @@ class AxisBrowser {
                 this.applyCustomTheme(colors);
             }
             
-            /* No tabs: hide every guest fully — webview area must paint nothing. */
+            /* No tabs: hide every guest fully - webview area must paint nothing. */
             const webviews = document.querySelectorAll('webview');
             webviews.forEach(wv => {
                 wv.style.setProperty('opacity', '0', 'important');
@@ -12869,7 +14053,7 @@ class AxisBrowser {
                 webviewsContainer.style.removeProperty('background');
             }
 
-            // Reapply full shell theme only when leaving the empty (no-tab) state — not on every tab switch
+            // Reapply full shell theme only when leaving the empty (no-tab) state - not on every tab switch
             // (applyCustomThemeFromSettings is expensive and was causing visible lag / compositor hitches).
             const shouldRefreshThemeForTabs = this._lastEmptyStateHadOpenTabs !== true;
             this._lastEmptyStateHadOpenTabs = true;
@@ -12909,7 +14093,7 @@ class AxisBrowser {
         // The URL bar itself handles visibility based on whether a valid page is loaded
     }
 
-    /** Tabs in sidebar visual order for ⌘1–9 / Ctrl+1–9 (favorites grid, then pinned/unpinned rows). */
+    /** Tabs in sidebar visual order for ⌘1-9 / Ctrl+1-9 (favorites grid, then pinned/unpinned rows). */
     _invalidateKeyboardTabOrderCache() {
         this._keyboardTabOrderCache = null;
     }
@@ -12978,7 +14162,7 @@ class AxisBrowser {
         const t = this.tabs.get(tabId);
         if (!t) return false;
         if (!t.pinned) return true;
-        // Closed pinned slots have no webview — don't query the DOM for every candidate.
+        // Closed pinned slots have no webview - don't query the DOM for every candidate.
         if (t.closed || !t.webview) return false;
         return true;
     }
@@ -13108,7 +14292,7 @@ class AxisBrowser {
         this.updateEmptyState();
         this.updateUrlBar();
         this.updateNavigationButtons();
-        this.syncAIChatPanelForCurrentTab();
+        this.syncAIChatPanelForCurrentTab({ animate: false });
     }
 
     /** Canonical numeric id for `this.tabs` Map keys (avoids string/number shadow entries). */
@@ -13176,6 +14360,345 @@ class AxisBrowser {
         this._tabElementById.delete(this._normalizeTabMapKey(tabId));
     }
 
+    _isTabMotionLocked(el) {
+        return !!(
+            el &&
+            (el.classList?.contains('entering') ||
+                el.classList?.contains('closing') ||
+                el.dataset?.axisClosing === '1')
+        );
+    }
+
+    /** Run guest purge / suspend after sidebar tab motion so website tabs don’t hitch the animation.
+     * Each call schedules independently - rapid open/close must not cancel earlier focus/cleanup. */
+    _deferTabSidebarGuestChores(fn, delayMs = 160) {
+        const ms = Math.max(0, Number(delayMs) || 0);
+        setTimeout(() => {
+            try {
+                fn();
+            } catch (e) {
+                console.error('deferTabSidebarGuestChores', e);
+            }
+        }, ms);
+    }
+
+    _beginTabSidebarMotion() {
+        this._tabSidebarMotionDepth = (this._tabSidebarMotionDepth || 0) + 1;
+        document.body.classList.add('axis-tab-sidebar-motion');
+    }
+
+    _endTabSidebarMotion() {
+        this._tabSidebarMotionDepth = Math.max(0, (this._tabSidebarMotionDepth || 1) - 1);
+        if (this._tabSidebarMotionDepth === 0) {
+            document.body.classList.remove('axis-tab-sidebar-motion');
+        }
+    }
+
+    _shouldAnimateTabEnter(options = {}) {
+        if (options.skipEnterAnimation) return false;
+        if (options.skipActivate && options.animateEnter !== true) return false;
+        return !window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    }
+
+    /** Flex `gap` between tab rows - must collapse during close or neighbors jump on remove. */
+    _tabListGapPx(tabElement) {
+        const parent = tabElement?.parentElement;
+        if (!parent) return 4;
+        try {
+            const cs = getComputedStyle(parent);
+            const g = parseFloat(cs.rowGap || cs.gap);
+            if (Number.isFinite(g) && g >= 0) return g;
+        } catch (_) {}
+        return 4;
+    }
+
+    _tabRowMotionTiming(duration, delay, easing) {
+        return {
+            duration,
+            delay: delay || 0,
+            easing: easing || 'cubic-bezier(0.22, 1, 0.36, 1)',
+            fill: 'forwards'
+        };
+    }
+
+    _runTabRowMotion(el, keyframes, onDone, duration, delay = 0, easing) {
+        let settled = false;
+        const settle = () => {
+            if (settled) return;
+            settled = true;
+            onDone();
+        };
+        const ms = Math.max(1, Number(duration) || 220);
+        if (el && typeof el.animate === 'function') {
+            try {
+                const anim = el.animate(
+                    keyframes,
+                    this._tabRowMotionTiming(ms, delay, easing)
+                );
+                anim.finished.then(settle).catch(settle);
+                setTimeout(settle, ms + (delay || 0) + 80);
+                return anim;
+            } catch (_) {}
+        }
+        setTimeout(settle, ms + (delay || 0));
+        return null;
+    }
+
+    _prepareTabMotionClip(tabElement, heightPx) {
+        const h = Math.max(0, Math.round(heightPx) || 0);
+        const inner = tabElement.querySelector('.tab-content');
+        tabElement.style.overflow = 'hidden';
+        tabElement.style.boxSizing = 'border-box';
+        tabElement.style.height = `${h}px`;
+        tabElement.style.minHeight = '0px';
+        tabElement.style.maxHeight = 'none';
+        tabElement.style.opacity = '1';
+        tabElement.style.willChange = 'height, margin-bottom';
+        if (inner) {
+            inner.style.height = '32px';
+            inner.style.minHeight = '32px';
+            inner.style.boxSizing = 'border-box';
+            inner.style.willChange = 'opacity';
+            inner.style.transform = 'translateZ(0)';
+        }
+        return { h, inner };
+    }
+
+    _clearTabMotionInlineStyles(tabElement) {
+        if (!tabElement) return;
+        try {
+            tabElement.getAnimations?.({ subtree: true })?.forEach((a) => {
+                try {
+                    a.cancel();
+                } catch (_) {}
+            });
+        } catch (_) {}
+        tabElement.classList.remove('entering', 'enter-ready', 'closing', 'close-ready');
+        tabElement.style.height = '';
+        tabElement.style.minHeight = '';
+        tabElement.style.maxHeight = '';
+        tabElement.style.opacity = '';
+        tabElement.style.marginTop = '';
+        tabElement.style.marginBottom = '';
+        tabElement.style.paddingTop = '';
+        tabElement.style.paddingBottom = '';
+        tabElement.style.overflow = '';
+        tabElement.style.willChange = '';
+        tabElement.style.transform = '';
+        tabElement.style.transformOrigin = '';
+        tabElement.style.removeProperty('transition');
+        const inner = tabElement.querySelector('.tab-content');
+        if (inner) {
+            inner.style.opacity = '';
+            inner.style.transform = '';
+            inner.style.willChange = '';
+            inner.style.height = '';
+            inner.style.minHeight = '';
+            inner.style.overflow = '';
+            inner.style.boxSizing = '';
+        }
+    }
+
+    /** Close: clip the row + collapse list gap so neighbors don’t jump; face fades only. */
+    _removeTabElementAnimated(tabElement, tabId) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (!tabElement?.isConnected) {
+            this._forgetTabElement(id);
+            return;
+        }
+        if (tabElement.dataset.axisClosing === '1') return;
+        tabElement.dataset.axisClosing = '1';
+
+        const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+        if (reduceMotion) {
+            tabElement.remove();
+            this._forgetTabElement(id);
+            return;
+        }
+
+        this._beginTabSidebarMotion();
+
+        // Measure before cancelling anything so we don’t flash a wrong height.
+        const measured = Math.max(1, Math.round(tabElement.getBoundingClientRect().height) || 32);
+        const gap = this._tabListGapPx(tabElement);
+
+        try {
+            tabElement.getAnimations?.({ subtree: true })?.forEach((a) => {
+                try {
+                    a.cancel();
+                } catch (_) {}
+            });
+        } catch (_) {}
+
+        tabElement.classList.remove('entering', 'enter-ready', 'close-ready');
+        tabElement.classList.add('closing');
+        tabElement.style.setProperty('transition', 'none', 'important');
+
+        const { h, inner } = this._prepareTabMotionClip(tabElement, measured);
+        tabElement.style.marginBottom = '0px';
+        if (inner) {
+            inner.style.opacity = '1';
+        }
+        void tabElement.offsetHeight;
+        tabElement.style.removeProperty('transition');
+
+        const finish = () => {
+            if (tabElement.dataset.axisClosing !== '1') return;
+            tabElement.dataset.axisClosing = '0';
+            delete tabElement.dataset.axisClosing;
+            this._endTabSidebarMotion();
+            if (tabElement.isConnected) tabElement.remove();
+            this._forgetTabElement(id);
+        };
+
+        // Ease-in-out close; negative margin eats the flex gap so removal doesn’t snap.
+        const closeEase = 'cubic-bezier(0.4, 0.0, 0.2, 1)';
+        this._runTabRowMotion(
+            tabElement,
+            [
+                { height: `${h}px`, marginBottom: '0px' },
+                { height: '0px', marginBottom: `${-gap}px` }
+            ],
+            finish,
+            150,
+            0,
+            closeEase
+        );
+        if (inner) {
+            // Opacity-only - no translate (translate + clip looks rough on close).
+            this._runTabRowMotion(
+                inner,
+                [{ opacity: 1 }, { opacity: 0 }],
+                () => {},
+                110,
+                0,
+                'cubic-bezier(0.4, 0.0, 1, 1)'
+            );
+        }
+    }
+
+    /** Open: expand clip + restore gap; face fades in softly. */
+    _animateTabEnter(tabElement, options = {}) {
+        if (!tabElement?.isConnected) return;
+        if (!this._shouldAnimateTabEnter(options)) {
+            this._clearTabMotionInlineStyles(tabElement);
+            return;
+        }
+
+        this._beginTabSidebarMotion();
+        try {
+            tabElement.getAnimations?.({ subtree: true })?.forEach((a) => {
+                try {
+                    a.cancel();
+                } catch (_) {}
+            });
+        } catch (_) {}
+
+        const targetH = Math.max(32, Math.round(tabElement.getBoundingClientRect().height) || 32);
+        const gap = this._tabListGapPx(tabElement);
+        tabElement.classList.remove('closing', 'close-ready', 'enter-ready');
+        tabElement.classList.add('entering');
+        tabElement.style.setProperty('transition', 'none', 'important');
+        const { inner } = this._prepareTabMotionClip(tabElement, 0);
+        tabElement.style.height = '0px';
+        tabElement.style.marginBottom = `${-gap}px`;
+        if (inner) {
+            inner.style.opacity = '0';
+        }
+        void tabElement.offsetHeight;
+        tabElement.style.removeProperty('transition');
+
+        const clear = () => {
+            this._clearTabMotionInlineStyles(tabElement);
+            this._endTabSidebarMotion();
+        };
+
+        const openEase = 'cubic-bezier(0.22, 1, 0.36, 1)';
+        const start = () => {
+            if (!tabElement.isConnected || tabElement.dataset.axisClosing === '1') {
+                clear();
+                return;
+            }
+            this._runTabRowMotion(
+                tabElement,
+                [
+                    { height: '0px', marginBottom: `${-gap}px` },
+                    { height: `${targetH}px`, marginBottom: '0px' }
+                ],
+                clear,
+                155,
+                0,
+                openEase
+            );
+            if (inner) {
+                this._runTabRowMotion(
+                    inner,
+                    [{ opacity: 0 }, { opacity: 1 }],
+                    () => {},
+                    130,
+                    20,
+                    openEase
+                );
+            }
+        };
+
+        requestAnimationFrame(start);
+    }
+
+    /** Centered SVG × / minus - thin strokes, slightly larger mark in the same hit target. */
+    _tabCloseGlyphHtml(kind = 'x') {
+        if (kind === 'minus') {
+            return '<svg class="tab-close-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>';
+        }
+        return '<svg class="tab-close-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M4.25 4.25l7.5 7.5M11.75 4.25l-7.5 7.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>';
+    }
+
+    _tabCloseButtonHtml(extraAttrs = '') {
+        const attrs = extraAttrs ? ` ${extraAttrs}` : '';
+        return `<button type="button" class="tab-close"${attrs} aria-label="${this.escapeHtml(this.t('chrome.closeTab'))}">${this._tabCloseGlyphHtml('x')}</button>`;
+    }
+
+    /** Soft-hide a guest immediately (cheap) so the page vanishes without Chromium teardown cost. */
+    _softHideClosedTabWebview(webview) {
+        if (!webview) return;
+        try {
+            webview.dataset.axisDeferredDestroy = '1';
+            webview.classList.add('inactive');
+            webview.style.opacity = '0';
+            webview.style.visibility = 'hidden';
+            webview.style.pointerEvents = 'none';
+            webview.style.zIndex = '0';
+        } catch (_) {}
+    }
+
+    /** Tear down a guest after the sidebar close animation has had time to run. */
+    _deferClosedTabWebviewTeardown(webview, opts = {}) {
+        const delayMs = Math.max(0, Number(opts.delayMs) || 0);
+        const run = () => {
+            if (webview) {
+                try {
+                    try {
+                        delete webview.dataset.axisDeferredDestroy;
+                    } catch (_) {}
+                    this.cleanupWebviewListeners(webview);
+                    try {
+                        webview.src = 'about:blank';
+                    } catch (_) {}
+                    if (webview.parentNode) {
+                        webview.parentNode.removeChild(webview);
+                    }
+                } catch (e) {
+                    console.error('Error removing webview:', e);
+                }
+            }
+            if (opts.favoriteTabId != null) {
+                this._removeFavoriteTabHostElement(opts.favoriteTabId);
+            }
+        };
+        if (delayMs <= 0) run();
+        else setTimeout(run, delayMs);
+    }
+
     _maybeRenderFavoritesForActiveTab() {
         const tid = this._normalizeTabMapKey(this.currentTab);
         if (tid === this._lastFavoritesRenderTabId) return;
@@ -13207,7 +14730,15 @@ class AxisBrowser {
     /** Create a unique numeric tab id (optionally honoring a preferred id). */
     _createUniqueTabId(preferredId = null) {
         let id = this._normalizeTabMapKey(preferredId);
-        if (id == null) id = Date.now();
+        if (id == null) {
+            const now =
+                typeof performance !== 'undefined' && typeof performance.now === 'function'
+                    ? Math.floor(performance.timeOrigin + performance.now())
+                    : Date.now();
+            id = now;
+            // Extra entropy when many tabs are created in the same millisecond.
+            id = id * 1000 + ((this._tabIdSeq = (this._tabIdSeq || 0) + 1) % 1000);
+        }
         while (this.tabs.has(id)) {
             id += 1;
         }
@@ -13224,25 +14755,148 @@ class AxisBrowser {
     /**
      * Show or hide the AI chat panel from per-tab remembered state.
      * Chat stays open only on tabs where the user opened it; switching tabs applies that tab's preference.
+     * @param {{ animate?: boolean }} [opts] - `animate: false` skips the slide when switching tabs/profiles
+     *   so leaving a tab that had chat open does not play a close animation.
      */
-    syncAIChatPanelForCurrentTab() {
+    syncAIChatPanelForCurrentTab(opts = {}) {
+        const animate = opts.animate !== false;
         const chatPanel = document.getElementById('ai-chat-panel');
         const contentArea = document.getElementById('content-area');
         if (!chatPanel) return;
-        if (!this.isAiFeaturesEnabled()) {
-            chatPanel.classList.add('hidden');
-            contentArea?.classList.remove('chat-open');
+
+        const apply = () => {
+            if (!this.isAiFeaturesEnabled()) {
+                chatPanel.classList.add('hidden');
+                contentArea?.classList.remove('chat-open');
+                contentArea?.classList.remove('chat-sliding');
+                document.body.classList.remove('axis-chat-sliding');
+                return;
+            }
+            const tid = this._normalizeTabIdForChatState(this.currentTab);
+            this._restoreSidebarChatForTab(tid, { instant: !animate });
+            const wantOpen = tid != null && this.aiChatPanelOpenByTabId.get(tid) === true;
+            if (wantOpen) {
+                chatPanel.classList.remove('hidden');
+                contentArea?.classList.add('chat-open');
+            } else {
+                chatPanel.classList.add('hidden');
+                contentArea?.classList.remove('chat-open');
+            }
+            if (!animate) {
+                contentArea?.classList.remove('chat-sliding');
+                document.body.classList.remove('axis-chat-sliding');
+            }
+        };
+
+        if (!animate) {
+            chatPanel.classList.add('ai-chat-instant');
+            contentArea?.classList.add('chat-switch-instant');
+            apply();
+            // Drop instant flags after paint so the next user open/close still animates.
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    chatPanel.classList.remove('ai-chat-instant');
+                    contentArea?.classList.remove('chat-switch-instant');
+                });
+            });
             return;
         }
-        const tid = this._normalizeTabIdForChatState(this.currentTab);
-        const wantOpen = tid != null && this.aiChatPanelOpenByTabId.get(tid) === true;
-        if (wantOpen) {
-            chatPanel.classList.remove('hidden');
-            contentArea?.classList.add('chat-open');
-        } else {
-            chatPanel.classList.add('hidden');
-            contentArea?.classList.remove('chat-open');
+
+        apply();
+    }
+
+    _cloneSidebarChatMessages(messages) {
+        if (!Array.isArray(messages) || !messages.length) return [];
+        return messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+            ...(m.images?.length ? { images: m.images } : {}),
+            ...(m.quote != null ? { quote: m.quote } : {}),
+            ...(m.mainText != null ? { mainText: m.mainText } : {})
+        }));
+    }
+
+    _persistSidebarChatForTab(tabId) {
+        const tid = this._normalizeTabIdForChatState(tabId);
+        if (tid == null) return;
+        if (!(this.aiChatMessagesByTabId instanceof Map)) {
+            this.aiChatMessagesByTabId = new Map();
         }
+        this.aiChatMessagesByTabId.set(tid, this._cloneSidebarChatMessages(this.aiChatMessages));
+    }
+
+    _renderSidebarChatMessages(messages, { instant = true } = {}) {
+        const chatMessages = document.getElementById('ai-chat-messages');
+        if (!chatMessages) return;
+        const list = Array.isArray(messages) ? messages : [];
+        if (instant) chatMessages.classList.add('ai-chat-instant-scroll');
+        chatMessages.innerHTML = '';
+        for (const m of list) {
+            if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
+            const content = m.content != null ? String(m.content) : '';
+            if (!content.trim() && !(m.images && m.images.length)) continue;
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `ai-chat-message ${m.role}`;
+            if (m.id != null) messageDiv.dataset.messageId = String(m.id);
+            const time = m.timestamp
+                ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            let contentHtml;
+            if (m.role === 'user' && m.quote != null && m.quote !== '') {
+                const imagesHtml = this._buildUserMessageImagesHtml?.(m.images) || '';
+                const bodyDisplay = this.escapeHtml((m.mainText != null ? m.mainText : '').trim());
+                contentHtml = `
+                    <div class="ai-chat-message-content">
+                        <div class="ai-chat-message-quote">${this.escapeHtml(m.quote)}</div>
+                        ${imagesHtml}
+                        ${bodyDisplay ? `<div class="ai-chat-message-body">${bodyDisplay}</div>` : ''}
+                    </div>
+                `;
+            } else if (m.role === 'user') {
+                const imagesHtml = this._buildUserMessageImagesHtml?.(m.images) || '';
+                const bodyDisplay = this.escapeHtml(content.trim());
+                if (imagesHtml) {
+                    contentHtml = `
+                    <div class="ai-chat-message-content ai-chat-message-content--with-media">
+                        ${imagesHtml}
+                        ${bodyDisplay ? `<div class="ai-chat-message-body">${bodyDisplay}</div>` : ''}
+                    </div>
+                `;
+                } else {
+                    contentHtml = `<div class="ai-chat-message-content">${bodyDisplay}</div>`;
+                }
+            } else {
+                contentHtml = `
+                    <div class="ai-chat-message-content">${this.formatAiChatMarkdown(content)}</div>
+                `;
+            }
+            messageDiv.innerHTML = contentHtml + `<div class="ai-chat-message-time">${time}</div>`;
+            chatMessages.appendChild(messageDiv);
+        }
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        if (instant) {
+            requestAnimationFrame(() => chatMessages.classList.remove('ai-chat-instant-scroll'));
+        }
+    }
+
+    _restoreSidebarChatForTab(tabId, { instant = true } = {}) {
+        const tid = this._normalizeTabIdForChatState(tabId);
+        if (!(this.aiChatMessagesByTabId instanceof Map)) {
+            this.aiChatMessagesByTabId = new Map();
+        }
+        const saved =
+            tid != null && this.aiChatMessagesByTabId.has(tid)
+                ? this._cloneSidebarChatMessages(this.aiChatMessagesByTabId.get(tid))
+                : [];
+        this.aiChatMessages = saved;
+        if (typeof this.hasAiApiKey === 'function' && !this.hasAiApiKey()) {
+            this.updateAIChatSetupState?.();
+            return;
+        }
+        this._renderSidebarChatMessages(saved, { instant });
+        this.updateAIChatSetupState?.();
     }
 
     closeTab(rawCloseId) {
@@ -13261,9 +14915,11 @@ class AxisBrowser {
             this.hideSidebarMediaDock();
         }
 
-        // Save pinned tabs only when this close actually changes pin state (not every unpinned close).
         const tidChat = this._normalizeTabIdForChatState(tid);
-        if (tidChat != null) this.aiChatPanelOpenByTabId.delete(tidChat);
+        if (tidChat != null) {
+            this.aiChatPanelOpenByTabId.delete(tidChat);
+            this.aiChatMessagesByTabId?.delete?.(tidChat);
+        }
         const tabElement = this._getTabElement(tid) || document.querySelector(`[data-tab-id="${tid}"]`);
         const tab = this.tabs.get(tid);
         const cur = this._normalizeTabMapKey(this.currentTab);
@@ -13284,9 +14940,11 @@ class AxisBrowser {
                 // Remove from tab groups first (sync may move the tab element)
                 this._removeTabIdFromAllTabGroups(tid, true);
                 // Re-query in case sync moved the element
-                const elToRemove = this._getTabElement(tid);
-                if (elToRemove) elToRemove.remove();
-                this._forgetTabElement(tid);
+                const elToRemove =
+                    this._getTabElement(tid) ||
+                    document.querySelector(`[data-tab-id="${tid}"]`);
+                if (elToRemove) this._removeTabElementAnimated(elToRemove, tid);
+                else this._forgetTabElement(tid);
                 this.tabs.delete(tid);
                 
                 if (closingCurrent) {
@@ -13342,73 +15000,103 @@ class AxisBrowser {
         const tabGroupIdForUndo = tab && tab.tabGroupId;
         const closingUnpinnedCurrent = cur === tid;
         const neighborUnpinnedPref = closingUnpinnedCurrent ? this._findNeighborTabToActivate(tid) : null;
+
+        // Snapshot BEFORE group removal so undo keeps group membership / sidebar index.
+        let undoSnapshot = null;
+        if (tab && typeof this._snapshotTabForUndo === 'function') {
+            undoSnapshot = this._snapshotTabForUndo(tid);
+            if (undoSnapshot && tabGroupIdForUndo != null && undoSnapshot.tabGroupId == null) {
+                undoSnapshot.tabGroupId = tabGroupIdForUndo;
+            }
+            if (undoSnapshot && tabGroupIdForUndo != null && typeof this._snapshotTabGroupForUndo === 'function') {
+                undoSnapshot.groupSnapshot = this._snapshotTabGroupForUndo(tabGroupIdForUndo);
+            }
+        }
+
         // Remove from every group that still lists this tab (delete-group clears tabGroupId but not tabIds)
-        this._removeTabIdFromAllTabGroups(tid, true);
-        // Store closed tab for recovery (only if it's not a new tab)
-        if (tab && tab.url && tab.url !== 'about:blank') {
-            const newTabPageState = this._captureNewTabPageStateForUndo(tab, tid, cur === tid);
+        this._removeTabIdFromAllTabGroups(tid, true, true);
+        // Re-resolve after group sync - DOM node may have moved.
+        const liveTabElement =
+            this._getTabElement(tid) ||
+            document.querySelector(`[data-tab-id="${tid}"]`) ||
+            tabElement;
+
+        const closingWebview = tab?.webview || null;
+        if (tab) tab.webview = null;
+        const favoriteTabId = tab?.isFavoriteTab ? tid : null;
+        this._softHideClosedTabWebview(closingWebview);
+
+        // Start sidebar motion before undo bookkeeping so live webviews don’t block the first frames.
+        if (liveTabElement && liveTabElement.parentNode) {
+            this._removeTabElementAnimated(liveTabElement, tid);
+        } else {
+            this._forgetTabElement(tid);
+        }
+
+        // Store closed tab for recovery (skip empty about:blank shells)
+        const closeUrl = (undoSnapshot && undoSnapshot.url) || (tab && tab.url) || '';
+        if (tab && closeUrl && closeUrl !== 'about:blank') {
+            const newTabPageState =
+                (undoSnapshot && undoSnapshot.newTabPageState) ||
+                this._captureNewTabPageStateForUndo(tab, tid, cur === tid);
             this.closedTabs.unshift({
                 id: tid,
-                title: tab.title || 'Untitled',
-                url: tab.url,
-                customTitle: tab.customTitle,
+                oldTabId: tid,
+                title: (undoSnapshot && undoSnapshot.title) || tab.title || 'Untitled',
+                url: closeUrl,
+                customTitle: (undoSnapshot && undoSnapshot.customTitle) || tab.customTitle,
+                customIcon: undoSnapshot?.customIcon ?? tab.customIcon ?? null,
+                customIconType: undoSnapshot?.customIconType ?? tab.customIconType ?? null,
+                favicon: undoSnapshot?.favicon ?? tab.favicon ?? null,
+                pinned: !!(undoSnapshot?.pinned ?? tab.pinned),
+                savedLinkUrl: undoSnapshot?.savedLinkUrl ?? tab.savedLinkUrl ?? null,
+                tabGroupId: undoSnapshot?.tabGroupId ?? tabGroupIdForUndo ?? null,
+                groupSnapshot: undoSnapshot?.groupSnapshot ?? null,
+                sidebarIndex: undoSnapshot?.sidebarIndex ?? null,
+                wasActive: undoSnapshot?.wasActive !== false,
                 newTabPageState,
                 timestamp: Date.now()
             });
-            // Push to undo stack so Cmd+Z can revert close
-            const undoSnapshot =
-                typeof this._snapshotTabForUndo === 'function'
-                    ? this._snapshotTabForUndo(tid)
-                    : {
-                    url: tab.url,
+            if (!undoSnapshot) {
+                undoSnapshot = {
+                    url: closeUrl,
                     title: tab.title || 'Untitled',
                     customTitle: tab.customTitle,
-                          tabGroupId: tabGroupIdForUndo,
-                          newTabPageState
-                      };
-            if (undoSnapshot) {
-                this._pushUndo({ type: 'close_tab', data: undoSnapshot });
+                    tabGroupId: tabGroupIdForUndo,
+                    newTabPageState
+                };
             }
+            this._pushUndo({ type: 'close_tab', oldTabId: tid, data: undoSnapshot });
             // Keep only the last 8 closed tabs (less RAM, recovery still works)
             if (this.closedTabs.length > 8) {
                 this.closedTabs = this.closedTabs.slice(0, 8);
             }
-            this._refreshNtpWidgetsByType('reopen');
-            this._refreshNtpWidgetsByType('stats');
-            this._refreshNtpWidgetsByType('pinned');
         }
-        
-        if (tab && tab.webview) {
-            try {
-                this.cleanupWebviewListeners(tab.webview);
-                try { tab.webview.src = 'about:blank'; } catch (_) {}
-                if (tab.webview.parentNode) {
-                    tab.webview.parentNode.removeChild(tab.webview);
-                }
-            } catch (e) {
-                console.error('Error removing webview:', e);
-            }
-        }
+        this._syncUndoShortcutState?.();
 
-        if (tab?.isFavoriteTab) {
-            this._removeFavoriteTabHostElement(tid);
-        }
-        
-        if (tabElement && tabElement.parentNode) {
-            // Remove the tab element immediately to avoid layout glitches / gaps
-            tabElement.parentNode.removeChild(tabElement);
-        }
-
-        // Delete the tab FIRST to get accurate remaining tabs count
         this.tabs.delete(tid);
-        
+
+        // Switch focus immediately so rapid Cmd+W / close clicks target the next tab
+        // (deferred focus left currentTab on a deleted id and blocked fast closing).
         if (closingUnpinnedCurrent) {
             this._applyFocusAfterTabClose(tid, neighborUnpinnedPref);
         } else if (cur != null && this.tabs.has(cur)) {
             this._prepareWebviewsForTabSwitch(cur);
         }
-        this._syncAfterTabClose();
-        this.applyAmbientFromSettings();
+
+        const finishCloseHeavy = () => {
+            this.syncSidebarFromTabGroups?.();
+            this._syncAfterTabClose();
+            this.applyAmbientFromSettings();
+            if (closeUrl && closeUrl !== 'about:blank') {
+                this._refreshNtpWidgetsByType('reopen');
+                this._refreshNtpWidgetsByType('stats');
+                this._refreshNtpWidgetsByType('pinned');
+            }
+        };
+
+        this._deferTabSidebarGuestChores(finishCloseHeavy, 160);
+        this._deferClosedTabWebviewTeardown(closingWebview, { favoriteTabId, delayMs: 180 });
     }
 
     _shouldRecoverUnpinnedTabsAfterCrash() {
@@ -13562,7 +15250,10 @@ class AxisBrowser {
         if (tab.pinned && !force) return;
 
         const tidChat = this._normalizeTabIdForChatState(tid);
-        if (tidChat != null) this.aiChatPanelOpenByTabId.delete(tidChat);
+        if (tidChat != null) {
+            this.aiChatPanelOpenByTabId.delete(tidChat);
+            this.aiChatMessagesByTabId?.delete?.(tidChat);
+        }
 
         if (this._sidebarMediaDock && this._normalizeTabMapKey(this._sidebarMediaDock.tabId) === tid) {
             this.hideSidebarMediaDock();
@@ -13592,50 +15283,52 @@ class AxisBrowser {
         this._removeTabFromRecentStack(tid);
     }
 
-    /** Tab ids that count as unpinned for auto/manual clear (state + sidebar position). */
+    /** Tab ids that count as unpinned for auto/manual clear (sidebar visual order first). */
     _collectUnpinnedTabIdsForClear() {
-        const ids = new Set();
+        const ids = [];
+        const seen = new Set();
+        const add = (rawId) => {
+            const tabId = this._normalizeTabMapKey(rawId);
+            if (tabId == null || seen.has(tabId)) return;
+            const tab = this.tabs.get(tabId);
+            if (!tab || tab.isFavoriteTab) return;
+            seen.add(tabId);
+            ids.push(tabId);
+        };
+
+        const tabsContainer = this.elements.tabsContainer;
+        const separator = this.elements.tabsSeparator;
+        if (tabsContainer && separator && separator.parentNode === tabsContainer) {
+            const allElements = Array.from(tabsContainer.children);
+            const separatorIndex = allElements.indexOf(separator);
+            for (let i = separatorIndex + 1; i < allElements.length; i++) {
+                const el = allElements[i];
+                if (el.classList.contains('tab')) {
+                    add(el.dataset.tabId);
+                } else if (el.classList.contains('tab-group')) {
+                    const gid = el.dataset.tabGroupId;
+                    const gKey = gid != null ? this.findTabGroupKey(gid) : null;
+                    const g = gKey != null ? this.tabGroups.get(gKey) : null;
+                    if (g && g.pinned !== false) continue;
+                    el.querySelectorAll('.tab').forEach((tabEl) => add(tabEl.dataset.tabId));
+                }
+            }
+        }
 
         for (const [tabId, tab] of this.tabs) {
             if (!tab || tab.isFavoriteTab) continue;
             if (!tab.pinned) {
-                ids.add(tabId);
+                add(tabId);
                 continue;
             }
             if (tab.tabGroupId != null) {
                 const gKey = this.findTabGroupKey(tab.tabGroupId);
                 const g = gKey != null ? this.tabGroups.get(gKey) : null;
-                if (g && g.pinned === false) ids.add(tabId);
+                if (g && g.pinned === false) add(tabId);
             }
         }
 
-        const tabsContainer = this.elements.tabsContainer;
-        const separator = this.elements.tabsSeparator;
-        if (tabsContainer && separator) {
-        const allElements = Array.from(tabsContainer.children);
-        const separatorIndex = allElements.indexOf(separator);
-            const collectFromEl = (el) => {
-                const tabId = this._normalizeTabMapKey(el?.dataset?.tabId);
-                if (tabId == null) return;
-                const tab = this.tabs.get(tabId);
-                if (!tab || tab.isFavoriteTab) return;
-                ids.add(tabId);
-            };
-        for (let i = separatorIndex + 1; i < allElements.length; i++) {
-            const el = allElements[i];
-            if (el.classList.contains('tab')) {
-                    collectFromEl(el);
-            } else if (el.classList.contains('tab-group')) {
-                    const gid = el.dataset.tabGroupId;
-                    const gKey = gid != null ? this.findTabGroupKey(gid) : null;
-                    const g = gKey != null ? this.tabGroups.get(gKey) : null;
-                    if (g && g.pinned !== false) continue;
-                    el.querySelectorAll('.tab').forEach(collectFromEl);
-                }
-            }
-        }
-
-        return Array.from(ids);
+        return ids;
     }
 
     clearAllUnpinnedItems(opts = {}) {
@@ -13758,24 +15451,26 @@ class AxisBrowser {
 
     recoverClosedTab() {
         if (this.closedTabs.length === 0) {
-            this.showNotification('No closed tabs to recover', 'info');
+            this.showNotification(this.t('note.noClosedTabs'), 'info');
             return;
         }
-        
-        // Get the most recently closed tab
+
         const closedTab = this.closedTabs.shift();
-        const urlToLoad = this.sanitizeUrl(closedTab.url) || closedTab.url || 'https://www.google.com';
-        const preserveNewTabState = !!closedTab.newTabPageState;
-        
-        // Create new tab and navigate directly to the closed tab's URL
-        const newTabId = this.createNewTab(urlToLoad, { preserveNewTabState });
-        const tab = this.tabs.get(newTabId);
-        
-        if (tab) {
-            this._applyRecoveredTabState(newTabId, closedTab);
-            this.showNotification(`Recovered: ${closedTab.title}`, 'success');
+        this._forgetUndoCloseForTab?.(closedTab.oldTabId || closedTab.id, closedTab);
+        const restoredId =
+            typeof this._restoreTabFromSnapshot === 'function'
+                ? this._restoreTabFromSnapshot(closedTab, { activate: closedTab.wasActive !== false })
+                : null;
+        if (restoredId == null) {
+            const urlToLoad = this.sanitizeUrl(closedTab.url) || closedTab.url || 'https://www.google.com';
+            const newTabId = this.createNewTab(urlToLoad, {
+                preserveNewTabState: !!closedTab.newTabPageState
+            });
+            if (this.tabs.get(newTabId)) this._applyRecoveredTabState(newTabId, closedTab);
         }
+        this.showNotification(this.t('note.recovered', { title: closedTab.customTitle || closedTab.title }), 'success');
         this._syncUndoShortcutState?.();
+        this._refreshTabsScrollEdges?.();
         this._refreshNtpWidgetsByType('reopen');
         this._refreshNtpWidgetsByType('stats');
         this._refreshNtpWidgetsByType('pinned');
@@ -13786,7 +15481,7 @@ class AxisBrowser {
 
         // Create a tab if there are no tabs
         if (this.tabs.size === 0 || this.currentTab === null) {
-            this.createNewTab(url);
+            this.createNewTab(url, { skipEnterAnimation: true });
             return;
         }
 
@@ -13832,7 +15527,7 @@ class AxisBrowser {
 
         // Load URL in active webview
         if (webview) {
-            webview.src = sanitizedUrl;
+            this._assignWebviewSrc(webview, sanitizedUrl);
 
             // Ensure the webview is fully interactive for real pages
             if (!isNewTabUrl) {
@@ -13884,6 +15579,7 @@ class AxisBrowser {
             this.updateNewTabPageVisibility(false);
         }
         this.updateNavigationButtons();
+        this.updateUrlBar(webview || null, { skipExtractTheme: true });
     }
 
     /**
@@ -13949,7 +15645,7 @@ class AxisBrowser {
             canChromiumBack = w.canGoBack();
             canChromiumFwd = w.canGoForward();
         } catch (_) {
-            /* guest may transiently throw — treat as no native stack */
+            /* guest may transiently throw - treat as no native stack */
         }
 
         if (direction === 'back' && !synthBack && !canChromiumBack) return;
@@ -14122,7 +15818,7 @@ class AxisBrowser {
         }
         
         if (webview) {
-            webview.src = sanitizedUrl;
+            this._assignWebviewSrc(webview, sanitizedUrl);
             if (currentTab) {
                 currentTab.url = sanitizedUrl;
             }
@@ -14145,7 +15841,7 @@ class AxisBrowser {
                     this.loadingBarTabId = null;
                 }
             }
-            // Shell UI only — keep search, suggestions, and AI chat; nothing to reload.
+            // Shell UI only - keep search, suggestions, and AI chat; nothing to reload.
             if (this.currentTab != null) {
                 this.saveNewTabPageStateToTab(this.currentTab);
             }
@@ -14186,7 +15882,7 @@ class AxisBrowser {
             if (isBlank) {
                 const sanitized = this.sanitizeUrl(tab.url);
                 if (sanitized) {
-                    webview.src = sanitized;
+                    this._assignWebviewSrc(webview, sanitized);
                     return;
                 }
             }
@@ -14205,26 +15901,38 @@ class AxisBrowser {
         if (isLoading) {
             // Change to X (stop) icon
             icon.className = 'fas fa-times';
-            refreshBtn.title = 'Stop Loading';
+            refreshBtn.title = this.t('menu.stop');
         } else {
             // Change back to reload icon
             icon.className = 'fas fa-redo-alt';
-            refreshBtn.title = 'Reload';
+            refreshBtn.title = this.t('chrome.reload');
         }
     }
 
-    printPage() {
-        const webview = this.getActiveWebview();
+    printPage(options = {}) {
+        const webview = options.fromContextMenu
+            ? this.getContextMenuWebview()
+            : this.getActiveWebview();
         if (!webview) return;
         try {
+            let guestUrl = '';
+            try {
+                guestUrl = webview.getURL() || '';
+            } catch (_) {}
+            if (!guestUrl || guestUrl === 'about:blank') {
+                this.showNotification(this.t('note.nothingToPrint'), 'error');
+                return;
+            }
+            if (typeof webview.print === 'function') {
+                webview.print({ silent: false, printBackground: true });
+                return;
+            }
             const wcId = webview.getWebContentsId();
             if (wcId && window.electronAPI?.printPage) {
-                window.electronAPI.printPage(wcId);
-            } else {
-                webview.print({ silent: false, printBackground: true });
+                void window.electronAPI.printPage(wcId);
             }
         } catch (e) {
-            this.showNotification('Unable to print this page.', 'error');
+            this.showNotification(this.t('note.unableToPrint'), 'error');
         }
     }
 
@@ -14326,14 +16034,6 @@ class AxisBrowser {
         }
     }
 
-    /** Reload a stuck YouTube `<video>` after tab switch or guest show/hide. */
-    _nudgeYouTubePlayerIfNeeded(webview, rawUrl) {
-        if (!webview || !this.isYouTubeWatchUrl(rawUrl)) return;
-        try {
-            webview.executeJavaScript(AXIS_YOUTUBE_PLAYER_RECOVERY_JS, true).catch(() => {});
-        } catch (_) {}
-    }
-
     /**
      * Allow navigation for context-menu images only when scheme is safe (blocks `data:text/html`, etc.).
      */
@@ -14362,7 +16062,7 @@ class AxisBrowser {
         if (!webview) {
             if (window.electronAPI?.setWindowTitle) {
                 window.electronAPI.setWindowTitle(
-                    this.isIncognitoWindow ? 'Axis — Incognito' : 'Axis Browser'
+                    this.isIncognitoWindow ? 'Axis - Incognito' : 'Axis Browser'
                 );
             }
             return;
@@ -14422,7 +16122,7 @@ class AxisBrowser {
 
         // Update native window title so macOS Dock shows the active tab name
         if (window.electronAPI?.setWindowTitle) {
-            const fallback = this.isIncognitoWindow ? 'Axis — Incognito' : 'Axis Browser';
+            const fallback = this.isIncognitoWindow ? 'Axis - Incognito' : 'Axis Browser';
             const isPlaceholder =
                 !title ||
                 title === 'New Tab' ||
@@ -14501,12 +16201,12 @@ class AxisBrowser {
         tabElement.innerHTML = `
             <div class="tab-content">
                 <div class="tab-left">
-                    <i class="fas fa-cog tab-favicon" style="width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: rgba(255, 255, 255, 0.7);"></i>
+                    ${this.customTabIconHtml('fa-cog', 'fa')}
                     <span class="tab-audio-indicator" style="display: none;"><i class="fas fa-volume-up"></i></span>
                     <span class="tab-title">Settings</span>
                 </div>
                 <div class="tab-right">
-                    <button class="tab-close"><i class="fas fa-times"></i></button>
+                    ${this._tabCloseButtonHtml()}
                 </div>
             </div>
         `;
@@ -14555,7 +16255,12 @@ class AxisBrowser {
 
     async openSettingsTab(section = null) {
         try {
-            await window.electronAPI.openSettingsWindow(section || null);
+            const allowedIncog = new Set(['customization', 'newtab', 'ai', 'shortcuts']);
+            let tab = section;
+            if (this.isIncognitoWindow) {
+                tab = allowedIncog.has(section) ? section : 'customization';
+            }
+            await window.electronAPI.openSettingsWindow(tab);
         } catch (_) {}
         return null;
     }
@@ -14618,7 +16323,7 @@ class AxisBrowser {
         if (tab) {
             tab.isSettings = true;
             tab.url = 'axis://settings';
-            tab.title = 'Settings';
+            tab.title = this.t('chrome.settings');
             if (section) tab.settingsSection = section;
             this.tabs.set(tabId, tab);
         }
@@ -14626,7 +16331,7 @@ class AxisBrowser {
         const tabElement = tabId != null ? document.querySelector(`[data-tab-id="${tabId}"]`) : null;
         if (tabElement) {
             const titleEl = tabElement.querySelector('.tab-title');
-            if (titleEl) titleEl.textContent = 'Settings';
+            if (titleEl) titleEl.textContent = this.t('chrome.settings');
             this.updateTabTooltip(tabId);
         }
 
@@ -14795,7 +16500,7 @@ class AxisBrowser {
     // Notes functionality - now works as tabs
     async openNoteAsTab(noteId = null) {
         // Create a new tab for the note
-        const tabId = Date.now();
+        const tabId = this._createUniqueTabId();
         const noteUrl = noteId ? `axis:note://${noteId}` : `axis:note://new`;
         
         // Create tab element
@@ -14811,7 +16516,7 @@ class AxisBrowser {
                     <span class="tab-title">${this.escapeHtml(noteTitle)}</span>
                 </div>
                 <div class="tab-right">
-                    <button class="tab-close"><i class="fas fa-times"></i></button>
+                    ${this._tabCloseButtonHtml()}
                 </div>
             </div>
         `;
@@ -14940,7 +16645,7 @@ class AxisBrowser {
         
         if (event.data.type === 'clearBrowsingData') {
             // Clear browsing data (history, cookies, etc.)
-            if (confirm('Are you sure you want to delete all browsing data? This will clear your history and cookies.')) {
+            if (confirm(this.t('note.clearAllData'))) {
                 await this.clearAllHistory();
                 // Could also clear cookies here if needed
                 // Reload settings page to refresh
@@ -14954,7 +16659,7 @@ class AxisBrowser {
         
         if (event.data.type === 'openSiteSettings') {
             this.openSettingsTab('permissions');
-            this.showNotification('Opening Site permissions in Settings', 'info');
+            this.showNotification(this.t('note.openingPermissions'), 'info');
             return;
         }
         
@@ -15052,8 +16757,19 @@ class AxisBrowser {
             note = notes.find(n => n.id === parseInt(noteId));
         }
 
-        const noteTitle = note ? (note.title || 'Untitled Note') : '';
+        const untitled = this.t('chrome.untitledNote');
+        const noteTitle = note ? (note.title || untitled) : '';
         const noteContent = note ? (note.content || '') : '';
+        const noteStrings = JSON.stringify({
+            saving: this.t('common.saving'),
+            saved: this.t('common.saved'),
+            saveError: this.t('common.saveError'),
+            untitled,
+            startWriting: this.t('chrome.startWriting'),
+            save: this.t('common.save'),
+            saveShortcut: this.t('notes.saveShortcut'),
+            newNote: this.t('notes.create')
+        }).replace(/</g, '\\u003c');
 
         // Create modern HTML for note editor
         const noteHtml = `
@@ -15062,7 +16778,7 @@ class AxisBrowser {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${this.escapeHtml(noteTitle || 'New Note')}</title>
+    <title>${this.escapeHtml(noteTitle || this.t('notes.create'))}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -15246,21 +16962,21 @@ class AxisBrowser {
 </head>
 <body>
     <div class="note-header">
-        <input type="text" id="note-title" class="note-title-input" placeholder="Untitled Note" value="${this.escapeHtml(noteTitle)}">
+        <input type="text" id="note-title" class="note-title-input" placeholder="${this.escapeHtml(untitled)}" value="${this.escapeHtml(noteTitle)}">
         <div class="note-actions">
             <div class="note-status" id="note-status"></div>
-            <button class="note-btn save" onclick="saveNote()" title="Save (Ctrl+S)">
+            <button class="note-btn save" onclick="saveNote()" title="${this.escapeHtml(this.t('notes.saveShortcut'))}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
                     <polyline points="17 21 17 13 7 13 7 21"></polyline>
                     <polyline points="7 3 7 8 15 8"></polyline>
                 </svg>
-                Save
+                ${this.escapeHtml(this.t('common.save'))}
             </button>
         </div>
     </div>
     <div class="note-content">
-        <textarea id="note-content" class="note-textarea" placeholder="Start writing...">${this.escapeHtml(noteContent)}</textarea>
+        <textarea id="note-content" class="note-textarea" placeholder="${this.escapeHtml(this.t('chrome.startWriting'))}">${this.escapeHtml(noteContent)}</textarea>
     </div>
     <div class="note-meta" id="note-meta">
         <div class="note-meta-left">
@@ -15269,6 +16985,7 @@ class AxisBrowser {
         <div class="word-count" id="word-count">0 words<span> • 0 chars</span></div>
     </div>
     <script>
+        const axisNoteStrings = ${noteStrings};
         const noteId = ${noteId === 'new' ? 'null' : noteId};
         let isSaving = false;
         let saveTimeout = null;
@@ -15295,7 +17012,7 @@ class AxisBrowser {
         function saveNote() {
             if (isSaving) return;
             
-            const title = document.getElementById('note-title').value.trim() || 'Untitled Note';
+            const title = document.getElementById('note-title').value.trim() || axisNoteStrings.untitled;
             const content = document.getElementById('note-content').value;
             
             // Check if nothing changed
@@ -15367,10 +17084,10 @@ class AxisBrowser {
             statusEl.className = 'note-status';
             
             if (status === 'saving') {
-                statusEl.textContent = 'Saving...';
+                statusEl.textContent = axisNoteStrings.saving;
                 statusEl.classList.add('saving', 'visible');
             } else if (status === true) {
-                statusEl.textContent = 'Saved';
+                statusEl.textContent = axisNoteStrings.saved;
                 statusEl.classList.add('saved', 'visible');
                 isSaving = false;
                 if (dateEl) {
@@ -15384,7 +17101,7 @@ class AxisBrowser {
                     }, 300);
                 }, 2000);
             } else if (status === false) {
-                statusEl.textContent = 'Error saving';
+                statusEl.textContent = axisNoteStrings.saveError;
                 statusEl.classList.add('error', 'visible');
                 isSaving = false;
                 setTimeout(() => {
@@ -15503,7 +17220,8 @@ class AxisBrowser {
             // Update notes count
             if (notesCount) {
                 const count = notes ? notes.length : 0;
-                notesCount.textContent = `${count} note${count !== 1 ? 's' : ''}`;
+                notesCount.textContent =
+                    count === 1 ? this.t('notes.countOne', { n: count }) : this.t('notes.count', { n: count });
             }
             
             // Clear immediately
@@ -15528,9 +17246,9 @@ class AxisBrowser {
                 
                 noteElement.innerHTML = `
                     <div class="note-item-header">
-                        <h4 class="note-item-title">${this.escapeHtml(note.title || 'Untitled Note')}</h4>
+                        <h4 class="note-item-title">${this.escapeHtml(note.title || this.t('chrome.untitledNote'))}</h4>
                         <div class="note-item-actions">
-                            <button class="note-item-delete" data-note-id="${note.id}">
+                            <button class="note-item-delete" data-note-id="${this.escapeHtml(String(note.id))}">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -15558,7 +17276,7 @@ class AxisBrowser {
             });
         } catch (error) {
             console.error('Error loading notes:', error);
-            this.showNotification('Error loading notes', 'error');
+            this.showNotification(this.t('note.notesLoadError'), 'error');
         }
     }
 
@@ -15665,10 +17383,10 @@ class AxisBrowser {
             // Refresh notes list
             await this.populateNotes();
             
-            this.showNotification('Note saved!', 'success');
+            this.showNotification(this.t('note.noteSaved'), 'success');
         } catch (error) {
             console.error('Error saving note:', error);
-            this.showNotification('Error saving note', 'error');
+            this.showNotification(this.t('note.noteSaveError'), 'error');
         }
     }
 
@@ -15677,14 +17395,14 @@ class AxisBrowser {
             const notes = await window.electronAPI.getNotes();
             const note = notes.find(n => n.id === noteId);
             
-            if (note && confirm(`Delete note "${note.title}"?`)) {
+            if (note && confirm(this.t('note.deleteNoteNamed', { title: note.title }))) {
                 await window.electronAPI.deleteNote(noteId);
                 await this.populateNotes(); // This will update the count automatically
-                this.showNotification('Note deleted', 'success');
+                this.showNotification(this.t('note.noteDeleted'), 'success');
             }
         } catch (error) {
             console.error('Error deleting note:', error);
-            this.showNotification('Error deleting note', 'error');
+            this.showNotification(this.t('note.noteDeleteError'), 'error');
         }
     }
 
@@ -15748,9 +17466,9 @@ class AxisBrowser {
                     
                     noteElement.innerHTML = `
                         <div class="note-item-header">
-                            <h4 class="note-item-title">${this.escapeHtml(note.title || 'Untitled Note')}</h4>
+                            <h4 class="note-item-title">${this.escapeHtml(note.title || this.t('chrome.untitledNote'))}</h4>
                             <div class="note-item-actions">
-                                <button class="note-item-delete" data-note-id="${note.id}">
+                                <button class="note-item-delete" data-note-id="${this.escapeHtml(String(note.id))}">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </div>
@@ -15814,9 +17532,9 @@ class AxisBrowser {
                 </head>
                 <body>
                     <div class="error-container">
-                        <h1>Unable to load page</h1>
+                        <h1>${this.escapeHtml(this.t('chrome.loadError'))}</h1>
                         <p>${error}</p>
-                        <p>Please check the URL and try again.</p>
+                        <p>${this.escapeHtml(this.t('chrome.loadErrorHint'))}</p>
                     </div>
                 </body>
             </html>
@@ -15833,7 +17551,7 @@ class AxisBrowser {
         input.type = 'text';
         input.value = currentTitle;
         input.className = 'tab-title';
-        input.setAttribute('aria-label', 'Rename tab');
+        input.setAttribute('aria-label', this.t('chrome.renameTabAria'));
 
         if (titleElement && titleElement.parentNode) {
             titleElement.parentNode.replaceChild(input, titleElement);
@@ -15930,7 +17648,7 @@ class AxisBrowser {
         input.type = 'text';
         input.value = currentTitle;
         input.className = 'tab-title';
-        input.setAttribute('aria-label', 'Rename tab group');
+        input.setAttribute('aria-label', this.t('chrome.renameGroupAria'));
 
         if (titleElement.parentNode) {
             titleElement.parentNode.replaceChild(input, titleElement);
@@ -16023,7 +17741,7 @@ class AxisBrowser {
     }
 
     showNotification(message, type = 'info') {
-        // Notifications disabled — no on-screen toasts
+        // Notifications disabled - no on-screen toasts
         return;
     }
 
@@ -16113,10 +17831,10 @@ class AxisBrowser {
         if (urlBtn) {
             urlBtn.classList.toggle('url-bar-cws-install--installed', installed);
             urlBtn.title = installed
-                ? `${extName} is installed — click to install again`
+                ? `${extName} is installed - click to install again`
                 : ctx?.amoKey
                   ? 'Install this Firefox add-on in Axis (from this Mozilla page)'
-                  : 'Install this Chrome extension in Axis (same tab — no copy/paste)';
+                  : 'Install this Chrome extension in Axis (same tab - no copy/paste)';
         }
     }
 
@@ -16210,11 +17928,11 @@ class AxisBrowser {
 
         if (btn.id === 'axis-store-install-host-btn' || btn.classList.contains('axis-store-install-host-btn')) {
             const labels = {
-                idle: 'Install in Axis',
-                installed: 'Install again',
-                busy: 'Installing…',
-                success: 'Installed',
-                error: 'Try again'
+                idle: this.t('ext.installInAxis'),
+                installed: this.t('ext.installAgain'),
+                busy: this.t('ext.installing'),
+                success: this.t('ext.installed'),
+                error: this.t('ext.tryAgain')
             };
             btn.textContent = labels[state] || labels.idle;
         }
@@ -16392,13 +18110,7 @@ class AxisBrowser {
         
         // If tab has custom icon, don't update favicon
         if (tab.customIcon) {
-            // Ensure it's an icon element, not img
-            if (faviconEl.tagName === 'IMG') {
-                const iconElement = document.createElement('i');
-                iconElement.className = `fas ${tab.customIcon} tab-favicon`;
-                iconElement.style.cssText = 'width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: rgba(255, 255, 255, 0.7);';
-                faviconEl.parentNode.replaceChild(iconElement, faviconEl);
-            }
+            this.updateTabIcon(tabElement, tabId);
             return;
         }
         
@@ -16463,7 +18175,7 @@ class AxisBrowser {
         if (tab && tab.isMuted) {
             audioIndicator.style.display = 'inline-flex';
             audioIndicator.classList.add('muted');
-            audioIndicator.title = 'Tab muted - click to unmute';
+            audioIndicator.title = this.t('chrome.tabMuted');
             if (icon) {
                 icon.className = 'fas fa-volume-mute';
             }
@@ -16474,7 +18186,7 @@ class AxisBrowser {
         if (isPlaying) {
             audioIndicator.style.display = 'inline-flex';
             audioIndicator.classList.remove('muted');
-            audioIndicator.title = 'Playing audio';
+            audioIndicator.title = this.t('chrome.playingAudio');
             if (icon) {
                 icon.className = 'fas fa-volume-up';
             }
@@ -16484,7 +18196,7 @@ class AxisBrowser {
         }
     }
     
-    // Event-driven audio indicator — no per-tab polling (polling kept background pages hot and leaked RAM).
+    // Event-driven audio indicator - no per-tab polling (polling kept background pages hot and leaked RAM).
     bindWebviewAudioStateListener(tabId, webview) {
         if (!webview || webview.__axisAudioStateBound) return;
         const syncAudible = () => {
@@ -16556,7 +18268,7 @@ class AxisBrowser {
         const wasPinned = tab.pinned || el.classList.contains('pinned');
         const isPinned = !wasPinned;
 
-        // Tab still inside a group — only "unpin" removes it to the loose unpinned list.
+        // Tab still inside a group - only "unpin" removes it to the loose unpinned list.
         if (tab.tabGroupId != null) {
             const gid = this.findTabGroupKey(tab.tabGroupId);
             const group = gid != null ? this.tabGroups.get(gid) : null;
@@ -16839,7 +18551,7 @@ class AxisBrowser {
             this.tabs.set(tid, tab);
             this.saveFavorites();
             this.renderFavorites();
-            this.showNotification('Favorite link updated', 'success');
+            this.showNotification(this.t('note.favoriteUpdated'), 'success');
             return;
         }
 
@@ -16866,15 +18578,12 @@ class AxisBrowser {
         } else {
             await this.savePinnedTabs();
         }
-        this.showNotification('Pinned link updated', 'success');
+        this.showNotification(this.t('note.pinnedUpdated'), 'success');
     }
 
     getFavoriteIconHtml(favorite) {
         if (favorite.customIcon) {
-            if (favorite.customIconType === 'emoji') {
-                return `<span class="favorite-favicon favorite-favicon-emoji">${this.escapeHtml(favorite.customIcon)}</span>`;
-            }
-            return `<i class="fas ${this.escapeHtml(favorite.customIcon)} favorite-favicon favorite-favicon-fa" aria-hidden="true"></i>`;
+            return this.customTabIconHtml(favorite.customIcon, favorite.customIconType, { favorite: true });
         }
         const iconUrl =
             favorite.favicon ||
@@ -16990,7 +18699,7 @@ class AxisBrowser {
         } catch (_) {}
         const normalized = this.normalizeFavoriteUrl(url);
         if (!normalized) {
-            this.showNotification('Only website tabs can be added to Favorites', 'info');
+            this.showNotification(this.t('note.favoriteWebOnly'), 'info');
             return;
         }
         let title = tab.customTitle || tab.title || '';
@@ -17244,7 +18953,7 @@ class AxisBrowser {
             return;
         }
 
-        /* Host-tinted placeholder until favicon pixels are ready — avoids white shell-ink flash. */
+        /* Host-tinted placeholder until favicon pixels are ready - avoids white shell-ink flash. */
         apply(this._favoriteAccentFallback(favorite.url));
 
         const domImg = item.querySelector('img.favorite-favicon');
@@ -17535,7 +19244,10 @@ class AxisBrowser {
             unpinnedTabsData.sort((a, b) => (a.order || 0) - (b.order || 0));
 
             for (const tabData of unpinnedTabsData) {
-                const tabId = this._createUniqueTabId(tabData.id);
+                const preferredId = this._normalizeTabMapKey(tabData.id);
+                // Already restored via a tab group (or earlier pass) - never mint a duplicate id.
+                if (preferredId != null && this.tabs.has(preferredId)) continue;
+                const tabId = this._createUniqueTabId(preferredId);
                 if (this.tabs.has(tabId)) continue;
                 const inAiChat = this._savedNewTabInAiChatFromPayload(tabData);
                 const resolvedFavicon = tabData.customIcon
@@ -17647,7 +19359,7 @@ class AxisBrowser {
                             <span class="tab-title">${this.escapeHtml(displayTitle)}</span>
                         </div>
                         <div class="tab-right">
-                            <button class="tab-close"><i class="fas fa-times"></i></button>
+                            ${this._tabCloseButtonHtml()}
                         </div>
                     </div>
                 `;
@@ -17687,7 +19399,7 @@ class AxisBrowser {
                 // Set up event listeners
                 this.setupTabEventListeners(tabElement, tabId);
                 this.setupPinnedTabCloseButton(tabElement, tabId);
-                // Skip updateTabFavicon on load — iconHTML already has the cached icon.
+                // Skip updateTabFavicon on load - iconHTML already has the cached icon.
                 // Refetching hundreds of favicons at once freezes the sidebar.
             }
 
@@ -17755,7 +19467,7 @@ class AxisBrowser {
         }
     }
 
-    /** Window-wide sidebar side (left/right) — always read from the global store, not profile settings. */
+    /** Window-wide sidebar side (left/right) - always read from the global store, not profile settings. */
     syncSidebarPositionFromGlobal() {
         try {
             const pos = window.electronAPI?.getSidebarPosition?.();
@@ -17798,13 +19510,13 @@ class AxisBrowser {
         if (next === 'left') {
             mainArea.classList.remove('sidebar-right');
             sidebar.classList.remove('sidebar-right');
-            if (positionText) positionText.textContent = 'Move Sidebar Right';
-            if (contextText) contextText.textContent = 'Move Sidebar Right';
+            if (positionText) positionText.textContent = this.t('menu.moveSidebarRight');
+            if (contextText) contextText.textContent = this.t('menu.moveSidebarRight');
         } else {
             mainArea.classList.add('sidebar-right');
             sidebar.classList.add('sidebar-right');
-            if (positionText) positionText.textContent = 'Move Sidebar Left';
-            if (contextText) contextText.textContent = 'Move Sidebar Left';
+            if (positionText) positionText.textContent = this.t('menu.moveSidebarLeft');
+            if (contextText) contextText.textContent = this.t('menu.moveSidebarLeft');
         }
         if (!this.settings || typeof this.settings !== 'object') this.settings = {};
         this.settings.sidebarPosition = next;
@@ -17839,13 +19551,13 @@ class AxisBrowser {
         if (position === 'right') {
             mainArea.classList.add('sidebar-right');
             sidebar.classList.add('sidebar-right');
-            if (positionText) positionText.textContent = 'Move Sidebar Left';
-            if (contextText) contextText.textContent = 'Move Sidebar Left';
+            if (positionText) positionText.textContent = this.t('menu.moveSidebarLeft');
+            if (contextText) contextText.textContent = this.t('menu.moveSidebarLeft');
         } else {
             mainArea.classList.remove('sidebar-right');
             sidebar.classList.remove('sidebar-right');
-            if (positionText) positionText.textContent = 'Move Sidebar Right';
-            if (contextText) contextText.textContent = 'Move Sidebar Right';
+            if (positionText) positionText.textContent = this.t('menu.moveSidebarRight');
+            if (contextText) contextText.textContent = this.t('menu.moveSidebarRight');
         }
         this.syncMacOSTrafficLayout();
         if (typeof this._syncSidebarResizeHandleLayout === 'function') {
@@ -17897,9 +19609,21 @@ class AxisBrowser {
         const updateThumb = () => {
             const scrollHeight = container.scrollHeight;
             const clientHeight = container.clientHeight;
-            if (scrollHeight <= clientHeight + 1) {
+            const scrollTop = container.scrollTop;
+            const canScroll = scrollHeight > clientHeight + 1;
+            section.classList.toggle('is-tabs-scrolled', canScroll && scrollTop > 0);
+            section.classList.toggle(
+                'is-tabs-scrolled-bottom',
+                canScroll && scrollTop + clientHeight < scrollHeight - 1
+            );
+            if (!canScroll) {
                 thumb.hidden = true;
-                section.classList.remove('is-tabs-scrolling', 'is-tabs-scroll-fading');
+                section.classList.remove(
+                    'is-tabs-scrolling',
+                    'is-tabs-scroll-fading',
+                    'is-tabs-scrolled',
+                    'is-tabs-scrolled-bottom'
+                );
                 return false;
             }
             thumb.hidden = false;
@@ -17909,7 +19633,7 @@ class AxisBrowser {
             const thumbH = Math.max(28, Math.min(trackH, trackH * ratio));
             const maxScroll = scrollHeight - clientHeight;
             const maxTop = Math.max(0, trackH - thumbH);
-            const thumbOffset = maxScroll > 0 ? (container.scrollTop / maxScroll) * maxTop : 0;
+            const thumbOffset = maxScroll > 0 ? (scrollTop / maxScroll) * maxTop : 0;
             thumb.style.height = `${thumbH}px`;
             thumb.style.top = `${container.offsetTop + inset + thumbOffset}px`;
             return true;
@@ -17930,7 +19654,18 @@ class AxisBrowser {
             }, IDLE_MS);
         };
 
-        container.addEventListener('scroll', showScrollbar, { passive: true });
+        /* Coalesce bursty trackpad scroll/wheel into one paint so edges keep up with fast flicks. */
+        let scrollRaf = 0;
+        const onScrollActivity = () => {
+            if (scrollRaf) return;
+            scrollRaf = requestAnimationFrame(() => {
+                scrollRaf = 0;
+                showScrollbar();
+            });
+        };
+
+        container.addEventListener('scroll', onScrollActivity, { passive: true });
+        container.addEventListener('wheel', onScrollActivity, { passive: true });
         if (typeof ResizeObserver !== 'undefined') {
             const ro = new ResizeObserver(() => {
                 updateThumb();
@@ -17938,7 +19673,18 @@ class AxisBrowser {
             });
             ro.observe(container);
         }
-        updateThumb();
+        if (typeof MutationObserver !== 'undefined') {
+            const mo = new MutationObserver(() => this._refreshTabsScrollEdges?.());
+            mo.observe(container, { childList: true, subtree: true });
+        }
+        this._refreshTabsScrollEdges = () => {
+            const run = () => updateThumb();
+            run();
+            requestAnimationFrame(run);
+            clearTimeout(this._tabsScrollEdgesTimer);
+            this._tabsScrollEdgesTimer = setTimeout(run, 220);
+        };
+        this._refreshTabsScrollEdges();
     }
 
     setupSidebarSlideBack() {
@@ -18442,8 +20188,12 @@ class AxisBrowser {
 
         // Ensure main chat panel is open
         if (chatPanel.classList.contains('hidden')) {
+            this.applyChatPanelWidth?.(this.getChatPanelWidth?.());
+            contentArea?.classList.remove('chat-sliding');
+            document.body.classList.remove('axis-chat-sliding');
             chatPanel.classList.remove('hidden');
             if (contentArea) contentArea.classList.add('chat-open');
+            this._finishWebviewHostBoundsTracking?.();
         }
         const tid = this._normalizeTabIdForChatState(this.currentTab);
         if (tid != null) {
@@ -18556,12 +20306,12 @@ class AxisBrowser {
 
         // Show loading state
         submitBtn.disabled = true;
-        responseContent.textContent = 'Processing...';
+        responseContent.textContent = this.t('common.processing');
         responseArea.classList.remove('hidden');
 
         try {
             if (!this.hasAiApiKey()) {
-                throw new Error('Add an API key in Settings → AI Chat to use this feature.');
+                throw new Error(this.t('ai.needKey'));
             }
             const fullPrompt = `Context: "${context}"\n\nQuestion: ${prompt}\n\nPlease provide a helpful answer based on the context provided.`;
             const aiResponse = await this._completeAiChat(
@@ -18661,7 +20411,7 @@ class AxisBrowser {
     async _completeAiChat(messages, options = {}) {
         const entry = this.getActiveAiProvider();
         if (!entry?.apiKey) {
-            throw new Error('Add an API key in Settings → AI Chat to use this feature.');
+            throw new Error(this.t('ai.needKey'));
         }
         if (typeof AxisAiProviders === 'undefined') {
             throw new Error('AI providers module is unavailable.');
@@ -18903,10 +20653,7 @@ class AxisBrowser {
     async _addNewTabChatImages(fileList) {
         if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled()) return;
         if (!this.activeProviderSupportsImages()) {
-            this.showNotification?.(
-                'Your active provider does not support images. Switch to a vision-capable key in Settings → AI Chat.',
-                'error'
-            );
+            this.showNotification?.(this.t('ai.noVision'), 'error');
             return;
         }
         const files = Array.from(fileList || []).filter(
@@ -18944,10 +20691,7 @@ class AxisBrowser {
     async _addSidebarChatImages(fileList) {
         if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled()) return;
         if (!this.activeProviderSupportsImages()) {
-            this.showNotification?.(
-                'Your active provider does not support images. Switch to a vision-capable key in Settings → AI Chat.',
-                'error'
-            );
+            this.showNotification?.(this.t('ai.noVision'), 'error');
             return;
         }
         const files = Array.from(fileList || []).filter(
@@ -19146,8 +20890,8 @@ class AxisBrowser {
             chatInput.setAttribute('aria-disabled', hasKey ? 'false' : 'true');
             chatInput.tabIndex = hasKey ? 0 : -1;
             chatInput.placeholder = hasKey
-                ? 'Type your message...'
-                : 'Add an API key in Settings to start chatting';
+                ? this.t('chrome.messageAi')
+                : this.t('ai.setupPlaceholder');
             if (!hasKey) chatInput.value = '';
         }
         if (chatSend) {
@@ -19167,14 +20911,20 @@ class AxisBrowser {
         this._syncAiChatImageAttachUi();
     }
 
-    /** Store default: on unless explicitly false. */
+    /** Store default: on unless explicitly false. Incognito defaults off until enabled in Settings. */
     isAiFeaturesEnabled() {
+        if (this.isIncognitoWindow) {
+            return this.settings?.aiFeaturesEnabled === true;
+        }
         return this.settings?.aiFeaturesEnabled !== false;
     }
 
     applyAiFeaturesVisibility() {
         const on = this.isAiFeaturesEnabled();
         document.documentElement.classList.toggle('axis-ai-features-disabled', !on);
+        if (this.isIncognitoWindow) {
+            document.body.classList.toggle('incognito-ai-on', on);
+        }
 
         const urlBarChat = this.elements?.urlBarChat || document.getElementById('url-bar-chat');
         if (urlBarChat) {
@@ -19197,6 +20947,8 @@ class AxisBrowser {
             if (chatPanel) {
                 chatPanel.classList.add('hidden');
                 contentArea?.classList.remove('chat-open');
+                contentArea?.classList.remove('chat-sliding');
+                document.body.classList.remove('axis-chat-sliding');
                 const tid = this._normalizeTabIdForChatState(this.currentTab);
                 if (tid != null) this.aiChatPanelOpenByTabId.set(tid, false);
             }
@@ -19405,34 +21157,98 @@ class AxisBrowser {
         if (!this.isAiFeaturesEnabled()) return;
         const chatPanel = document.getElementById('ai-chat-panel');
         const contentArea = document.getElementById('content-area');
-        
+
         if (!chatPanel) return;
 
         const isHidden = chatPanel.classList.contains('hidden');
-        
+        const reduceMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+        const slideMs = 300;
+
+        if (this._chatSlideSettleTimer) {
+            clearTimeout(this._chatSlideSettleTimer);
+            this._chatSlideSettleTimer = null;
+        }
+        if (this._chatSlideBoundsRaf) {
+            cancelAnimationFrame(this._chatSlideBoundsRaf);
+            this._chatSlideBoundsRaf = null;
+        }
+
+        chatPanel.classList.remove('ai-chat-instant');
+        contentArea?.classList.remove('chat-switch-instant');
+
         if (isHidden) {
+            this.applyChatPanelWidth(this.getChatPanelWidth());
+            document.body.classList.add('axis-chat-sliding');
+            if (!reduceMotion) contentArea?.classList.add('chat-sliding');
+            // Start off-screen, then open so transform actually interpolates.
             chatPanel.classList.remove('hidden');
-            if (contentArea) {
-                contentArea.classList.add('chat-open');
-            }
+            void chatPanel.offsetWidth;
+            contentArea?.classList.add('chat-open');
             this._applyAiChatPanelChrome();
             this.updateAIChatSetupState();
             this._syncAiChatImageAttachUi();
-            // Focus input after open animation finishes
             const chatInput = document.getElementById('ai-chat-input');
             if (chatInput && this.hasGroqApiKey()) {
-                setTimeout(() => chatInput.focus(), 420);
+                setTimeout(() => chatInput.focus(), reduceMotion ? 0 : slideMs);
             }
         } else {
-            chatPanel.classList.add('hidden');
-            if (contentArea) {
-                contentArea.classList.remove('chat-open');
+            document.body.classList.add('axis-chat-sliding');
+            if (!reduceMotion) contentArea?.classList.add('chat-sliding');
+            contentArea?.classList.remove('chat-open');
+            if (reduceMotion) {
+                chatPanel.classList.add('hidden');
             }
         }
+
+        if (reduceMotion) {
+            contentArea?.classList.remove('chat-sliding');
+            document.body.classList.remove('axis-chat-sliding');
+        } else {
+            this._runChatSlideBoundsSync(slideMs);
+            this._chatSlideSettleTimer = setTimeout(() => {
+                this._chatSlideSettleTimer = null;
+                contentArea?.classList.remove('chat-sliding');
+                document.body.classList.remove('axis-chat-sliding');
+                if (!contentArea?.classList.contains('chat-open')) {
+                    chatPanel.classList.add('hidden');
+                }
+                this._nudgeWebviewGuestLayout();
+                this._syncGuestWindowResizeEvent();
+                this._maybeRebindStaleGuestLayout();
+            }, slideMs);
+        }
+
         const tid = this._normalizeTabIdForChatState(this.currentTab);
         if (tid != null) {
-            this.aiChatPanelOpenByTabId.set(tid, !chatPanel.classList.contains('hidden'));
+            this.aiChatPanelOpenByTabId.set(tid, contentArea?.classList.contains('chat-open') === true);
         }
+    }
+
+    /** Nudge guest layout during chat slide without host-resizing (that kills page transitions). */
+    _runChatSlideBoundsSync(durationMs = 300) {
+        const slideMs = Math.max(0, Number(durationMs) || 300);
+        const start = performance.now();
+        if (this._chatSlideBoundsRaf) {
+            cancelAnimationFrame(this._chatSlideBoundsRaf);
+            this._chatSlideBoundsRaf = null;
+        }
+        let frame = 0;
+        const tick = (now) => {
+            frame += 1;
+            if (frame === 1 || frame % 2 === 0) {
+                this._nudgeWebviewGuestLayout();
+                this._syncGuestWindowResizeEvent();
+            }
+            if (now - start < slideMs) {
+                this._chatSlideBoundsRaf = requestAnimationFrame(tick);
+            } else {
+                this._chatSlideBoundsRaf = null;
+                this._nudgeWebviewGuestLayout();
+                this._syncGuestWindowResizeEvent();
+                this._maybeRebindStaleGuestLayout();
+            }
+        };
+        this._chatSlideBoundsRaf = requestAnimationFrame(tick);
     }
 
     async sendChatMessage() {
@@ -19465,14 +21281,11 @@ class AxisBrowser {
             return;
         }
         if (images.length && !this.activeProviderSupportsImages()) {
-            this.showNotification?.(
-                'Your active provider does not support images. Switch to a vision-capable key in Settings → AI Chat.',
-                'error'
-            );
+            this.showNotification?.(this.t('ai.noVision'), 'error');
             return;
         }
 
-        // Clear input (fixed height – no resize)
+        // Clear input (fixed height - no resize)
         chatInput.value = '';
         this._sidebarChatImages = [];
         this._syncAiChatImageAttachUi();
@@ -19501,12 +21314,13 @@ class AxisBrowser {
         const messageDiv = document.createElement('div');
         messageDiv.className = `ai-chat-message ${role}`;
         messageDiv.dataset.messageId = messageId;
+        this._markChatMessageEnter(messageDiv, 'ai-chat-message-enter');
 
         if (isLoading) {
             messageDiv.innerHTML = `
                 <div class="ai-chat-message-content ai-chat-message-loading">
                     <i class="fas fa-spinner"></i>
-                    <span>Thinking...</span>
+                    <span>${this.escapeHtml(this.t('ai.thinking'))}</span>
                 </div>
             `;
         } else {
@@ -19552,15 +21366,18 @@ class AxisBrowser {
         chatMessages.appendChild(messageDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
-        // Store message (full content for API/history) — skip loading placeholders
+        // Store message (full content for API/history) - skip loading placeholders
         if (!isLoading) {
         this.aiChatMessages.push({
             id: messageId,
             role,
             content,
                 timestamp: new Date().toISOString(),
-                ...(options.images?.length ? { images: options.images } : {})
+                ...(options.images?.length ? { images: options.images } : {}),
+                ...(options.quote != null ? { quote: options.quote } : {}),
+                ...(options.mainText != null ? { mainText: options.mainText } : {})
         });
+            this._persistSidebarChatForTab(this.currentTab);
         }
 
         return messageId;
@@ -19596,6 +21413,7 @@ class AxisBrowser {
                 timestamp: new Date().toISOString()
             });
         }
+        this._persistSidebarChatForTab(this.currentTab);
 
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
@@ -19634,7 +21452,7 @@ class AxisBrowser {
         }
     }
 
-    /** Build prior turns for Groq — drops loading placeholders and the current user line (re-added once). */
+    /** Build prior turns for Groq - drops loading placeholders and the current user line (re-added once). */
     _getChatHistoryForApi(rawHistory, userMessage, userImages) {
         const msgs = (Array.isArray(rawHistory) ? rawHistory : [])
             .filter((m) => (m.role === 'user' || m.role === 'assistant') && (String(m.content || '').trim() || m.images?.length))
@@ -20053,33 +21871,23 @@ class AxisBrowser {
         
         // Check if tab has custom icon
         if (tab.customIcon) {
-            // Check if it's an emoji or Font Awesome icon
-            if (tab.customIconType === 'emoji') {
-                // For emojis, use a span with the emoji
-                const emojiElement = document.createElement('span');
-                emojiElement.className = 'tab-favicon';
-                emojiElement.textContent = tab.customIcon;
-                emojiElement.style.cssText = 'width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1;';
-                faviconEl.parentNode.replaceChild(emojiElement, faviconEl);
-            } else {
-                // Font Awesome icon
-                const iconElement = document.createElement('i');
-                iconElement.className = `fas ${tab.customIcon} tab-favicon`;
-                iconElement.style.cssText = 'width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: rgba(255, 255, 255, 0.7);';
-                faviconEl.parentNode.replaceChild(iconElement, faviconEl);
-            }
-        } else {
-            // Use regular favicon (img element)
-            if (faviconEl.tagName !== 'IMG') {
-                const imgElement = document.createElement('img');
-                imgElement.className = 'tab-favicon';
-                imgElement.draggable = false;
-                imgElement.src = '';
-                imgElement.alt = '';
-                imgElement.setAttribute('onerror', "this.style.visibility='hidden'");
-                faviconEl.parentNode.replaceChild(imgElement, faviconEl);
-                this.updateTabFavicon(tabId, tabElement);
-            }
+            const next = document.createElement('span');
+            next.innerHTML = this.customTabIconHtml(tab.customIcon, tab.customIconType);
+            const iconEl = next.firstElementChild;
+            if (iconEl) faviconEl.replaceWith(iconEl);
+            return;
+        }
+
+        // Use regular favicon (img element)
+        if (faviconEl.tagName !== 'IMG') {
+            const imgElement = document.createElement('img');
+            imgElement.className = 'tab-favicon';
+            imgElement.draggable = false;
+            imgElement.src = '';
+            imgElement.alt = '';
+            imgElement.setAttribute('onerror', "this.style.visibility='hidden'");
+            faviconEl.parentNode.replaceChild(imgElement, faviconEl);
+            this.updateTabFavicon(tabId, tabElement);
         }
     }
     
@@ -20169,14 +21977,8 @@ class AxisBrowser {
         tabGroupElement.innerHTML = `
             <div class="tab-content">
                 <div class="tab-left">
-                    ${tabGroup.iconType === 'emoji'
-                        ? `<span class="tab-favicon tab-group-icon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;">${tabGroup.icon || '📁'}</span>`
-                        : `<i class="fas ${tabGroup.icon || 'fa-layer-group'} tab-favicon tab-group-icon"></i>`
-                    }
+                    ${this.tabGroupIconHtml(tabGroup)}
                     <span class="tab-title">${this.escapeHtml(tabGroup.name || 'Tab Group')}</span>
-                </div>
-                <div class="tab-right">
-                    <button class="tab-group-delete tab-close" title="Delete Tab Group"><i class="fas fa-times"></i></button>
                 </div>
             </div>
             <div class="tab-group-content"></div>
@@ -20203,10 +22005,7 @@ class AxisBrowser {
         const titleEl = el.querySelector('.tab-title');
         if (!tabLeft || !titleEl) return;
 
-        const nextIconHtml =
-            tabGroup.iconType === 'emoji'
-                ? `<span class="tab-favicon tab-group-icon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;">${this.escapeHtml(tabGroup.icon || '📁')}</span>`
-                : `<i class="fas ${this.escapeHtml(tabGroup.icon || 'fa-layer-group')} tab-favicon tab-group-icon" aria-hidden="true"></i>`;
+        const nextIconHtml = this.tabGroupIconHtml(tabGroup);
 
         const oldIcon = tabLeft.querySelector('.tab-group-icon');
         if (oldIcon) {
@@ -20228,12 +22027,10 @@ class AxisBrowser {
     }
 
     setupTabGroupEventListeners(tabGroupElement, tabGroup) {
-        const deleteBtn = tabGroupElement.querySelector('.tab-group-delete');
         const tabGroupContent = tabGroupElement.querySelector('.tab-group-content');
         const tabContent = tabGroupElement.querySelector('.tab-content');
 
         tabGroupElement.draggable = false;
-        deleteBtn.draggable = false;
         const tabGroupIcon = tabGroupElement.querySelector('.tab-group-icon');
         if (tabGroupIcon) {
             tabGroupIcon.draggable = false;
@@ -20252,9 +22049,6 @@ class AxisBrowser {
         });
             
         tabContent.addEventListener('click', (e) => {
-            if (e.target.closest('.tab-group-delete')) {
-                return;
-            }
             if (tabGroupElement.classList.contains('tab-renaming')) {
                 return;
             }
@@ -20280,18 +22074,10 @@ class AxisBrowser {
             this.showTabGroupContextMenu(e, tabGroup.id);
         }, true);
 
-        deleteBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            if (confirm(`Delete tab group "${tabGroup.name}"? Tabs will be moved back to the sidebar.`)) {
-                this.deleteTabGroup(tabGroup.id);
-            }
-        });
-
     }
 
     /**
-     * Collapse/expand tab group content. Safe to call again mid-animation (spam click) —
+     * Collapse/expand tab group content. Safe to call again mid-animation (spam click) -
      * reverses from the current height without getting stuck on the toggling lock.
      */
     _bumpTabGroupAnimToken(tabGroupId) {
@@ -20433,7 +22219,7 @@ class AxisBrowser {
     }
 
     /**
-     * Same collapse animation as closing a group — used when a group becomes empty.
+     * Same collapse animation as closing a group - used when a group becomes empty.
      * @param {number|string} tabGroupId
      */
     runTabGroupCollapseAnimation(tabGroupId) {
@@ -20540,7 +22326,7 @@ class AxisBrowser {
         return tabIds.some((id) => this._normalizeTabMapKey(id) === tid);
     }
 
-    /** Drop tab ids that no longer exist in `this.tabs` (does not remove empty groups — new groups start empty). */
+    /** Drop tab ids that no longer exist in `this.tabs` (does not remove empty groups - new groups start empty). */
     _pruneAllTabGroupsTabIds() {
         let changed = false;
         for (const [groupKey, tabGroup] of this.tabGroups) {
@@ -20926,7 +22712,7 @@ class AxisBrowser {
                     <span class="tab-audio-indicator" style="display:none;"><i class="fas fa-volume-up"></i></span>
                     <span class="tab-title">${this.escapeHtml(tab.title || 'New Tab')}</span>
                 </div>
-                <div class="tab-right"><button class="tab-close"><i class="fas fa-times"></i></button></div>
+                <div class="tab-right"><button class="tab-close">${this._tabCloseGlyphHtml('x')}</button></div>
             </div>
         `;
         if (!tab.webview) tabElement.classList.add('closed');
@@ -21090,7 +22876,7 @@ class AxisBrowser {
 
     /**
      * Resolve interleaved pinned tabs + groups. Prefer live DOM when it already has groups,
-     * otherwise saved order — avoids the mid-load "all tabs then all groups" flash.
+     * otherwise saved order - avoids the mid-load "all tabs then all groups" flash.
      */
     _resolvePinnedSidebarOrder(loosePinnedIds, pinnedGroups, opts = {}) {
         const fallback =
@@ -21211,8 +22997,10 @@ class AxisBrowser {
                 const tabId = this._normalizeTabMapKey(rawTabId);
                 if (tabId == null) continue;
                 const tab = this.tabs.get(tabId);
-                if (tab && !tab.pinned) {
+                if (!tab) continue;
+                if (!tab.pinned || tab.tabGroupId !== group.id) {
                     tab.pinned = true;
+                    tab.tabGroupId = group.id;
                     this.tabs.set(tabId, tab);
                     changed = true;
                 }
@@ -21308,18 +23096,27 @@ class AxisBrowser {
         });
 
         [].concat(pinnedNodes, unpinnedNodes).forEach(node => {
+            if (this._isTabMotionLocked?.(node)) return;
             if (node.parentNode) node.remove();
         });
 
         const pinnedFrag = document.createDocumentFragment();
-        pinnedNodes.forEach((node) => pinnedFrag.appendChild(node));
-        container.insertBefore(pinnedFrag, separator);
+        pinnedNodes.forEach((node) => {
+            if (this._isTabMotionLocked?.(node) && node.parentNode === container) return;
+            pinnedFrag.appendChild(node);
+        });
+        if (pinnedFrag.childNodes.length) container.insertBefore(pinnedFrag, separator);
 
         const afterNewTab = newTabBtn ? newTabBtn.nextSibling : separator.nextSibling;
         const unpinnedFrag = document.createDocumentFragment();
-        unpinnedNodes.forEach((node) => unpinnedFrag.appendChild(node));
-        if (afterNewTab) container.insertBefore(unpinnedFrag, afterNewTab);
-        else container.appendChild(unpinnedFrag);
+        unpinnedNodes.forEach((node) => {
+            if (this._isTabMotionLocked?.(node) && node.parentNode === container) return;
+            unpinnedFrag.appendChild(node);
+        });
+        if (unpinnedFrag.childNodes.length) {
+            if (afterNewTab) container.insertBefore(unpinnedFrag, afterNewTab);
+            else container.appendChild(unpinnedFrag);
+        }
         
         // Separator visibility is based on actual DOM content above it
         this.updatePinnedSeparatorVisibility();
@@ -21354,6 +23151,7 @@ class AxisBrowser {
             group.tabIds.forEach(tabId => {
                 const tab = this.tabs.get(tabId);
                 if (tab) {
+                    tab.tabGroupId = group.id;
                     tab.pinned = true;
                     this.tabs.set(tabId, tab);
                 }
@@ -21436,7 +23234,7 @@ class AxisBrowser {
         const gKey = this.findTabGroupKey(id);
         const tabGroup = gKey != null ? this.tabGroups.get(gKey) : null;
         if (!tabGroup) return;
-        if (!confirm(`Delete tab group "${tabGroup.name}"? Tabs will be moved back to the sidebar.`)) return;
+        if (!confirm(this.t('note.deleteGroupNamed', { name: tabGroup.name }))) return;
         this.deleteTabGroup(tabGroup.id);
     }
 
@@ -21524,7 +23322,7 @@ class AxisBrowser {
         this.syncSidebarFromTabGroups();
         
         // Show notification
-        this.showNotification('Tab group duplicated', 'success');
+        this.showNotification(this.t('note.groupDuplicated'), 'success');
     }
 
     setupSidebarContextMenu() {
@@ -21561,6 +23359,390 @@ class AxisBrowser {
                 this.showSidebarContextMenu(e);
             }
         }, true); // Use capture phase to catch it early
+    }
+
+    _findTabIdByWebContentsId(webContentsId) {
+        const id = Number(webContentsId) || 0;
+        if (!id) return null;
+        for (const [tabId, tab] of this.tabs.entries()) {
+            const wv = tab?.webview;
+            if (wv && typeof wv.getWebContentsId === 'function' && wv.getWebContentsId() === id) {
+                return tabId;
+            }
+        }
+        return null;
+    }
+
+    _buildTabAncestryForNewTab(_tabData, effectiveUrl, options = {}) {
+        const AA = window.AxisTabAncestry;
+        if (!AA) return [];
+        if (options.preserveAncestry && Array.isArray(options.ancestry)) {
+            return AA.cloneSteps(options.ancestry);
+        }
+        let fromTab = null;
+        if (options.fromTabId != null) {
+            fromTab = this.tabs.get(this._normalizeTabMapKey(options.fromTabId));
+        } else if (options.ancestryFromContext) {
+            const srcId = this._normalizeTabMapKey(this._contextMenuSourceTabId ?? this.contextMenuTabId);
+            fromTab = srcId != null ? this.tabs.get(srcId) : null;
+        } else if (options.ancestryFromCurrent) {
+            fromTab = this.tabs.get(this.currentTab);
+        }
+        let kind = options.ancestryKind;
+        if (!kind) {
+            if (!effectiveUrl) {
+                kind = 'new';
+            } else if (
+                options.fromTabId != null ||
+                options.ancestryFromContext ||
+                options.ancestryFromCurrent
+            ) {
+                kind = 'link';
+            } else {
+                kind = 'new';
+            }
+        }
+        return AA.buildForNewTab({
+            kind,
+            fromTab,
+            url: effectiveUrl || '',
+            linkUrl: options.ancestryLinkUrl || effectiveUrl || '',
+            searchQuery: options.searchQuery || '',
+            t: (k, p) => this.t(k, p),
+            getFaviconUrl: (u) => this.getFaviconUrl(u)
+        });
+    }
+
+    _recordTabAncestryNavigation(tabId, webview) {
+        const AA = window.AxisTabAncestry;
+        if (!AA) return;
+        const id = this._normalizeTabMapKey(tabId);
+        const tab = id != null ? this.tabs.get(id) : null;
+        if (!tab || tab.isSettings || tab.url === this.NEWTAB_URL) return;
+        let url = tab.url || '';
+        try {
+            if (webview) url = webview.getURL() || url;
+        } catch (_) {}
+        if (!url || url === 'about:blank' || /^axis:\/\//i.test(url) || /^axis:note:\/\//i.test(url)) {
+            return;
+        }
+        const title = tab.customTitle || tab.title || '';
+        const favicon = tab.favicon || this.getFaviconUrl(url);
+        tab.ancestry = AA.appendNavigation(tab.ancestry, {
+            url,
+            title,
+            favicon,
+            t: (k, p) => this.t(k, p)
+        });
+        this.tabs.set(id, tab);
+        if (this._tabAncestryPanelTabId === id) {
+            this._renderTabAncestryPanel(id);
+        }
+    }
+
+    _updateTabAncestryMeta(tabId, patch = {}) {
+        const AA = window.AxisTabAncestry;
+        if (!AA || !patch) return;
+        const id = this._normalizeTabMapKey(tabId);
+        const tab = id != null ? this.tabs.get(id) : null;
+        if (!tab || !AA.hasAncestry(tab.ancestry)) return;
+        tab.ancestry = AA.updateLastStep(tab.ancestry, patch);
+        this.tabs.set(id, tab);
+        if (this._tabAncestryPanelTabId === id) {
+            this._renderTabAncestryPanel(id);
+        }
+    }
+
+    _tabAncestryStepLabel(step) {
+        if (!step) return '';
+        if (step.type === 'search' && step.searchQuery) {
+            return this.t('ancestry.searchStep', { query: step.searchQuery });
+        }
+        if (step.type === 'link') return step.title || this.t('ancestry.openedLink');
+        if (step.type === 'external') return step.title || this.t('ancestry.external');
+        if (step.type === 'duplicate') return step.title || this.t('ancestry.duplicate');
+        if (step.type === 'favorite') return step.title || this.t('ancestry.favorite');
+        if (step.type === 'history') return step.title || this.t('ancestry.history');
+        const AA = window.AxisTabAncestry;
+        const host = AA && step.url ? AA.stepHost(step.url) : '';
+        const title = (step.title || '').trim();
+        if (title && host) {
+            const hostKey = host.split('.')[0];
+            if (hostKey && !title.toLowerCase().includes(hostKey.toLowerCase())) {
+                return `${hostKey.charAt(0).toUpperCase()}${hostKey.slice(1)}: ${title}`;
+            }
+            return title;
+        }
+        return title || host || step.url || '';
+    }
+
+    /** Clean trail for display: drop noise/dupes — no step limit. */
+    _ancestryStepsForDisplay(rawSteps) {
+        const AA = window.AxisTabAncestry;
+        const list = Array.isArray(rawSteps) ? rawSteps : [];
+        const cleaned = [];
+        for (let i = 0; i < list.length; i++) {
+            const step = list[i];
+            if (!step) continue;
+            if (step.type === 'link') {
+                const next = list[i + 1];
+                if (next && (next.type === 'page' || next.type === 'search')) continue;
+            }
+            if (
+                step.type === 'duplicate' ||
+                step.type === 'external' ||
+                step.type === 'favorite' ||
+                step.type === 'history'
+            ) {
+                const next = list[i + 1];
+                if (next && (next.url || next.searchQuery)) continue;
+            }
+            const key = AA
+                ? AA.normalizeUrlKey(step.url || '') + '|' + (step.searchQuery || '') + '|' + step.type
+                : '';
+            const prev = cleaned[cleaned.length - 1];
+            const prevKey =
+                prev && AA
+                    ? AA.normalizeUrlKey(prev.url || '') +
+                      '|' +
+                      (prev.searchQuery || '') +
+                      '|' +
+                      prev.type
+                    : '';
+            if (key && key === prevKey) {
+                if (step.title && (!prev.title || step.title.length > prev.title.length)) {
+                    prev.title = step.title;
+                }
+                if (step.favicon) prev.favicon = step.favicon;
+                continue;
+            }
+            cleaned.push({ ...step });
+        }
+        return cleaned;
+    }
+
+    _scrollTabAncestryToBottom() {
+        const body = document.getElementById('tab-ancestry-body');
+        if (!body) return;
+        body.scrollTop = body.scrollHeight;
+        this._updateTabAncestryScrollFade();
+        requestAnimationFrame(() => {
+            body.scrollTop = body.scrollHeight;
+            this._updateTabAncestryScrollFade();
+        });
+    }
+
+    _updateTabAncestryScrollFade() {
+        const panel = document.getElementById('tab-ancestry-panel');
+        const body = document.getElementById('tab-ancestry-body');
+        if (!panel || !body) return;
+        panel.classList.toggle('is-scrolled', body.scrollTop > 1);
+    }
+
+    _bindTabAncestryBodyScroll() {
+        if (this._tabAncestryBodyScrollBound) return;
+        const body = document.getElementById('tab-ancestry-body');
+        if (!body) return;
+        this._tabAncestryBodyScrollBound = true;
+        body.addEventListener('scroll', () => this._updateTabAncestryScrollFade(), { passive: true });
+    }
+
+    closeTabAncestryPanel() {
+        const panel = document.getElementById('tab-ancestry-panel');
+        const backdrop = document.getElementById('tab-ancestry-backdrop');
+        if (!panel || panel.classList.contains('hidden')) {
+            if (backdrop) {
+                backdrop.classList.add('hidden');
+                backdrop.setAttribute('aria-hidden', 'true');
+            }
+            this._tabAncestryPanelTabId = null;
+            return;
+        }
+        if (panel.classList.contains('is-closing')) return;
+        if (this._tabAncestryCloseTimer) {
+            clearTimeout(this._tabAncestryCloseTimer);
+            this._tabAncestryCloseTimer = null;
+        }
+        panel.classList.remove('is-open');
+        panel.classList.add('is-closing');
+        if (backdrop) {
+            backdrop.classList.add('hidden');
+            backdrop.setAttribute('aria-hidden', 'true');
+        }
+        const finish = () => {
+            panel.classList.remove('is-closing', 'is-open');
+            panel.classList.add('hidden');
+            this._tabAncestryPanelTabId = null;
+            this._tabAncestryCloseTimer = null;
+        };
+        const onEnd = (e) => {
+            if (e.target !== panel || (e.propertyName !== 'opacity' && e.propertyName !== 'transform')) {
+                return;
+            }
+            panel.removeEventListener('transitionend', onEnd);
+            finish();
+        };
+        panel.addEventListener('transitionend', onEnd);
+        this._tabAncestryCloseTimer = setTimeout(() => {
+            panel.removeEventListener('transitionend', onEnd);
+            finish();
+        }, 160);
+    }
+
+    positionTabAncestryPanel(tabId) {
+        const panel = document.getElementById('tab-ancestry-panel');
+        const arrow = panel?.querySelector('.tab-ancestry-arrow');
+        if (!panel) return;
+        const inset = 8;
+        const viewportH = window.innerHeight || document.documentElement.clientHeight;
+        const sidebar = document.getElementById('sidebar');
+        const tabEl = document.querySelector(`[data-tab-id="${tabId}"]`);
+        const pt = this._lastContextMenuPoint;
+        const sideRect = sidebar?.getBoundingClientRect?.();
+        const sideLeft = sideRect ? sideRect.left + inset : inset;
+        const sideRight = sideRect ? sideRect.right - inset : (window.innerWidth || 320) - inset;
+        const maxW = Math.max(180, sideRight - sideLeft);
+        const panelW = Math.min(248, maxW);
+
+        let anchorX;
+        let top;
+        if (tabEl) {
+            const rect = tabEl.getBoundingClientRect();
+            anchorX = rect.left + rect.width / 2;
+            top = rect.bottom + 2;
+        } else if (pt && Number.isFinite(pt.x)) {
+            anchorX = pt.x;
+            top = pt.y + 6;
+        } else if (sideRect) {
+            anchorX = sideRect.left + sideRect.width / 2;
+            top = Math.max(inset, sideRect.top + 80);
+        } else {
+            anchorX = panelW / 2 + inset;
+            top = 80;
+        }
+
+        let left = anchorX - panelW / 2;
+        left = Math.max(sideLeft, Math.min(left, sideRight - panelW));
+        const maxTop = Math.max(inset, viewportH - 140);
+        top = Math.max(inset, Math.min(top, maxTop));
+
+        panel.style.width = `${panelW}px`;
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+        panel.style.setProperty('--tab-ancestry-origin-x', `${Math.round(anchorX - left)}px`);
+        if (arrow) {
+            const arrowX = Math.max(14, Math.min(anchorX - left, panelW - 14));
+            arrow.style.left = `${arrowX}px`;
+            arrow.style.marginLeft = '-7px';
+            panel.style.transformOrigin = `${arrowX}px 0`;
+            panel.style.setProperty('--ta-arrow-x', `${arrowX}px`);
+        }
+    }
+
+    showTabAncestryPanel(tabId) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (id == null) return;
+        this.closeSecurityPanel();
+        this.closeAdblockPanel();
+        this.closeExtensionsMenu();
+        const panel = document.getElementById('tab-ancestry-panel');
+        const backdrop = document.getElementById('tab-ancestry-backdrop');
+        if (!panel) return;
+        if (this._tabAncestryCloseTimer) {
+            clearTimeout(this._tabAncestryCloseTimer);
+            this._tabAncestryCloseTimer = null;
+        }
+        panel.setAttribute('data-ui-theme', this.isLightUiTheme() ? 'light' : 'dark');
+        this._tabAncestryPanelTabId = id;
+        this._bindTabAncestryBodyScroll();
+        this._renderTabAncestryPanel(id);
+        this.positionTabAncestryPanel(id);
+        panel.classList.remove('hidden', 'is-closing', 'is-open', 'is-scrolled');
+        backdrop?.classList.remove('hidden');
+        backdrop?.setAttribute('aria-hidden', 'false');
+        this._scrollTabAncestryToBottom();
+        // Force reflow so the open transition always plays.
+        void panel.offsetWidth;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                panel.classList.add('is-open');
+                this._scrollTabAncestryToBottom();
+            });
+        });
+    }
+
+    _renderTabAncestryPanel(tabId) {
+        const id = this._normalizeTabMapKey(tabId);
+        const tab = id != null ? this.tabs.get(id) : null;
+        const trail = document.getElementById('tab-ancestry-trail');
+        const empty = document.getElementById('tab-ancestry-empty');
+        const AA = window.AxisTabAncestry;
+        if (!trail || !empty) return;
+        trail.replaceChildren();
+        const steps = this._ancestryStepsForDisplay(tab?.ancestry);
+        const hasSteps = steps.length > 0;
+        empty.classList.toggle('hidden', hasSteps);
+        if (!hasSteps) return;
+        const currentKey = AA ? AA.normalizeUrlKey(tab?.url || '') : '';
+        steps.forEach((step, index) => {
+            if (index > 0) {
+                const dots = document.createElement('li');
+                dots.className = 'tab-ancestry-step-dots';
+                dots.setAttribute('aria-hidden', 'true');
+                dots.innerHTML = '<span></span><span></span><span></span>';
+                trail.appendChild(dots);
+            }
+            const li = document.createElement('li');
+            li.className = 'tab-ancestry-step';
+            li.setAttribute('role', 'listitem');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'tab-ancestry-step-btn';
+            const stepKey = AA ? AA.normalizeUrlKey(step.url || '') : '';
+            if (index === steps.length - 1 || (stepKey && stepKey === currentKey)) {
+                btn.classList.add('is-current');
+            }
+            const iconWrap = document.createElement('span');
+            iconWrap.className = 'tab-ancestry-step-icon';
+            if (step.type === 'search') {
+                iconWrap.classList.add('tab-ancestry-step-icon--search');
+                iconWrap.innerHTML = '<i class="fas fa-magnifying-glass" aria-hidden="true"></i>';
+            } else if (step.favicon) {
+                const img = document.createElement('img');
+                img.src = step.favicon;
+                img.alt = '';
+                img.onerror = () => {
+                    img.remove();
+                    iconWrap.innerHTML = `<i class="fas ${AA?.stepIconClass(step) || 'fa-globe'}" aria-hidden="true"></i>`;
+                };
+                iconWrap.appendChild(img);
+            } else {
+                iconWrap.innerHTML = `<i class="fas ${AA?.stepIconClass(step) || 'fa-globe'}" aria-hidden="true"></i>`;
+            }
+            const textWrap = document.createElement('span');
+            textWrap.className = 'tab-ancestry-step-text';
+            const titleEl = document.createElement('span');
+            titleEl.className = 'tab-ancestry-step-title';
+            titleEl.textContent = this._tabAncestryStepLabel(step);
+            textWrap.appendChild(titleEl);
+            btn.appendChild(iconWrap);
+            btn.appendChild(textWrap);
+            if (step.url && /^https?:/i.test(step.url)) {
+                btn.addEventListener('click', () => {
+                    if (id === this.currentTab) {
+                        this.navigate(step.url);
+                    } else {
+                        this.switchToTab(id);
+                        requestAnimationFrame(() => this.navigate(step.url));
+                    }
+                    this.closeTabAncestryPanel();
+                });
+            } else {
+                btn.disabled = true;
+            }
+            li.appendChild(btn);
+            trail.appendChild(li);
+        });
     }
 
     async showTabContextMenu(e, tabId) {
@@ -21606,7 +23788,11 @@ class AxisBrowser {
         }
         await window.electronAPI.showFavoriteContextMenu(e.clientX, e.clientY, {
             hasCustomIcon,
-            canUpdateSavedLink: !!savedLinkInfo
+            canUpdateSavedLink: !!savedLinkInfo,
+            canMoveLeft: this.favorites.findIndex((f) => f.id === favorite.id) > 0,
+            canMoveRight:
+                this.favorites.findIndex((f) => f.id === favorite.id) >= 0 &&
+                this.favorites.findIndex((f) => f.id === favorite.id) < this.favorites.length - 1
         });
     }
 
@@ -21668,7 +23854,7 @@ class AxisBrowser {
                 return;
             }
 
-            const newTabId = this.createNewTab(sanitized);
+            const newTabId = this.createNewTab(sanitized, { ancestryKind: 'duplicate', fromTabId: tabId });
             this._copyTabPresentationToDuplicate(tab, newTabId);
         } catch (error) {
             console.error('Error in duplicateCurrentTab:', error);
@@ -21777,7 +23963,7 @@ class AxisBrowser {
         this.clearSearch();
     }
 
-    /** Live find while typing — clear prior search first so each keystroke updates immediately */
+    /** Live find while typing - clear prior search first so each keystroke updates immediately */
     performIncrementalFind(rawQuery) {
         const query = (rawQuery || '').trim();
         const webview = this.getActiveWebview();
@@ -21857,7 +24043,7 @@ class AxisBrowser {
                 : this.getActiveWebview();
         
         // Back/forward are sync. Speech state: only query guest JS when the menu will show Speech
-        // (selection + speech on); otherwise skip — first executeJavaScript can stall seconds on cold webview.
+        // (selection + speech on); otherwise skip - first executeJavaScript can stall seconds on cold webview.
         let canGoBack = false;
         let canGoForward = false;
         let isSpeaking = false;
@@ -22112,7 +24298,23 @@ class AxisBrowser {
         return false;
     }
 
-    async copyCurrentUrl() {
+    async copyCurrentUrlAsync() {
+        // Check if current tab is settings
+        if (this.currentTab) {
+            const tab = this.tabs.get(this.currentTab);
+            if (tab && (tab.url === 'axis://settings' || tab.isSettings)) {
+                try {
+                    await navigator.clipboard.writeText('axis://settings');
+                    this.flashUrlBarCopySuccess();
+                    this.showNotification(this.t('note.settingsUrlCopied'), 'success');
+                    return;
+                } catch (e) {
+                    console.error('Failed to copy URL:', e);
+                    return;
+                }
+            }
+        }
+
         // Try to get URL from active webview first
         let url = null;
         const webview = this.getActiveWebview();
@@ -22136,13 +24338,16 @@ class AxisBrowser {
         }
         
         if (!url || url === 'about:blank') {
-            this.showNotification('No URL to copy', 'error');
+            this.showNotification(this.t('note.noUrl'), 'error');
             return;
         }
+
+        url = this._cleanUrlForClipboard(url);
         
         try {
             await navigator.clipboard.writeText(url);
-            this.showNotification('URL copied to clipboard', 'success');
+            this.flashUrlBarCopySuccess();
+            this.showNotification(this.t('note.urlCopied'), 'success');
         } catch (err) {
             // Fallback for older browsers
             const textArea = document.createElement('textarea');
@@ -22153,9 +24358,10 @@ class AxisBrowser {
             textArea.select();
             try {
                 document.execCommand('copy');
-                this.showNotification('URL copied to clipboard', 'success');
+                this.flashUrlBarCopySuccess();
+                this.showNotification(this.t('note.urlCopied'), 'success');
             } catch (fallbackErr) {
-                this.showNotification('Failed to copy URL', 'error');
+                this.showNotification(this.t('note.copyUrlFailed'), 'error');
             }
             document.body.removeChild(textArea);
         }
@@ -22169,9 +24375,10 @@ class AxisBrowser {
                 const md = '[Settings](axis://settings)';
                 try {
                     await navigator.clipboard.writeText(md);
-                    this.showNotification('Markdown link copied to clipboard', 'success');
+                    this.flashUrlBarCopySuccess();
+                    this.showNotification(this.t('note.mdCopied'), 'success');
                 } catch (e) {
-                    this.showNotification('Failed to copy', 'error');
+                    this.showNotification(this.t('note.copyMdFailed'), 'error');
                 }
                 return;
             }
@@ -22198,9 +24405,11 @@ class AxisBrowser {
         }
 
         if (!url || url === 'about:blank') {
-            this.showNotification('No URL to copy', 'error');
+            this.showNotification(this.t('note.noUrl'), 'error');
             return;
         }
+
+        url = this._cleanUrlForClipboard(url);
 
         let title = '';
         if (this.currentTab && this.tabs.has(this.currentTab)) {
@@ -22237,7 +24446,8 @@ class AxisBrowser {
 
         try {
             await navigator.clipboard.writeText(md);
-            this.showNotification('Markdown link copied to clipboard', 'success');
+            this.flashUrlBarCopySuccess();
+            this.showNotification(this.t('note.mdCopied'), 'success');
         } catch (err) {
             const textArea = document.createElement('textarea');
             textArea.value = md;
@@ -22247,9 +24457,10 @@ class AxisBrowser {
             textArea.select();
             try {
                 document.execCommand('copy');
-                this.showNotification('Markdown link copied to clipboard', 'success');
+                this.flashUrlBarCopySuccess();
+                this.showNotification(this.t('note.mdCopied'), 'success');
             } catch (fallbackErr) {
-                this.showNotification('Failed to copy', 'error');
+                this.showNotification(this.t('note.copyMdFailed'), 'error');
             }
             document.body.removeChild(textArea);
         }
@@ -22266,7 +24477,7 @@ class AxisBrowser {
 
     /**
      * Paste plain text into the guest focused field (execCommand('paste') is unreliable in webviews).
-     * @param {string} [textIfKnown] — if omitted, reads the system clipboard.
+     * @param {string} [textIfKnown] - if omitted, reads the system clipboard.
      */
     async pastePlainIntoWebview(webview, textIfKnown) {
         let text = textIfKnown;
@@ -22320,7 +24531,7 @@ class AxisBrowser {
         try {
             text = await navigator.clipboard.readText();
         } catch (e) {
-            this.showNotification('Could not read clipboard.', 'error');
+            this.showNotification(this.t('note.clipboardReadFailed'), 'error');
             return;
         }
         if (text == null) text = '';
@@ -22377,7 +24588,7 @@ class AxisBrowser {
                 </div>
                 <div class="history-time">${time}</div>
                 <div class="history-actions">
-                    <button class="history-delete" data-id="${id}" title="Delete">
+                    <button class="history-delete" data-id="${id}" title="${this.escapeHtml(this.t('common.delete'))}">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -22440,10 +24651,10 @@ class AxisBrowser {
         try {
             await window.electronAPI.deleteHistoryItem(id);
             this.populateHistory();
-            this.showNotification('History item deleted', 'success');
+            this.showNotification(this.t('note.historyDeleted'), 'success');
         } catch (error) {
             console.error('Failed to delete history item:', error);
-            this.showNotification('Failed to delete history item', 'error');
+            this.showNotification(this.t('note.historyDeleteFailed'), 'error');
         }
     }
 
@@ -22451,10 +24662,10 @@ class AxisBrowser {
         try {
             await window.electronAPI.clearHistory();
             this.populateHistory();
-            this.showNotification('History cleared', 'success');
+            this.showNotification(this.t('note.historyCleared'), 'success');
         } catch (error) {
             console.error('Failed to clear history:', error);
-            this.showNotification('Failed to clear history', 'error');
+            this.showNotification(this.t('note.historyClearFailed'), 'error');
         }
     }
 
@@ -22487,7 +24698,7 @@ class AxisBrowser {
                     <div class="history-time">${time}</div>
                 </div>
                 <div class="history-actions">
-                    <button class="history-delete" title="Delete">
+                    <button class="history-delete" title="${this.escapeHtml(this.t('common.delete'))}">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -22614,7 +24825,7 @@ class AxisBrowser {
         const timeEl = row.querySelector('.downloads-popup-time');
         if (timeEl) {
             if (!isDownloading && row.dataset.axisDownloadCancelled === '1') {
-                timeEl.textContent = 'Download cancelled';
+                timeEl.textContent = this.t('downloads.cancelled');
             } else if (isDownloading) {
                 timeEl.textContent = hasProgress
                     ? `Downloading • ${progressPct}%${etaText ? ` • ${etaText}` : ''}`
@@ -22652,7 +24863,7 @@ class AxisBrowser {
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'downloads-popup-row-action downloads-popup-cancel-download';
-                btn.title = 'Cancel download';
+                btn.title = this.t('downloads.cancel');
                 btn.dataset.axisDownloadId = String(aid);
                 btn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
                 btn.addEventListener('click', (e) => {
@@ -22671,7 +24882,7 @@ class AxisBrowser {
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'downloads-popup-row-action downloads-popup-show-folder';
-                btn.title = 'Show in Finder';
+                btn.title = this.t('menu.revealFinder');
                 btn.innerHTML =  '<i class="fas fa-folder-open" aria-hidden="true"></i>';
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -22711,8 +24922,8 @@ class AxisBrowser {
             empty.className = 'downloads-popup-empty';
             empty.innerHTML = `
                 <i class="far fa-circle-down"></i>
-                <p>No recent downloads</p>
-                <p>Your latest downloads will appear here.</p>
+                <p>${this.escapeHtml(this.t('downloads.empty'))}</p>
+                <p>${this.escapeHtml(this.t('downloads.emptyHint'))}</p>
             `;
             list.appendChild(empty);
         } else {
@@ -22750,10 +24961,14 @@ class AxisBrowser {
                     ? Number(tracked.etaSeconds)
                     : null;
                 const etaText = etaSeconds != null
-                    ? (etaSeconds >= 60 ? `${Math.ceil(etaSeconds / 60)} min left` : `${Math.max(1, etaSeconds)} sec left`)
+                    ? (etaSeconds >= 60
+                        ? this.t('downloads.minutesLeft', { n: Math.ceil(etaSeconds / 60) })
+                        : this.t('downloads.secondsLeft', { n: Math.max(1, etaSeconds) }))
                     : '';
                 const metaText = isDownloading
-                    ? (hasProgress ? `Downloading • ${progressPct}%${etaText ? ` • ${etaText}` : ''}` : `Downloading…${etaText ? ` • ${etaText}` : ''}`)
+                    ? (hasProgress
+                        ? `${this.t('downloads.downloading')} • ${progressPct}%${etaText ? ` • ${etaText}` : ''}`
+                        : `${this.t('downloads.downloading')}…${etaText ? ` • ${etaText}` : ''}`)
                     : `${this.formatFileSize(item.size || 0)} • ${this.formatTimeAgo(item.mtime)}`;
                 const progressMarkup = isDownloading
                     ? `<div class="downloads-popup-progress ${hasProgress ? '' : 'indeterminate'}"><div class="downloads-popup-progress-fill" style="width:${hasProgress ? progressPct : 28}%;"></div></div>`
@@ -22766,8 +24981,8 @@ class AxisBrowser {
                 row.dataset.downloadBaseMeta = `${this.formatFileSize(item.size || 0)} • ${this.formatTimeAgo(item.mtime)}`;
                 const sideBtnHtml =
                     isDownloading && tracked && Number(tracked.axisId) > 0
-                        ? `<button type="button" class="downloads-popup-row-action downloads-popup-cancel-download" title="Cancel download" data-axis-download-id="${tracked.axisId}"><i class="fas fa-times" aria-hidden="true"></i></button>`
-                        : `<button type="button" class="downloads-popup-row-action downloads-popup-show-folder" title="Show in Finder"><i class="fas fa-folder-open" aria-hidden="true"></i></button>`;
+                        ? `<button type="button" class="downloads-popup-row-action downloads-popup-cancel-download" title="${this.escapeHtml(this.t('downloads.cancel'))}" data-axis-download-id="${tracked.axisId}"><i class="fas fa-times" aria-hidden="true"></i></button>`
+                        : `<button type="button" class="downloads-popup-row-action downloads-popup-show-folder" title="${this.escapeHtml(this.t('menu.revealFinder'))}"><i class="fas fa-folder-open" aria-hidden="true"></i></button>`;
                 row.innerHTML = `
                     <div class="downloads-popup-thumbnail ${this.escapeHtml(fileType)}">
                         ${this.getDownloadPopupThumbnailLoadingMarkup()}
@@ -22851,6 +25066,7 @@ class AxisBrowser {
             backdrop.setAttribute('aria-hidden', 'false');
         }
         document.body.classList.add('downloads-popup-open');
+        button.setAttribute('aria-expanded', 'true');
         this.startDownloadsPopupLiveRefresh();
 
         const openFolderBtn = document.getElementById('downloads-popup-open-folder');
@@ -22873,6 +25089,7 @@ class AxisBrowser {
             backdrop.setAttribute('aria-hidden', 'true');
         }
         document.body.classList.remove('downloads-popup-open');
+        document.getElementById('downloads-btn-footer')?.setAttribute('aria-expanded', 'false');
         if (!popup) return;
         popup.classList.add('hidden');
     }
@@ -23055,6 +25272,7 @@ class AxisBrowser {
             backdrop.setAttribute('aria-hidden', 'true');
         }
         document.body.classList.remove('extensions-menu-open');
+        document.getElementById('url-bar-extensions')?.setAttribute('aria-expanded', 'false');
         if (panel) panel.classList.add('hidden');
     }
 
@@ -23104,6 +25322,7 @@ class AxisBrowser {
             extBackdrop.setAttribute('aria-hidden', 'false');
         }
         document.body.classList.add('extensions-menu-open');
+        document.getElementById('url-bar-extensions')?.setAttribute('aria-expanded', 'true');
         panel.classList.remove('hidden');
     }
 
@@ -23117,7 +25336,7 @@ class AxisBrowser {
             list.innerHTML = `
                 <div class="extensions-menu-empty">
                     <i class="fas fa-exclamation-circle" aria-hidden="true"></i>
-                    <p>Could not load extensions.</p>
+                    <p>${this.t('ext.couldNotLoad')}</p>
                 </div>`;
             return;
         }
@@ -23126,7 +25345,7 @@ class AxisBrowser {
                 <div class="extensions-menu-empty">
                     <i class="fas fa-puzzle-piece" aria-hidden="true"></i>
                     <p>No extensions installed</p>
-                    <p>Use Manage extensions to add some.</p>
+                    <p>${this.t('ext.useManage')}</p>
                 </div>`;
             return;
         }
@@ -23155,7 +25374,7 @@ class AxisBrowser {
                     <div class="extensions-menu-name">${browser.escapeHtml(ext.name || 'Extension')}</div>
                     <div class="extensions-menu-meta">${browser.escapeHtml(meta)}</div>
                 </div>
-                <button type="button" class="extensions-menu-remove" title="Remove extension" aria-label="Remove extension">
+                <button type="button" class="extensions-menu-remove" title="${this.escapeHtml(this.t('ext.remove'))}" aria-label="${this.escapeHtml(this.t('ext.remove'))}">
                     <i class="fas fa-trash-alt" aria-hidden="true"></i>
                 </button>
             `;
@@ -23163,7 +25382,7 @@ class AxisBrowser {
             removeBtn.addEventListener('click', async (ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();
-                if (!confirm(`Remove ${ext.name || 'this extension'}?`)) return;
+                if (!confirm(this.t('note.removeExtensionNamed', { name: ext.name || this.t('note.thisExtension') }))) return;
                 try {
                     await window.electronAPI.removeExtension(ext.id);
                     await browser.populateExtensionsMenu();
@@ -23298,7 +25517,7 @@ class AxisBrowser {
                 return;
             }
             
-        // Render simple media tiles – image/video only, no text
+        // Render simple media tiles - image/video only, no text
         limitedItems.forEach((file) => {
             const item = document.createElement('div');
             item.className = 'library-popup-item';
@@ -23314,7 +25533,7 @@ class AxisBrowser {
                     </div>
                 `;
             } else {
-                // Video – show frame with play icon overlay
+                // Video - show frame with play icon overlay
                 inner = `
                     <div class="library-popup-thumb library-popup-thumb-video">
                         <div class="library-popup-thumb-video-overlay">
@@ -23405,7 +25624,7 @@ class AxisBrowser {
             this.showFilePreview(fullPath, fileInfo);
         } catch (error) {
             console.error('Failed to open library item:', error);
-            this.showNotification('Failed to open item', 'error');
+            this.showNotification(this.t('note.openItemFailed'), 'error');
         }
     }
 
@@ -23483,7 +25702,7 @@ class AxisBrowser {
                 previewContent.innerHTML = `
                     <div class="file-preview-unsupported">
                         <i class="fas fa-image"></i>
-                        <p>Unable to load image</p>
+                        <p>${this.escapeHtml(this.t('chrome.imageLoadFail'))}</p>
                     </div>
                 `;
             };
@@ -23552,7 +25771,7 @@ class AxisBrowser {
                         await window.electronAPI.openLibraryItem(this.currentPreviewFile.path);
                     } catch (error) {
                         console.error('Failed to open file:', error);
-                        this.showNotification('Failed to open file', 'error');
+                        this.showNotification(this.t('note.openFileFailed'), 'error');
                     }
                 }
             });
@@ -23631,18 +25850,7 @@ class AxisBrowser {
     }
 
     reopenLastClosedTab() {
-        if (this.closedTabs.length === 0) {
-            this.showNotification('No recently closed tabs', 'info');
-            return;
-        }
-        
-        const closedTab = this.closedTabs[0];
-        if (closedTab && closedTab.url) {
-            const newTabId = this.createNewTab(closedTab.url);
-            this._applyRecoveredTabState(newTabId, closedTab);
-            this.closedTabs.shift(); // Remove from closed tabs
-            this.showNotification('Reopened tab', 'success');
-        }
+        this.recoverClosedTab();
     }
 
 
@@ -23789,9 +25997,9 @@ class AxisBrowser {
             tabElement.innerHTML = `
                 <div class="tab-content">
                     ${tab.incognito ? '<i class="fas fa-mask tab-incognito-icon"></i>' : ''}
-                    <span class="tab-title">${title}</span>
-                    <button class="tab-close" data-tab-id="${tabId}">
-                        <i class="fas fa-times"></i>
+                    <span class="tab-title">${this.escapeHtml(title)}</span>
+                    <button class="tab-close" data-tab-id="${this.escapeHtml(String(tabId))}" aria-label="${this.escapeHtml(this.t('chrome.closeTab'))}">
+                        ${this._tabCloseGlyphHtml('x')}
                     </button>
                 </div>
             `;
@@ -24002,7 +26210,7 @@ class AxisBrowser {
             }
         };
 
-        /** Pinned/unpinned band: separator + “+ New Tab” — same drag shift as a unit */
+        /** Pinned/unpinned band: separator + “+ New Tab” - same drag shift as a unit */
         const clearPinnedUnpinnedBandTransforms = () => {
             const sep = this.elements.tabsSeparator;
             if (sep && sep.parentNode) {
@@ -24105,7 +26313,7 @@ class AxisBrowser {
             return map;
         };
 
-        /** Pinned block, separator, + New Tab, then unpinned — metrics for crossing that gap. */
+        /** Pinned block, separator, + New Tab, then unpinned - metrics for crossing that gap. */
         const computeBandMetrics = (positions, fu) => {
             const sep = this.elements.tabsSeparator;
             const nt = this.elements.sidebarNewTabBtn;
@@ -24454,7 +26662,7 @@ class AxisBrowser {
         const createPreviewBox = (element, type) => {
             if (!drag || drag.previewBox) return drag?.previewBox;
             
-            let title = 'New Tab';
+            let title = this.t('chrome.newTab');
             let webview = null;
             
             if (type === 'tab') {
@@ -24801,7 +27009,7 @@ class AxisBrowser {
                 if (!siblingSet.has(key)) shiftMap.delete(key);
             }
 
-            // Shift siblings around the dragged item — eased toward target each frame (smooth, no CSS transition fight)
+            // Shift siblings around the dragged item - eased toward target each frame (smooth, no CSS transition fight)
             for (let i = 0; i < numSiblings; i++) {
                 const el = currentSiblings[i];
                 if (!el || el === drag.element || el.parentElement !== container) continue;
@@ -25182,12 +27390,12 @@ class AxisBrowser {
             }
         };
                 
-        // Sync pin flag from sidebar DOM position (after drag — DOM order is already correct).
+        // Sync pin flag from sidebar DOM position (after drag - DOM order is already correct).
         this.updateTabPinState = (tabEl) => {
             this._syncTabPinFromDomPosition(tabEl);
         };
 
-        // Tab groups stay in the pinned section — pin state is not toggled by drag position.
+        // Tab groups stay in the pinned section - pin state is not toggled by drag position.
         this.updateTabGroupPinState = () => {
             this._normalizeTabGroupsPinnedOnly();
             this.syncSidebarFromTabGroups();
@@ -25239,7 +27447,7 @@ class AxisBrowser {
                 // Ensure tab still exists
                 if (!tab.parentElement) return;
                 
-                // Do not preventDefault/stopPropagation here — that breaks click + dblclick (e.g. rename).
+                // Do not preventDefault/stopPropagation here - that breaks click + dblclick (e.g. rename).
                 // Text selection is suppressed via CSS (.tab { user-select: none }).
                 
                 startPos = { x: e.clientX, y: e.clientY };
@@ -25326,9 +27534,8 @@ class AxisBrowser {
                 // Don't start if already dragging
                 if (isDragging) return;
                 
-                // Don't drag if clicking delete button or other interactive elements
-                if (e.target.closest('.tab-group-delete') ||
-                    e.target.closest('button')) {
+                // Don't drag if clicking interactive elements
+                if (e.target.closest('button')) {
                     return;
                 }
                 
@@ -25690,6 +27897,7 @@ class AxisBrowser {
     }
 
     renderSecurityPanel(info) {
+        const localized = this.localizeSecurityInfo(info);
         const loading = document.getElementById('security-panel-loading');
         const factsEl = document.getElementById('security-panel-facts');
         const heading = document.getElementById('security-panel-heading');
@@ -25697,8 +27905,8 @@ class AxisBrowser {
         const statusIcon = document.getElementById('security-panel-status-icon');
 
         if (loading) loading.classList.add('hidden');
-        if (heading) heading.textContent = info?.title || 'Security';
-        if (subheading) subheading.textContent = info?.subtitle || '';
+        if (heading) heading.textContent = localized?.title || this.t('security.heading');
+        if (subheading) subheading.textContent = localized?.subtitle || '';
 
         if (statusIcon) {
             statusIcon.classList.remove(
@@ -25710,13 +27918,13 @@ class AxisBrowser {
             const icon = statusIcon.querySelector('i');
             let modifier = 'security-panel-status-icon--local';
             let iconClass = 'fa-circle-info';
-            if (info?.state === 'secure') {
+            if (localized?.state === 'secure') {
                 modifier = 'security-panel-status-icon--secure';
                 iconClass = 'fa-lock';
-            } else if (info?.state === 'warning') {
+            } else if (localized?.state === 'warning') {
                 modifier = 'security-panel-status-icon--warning';
                 iconClass = 'fa-triangle-exclamation';
-            } else if (info?.state === 'insecure') {
+            } else if (localized?.state === 'insecure') {
                 modifier = 'security-panel-status-icon--insecure';
                 iconClass = 'fa-unlock';
             }
@@ -25726,9 +27934,9 @@ class AxisBrowser {
 
         if (factsEl) {
             factsEl.replaceChildren();
-            const rows = Array.isArray(info?.facts) ? info.facts : [];
-            if (!rows.length && info?.hostname) {
-                rows.push({ label: 'Site', value: info.hostname });
+            const rows = Array.isArray(localized?.facts) ? localized.facts : [];
+            if (!rows.length && localized?.hostname) {
+                rows.push({ label: this.t('security.fact.site'), value: localized.hostname });
             }
             rows.forEach(({ label, value }) => {
                 if (!label || value == null || value === '') return;
@@ -25741,15 +27949,79 @@ class AxisBrowser {
             });
         }
 
-        this._renderSecurityCertChain(info?.chain || []);
+        this._renderSecurityCertChain(localized?.chain || []);
+    }
+
+    /** Map security IPC payload into the active UI language (values like hostnames stay as-is). */
+    localizeSecurityInfo(info) {
+        if (!info || typeof info !== 'object') {
+            return {
+                state: 'unknown',
+                title: this.t('security.heading'),
+                subtitle: this.t('security.unknown'),
+                chain: [],
+                facts: []
+            };
+        }
+        const out = { ...info, facts: Array.isArray(info.facts) ? info.facts.map((f) => ({ ...f })) : [] };
+        const host = info.hostname || '';
+        if (info.state === 'insecure') {
+            out.title = this.t('security.insecure');
+            out.subtitle = this.t('security.insecureHint');
+        } else if (info.state === 'file') {
+            out.title = this.t('security.localFile');
+            out.subtitle = this.t('security.localHint');
+        } else if (info.state === 'local') {
+            out.title = this.t('security.localPage');
+            out.subtitle = this.t('security.localHint');
+        } else if (info.state === 'warning') {
+            out.title = this.t('security.certUntrusted');
+            // Keep technical trust.message from main when present.
+        } else if (info.state === 'secure') {
+            out.title = this.t('security.secure');
+            out.subtitle = this.t('security.secureHint', { host });
+        } else if (info.state === 'unknown' || !info.state) {
+            out.title = this.t('security.heading');
+            out.subtitle = this.t('security.unknown');
+        }
+
+        const labelMap = {
+            Connection: 'security.fact.connection',
+            Protocol: 'security.fact.protocol',
+            Cipher: 'security.fact.cipher',
+            Certificate: 'security.fact.certificate',
+            'Issued by': 'security.fact.issuedBy',
+            'Valid until': 'security.fact.validUntil',
+            'Certificate details': 'security.fact.certDetails',
+            Site: 'security.fact.site'
+        };
+        const valueMap = {
+            'Not encrypted': 'security.val.notEncrypted',
+            Encrypted: 'security.val.encrypted',
+            'Encrypted (certificate problem)': 'security.val.encryptedProblem',
+            Local: 'security.val.local',
+            'Reload this page, then open the lock again.': 'security.val.reloadCert'
+        };
+        out.facts = out.facts.map((row) => {
+            const labelKey = labelMap[row.label];
+            const valueKey = valueMap[row.value];
+            return {
+                label: labelKey ? this.t(labelKey) : row.label,
+                value: valueKey ? this.t(valueKey) : row.value
+            };
+        });
+        // Main may send English placeholders for local pages (hostname / trust text).
+        if (out.hostname === 'Local file') out.hostname = this.t('security.localFile');
+        if (out.hostname === 'Local page') out.hostname = this.t('security.localPage');
+        return out;
     }
 
     async fetchSecurityInfo() {
         const ctx = this.getSecurityPageContext();
         let info = {
             state: 'unknown',
-            title: 'Security',
-            subtitle: 'Unable to determine security status for this page.',
+            title: this.t('security.heading'),
+            subtitle: this.t('security.unknown'),
             chain: [],
         };
         try {
@@ -25798,6 +28070,7 @@ class AxisBrowser {
             backdrop.setAttribute('aria-hidden', 'true');
         }
         document.body.classList.remove('security-panel-open');
+        this.elements?.urlBarSecurity?.setAttribute('aria-expanded', 'false');
         if (panel) panel.classList.add('hidden');
     }
 
@@ -25837,6 +28110,7 @@ class AxisBrowser {
             backdrop.setAttribute('aria-hidden', 'false');
         }
         document.body.classList.add('security-panel-open');
+        this.elements?.urlBarSecurity?.setAttribute('aria-expanded', 'true');
         panel.classList.remove('hidden');
 
         const info = await this.fetchSecurityInfo();
@@ -25846,11 +28120,6 @@ class AxisBrowser {
 
     updateSecurityInfo() {
         void this.refreshSecurityPanel();
-    }
-
-    openSecuritySettings() {
-        this.closeSecurityPanel();
-        void this.openSettingsTab('customization');
     }
 
     closeAllPopups() {
@@ -25868,6 +28137,7 @@ class AxisBrowser {
         if (securityPanel && !securityPanel.classList.contains('hidden')) {
             this.closeSecurityPanel();
         }
+        this.closeTabAncestryPanel();
         if (notesPanel && !notesPanel.classList.contains('hidden')) {
             this.closePanelWithAnimation(notesPanel);
         }
@@ -26001,10 +28271,14 @@ class AxisBrowser {
 
             const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
             const onNewTabPage = tab && tab.url === this.NEWTAB_URL;
+            const searchMeta = window.AxisTabAncestry?.extractSearchQuery(searchUrl);
             if (onNewTabPage) {
                 this.navigate(searchUrl);
             } else {
-                this.createNewTab(searchUrl);
+                this.createNewTab(
+                    searchUrl,
+                    searchMeta ? { ancestryKind: 'search', searchQuery: searchMeta.query } : {}
+                );
             }
         }
     }
@@ -26052,11 +28326,12 @@ class AxisBrowser {
         if (!url || url === 'about:blank' || url.startsWith('axis:')) {
             return null;
         }
-        
+
         try {
             const urlObj = new URL(url);
-            // Use Google's favicon service for reliable favicon fetching
-            return `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`;
+            const host = urlObj.hostname.replace(/^www\./i, '');
+            // DuckDuckGo icons are more reliable inside guest pages than Google's service.
+            return `https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico`;
         } catch (e) {
             return null;
         }
@@ -26202,7 +28477,7 @@ class AxisBrowser {
         const tabDisplayTitle = (tab, tabId) => {
             if (tab.customTitle) return tab.customTitle;
             if (tab.url === this.NEWTAB_URL) {
-                return this.isTabInNtpAiChat(tabId) ? 'AI Chat' : 'New Tab';
+                return this.isTabInNtpAiChat(tabId) ? this.t('chrome.aiChat') : this.t('chrome.newTab');
             }
             return tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
         };
@@ -26218,7 +28493,7 @@ class AxisBrowser {
             return false;
         };
 
-        // Matching open tabs first — with Switch to Tab (skip the tab you're already on).
+        // Matching open tabs first - with Switch to Tab (skip the tab you're already on).
         let tabCount = 0;
         this.tabs.forEach((tab, tabId) => {
             if (tabCount >= 5) return;
@@ -26400,7 +28675,7 @@ class AxisBrowser {
             });
         }
 
-        // No shortcut fillers (New Tab / Incognito / Settings / Note) — only real matches.
+        // No shortcut fillers (New Tab / Incognito / Settings / Note) - only real matches.
         if (suggestions.length < maxSuggestions) {
             const defaultSuggestions = this.getDefaultSuggestions().filter((s) => !s.isAction);
             const existingTexts = new Set(suggestions.map((s) => s.text));
@@ -26956,7 +29231,7 @@ class AxisBrowser {
         const tabDisplayTitle = (tab, tabId) => {
             if (tab.customTitle) return tab.customTitle;
             if (tab.url === this.NEWTAB_URL) {
-                return this.isTabInNtpAiChat(tabId) ? 'AI Chat' : 'New Tab';
+                return this.isTabInNtpAiChat(tabId) ? this.t('chrome.aiChat') : this.t('chrome.newTab');
             }
             return tab.title || (tab.incognito ? 'New Incognito Tab' : 'New Tab');
         };
@@ -27157,7 +29432,7 @@ class AxisBrowser {
             
             urlBar.classList.add('has-search-engine');
             // Update placeholder
-            urlBar.placeholder = 'Search...';
+            urlBar.placeholder = this.t('chrome.searchEllipsis');
         }
     }
 
@@ -27196,7 +29471,7 @@ class AxisBrowser {
             'facebook': 'Facebook'
         };
         const displayName = displayNames[engine] || engine.charAt(0).toUpperCase() + engine.slice(1);
-        suggestionText.textContent = `Search ${displayName}!`;
+        suggestionText.textContent = this.t('chrome.searchWith', { engine: displayName });
         suggestion.classList.remove('hidden');
     }
 
@@ -27233,9 +29508,7 @@ class AxisBrowser {
     confirmInsecureHttpNavigation(url) {
         if (!this.settings?.httpsOnlyMode) return true;
         if (!this.isNonSecureHttpUrl(url)) return true;
-        return window.confirm(
-            'This page uses HTTP (not HTTPS). Your connection would not be encrypted on this site.\n\nContinue to:\n' + url
-        );
+        return window.confirm(this.t('note.httpsOnly', { url }));
     }
 
     /**
@@ -27321,7 +29594,22 @@ class AxisBrowser {
         // Remove dangerous characters and scripts
         url = url.replace(/[<>'"\x00-\x1f\x7f-\x9f]/g, '');
         
-        // Remove dangerous URL schemes that could execute code or access local files
+        // Local HTML / files (dev testing): `file://…` or absolute paths (`/Users/…`, `C:\…`, `~/…`).
+        // Must run before the spaces→search heuristic so paths with spaces still open.
+        try {
+            const AxisLocal = typeof window !== 'undefined' ? window.AxisLocalFileUrl : null;
+            if (AxisLocal && typeof AxisLocal.resolveLocalFileUrl === 'function') {
+                const homeDir =
+                    (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.homedir) ||
+                    '';
+                const localUrl = AxisLocal.resolveLocalFileUrl(url, { homeDir });
+                if (localUrl) return localUrl;
+            }
+        } catch (_) {
+            /* Fall through */
+        }
+
+        // Remove dangerous URL schemes that could execute code
         const lowerUrl = url.toLowerCase();
         if (lowerUrl.startsWith('javascript:') || 
             lowerUrl.startsWith('data:') ||
@@ -27331,7 +29619,7 @@ class AxisBrowser {
             return null;
         }
 
-        // Internal Axis shell URLs — must not fall through to `getSearchUrl` (would Google "axis://…").
+        // Internal Axis shell URLs - must not fall through to `getSearchUrl` (would Google "axis://…").
         if (lowerUrl.startsWith('axis://')) {
             if (lowerUrl === 'axis://newtab') {
                 return this.NEWTAB_URL;
@@ -27349,7 +29637,7 @@ class AxisBrowser {
             return `axis:note://${idPart}`;
         }
 
-        // Spaces (and similar) mean a natural-language query, not a navigable URL — unless a full
+        // Spaces (and similar) mean a natural-language query, not a navigable URL - unless a full
         // http(s) URL was pasted (URL() can otherwise turn "site.com/foo bar" into path %20 spam).
         if (/\s/.test(url) && !/^https?:\/\//i.test(url) && !/^axis:\/\//i.test(url)) {
             return this.getSearchUrl(url);
@@ -27383,7 +29671,7 @@ class AxisBrowser {
         try {
             const urlObj = new URL(url);
             
-            // Only allow web, about, and installed extension pages.
+            // Only allow web, about, installed extension pages, and local files (handled above).
             if (!['http:', 'https:', 'about:', 'chrome-extension:'].includes(urlObj.protocol)) {
                 return null;
             }
@@ -27398,6 +29686,15 @@ class AxisBrowser {
             console.error('URL validation failed:', error);
             return null;
         }
+    }
+
+    /** Set guest webview src; allow one file: navigation past the http(s)→file: link block. */
+    _assignWebviewSrc(webview, url) {
+        if (!webview || !url) return;
+        if (/^file:/i.test(url)) {
+            webview.__axisAllowNextFileNav = true;
+        }
+        webview.src = url;
     }
 
     isValidDomain(domain) {
@@ -27425,9 +29722,18 @@ class AxisBrowser {
             return true;
         }
         try {
+            const AxisLocal = typeof window !== 'undefined' ? window.AxisLocalFileUrl : null;
+            if (AxisLocal && typeof AxisLocal.resolveLocalFileUrl === 'function') {
+                const homeDir =
+                    (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.homedir) ||
+                    '';
+                if (AxisLocal.resolveLocalFileUrl(string, { homeDir })) return true;
+            }
+        } catch (_) {}
+        try {
             const url = new URL(string);
-            // Only allow web, about, and installed extension pages.
-            return ['http:', 'https:', 'about:', 'chrome-extension:'].includes(url.protocol);
+            // Only allow web, about, installed extension pages, and local files.
+            return ['http:', 'https:', 'about:', 'chrome-extension:', 'file:'].includes(url.protocol);
         } catch (_) {
             return false;
         }
@@ -27485,11 +29791,11 @@ class AxisBrowser {
                     <div class="quit-modal-icon">
                         <i class="fas fa-power-off"></i>
                     </div>
-                    <div class="quit-modal-title">Quit Axis?</div>
-                    <div class="quit-modal-subtitle">Are you sure you want to exit the application?</div>
+                    <div class="quit-modal-title" data-i18n="app.quitAsk">Quit Axis?</div>
+                    <div class="quit-modal-subtitle" data-i18n="app.quitDetail">Are you sure you want to exit Axis?</div>
                     <div class="quit-modal-actions">
-                        <button class="btn-secondary" id="quit-cancel-btn">Cancel</button>
-                        <button class="btn-primary" id="quit-confirm-btn">Quit</button>
+                        <button class="btn-secondary" id="quit-cancel-btn" data-i18n="common.cancel">Cancel</button>
+                        <button class="btn-primary" id="quit-confirm-btn" data-i18n="menu.quit">Quit</button>
                     </div>
                 </div>`;
             backdrop.appendChild(modal);
@@ -27502,6 +29808,14 @@ class AxisBrowser {
                 if (e.target === backdrop) this.hideQuitConfirmation();
             });
         }
+        const title = backdrop.querySelector('.quit-modal-title');
+        const subtitle = backdrop.querySelector('.quit-modal-subtitle');
+        const cancelBtn = backdrop.querySelector('#quit-cancel-btn');
+        const confirmBtn = backdrop.querySelector('#quit-confirm-btn');
+        if (title) title.textContent = this.t('app.quitAsk');
+        if (subtitle) subtitle.textContent = this.t('app.quitDetail');
+        if (cancelBtn) cancelBtn.textContent = this.t('common.cancel');
+        if (confirmBtn) confirmBtn.textContent = this.t('menu.quit');
         requestAnimationFrame(() => {
             backdrop.classList.remove('hidden');
             document.body.classList.add('modal-open');
@@ -27556,14 +29870,14 @@ class AxisBrowser {
             switch (data.type) {
                 case 'setShortcuts':
                     await window.electronAPI.setShortcuts(data.shortcuts);
-                    this.showNotification('Keyboard shortcuts saved', 'success');
+                    this.showNotification(this.t('note.shortcutsSaved'), 'success');
                     await this.refreshEmbeddedShortcutsEditor(webview);
                     break;
                     
                 case 'resetShortcuts':
                     await window.electronAPI.resetShortcuts();
                     await this.refreshEmbeddedShortcutsEditor(webview);
-                    this.showNotification('Keyboard shortcuts reset to defaults', 'success');
+                    this.showNotification(this.t('note.shortcutsReset'), 'success');
                     break;
                     
                 case 'pauseShortcuts':
@@ -27592,14 +29906,14 @@ class AxisBrowser {
         await window.electronAPI.setShortcuts(shortcuts);
         const webview = this.getActiveWebview();
         await this.refreshEmbeddedShortcutsEditor(webview);
-        this.showNotification('Keyboard shortcuts saved', 'success');
+        this.showNotification(this.t('note.shortcutsSaved'), 'success');
     }
 
     async resetShortcutsToDefaults() {
         await window.electronAPI.resetShortcuts();
         const webview = this.getActiveWebview();
         await this.refreshEmbeddedShortcutsEditor(webview);
-        this.showNotification('Keyboard shortcuts reset to defaults', 'success');
+        this.showNotification(this.t('note.shortcutsReset'), 'success');
     }
 
     _isLinkPreviewEnabled() {
@@ -27915,7 +30229,7 @@ class AxisBrowser {
             });
         }
         
-        // Ad blocker toggle (EasyList + EasyPrivacy-style rules via main process)
+        // Privacy protection toggle (ads + trackers + fingerprinting via main process)
         if (el.urlBarAdblock) {
             el.urlBarAdblock.addEventListener('click', (event) => {
                 event.preventDefault();
@@ -27931,6 +30245,26 @@ class AxisBrowser {
         document.getElementById('adblock-panel-site-btn')?.addEventListener('click', () => {
             void this.toggleAdBlockerSiteFromPanel();
         });
+        const adblockPanel = document.getElementById('adblock-panel');
+        const adblockBody = adblockPanel?.querySelector('.adblock-panel-body');
+        if (adblockBody && !adblockBody._axisWheelBound) {
+            adblockBody._axisWheelBound = true;
+            adblockBody.addEventListener(
+                'wheel',
+                (e) => {
+                    e.stopPropagation();
+                },
+                { passive: true }
+            );
+        }
+        const adblockDetails = document.getElementById('adblock-panel-details');
+        if (adblockDetails && !adblockDetails._axisToggleBound) {
+            adblockDetails._axisToggleBound = true;
+            adblockDetails.addEventListener('toggle', () => {
+                if (!adblockPanel || adblockPanel.classList.contains('hidden')) return;
+                this.positionAdblockPanel();
+            });
+        }
         window.addEventListener('resize', () => {
             const p = document.getElementById('adblock-panel');
             if (p && !p.classList.contains('hidden')) this.positionAdblockPanel();
@@ -28000,16 +30334,6 @@ class AxisBrowser {
         if (el.urlBarCopy) {
             el.urlBarCopy.addEventListener('click', async () => {
                 await this.copyCurrentUrl();
-                // Visual feedback
-                const icon = el.urlBarCopy.querySelector('i');
-                if (icon) {
-                    icon.classList.remove('fa-link');
-                    icon.classList.add('fa-check');
-                    setTimeout(() => {
-                        icon.classList.remove('fa-check');
-                        icon.classList.add('fa-link');
-                    }, 1500);
-                }
             });
         }
         
@@ -28025,6 +30349,27 @@ class AxisBrowser {
             };
 
             const enterEditMode = () => {
+                const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+                const onNewTab = tab?.url === this.NEWTAB_URL;
+                if (onNewTab) {
+                    el.urlBarDisplay.style.display = 'none';
+                    el.urlBarInput.style.display = 'flex';
+                    el.urlBarInput.removeAttribute('readonly');
+                    el.urlBarInput.placeholder = this.t('chrome.searchOrEnter');
+                    if (!onNewTab) {
+                        try {
+                            const currentUrl = tab?.webview?.getURL?.() || '';
+                            if (currentUrl && currentUrl !== 'about:blank') {
+                                el.urlBarInput.value = currentUrl;
+                            }
+                        } catch (_) {}
+                    } else {
+                        el.urlBarInput.value = '';
+                    }
+                    el.urlBarInput.focus();
+                    el.urlBarInput.select();
+                    return;
+                }
                 const webview = this.getActiveWebview();
                 if (!webview) return;
                 try {
@@ -28130,7 +30475,7 @@ class AxisBrowser {
         const urlBtn = triggerBtn || this.elements?.urlBarCwsInstall;
 
         this._extensionInstallUiActive = true;
-        this.setExtensionStoreHostBarState('busy', 'Downloading and installing…');
+        this.setExtensionStoreHostBarState('busy', this.t('ext.downloadingInstall'));
         this.setExtensionInstallControlState(hostBtn, 'busy');
         this.setExtensionInstallControlState(urlBtn, 'busy');
 
@@ -28153,7 +30498,7 @@ class AxisBrowser {
             }
             this.setExtensionStoreHostBarState(
                 'success',
-                'Extension installed — open it from the puzzle icon in the URL bar.'
+                'Extension installed - open it from the puzzle icon in the URL bar.'
             );
             this.setExtensionInstallControlState(hostBtn, 'success');
             this.setExtensionInstallControlState(urlBtn, 'success');
@@ -28201,7 +30546,7 @@ class AxisBrowser {
         void this.refreshExtensionStoreListingUi(currentUrl);
     }
 
-    /** Navigation + URL display only — no theme extraction or shell repaint (used after tab switch). */
+    /** Navigation + URL display only - no theme extraction or shell repaint (used after tab switch). */
     _updateUrlBarNavigationState(webview, tab) {
         const el = this.elements;
         if (!el?.webviewUrlBar || !tab) return;
@@ -28223,7 +30568,7 @@ class AxisBrowser {
             el.webviewUrlBar.classList.remove('hidden');
             const settingsWv = tab.webview;
             if (el.urlBarInput) el.urlBarInput.value = 'axis://settings';
-            if (el.urlBarDisplay) el.urlBarDisplay.textContent = 'Settings';
+            if (el.urlBarDisplay) el.urlBarDisplay.textContent = this.t('chrome.settings');
             if (el.urlBarBack) el.urlBarBack.disabled = !settingsWv || !settingsWv.canGoBack();
             if (el.urlBarForward) el.urlBarForward.disabled = !settingsWv || !settingsWv.canGoForward();
             if (el.urlBarCwsInstall) {
@@ -28317,7 +30662,7 @@ class AxisBrowser {
     }
 
     // Update the URL bar display and theme
-    // opts.skipExtractTheme: when true, do not run extractUrlBarTheme (caller will await it — avoids races on rapid settings toggles)
+    // opts.skipExtractTheme: when true, do not run extractUrlBarTheme (caller will await it - avoids races on rapid settings toggles)
     updateUrlBar(webview, opts = {}) {
         if (this.splitView) {
             this.updateSplitPanesUrlBars();
@@ -28329,7 +30674,7 @@ class AxisBrowser {
             this._maybeRenderFavoritesForActiveTab();
             return;
         }
-        // Favorites “active” dot tracks `currentTab` only — must run before NTP / special-page early returns that skip URL chrome work.
+        // Favorites “active” dot tracks `currentTab` only - must run before NTP / special-page early returns that skip URL chrome work.
         this._maybeRenderFavoritesForActiveTab();
 
         // New tab page: show URL bar but hide action buttons (copy, security, chat)
@@ -28338,8 +30683,13 @@ class AxisBrowser {
             el.webviewUrlBar.classList.remove('hidden');
             this._setUrlBarInternalShellMode('ntp');
             this.applyInternalShellUrlBarStyle();
-            if (el.urlBarInput) el.urlBarInput.value = '';
-            if (el.urlBarDisplay) el.urlBarDisplay.textContent = '';
+            if (el.urlBarInput) {
+                el.urlBarInput.value = '';
+                el.urlBarInput.placeholder = '';
+            }
+            if (el.urlBarDisplay) {
+                el.urlBarDisplay.textContent = '';
+            }
             if (el.urlBarBack) el.urlBarBack.disabled = true;
             if (el.urlBarForward) el.urlBarForward.disabled = true;
             if (el.urlBarCwsInstall) {
@@ -28357,7 +30707,7 @@ class AxisBrowser {
             this.applyInternalShellUrlBarStyle();
             const settingsWv = currentTab.webview;
             if (el.urlBarInput) el.urlBarInput.value = 'axis://settings';
-            if (el.urlBarDisplay) el.urlBarDisplay.textContent = 'Settings';
+            if (el.urlBarDisplay) el.urlBarDisplay.textContent = this.t('chrome.settings');
             if (el.urlBarBack) {
                 el.urlBarBack.disabled = !settingsWv || !settingsWv.canGoBack();
             }
@@ -28523,7 +30873,7 @@ class AxisBrowser {
         }
     }
     
-    // Apply app theme to URL bar (for regular website tabs — not NTP / Settings)
+    // Apply app theme to URL bar (for regular website tabs - not NTP / Settings)
     applyAppThemeToUrlBar(opts = {}) {
         if (this.settings?.transparentSites) {
             this.applyTransparentSitesUrlBarStyle(opts);
@@ -28534,6 +30884,14 @@ class AxisBrowser {
         if (!opts.skipShellReset) {
             this._resetSiteThemeColorToSettings();
         }
+        const curTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        const internalTab =
+            curTab?.url === this.NEWTAB_URL ||
+            curTab?.url === 'axis://settings' ||
+            !!curTab?.isSettings;
+        if (!internalTab && this._isInternalShellUrlBar(urlBar)) {
+            this._setUrlBarInternalShellMode(null);
+        }
         if (this._isInternalShellUrlBar(urlBar)) {
             this.applyInternalShellUrlBarStyle();
             return;
@@ -28543,8 +30901,8 @@ class AxisBrowser {
         const gradientEnabled = this.settings?.gradientEnabled && gradientColor;
         const gradientDirection = this.settings?.gradientDirection || '135deg';
 
-        let shellDarkChrome = this.isIncognitoWindow || this.isDarkColor(themeColor);
-        if (!this.isIncognitoWindow && gradientEnabled) {
+        let shellDarkChrome = this.isDarkColor(themeColor);
+        if (gradientEnabled) {
                 shellDarkChrome = this.isDarkColor(this.mixHexColors(themeColor, gradientColor, 0.5));
         }
 
@@ -28571,12 +30929,20 @@ class AxisBrowser {
         this._syncWebviewCanvasColor(this.settings?.themeColor || '#1a1a1a');
     }
 
-    /** Transparent sites: see-through URL bar with frosted blur — theme shows through like New Tab. */
+    /** Transparent sites: see-through URL bar with frosted blur - theme shows through like New Tab. */
     applyTransparentSitesUrlBarStyle(opts = {}) {
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
         if (!opts.skipShellReset) {
             this._resetSiteThemeColorToSettings();
+        }
+        const curTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        const internalTab =
+            curTab?.url === this.NEWTAB_URL ||
+            curTab?.url === 'axis://settings' ||
+            !!curTab?.isSettings;
+        if (!internalTab && this._isInternalShellUrlBar(urlBar)) {
+            this._setUrlBarInternalShellMode(null);
         }
         if (this._isInternalShellUrlBar(urlBar)) {
             this.applyInternalShellUrlBarStyle();
@@ -28585,10 +30951,10 @@ class AxisBrowser {
         const themeColor = this.settings?.themeColor || '#1a1a1a';
         const gradientColor = this.settings?.gradientColor || '#2a2a2a';
         const gradientEnabled = this.settings?.gradientEnabled && gradientColor;
-        let shellDarkChrome = this.isIncognitoWindow || this.isDarkColor(themeColor);
-        if (!this.isIncognitoWindow && gradientEnabled) {
+        let shellDarkChrome = this.isDarkColor(themeColor);
+        if (gradientEnabled) {
             shellDarkChrome = this.isDarkColor(this.mixHexColors(themeColor, gradientColor, 0.5));
-        } else if (!this.isIncognitoWindow && this.isLightUiTheme()) {
+        } else if (this.isLightUiTheme()) {
             shellDarkChrome = false;
         }
 
@@ -28614,7 +30980,7 @@ class AxisBrowser {
         this._clearWebviewCanvasColor();
     }
 
-    /** NTP / AI chat top bar: transparent — single frosted layer is #new-tab-page beneath (z-index 50). */
+    /** NTP / AI chat top bar: transparent - single frosted layer is #new-tab-page beneath (z-index 50). */
     _applyNtpUrlBarStyle(urlBar) {
         this._clearWebviewCanvasColor();
         urlBar.style.setProperty('background', 'transparent', 'important');
@@ -28643,16 +31009,23 @@ class AxisBrowser {
         this.applyChatPanelTheme(urlBar);
     }
 
-    /** @deprecated alias — use applyInternalShellUrlBarStyle */
+    /** @deprecated alias - use applyInternalShellUrlBarStyle */
     applyNewTabPageUrlBarStyle() {
         this.applyInternalShellUrlBarStyle();
     }
     
     _clearUrlBarThemeRefineTimer() {
-        if (this._urlBarThemeRefineTimer != null) {
-            cancelAnimationFrame(this._urlBarThemeRefineTimer);
-            this._urlBarThemeRefineTimer = null;
-        }
+        const timers = Array.isArray(this._urlBarThemeRefineTimers)
+            ? this._urlBarThemeRefineTimers
+            : this._urlBarThemeRefineTimer != null
+              ? [this._urlBarThemeRefineTimer]
+              : [];
+        timers.forEach((timer) => {
+            try { clearTimeout(timer); } catch (_) {}
+            try { cancelAnimationFrame(timer); } catch (_) {}
+        });
+        this._urlBarThemeRefineTimers = [];
+        this._urlBarThemeRefineTimer = null;
     }
 
     /** One delayed re-extract so late-painted headers / meta updates can correct the URL bar tint. */
@@ -28660,17 +31033,19 @@ class AxisBrowser {
         this._clearUrlBarThemeRefineTimer();
         if (!webview || this.settings?.transparentSites) return;
         const wv = webview;
-        this._urlBarThemeRefineTimer = requestAnimationFrame(() => {
-            this._urlBarThemeRefineTimer = requestAnimationFrame(() => {
-            this._urlBarThemeRefineTimer = null;
-            if (this.getActiveWebview() !== wv) return;
-            const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
-            if (!tab || tab.url === this.NEWTAB_URL || tab.url === 'axis://settings' || tab.isSettings) return;
-            this._voidGuestTask(
-                this.extractUrlBarTheme(wv, { refine: true, afterRestore: !!opts.afterRestore })
-            );
-            });
-        });
+        this._urlBarThemeRefineTimers = [0, 60, 200].map((delay) =>
+            setTimeout(() => {
+                if (this.getActiveWebview() !== wv) return;
+                const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+                if (!tab || tab.url === this.NEWTAB_URL || tab.url === 'axis://settings' || tab.isSettings) return;
+                this._voidGuestTask(
+                    this.extractUrlBarTheme(wv, {
+                        refine: true,
+                        afterRestore: !!opts.afterRestore
+                    })
+                );
+            }, delay)
+        );
     }
 
     _applyUrlBarColorInfo(colorInfo, urlBar, opts = {}) {
@@ -28687,9 +31062,24 @@ class AxisBrowser {
             return true;
         }
 
-        const rr = Math.max(0, Math.min(255, Math.round(r)));
-        const gg = Math.max(0, Math.min(255, Math.round(g)));
-        const bb = Math.max(0, Math.min(255, Math.round(b)));
+        let rr = Math.max(0, Math.min(255, Math.round(r)));
+        let gg = Math.max(0, Math.min(255, Math.round(g)));
+        let bb = Math.max(0, Math.min(255, Math.round(b)));
+        // Pure white/black page canvases make the browser frame look stuck rather
+        // than adapted. Preserve the site's light/dark intent while moving only
+        // near-neutral extremes into a readable native-chrome range.
+        const maxChannel = Math.max(rr, gg, bb);
+        const minChannel = Math.min(rr, gg, bb);
+        const saturation = maxChannel ? (maxChannel - minChannel) / maxChannel : 0;
+        if (saturation < 0.08 && minChannel >= 246) {
+            rr = 242;
+            gg = 242;
+            bb = 244;
+        } else if (saturation < 0.08 && maxChannel <= 9) {
+            rr = 24;
+            gg = 24;
+            bb = 26;
+        }
         const pageHex = `#${[rr, gg, bb].map((c) => c.toString(16).padStart(2, '0')).join('')}`;
         this._syncWebPanelVisualState();
         this._syncWebviewCanvasColor(pageHex);
@@ -28738,7 +31128,10 @@ class AxisBrowser {
         const urlBar = this.elements?.webviewUrlBar;
         if (!urlBar) return;
         if (this._isInternalShellUrlBar(urlBar)) {
-            return;
+            this._setUrlBarInternalShellMode(null);
+            if (urlBar.classList.contains('url-bar-internal-shell')) {
+                return;
+            }
         }
 
         if (this.settings?.transparentSites) {
@@ -28751,8 +31144,8 @@ class AxisBrowser {
 
         const isEarly = !!opts.early;
         const isRefine = !!opts.refine;
-        if (!isEarly) {
-        this._clearUrlBarThemeRefineTimer();
+        if (!isEarly && !isRefine) {
+            this._clearUrlBarThemeRefineTimer();
         }
         const seqAtStart = this._urlBarThemeSeq;
         const seq = isEarly ? seqAtStart : ++this._urlBarThemeSeq;
@@ -28844,7 +31237,11 @@ class AxisBrowser {
                                 }
                             }
                         }
-                        return { r: 250, g: 250, b: 250, brightness: 250, source: 'default' };
+                        var fallbackDark = false;
+                        try { fallbackDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+                        return fallbackDark
+                            ? { r: 24, g: 24, b: 26, brightness: 24, source: 'surface-fallback' }
+                            : { r: 242, g: 242, b: 244, brightness: 242, source: 'surface-fallback' };
                     } catch (e) {
                         return { r: 250, g: 250, b: 250, brightness: 250, source: 'error' };
                     }
@@ -29068,7 +31465,7 @@ class AxisBrowser {
                         var hdr = collectHeaderCandidate();
                         var meta = collectMetaCandidate();
                         var surface = collectSurfaceCandidate();
-                        // Author theme-color wins when present — sticky nav samples were painting the wrong bar color.
+                        // Author theme-color wins when present - sticky nav samples were painting the wrong bar color.
                         if (meta) {
                             return { r: meta.rgb.r, g: meta.rgb.g, b: meta.rgb.b, brightness: getBrightness(meta.rgb), source: 'meta' };
                         }
@@ -29091,7 +31488,11 @@ class AxisBrowser {
                             return { r: w.r, g: w.g, b: w.b, brightness: getBrightness(w), source: winner.source };
                         }
 
-                        return { r: 250, g: 250, b: 250, brightness: 250, source: 'default' };
+                        var fallbackDark = false;
+                        try { fallbackDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+                        return fallbackDark
+                            ? { r: 24, g: 24, b: 26, brightness: 24, source: 'surface-fallback' }
+                            : { r: 242, g: 242, b: 244, brightness: 242, source: 'surface-fallback' };
                     } catch (e) {
                         return { r: 250, g: 250, b: 250, brightness: 250, source: 'error' };
                     }
@@ -29106,7 +31507,9 @@ class AxisBrowser {
                 colorInfo &&
                 (colorInfo.source === 'meta' ||
                     colorInfo.source === 'meta-inline' ||
-                    colorInfo.source === 'http-header');
+                    colorInfo.source === 'http-header' ||
+                    colorInfo.source === 'surface' ||
+                    colorInfo.source === 'topvote');
             if (isEarly && !earlyTrusted) return;
             
             if (this._isUrlBarThemeHeldForWebview(webview)) {
@@ -29125,7 +31528,13 @@ class AxisBrowser {
                 (colorInfo.source === 'default' || colorInfo.source === 'error');
                     if (isDefaultOrError) {
                 if (!isEarly) {
-                    this.applyAppThemeToUrlBar({ skipShellReset: true });
+                    // Avoid flashing the dark app theme (reads as black) when a page
+                    // has no theme-color yet - use a soft neutral until refine lands.
+                    const soft = this.isLightUiTheme?.()
+                        ? { r: 242, g: 242, b: 244, source: 'surface-fallback' }
+                        : { r: 24, g: 24, b: 26, source: 'surface-fallback' };
+                    this._applyUrlBarColorInfo(soft, urlBar, { force: true });
+                    this._scheduleUrlBarThemeRefine(webview);
                     this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
                 }
                 return;
@@ -29147,6 +31556,12 @@ class AxisBrowser {
                 if (!isRefine && !isEarly) {
                     this._scheduleUrlBarThemeRefine(webview);
                 }
+            } else if (!isEarly) {
+                const soft = this.isLightUiTheme?.()
+                    ? { r: 242, g: 242, b: 244, source: 'surface-fallback' }
+                    : { r: 24, g: 24, b: 26, source: 'surface-fallback' };
+                this._applyUrlBarColorInfo(soft, urlBar, { force: true });
+                this._scheduleUrlBarThemeRefine(webview);
             }
             if (!isEarly) {
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
@@ -29156,12 +31571,16 @@ class AxisBrowser {
             if (!isEarly && seq !== this._urlBarThemeSeq) return;
             if (this.getActiveWebview() !== webview) return;
             if (isEarly) return;
-            this.applyAppThemeToUrlBar({ skipShellReset: true });
+            const soft = this.isLightUiTheme?.()
+                ? { r: 242, g: 242, b: 244, source: 'surface-fallback' }
+                : { r: 24, g: 24, b: 26, source: 'surface-fallback' };
+            this._applyUrlBarColorInfo(soft, urlBar, { force: true });
+            this._scheduleUrlBarThemeRefine(webview);
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         }
     }
 
-    /** AI chat panel — frosted glass; follows Appearance light/dark for ink and surfaces. */
+    /** AI chat panel - frosted glass; follows Appearance light/dark for ink and surfaces. */
     applyChatPanelTheme(urlBar) {
         const sc = this.getNewTabSurfaceChromeStyle();
         const container = urlBar && urlBar.closest ? urlBar.closest('.webview-container') : null;
@@ -29249,10 +31668,10 @@ class AxisBrowser {
                 } catch (_) {}
             }
             /* Always offer the sidebar mini player when PiP ends and the `<video>` is still in
-             * the page — whether the site left playback running or paused it (e.g. PiP close).
+             * the page - whether the site left playback running or paused it (e.g. PiP close).
              * Showing only when `!paused` missed common cases and the dock poll hid instantly. */
             if (videoPresent && id != null) {
-                /* Native PiP teardown does not tell us the user’s intent — never auto-switch the
+                /* Native PiP teardown does not tell us the user’s intent - never auto-switch the
                  * active tab here; use **Go to tab** on the sidebar dock or the tab strip. */
                 this.showSidebarMediaDock(id, idx);
             }
@@ -29428,6 +31847,193 @@ class AxisBrowser {
         this.hidePIP();
     }
 
+    setupFullscreenChrome() {
+        if (this._fullscreenChromeBound) return;
+        this._fullscreenChromeBound = true;
+        const apply = (fullscreen) => {
+            document.body.classList.toggle('axis-window-fullscreen', !!fullscreen);
+        };
+        window.electronAPI?.onWindowFullscreen?.((payload) => {
+            apply(payload && typeof payload === 'object' ? payload.fullscreen : payload);
+        });
+        void window.electronAPI?.getWindowFullscreen?.().then((fs) => apply(fs));
+    }
+
+    setupSiteHtmlFullscreenSync() {
+        if (this._siteHtmlFullscreenBound) return;
+        this._siteHtmlFullscreenBound = true;
+        window.electronAPI?.onGuestHtmlFullscreen?.((payload) => {
+            const guestId = Number(payload?.guestWebContentsId) || 0;
+            const tabId = guestId ? this._findTabIdByWebContentsId(guestId) : null;
+            this._handleGuestHtmlFullscreen(!!payload?.active, guestId, tabId);
+        });
+    }
+
+    _applySiteHtmlFullscreenChrome(active) {
+        if (active) {
+            document.body.classList.remove('axis-site-html-fs-restore');
+            document.body.classList.add('axis-site-html-fullscreen');
+            return;
+        }
+        if (!document.body.classList.contains('axis-site-html-fullscreen')) return;
+        document.body.classList.add('axis-site-html-fs-restore');
+        document.body.classList.remove('axis-site-html-fullscreen');
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                document.body.classList.remove('axis-site-html-fs-restore');
+            });
+        });
+    }
+
+    _handleGuestHtmlFullscreen(active, guestWebContentsId, tabId = null) {
+        if (tabId == null && guestWebContentsId > 0) {
+            tabId = this._findTabIdByWebContentsId(guestWebContentsId);
+        }
+        if (tabId == null) return;
+
+        if (active) {
+            this._siteHtmlFullscreenTabId = tabId;
+            this._applySiteHtmlFullscreenChrome(true);
+            return;
+        }
+
+        if (this._siteHtmlFullscreenTabId != null && this._siteHtmlFullscreenTabId !== tabId) {
+            return;
+        }
+        if (this._siteHtmlFullscreenTabId === tabId) {
+            this._siteHtmlFullscreenTabId = null;
+        }
+        this._applySiteHtmlFullscreenChrome(false);
+        this._nudgeWebviewGuestLayout?.();
+    }
+
+    setupUpdateBanner() {
+        if (this._updateBannerBound) return;
+        this._updateBannerBound = true;
+        const el = this.elements;
+        el.sidebarUpdateBannerRestart?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void this.restartToUpdate();
+        });
+        el.sidebarUpdateBannerNotes?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void this.openUpdateReleaseNotes();
+        });
+        el.sidebarUpdateBannerDismiss?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void this.dismissUpdateBanner();
+        });
+        window.electronAPI?.onAxisUpdateStatus?.((payload) => this.applyUpdateBannerStatus(payload));
+        void window.electronAPI?.getUpdateStatus?.().then((payload) => {
+            if (payload) this.applyUpdateBannerStatus(payload);
+        });
+    }
+
+    applyUpdateBannerStatus(payload) {
+        const banner = this.elements?.sidebarUpdateBanner;
+        if (!banner) return;
+        const info = payload && typeof payload === 'object' ? payload : {};
+        this._lastUpdateBannerStatus = info;
+        this._lastUpdateBannerStatus = { ...(this._lastUpdateBannerStatus || {}), ...info };
+        if (info.preview === true) return;
+        const show = info.available === true && info.status !== 'idle';
+        banner.classList.toggle('hidden', !show);
+        if (show) banner.removeAttribute('hidden');
+        else banner.setAttribute('hidden', '');
+
+        const version = String(info.version || '').trim();
+        const channel = String(info.channel || '').trim();
+        const titleEl = this.elements.sidebarUpdateBannerTitle;
+        const metaEl = this.elements.sidebarUpdateBannerMeta;
+        const hintEl = this.elements.sidebarUpdateBannerHint;
+        const restart = this.elements.sidebarUpdateBannerRestart;
+        const notes = this.elements.sidebarUpdateBannerNotes;
+        if (titleEl) {
+            if (info.status === 'downloading') titleEl.textContent = this.t('update.downloading');
+            else if (info.status === 'installing') titleEl.textContent = this.t('update.installing');
+            else if (info.status === 'error') titleEl.textContent = this.t('update.failed');
+            else titleEl.textContent = this.t('chrome.updateAvailable');
+        }
+        if (metaEl) {
+            if (info.status === 'error' && info.message) {
+                metaEl.textContent = String(info.message);
+            } else {
+                metaEl.textContent = [version, channel].filter(Boolean).join(' · ');
+            }
+        }
+        if (hintEl) {
+            hintEl.textContent = '';
+            hintEl.classList.add('hidden');
+            hintEl.setAttribute('hidden', '');
+        }
+        if (notes) {
+            const url = String(info.releaseUrl || '').trim();
+            notes.disabled = !/^https:\/\//i.test(url);
+            notes.title = notes.disabled ? 'Release notes unavailable' : 'What’s new';
+        }
+        if (restart) {
+            const busy = info.status === 'downloading' || info.status === 'installing';
+            restart.disabled = busy;
+            restart.textContent = busy ? 'Working' : 'Restart';
+            banner.classList.toggle('is-busy', busy);
+        } else {
+            banner.classList.remove('is-busy');
+        }
+        if (!show) banner.classList.remove('is-busy');
+        const errMsg = info.status === 'error' && info.message ? String(info.message) : '';
+        if (errMsg && errMsg !== this._lastUpdateBannerError) {
+            this._lastUpdateBannerError = errMsg;
+            this.showNotification?.(errMsg, 'error');
+        }
+        if (!errMsg) this._lastUpdateBannerError = '';
+    }
+
+    async openUpdateReleaseNotes() {
+        const url = String(this._lastUpdateBannerStatus?.releaseUrl || '').trim();
+        if (!/^https:\/\//i.test(url)) {
+            this.showNotification?.('Release notes aren’t available right now.', 'info');
+            return;
+        }
+        try {
+            await window.electronAPI?.openExternalUrl?.(url);
+        } catch (_) {
+            this.showNotification?.('Couldn’t open the release page.', 'error');
+        }
+    }
+
+    async restartToUpdate() {
+        const api = window.electronAPI;
+        if (!api?.restartToUpdate) return;
+        this.applyUpdateBannerStatus({
+            ...(this._lastUpdateBannerStatus || {}),
+            available: true,
+            status: 'downloading'
+        });
+        const result = await api.restartToUpdate();
+        if (result?.preview) {
+            this.showNotification?.('Preview only - nothing is installed.', 'info');
+            this.applyUpdateBannerStatus({
+                available: true,
+                preview: true,
+                version: this._lastUpdateBannerStatus?.version || '',
+                channel: 'preview',
+                status: 'available'
+            });
+            return;
+        }
+        if (result?.ok === false && result?.message) {
+            this.showNotification?.(result.message, 'error');
+        }
+    }
+
+    async dismissUpdateBanner() {
+        await window.electronAPI?.dismissUpdateBanner?.();
+        this.applyUpdateBannerStatus({ available: false, status: 'idle' });
+    }
+
     setupSidebarMediaDockListeners() {
         const el = this.elements;
         el.sidebarMediaTitleBtn?.addEventListener('click', (e) => {
@@ -29523,7 +32129,7 @@ class AxisBrowser {
             this.pipWebview &&
             !this.pipWebview.isDestroyed?.() &&
             this._normalizeTabMapKey(this.pipTabId) === tid;
-        /* Tab may live on another profile after a swipe — still show the mini player. */
+        /* Tab may live on another profile after a swipe - still show the mini player. */
         if (!tab && !guestMatch && !pipMatch) return;
         this._stopSidebarMediaDockPoll();
         const webview = tab?.webview || (guestMatch ? guest.webview : null) || (pipMatch ? this.pipWebview : null);
@@ -29622,7 +32228,7 @@ class AxisBrowser {
             tab?.customTitle || tab?.title || state.title || guest?.title || 'Playing media';
         if (el.sidebarMediaTitle) el.sidebarMediaTitle.textContent = title;
         if (el.sidebarMediaTitleBtn) {
-            el.sidebarMediaTitleBtn.title = title ? `${title} — Go to tab` : 'Go to tab';
+            el.sidebarMediaTitleBtn.title = title ? `${title} - Go to tab` : 'Go to tab';
         }
 
         const card =
@@ -30127,7 +32733,7 @@ class AxisBrowser {
     }
 
     async isVaultCredentialTypingIdle(webview) {
-        const js = `(function(){var t=Number(document.documentElement.getAttribute('data-axis-vault-cred-edit-at')||window.__axisVaultCredentialEditAt||0);return Date.now()-t>2200})()`;
+        const js = `(function(){var t=Number(document.documentElement.getAttribute('data-axis-vault-cred-edit-at')||window.__axisVaultCredentialEditAt||0);return !t||Date.now()-t>1800})()`;
         let idle = true;
         const visit = async (frame) => {
             if (!frame) return;
@@ -30157,6 +32763,37 @@ class AxisBrowser {
             }
         } catch (_) {}
         return idle;
+    }
+
+    async isVaultLoginFieldFocused(webview) {
+        const js = `(function(){try{var a=document.activeElement;if(!a||(a.tagName!=='INPUT'&&a.tagName!=='TEXTAREA'))return false;var ty=(a.type||'text').toLowerCase();var ac=(a.autocomplete||'').toLowerCase();var n=(a.name||'').toLowerCase();var id=(a.id||'').toLowerCase();if(ty==='password'||ac.indexOf('password')>=0)return true;if(ty==='email'||ac.indexOf('username')>=0||ac==='email'||ac.indexOf('email')>=0)return true;if(n.indexOf('user')>=0||n.indexOf('email')>=0||n.indexOf('login')>=0||n.indexOf('pass')>=0||id.indexOf('user')>=0||id.indexOf('email')>=0||id.indexOf('pass')>=0||id.indexOf('login')>=0)return true;}catch(e){}return false})()`;
+        let focused = false;
+        const visit = async (frame) => {
+            if (!frame || focused) return;
+            try {
+                if ((await frame.executeJavaScript(js, false)) === true) focused = true;
+            } catch (_) {}
+            let kids = [];
+            try {
+                kids = frame.frames || [];
+            } catch (_) {
+                return;
+            }
+            for (let i = 0; i < kids.length; i++) {
+                try {
+                    await visit(kids[i]);
+                } catch (_) {}
+            }
+        };
+        try {
+            const wc = typeof webview.getWebContents === 'function' ? webview.getWebContents() : null;
+            if (wc && !wc.isDestroyed() && wc.mainFrame) {
+                await visit(wc.mainFrame);
+            } else if (typeof webview.executeJavaScript === 'function') {
+                if ((await webview.executeJavaScript(js, true)) === true) focused = true;
+            }
+        } catch (_) {}
+        return focused;
     }
 
     async pollVaultCredentialsFromPage(webview) {
@@ -30209,12 +32846,18 @@ class AxisBrowser {
                 }
             } catch (_) {}
             if (login) {
-                await this.handleVaultSaveOffer(webview, login);
-                return;
+                // Login saves wait for blur / Enter / Sign in / navigation - not mid-typing pauses.
+                const stillInLoginField = await this.isVaultLoginFieldFocused(webview);
+                if (!stillInLoginField) {
+                    await this.handleVaultSaveOffer(webview, login);
+                    const saveModal = document.getElementById('vault-save-modal');
+                    if (saveModal && !saveModal.classList.contains('hidden')) return;
+                }
             }
             if (card) {
                 await this.handleVaultSaveOffer(webview, card);
-                return;
+                const saveModal = document.getElementById('vault-save-modal');
+                if (saveModal && !saveModal.classList.contains('hidden')) return;
             }
             if (address) await this.handleVaultSaveOffer(webview, address);
         } catch (_) {}
@@ -30316,7 +32959,7 @@ class AxisBrowser {
             } catch (_) {}
             if (!/^https?:/i.test(url)) return;
             await this.syncVaultAutofillUiTheme(webview);
-            // Always walk frames — Stripe/Payment Element iframes load after the top page.
+            // Always walk frames - Stripe/Payment Element iframes load after the top page.
             await this.executeInGuestFrames(webview, js, false);
             webview.__axisVaultAutofillInjected = true;
         } catch (_) {}
@@ -30389,64 +33032,57 @@ class AxisBrowser {
         }
     }
 
+    _isValidVaultAutofillRect(rect) {
+        if (!rect || typeof rect !== 'object') return false;
+        const w = Number(rect.width);
+        const h = Number(rect.height);
+        const l = Number(rect.left);
+        const t = Number(rect.top);
+        const b = Number(rect.bottom);
+        if (![w, h, l, t].every((n) => Number.isFinite(n))) return false;
+        // Reject zero-size or off-screen/top-stuck ghosts (common when no real field is focused).
+        if (w < 12 || h < 8) return false;
+        if (l === 0 && t === 0 && w < 40 && h < 24) return false;
+        if (Number.isFinite(b) && b <= t) return false;
+        return true;
+    }
+
     async presentVaultAutofill(webview, payload) {
         if (!webview || !payload) return;
         try {
             const status = await window.electronAPI.vaultStatus();
             if (status?.autofillEnabled === false) return;
         } catch (_) {}
-        const kind =
-            payload.kind === 'card' ? 'card' : payload.kind === 'address' ? 'address' : 'login';
-        let items = [];
-        try {
-            const res = await window.electronAPI.vaultFillCandidates({
-                kind,
-                origin: payload.origin || '',
-                pageUrl: payload.pageUrl || '',
-                usernameHint: payload.usernameHint || ''
-            });
-            items =
-                kind === 'card'
-                    ? res?.cards || []
-                    : kind === 'address'
-                      ? res?.addresses || []
-                      : res?.logins || [];
-        } catch (_) {
+        // Always use the shell overlay (never the in-page menu - CSP kills favicons).
+        const focus = payload.focus && typeof payload.focus === 'object' ? payload.focus : payload;
+        const merged = {
+            ...focus,
+            rect: payload.rect || focus.rect || null,
+            origin: payload.origin || focus.origin || '',
+            pageUrl: payload.pageUrl || focus.pageUrl || '',
+            usernameHint: payload.usernameHint || focus.usernameHint || '',
+            kind: payload.kind || focus.kind || 'login'
+        };
+        if (!merged.rect && typeof webview.executeJavaScript === 'function') {
+            try {
+                const probeRect = await webview.executeJavaScript(
+                    `(function(){try{var a=window.__axisVault&&window.__axisVault.focusAnchor;if(!a||!a.getBoundingClientRect)return null;var ae=document.activeElement;if(!ae||ae!==a)return null;var r=a.getBoundingClientRect();return{left:r.left,top:r.top,bottom:r.bottom,right:r.right,width:r.width,height:r.height};}catch(e){return null;}})()`,
+                    true
+                );
+                if (this._isValidVaultAutofillRect(probeRect)) {
+                    merged.rect = probeRect;
+                }
+            } catch (_) {}
+        }
+        if (!this._isValidVaultAutofillRect(merged.rect)) {
+            this.hideVaultAutofillPanel(true);
             return;
         }
-        if (!items.length) return;
-        // Inject into every frame (including Stripe iframes) so the menu appears next to the field.
-        await this.showVaultAutofillInPage(webview, items, kind);
-        try {
-            webview.send('axis-vault-show-autofill', { kind, items });
-        } catch (_) {}
+        await this.handleVaultAutofillQuery(webview, merged);
     }
 
-    async showVaultAutofillInPage(webview, items, kind = 'login') {
-        try {
-            if (!webview || !items?.length) return;
-            const theme = this.getVaultAutofillUiTheme();
-            await this.syncVaultAutofillUiTheme(webview);
-            let showJs = null;
-            try {
-                showJs = await window.electronAPI.vaultBuildAutofillShowJs(items, theme, kind);
-            } catch (_) {
-                return;
-            }
-            if (!showJs) return;
-            await this.executeInGuestFrames(webview, showJs, true);
-            webview.__axisVaultAutofillShownKey = JSON.stringify({
-                url: (() => {
-                    try {
-                        return webview.getURL() || '';
-                    } catch (_) {
-                        return '';
-                    }
-                })(),
-                kind,
-                n: items.length
-            });
-        } catch (_) {}
+    async showVaultAutofillInPage(/* webview, items, kind */) {
+        // Autofill UI is shell-only - guest pages' CSP blocks favicons.
     }
 
     async pollVaultAutofillFocus(webview) {
@@ -30459,12 +33095,35 @@ class AxisBrowser {
             // Re-inject every poll so late-loading payment iframes get listeners.
             await this.injectVaultAutofillBootstrap(webview);
             const probe = await this.probeVaultAutofillGuest(webview);
-            if (!probe) return;
+            if (!probe || !probe.focus || !this._isValidVaultAutofillRect(probe.focus.rect)) {
+                // Only dismiss when focus truly left a fill field (or rect is bogus).
+                if (this._vaultAutofillWebview === webview) {
+                    this.hideVaultAutofillPanel(true);
+                }
+                return;
+            }
             if (probe.menuOpen) {
                 if (!probe.focus) {
                     this._voidGuestTask(this.hideVaultAutofillInPage(webview));
-                    this.hideVaultAutofillPanel();
+                    this.hideVaultAutofillPanel(true);
                 }
+                return;
+            }
+            // Shell menu already up for this field - don't thrash.
+            if (
+                this._vaultAutofillWebview === webview &&
+                this.elements.vaultAutofillPanel &&
+                !this.elements.vaultAutofillPanel.classList.contains('hidden') &&
+                (probe.focusKey || '') === (webview.__axisVaultAutofillLastKey || '')
+            ) {
+                if (probe.focus?.rect) {
+                    this._vaultAutofillPayload = {
+                        ...(this._vaultAutofillPayload || {}),
+                        ...probe.focus,
+                        rect: probe.focus.rect
+                    };
+                }
+                this.repositionVaultAutofillPanel();
                 return;
             }
             if (probe.pick) {
@@ -30482,17 +33141,33 @@ class AxisBrowser {
             }
             const focus = probe.focus;
             if (!focus) return;
-            const key = probe.focusKey || JSON.stringify(focus);
-            const now = Date.now();
-            // Retry showing soon if a payment iframe was not ready the first time.
             if (
-                key === webview.__axisVaultAutofillLastKey &&
-                now - (webview.__axisVaultAutofillLastAt || 0) < 900
+                webview.__axisVaultAutofillCooldownUntil &&
+                Date.now() < webview.__axisVaultAutofillCooldownUntil
             ) {
                 return;
             }
+            const key = probe.focusKey || JSON.stringify(focus);
+            const panelOpen =
+                this._vaultAutofillWebview === webview &&
+                this.elements.vaultAutofillPanel &&
+                !this.elements.vaultAutofillPanel.classList.contains('hidden');
+            // Same field as last offer - never rebuild (that caused blink). Only reposition.
+            if (key && key === webview.__axisVaultAutofillLastKey) {
+                if (panelOpen) {
+                    if (focus.rect) {
+                        this._vaultAutofillPayload = {
+                            ...(this._vaultAutofillPayload || {}),
+                            ...focus,
+                            rect: focus.rect
+                        };
+                    }
+                    this.repositionVaultAutofillPanel();
+                }
+                return;
+            }
             webview.__axisVaultAutofillLastKey = key;
-            webview.__axisVaultAutofillLastAt = now;
+            webview.__axisVaultAutofillLastAt = Date.now();
             await this.presentVaultAutofill(webview, focus);
         } catch (_) {}
     }
@@ -30510,6 +33185,7 @@ class AxisBrowser {
     }
 
     setupSitePermissionPrompts() {
+        if (this.isIncognitoWindow) return;
         if (this._sitePermissionPromptsSetup) return;
         this._sitePermissionPromptsSetup = true;
         this._sitePermissionQueue = [];
@@ -30694,30 +33370,42 @@ class AxisBrowser {
         }
         const panel = this.elements.vaultAutofillPanel;
         if (panel) panel.classList.add('hidden');
+        const wv = this._vaultAutofillWebview;
+        if (wv) {
+            wv.__axisVaultAutofillLastKey = '';
+            wv.__axisVaultAutofillLastAt = 0;
+        }
         this._vaultAutofillWebview = null;
         this._vaultAutofillPayload = null;
         this._vaultAutofillShownAt = 0;
+        this._vaultAutofillItemsSig = '';
     }
 
     repositionVaultAutofillPanel() {
         const panel = this.elements.vaultAutofillPanel;
         const wv = this._vaultAutofillWebview;
         const payload = this._vaultAutofillPayload;
-        if (!panel || panel.classList.contains('hidden') || !wv || !payload?.rect) return;
+        if (!panel || panel.classList.contains('hidden') || !wv) return;
+        if (!this._isValidVaultAutofillRect(payload?.rect)) {
+            this.hideVaultAutofillPanel(true);
+            return;
+        }
         try {
             const fr = payload.rect;
             const wvRect = wv.getBoundingClientRect();
-            const minW = Math.max(220, fr.width || 220);
+            const fieldW = Math.max(160, Math.round(fr.width || 200));
             let left = Math.max(8, wvRect.left + fr.left);
-            let top = Math.max(8, wvRect.top + fr.bottom + 4);
+            let top = Math.max(8, wvRect.top + fr.bottom + 6);
             panel.style.position = 'fixed';
-            panel.style.minWidth = `${minW}px`;
-            const panelH = panel.offsetHeight || 180;
+            panel.style.width = `${fieldW}px`;
+            panel.style.minWidth = `${fieldW}px`;
+            panel.style.maxWidth = `${fieldW}px`;
+            const panelH = panel.offsetHeight || 200;
             if (top + panelH > window.innerHeight - 8) {
-                top = Math.max(8, wvRect.top + fr.top - panelH - 4);
+                top = Math.max(8, wvRect.top + fr.top - panelH - 6);
             }
-            if (left + minW > window.innerWidth - 8) {
-                left = Math.max(8, window.innerWidth - minW - 8);
+            if (left + fieldW > window.innerWidth - 8) {
+                left = Math.max(8, window.innerWidth - fieldW - 8);
             }
             panel.style.left = `${left}px`;
             panel.style.top = `${top}px`;
@@ -30726,15 +33414,30 @@ class AxisBrowser {
 
     async handleVaultAutofillQuery(webview, payload) {
         if (!webview || !payload) return;
+        if (!this._isValidVaultAutofillRect(payload.rect)) {
+            this.hideVaultAutofillPanel(true);
+            return;
+        }
         const kind =
             payload.kind === 'card' ? 'card' : payload.kind === 'address' ? 'address' : 'login';
+        // Resolve origin from the live page - never trust a spoofed guest-only origin alone.
+        let pageOrigin = '';
+        try {
+            const live = webview.getURL?.() || '';
+            if (/^https?:/i.test(live)) pageOrigin = new URL(live).origin;
+        } catch (_) {}
+        if (!pageOrigin) {
+            try {
+                pageOrigin = payload.origin || '';
+            } catch (_) {}
+        }
         let items = Array.isArray(payload.items) ? payload.items : [];
         if (!items.length) {
             try {
                 const res = await window.electronAPI.vaultFillCandidates({
                     kind,
-                    origin: payload.origin || '',
-                    pageUrl: payload.pageUrl || '',
+                    origin: pageOrigin || payload.origin || '',
+                    pageUrl: payload.pageUrl || pageOrigin || '',
                     usernameHint: payload.usernameHint || ''
                 });
                 if (!res?.ok) return;
@@ -30748,62 +33451,311 @@ class AxisBrowser {
                 return;
             }
         }
-        if (!items.length) return;
-        await this.showVaultAutofillInPage(webview, items, kind);
-        try {
-            webview.send('axis-vault-show-autofill', { kind, items });
-        } catch (_) {}
-        if (payload.rect) {
-            this.showVaultAutofillPanel(webview, payload, kind, items);
+        // Passwords are site-bound - drop anything that does not match this page.
+        // Mirror vault originsMatch (incl. multi-part public suffixes like github.io).
+        if (kind === 'login' && pageOrigin) {
+            const hostKey = (h) =>
+                String(h || '')
+                    .replace(/^www\./i, '')
+                    .toLowerCase();
+            const MULTI_PART_SUFFIXES = [
+                'co.uk',
+                'org.uk',
+                'ac.uk',
+                'gov.uk',
+                'com.au',
+                'net.au',
+                'org.au',
+                'co.nz',
+                'co.jp',
+                'com.br',
+                'com.mx',
+                'github.io',
+                'herokuapp.com',
+                'netlify.app',
+                'vercel.app',
+                'pages.dev'
+            ];
+            const registrable = (host) => {
+                const parts = hostKey(host).split('.').filter(Boolean);
+                if (parts.length < 2) return hostKey(host);
+                const last2 = parts.slice(-2).join('.');
+                if (MULTI_PART_SUFFIXES.includes(last2) && parts.length >= 3) {
+                    return parts.slice(-3).join('.');
+                }
+                return last2;
+            };
+            items = items.filter((row) => {
+                try {
+                    if (!row.origin) return false;
+                    const a = new URL(pageOrigin);
+                    const b = new URL(
+                        String(row.origin).includes('://') ? row.origin : `https://${row.origin}`
+                    );
+                    if (a.protocol !== 'http:' && a.protocol !== 'https:') return false;
+                    if (b.protocol !== 'http:' && b.protocol !== 'https:') return false;
+                    const ah = hostKey(a.hostname);
+                    const bh = hostKey(b.hostname);
+                    if (!ah || !bh) return false;
+                    if (ah === bh) return true;
+                    const ar = registrable(ah);
+                    const br = registrable(bh);
+                    if (!ar || !br || ar !== br) return false;
+                    return ah.endsWith('.' + bh) || bh.endsWith('.' + ah);
+                } catch (_) {
+                    return false;
+                }
+            });
         }
+        if (!items.length) {
+            this.hideVaultAutofillPanel(true);
+            return;
+        }
+        const sig = `${kind}:${items.map((i) => i.id).join(',')}`;
+        const panel = this.elements.vaultAutofillPanel;
+        const alreadyOpen =
+            panel &&
+            !panel.classList.contains('hidden') &&
+            this._vaultAutofillWebview === webview &&
+            this._vaultAutofillItemsSig === sig;
+        if (alreadyOpen) {
+            this._vaultAutofillPayload = { ...payload, origin: pageOrigin || payload.origin };
+            this.repositionVaultAutofillPanel();
+            return;
+        }
+        try {
+            await this.hideVaultAutofillInPage(webview);
+        } catch (_) {}
+        this._vaultAutofillItemsSig = sig;
+        this.showVaultAutofillPanel(
+            webview,
+            { ...payload, origin: pageOrigin || payload.origin },
+            kind,
+            items
+        );
     }
 
     showVaultAutofillPanel(webview, payload, kind, items) {
         const panel = this.elements.vaultAutofillPanel;
         const list = document.getElementById('vault-autofill-list');
         if (!panel || !list) return;
+        if (!this._isValidVaultAutofillRect(payload?.rect)) {
+            this.hideVaultAutofillPanel(true);
+            return;
+        }
         this._vaultAutofillWebview = webview;
         this._vaultAutofillPayload = payload;
         list.innerHTML = '';
-        for (const row of items) {
-            const li = document.createElement('li');
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'vault-autofill-item';
-            btn.setAttribute('role', 'option');
-            if (kind === 'login') {
-                btn.innerHTML = `<span class="vault-autofill-item-title">${this.escapeHtml(row.title || row.username || 'Saved login')}</span><span class="vault-autofill-item-sub">${this.escapeHtml(row.username || '')}</span>`;
-                btn.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    this.hideVaultAutofillPanel(true);
-                    void this.applyVaultAutofillLogin(webview, row.id);
-                });
-            } else if (kind === 'address') {
-                const label = row.label || row.fullName || 'Address';
-                const sub = row.summary || row.addressLine1 || '';
-                btn.innerHTML = `<span class="vault-autofill-item-title">${this.escapeHtml(label)}</span><span class="vault-autofill-item-sub">${this.escapeHtml(sub)}</span>`;
-                btn.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    this.hideVaultAutofillPanel(true);
-                    void this.applyVaultAutofillAddress(webview, row.id);
-                });
-            } else {
-                const label = row.label || row.cardholder || 'Card';
-                const sub = row.masked || `•••• ${String(row.number || '').slice(-4)}`;
-                btn.innerHTML = `<span class="vault-autofill-item-title">${this.escapeHtml(label)}</span><span class="vault-autofill-item-sub">${this.escapeHtml(sub)}</span>`;
-                btn.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    this.hideVaultAutofillPanel(true);
-                    void this.applyVaultAutofillCard(webview, row.id);
-                });
+
+        const titleText =
+            kind === 'card'
+                ? this.t('settings.vault.cards')
+                : kind === 'address'
+                  ? this.t('settings.vault.addresses')
+                  : this.t('settings.vault.passwords');
+        panel.setAttribute('aria-label', titleText);
+
+        void this._decorateVaultAutofillItems(kind, items).then((decorated) => {
+            if (this._vaultAutofillWebview !== webview) return;
+            list.innerHTML = '';
+            for (const row of decorated) {
+                const li = document.createElement('li');
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'vault-af-item';
+                btn.setAttribute('role', 'option');
+                btn.innerHTML = this._vaultAutofillPillInnerHtml(row._ui);
+                if (kind === 'login') {
+                    btn.addEventListener('mousedown', (e) => {
+                        e.preventDefault();
+                        this.hideVaultAutofillPanel(true);
+                        void this.applyVaultAutofillLogin(webview, row.id);
+                    });
+                } else if (kind === 'address') {
+                    btn.addEventListener('mousedown', (e) => {
+                        e.preventDefault();
+                        this.hideVaultAutofillPanel(true);
+                        void this.applyVaultAutofillAddress(webview, row.id);
+                    });
+                } else {
+                    btn.addEventListener('mousedown', (e) => {
+                        e.preventDefault();
+                        this.hideVaultAutofillPanel(true);
+                        void this.applyVaultAutofillCard(webview, row.id);
+                    });
+                }
+                li.appendChild(btn);
+                list.appendChild(li);
             }
-            li.appendChild(btn);
-            list.appendChild(li);
+            panel.classList.remove('hidden');
+            panel.classList.add('vault-af-menu');
+            panel.setAttribute('data-ui-theme', this.getVaultAutofillUiTheme());
+            this._vaultAutofillShownAt = Date.now();
+            this.repositionVaultAutofillPanel();
+        });
+    }
+
+    _vaultCardBrand(num) {
+        const n = String(num || '').replace(/\D/g, '');
+        if (/^4/.test(n)) return 'visa';
+        if (/^5[1-5]/.test(n) || /^2(2[2-9]|[3-6]|7[01]|720)/.test(n)) return 'mastercard';
+        if (/^3[47]/.test(n)) return 'amex';
+        return 'card';
+    }
+
+    _vaultInitials(text) {
+        const s = String(text || '').trim();
+        if (!s) return '••';
+        const parts = s.replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean);
+        if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase().slice(0, 2);
+        return s.slice(0, 2).toUpperCase();
+    }
+
+    _vaultHostFromOrigin(origin) {
+        try {
+            return new URL(String(origin || '')).hostname.replace(/^www\./, '');
+        } catch (_) {
+            return '';
         }
-        panel.classList.remove('hidden');
-        panel.setAttribute('data-ui-theme', this.getVaultAutofillUiTheme());
-        this._vaultAutofillShownAt = Date.now();
-        this.repositionVaultAutofillPanel();
+    }
+
+    _vaultFormatAfDate(ts) {
+        const n = Number(ts);
+        if (!n) return '';
+        try {
+            const d = new Date(n);
+            if (Number.isNaN(d.getTime())) return '';
+            return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+        } catch (_) {
+            return '';
+        }
+    }
+
+    async _decorateVaultAutofillItems(kind, items) {
+        const list = Array.isArray(items) ? items : [];
+        return Promise.all(
+            list.map(async (row) => ({
+                ...row,
+                _ui: await this._vaultAutofillRowUi(kind, row)
+            }))
+        );
+    }
+
+    async _vaultFaviconDataUrl(origin, site) {
+        const cache = this._vaultFaviconDataCache || (this._vaultFaviconDataCache = new Map());
+        const key = String(origin || site || '').trim();
+        if (!key) return '';
+        if (cache.get(key)) return cache.get(key);
+        cache.delete(key);
+
+        let dataUrl = '';
+        // Prefer the exact favicon Electron already discovered for this site.
+        try {
+            const tabs = this.tabs instanceof Map ? [...this.tabs.values()] : Array.isArray(this.tabs) ? this.tabs : [];
+            for (const tab of tabs) {
+                if (!tab?.favicon || !tab.url) continue;
+                try {
+                    if (new URL(tab.url).origin === origin || (site && tab.url.includes(site))) {
+                        dataUrl = String(tab.favicon);
+                        break;
+                    }
+                } catch (_) {}
+            }
+        } catch (_) {}
+
+        if (!dataUrl && window.electronAPI?.vaultFetchFavicon) {
+            try {
+                const res = await window.electronAPI.vaultFetchFavicon(
+                    origin || (site ? `https://${site}/` : '')
+                );
+                if (res?.ok && res.dataUrl) dataUrl = res.dataUrl;
+            } catch (_) {}
+        }
+
+        // A page-favicon event can arrive later, so never cache a failed lookup.
+        if (dataUrl) cache.set(key, dataUrl);
+        return dataUrl || '';
+    }
+
+    async _vaultAutofillRowUi(kind, row) {
+        if (kind === 'card') {
+            const iconKind = ['mastercard', 'visa', 'amex'].includes(row.brand)
+                ? row.brand
+                : 'card';
+            const masked = row.masked || `···· ${String(row.number || '').slice(-4)}`;
+            return {
+                iconKind,
+                iconText: '',
+                iconUrl: '',
+                primary: masked,
+                secondary: ''
+            };
+        }
+        if (kind === 'address') {
+            const line = row.summary || row.addressLine1 || '';
+            return {
+                iconKind: 'house',
+                iconText: '',
+                iconUrl: '',
+                primary: line || row.label || row.fullName || this.t('vault.af.address'),
+                secondary: ''
+            };
+        }
+        const user = row.username || '';
+        const site = this._vaultHostFromOrigin(row.origin);
+        const originUrl = row.origin || (site ? `https://${site}/` : '');
+        let faviconUrl = '';
+        try {
+            faviconUrl = await this._vaultFaviconDataUrl(originUrl, site);
+        } catch (_) {}
+        if (!faviconUrl && site) {
+            faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(site)}&sz=64`;
+        }
+        return {
+            iconKind: faviconUrl ? 'favicon' : 'initials',
+            iconText: this._vaultInitials(user || site),
+            iconUrl: faviconUrl || '',
+            primary: user || this.t('vault.af.savedLogin'),
+            secondary: ''
+        };
+    }
+
+    _vaultCleanLoginTitle(title) {
+        let t = String(title || '').trim();
+        t = t.replace(/^(log\s*in\s*to|sign\s*in\s*to|login\s*to|sign\s*into|log\s*into)\s+/i, '');
+        t = t.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
+        return t;
+    }
+
+    _vaultAutofillPillInnerHtml(ui) {
+        const u = ui || {};
+        let avatar = '';
+        if (u.iconKind === 'mastercard') {
+            avatar =
+                '<span class="vault-af-avatar is-brand"><span class="vault-af-mc" aria-hidden="true"></span></span>';
+        } else if (u.iconKind === 'visa') {
+            avatar =
+                '<span class="vault-af-avatar is-brand"><span class="vault-af-visa" aria-hidden="true">VISA</span></span>';
+        } else if (u.iconKind === 'amex') {
+            avatar =
+                '<span class="vault-af-avatar is-brand"><span class="vault-af-amex" aria-hidden="true">AMEX</span></span>';
+        } else if (u.iconKind === 'house') {
+            avatar =
+                '<span class="vault-af-avatar is-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1v-10.5Z"/></svg></span>';
+        } else if (u.iconKind === 'favicon' && u.iconUrl) {
+            avatar = `<span class="vault-af-avatar is-favicon"><img src="${this.escapeHtmlAttribute(u.iconUrl)}" alt="" decoding="async" referrerpolicy="no-referrer" onerror="this.parentElement.classList.remove('is-favicon');this.parentElement.classList.add('is-initials');this.parentElement.textContent='${this.escapeHtmlAttribute(u.iconText || '••')}';" /></span>`;
+        } else if (u.iconKind === 'card') {
+            avatar =
+                '<span class="vault-af-avatar is-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></span>';
+        } else {
+            avatar = `<span class="vault-af-avatar is-initials">${this.escapeHtml(u.iconText || '••')}</span>`;
+        }
+        const primary = this.escapeHtml(u.primary || u.primaryValue || '');
+        const secondary = this.escapeHtml(u.secondary || u.secondaryValue || '');
+        const copy = secondary
+            ? `<span class="vault-af-copy"><span class="vault-af-primary">${primary}</span><span class="vault-af-secondary">${secondary}</span></span>`
+            : `<span class="vault-af-copy"><span class="vault-af-primary">${primary}</span></span>`;
+        return `${avatar}${copy}`;
     }
 
     async applyVaultAutofillLogin(webview, id) {
@@ -30824,6 +33776,9 @@ class AxisBrowser {
             } catch (_) {}
             this._voidGuestTask(this.hideVaultAutofillInPage(webview));
             this.hideVaultAutofillPanel(true);
+            try {
+                webview.__axisVaultAutofillCooldownUntil = Date.now() + 900;
+            } catch (_) {}
         } catch (_) {}
     }
 
@@ -30832,7 +33787,9 @@ class AxisBrowser {
         try {
             const card = await window.electronAPI.vaultGetCardForFill(id);
             if (!card || !card.number) return;
-            const payload = { ...card, __axisFillKind: 'card' };
+            // Never send CVV into the guest page (user types it on the form).
+            const cardForGuest = { ...card, cvv: '' };
+            const payload = { ...cardForGuest, __axisFillKind: 'card' };
             try {
                 let fillJs = null;
                 try {
@@ -30841,10 +33798,13 @@ class AxisBrowser {
                 if (fillJs) await this.executeInGuestFrames(webview, fillJs, true);
             } catch (_) {}
             try {
-                webview.send('axis-vault-apply-card', card);
+                webview.send('axis-vault-apply-card', cardForGuest);
             } catch (_) {}
             this._voidGuestTask(this.hideVaultAutofillInPage(webview));
             this.hideVaultAutofillPanel(true);
+            try {
+                webview.__axisVaultAutofillCooldownUntil = Date.now() + 900;
+            } catch (_) {}
         } catch (_) {}
     }
 
@@ -30866,16 +33826,19 @@ class AxisBrowser {
             } catch (_) {}
             this._voidGuestTask(this.hideVaultAutofillInPage(webview));
             this.hideVaultAutofillPanel(true);
+            try {
+                webview.__axisVaultAutofillCooldownUntil = Date.now() + 900;
+            } catch (_) {}
         } catch (_) {}
     }
 
     _vaultOfferKey(payload) {
         if (!payload) return '';
         if (payload.type === 'card') {
-            return `card:${payload.origin}:${String(payload.number || '').slice(-4)}`;
+            return `card:${String(payload.number || '').replace(/\D/g, '').slice(-4)}:${payload.expMonth || ''}:${payload.expYear || ''}`;
         }
         if (payload.type === 'address') {
-            return `address:${payload.origin}:${payload.postalCode}:${payload.addressLine1}`;
+            return `address:${String(payload.postalCode || '').toLowerCase()}:${String(payload.addressLine1 || '').toLowerCase()}`;
         }
         const pass = payload.password || '';
         return `login:${payload.origin}:${payload.username}:${pass.length}`;
@@ -30887,14 +33850,22 @@ class AxisBrowser {
         const prechecked = !!payload.vaultSavePrechecked;
         const cred = { ...payload };
         delete cred.vaultSavePrechecked;
-        if (cred.type !== 'card' && cred.type !== 'address' && !prechecked) {
+        if (!prechecked) {
             try {
-                const gate = await window.electronAPI.vaultShouldOfferLoginSave({
-                    origin: cred.origin,
-                    username: cred.username,
-                    password: cred.password
-                });
-                if (!gate?.offer) return;
+                if (cred.type === 'card') {
+                    const gate = await window.electronAPI.vaultShouldOfferCardSave(cred);
+                    if (!gate?.offer) return;
+                } else if (cred.type === 'address') {
+                    const gate = await window.electronAPI.vaultShouldOfferAddressSave(cred);
+                    if (!gate?.offer) return;
+                } else {
+                    const gate = await window.electronAPI.vaultShouldOfferLoginSave({
+                        origin: cred.origin,
+                        username: cred.username,
+                        password: cred.password
+                    });
+                    if (!gate?.offer) return;
+                }
             } catch (_) {
                 /* guest poll may still be valid */
             }
@@ -30944,16 +33915,23 @@ class AxisBrowser {
         modal.setAttribute('data-ui-theme', this.getVaultAutofillUiTheme());
         if (title) {
             title.textContent = isCard
-                ? 'Save this card?'
+                ? this.t('vault.saveCardTitle')
                 : isAddress
-                  ? 'Save this address?'
-                  : 'Save password?';
+                  ? this.t('vault.saveAddressTitle')
+                  : this.t('vault.savePasswordTitle');
         }
-        if (siteEl) siteEl.textContent = host || '—';
+        // Cards and addresses are not site-bound - show a plain label, not the checkout host.
+        if (siteEl) {
+            siteEl.textContent = isCard
+                ? this.t('vault.saveCardSubtitle')
+                : isAddress
+                  ? this.t('vault.saveAddressSubtitle')
+                  : host || '-';
+        }
         if (userRow) userRow.classList.toggle('hidden', isCard || isAddress);
         if (cardRow) cardRow.classList.toggle('hidden', !isCard);
         if (addressRow) addressRow.classList.toggle('hidden', !isAddress);
-        if (userEl && !isCard && !isAddress) userEl.textContent = payload.username || '—';
+        if (userEl && !isCard && !isAddress) userEl.textContent = payload.username || '-';
         if (cardEl && isCard) {
             const label = payload.masked || '••••';
             const who = payload.cardholder || '';
@@ -30962,7 +33940,7 @@ class AxisBrowser {
         if (addressEl && isAddress) {
             const who = payload.fullName || '';
             const summary = payload.summary || payload.addressLine1 || '';
-            addressEl.textContent = who && summary ? `${who} · ${summary}` : who || summary || '—';
+            addressEl.textContent = who && summary ? `${who} · ${summary}` : who || summary || '-';
         }
         modal.classList.remove('hidden');
         this._setVaultModalOverlay(true);
@@ -30986,7 +33964,7 @@ class AxisBrowser {
                     cvv: payload.cvv || '',
                     billingZip: payload.billingZip || ''
                 });
-                this.showNotification('Card saved', 'success');
+                this.showNotification(this.t('note.cardSaved'), 'success');
             } else if (payload.type === 'address') {
                 await window.electronAPI.vaultSaveAddress({
                     label: payload.label || '',
@@ -31001,13 +33979,13 @@ class AxisBrowser {
                     phone: payload.phone || '',
                     email: payload.email || ''
                 });
-                this.showNotification('Address saved', 'success');
+                this.showNotification(this.t('note.addressSaved'), 'success');
             } else {
                 await window.electronAPI.vaultCaptureLogin(payload);
-                this.showNotification('Password saved', 'success');
+                this.showNotification(this.t('note.passwordSaved'), 'success');
             }
         } catch (e) {
-            this.showNotification(e?.message || 'Could not save', 'error');
+            this.showNotification(e?.message || this.t('vault.saveFail'), 'error');
         }
     }
 
@@ -31016,7 +33994,7 @@ class AxisBrowser {
         const list = document.getElementById('vault-pick-list');
         const modal = this.elements.vaultPickModal;
         const title = document.getElementById('vault-pick-title');
-        if (title) title.textContent = 'Choose a login';
+        if (title) title.textContent = this.t('vault.chooseLogin');
         if (!list || !modal) return;
         list.innerHTML = '';
         for (const row of logins) {
@@ -31024,7 +34002,7 @@ class AxisBrowser {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'vault-pick-item';
-            btn.textContent = `${row.title || row.username} — ${row.username}`;
+            btn.textContent = `${row.title || row.username} - ${row.username}`;
             btn.addEventListener('click', () => void this.applyVaultLoginPick(row.id));
             li.appendChild(btn);
             list.appendChild(li);
@@ -31039,7 +34017,7 @@ class AxisBrowser {
         const list = document.getElementById('vault-pick-list');
         const modal = this.elements.vaultPickModal;
         const title = document.getElementById('vault-pick-title');
-        if (title) title.textContent = 'Choose a card';
+        if (title) title.textContent = this.t('vault.chooseCard');
         if (!list || !modal) return;
         list.innerHTML = '';
         for (const row of cards) {
@@ -31047,7 +34025,7 @@ class AxisBrowser {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'vault-pick-item';
-            btn.textContent = `${row.label || row.cardholder || 'Card'} — ${row.masked}`;
+            btn.textContent = `${row.label || row.cardholder || 'Card'} - ${row.masked}`;
             btn.addEventListener('click', () => void this.applyVaultCardPick(row.id));
             li.appendChild(btn);
             list.appendChild(li);
@@ -31079,7 +34057,7 @@ class AxisBrowser {
         if (!wv || !id) return;
         try {
             const card = await window.electronAPI.vaultGetCardForFill(id);
-            wv.send('axis-vault-apply-card', card);
+            wv.send('axis-vault-apply-card', { ...card, cvv: '' });
         } catch (e) {
             this.showNotification(e?.message || 'Could not fill card', 'error');
         }
