@@ -1,11 +1,13 @@
 {
   "name": "axis",
   "productName": "Axis",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A minimalistic, customizable, and beautiful browser built on Electron",
   "main": "src/main.js",
   "scripts": {
     "postinstall": "node scripts/patch-electron-mac-display-name.js",
+    "i18n:sync": "node scripts/i18n-sync-offline.js",
+    "prebuild": "npm run i18n:sync",
     "start": "node scripts/run-electron.js",
     "dev": "node scripts/run-electron.js --dev",
     "build": "npx electron-builder",
@@ -13,20 +15,20 @@
   },
   "overrides": {
     "ip-address": "^10.2.0",
-    "fast-uri": "^3.1.4",
+    "fast-uri": "^3.1.5",
     "tar": "^7.5.21",
     "ajv": "^8.18.0",
     "@develar/schema-utils": {
       "ajv": "^6.12.6"
     },
     "minimatch": "^10.2.3",
-    "brace-expansion": "^5.0.7",
+    "brace-expansion": "^5.0.9",
     "picomatch": "4.0.4",
     "@xmldom/xmldom": "0.8.13",
     "file-type": ">=21.3.1",
     "tmp": "0.2.7",
     "form-data": "^4.0.6",
-    "js-yaml": "^4.3.0",
+    "js-yaml": "^4.3.1",
     "app-builder-lib": "^26.15.7",
     "builder-util-runtime": "^9.7.0"
   },
@@ -39,7 +41,7 @@
   "author": "Axis Browser Team",
   "license": "SEE LICENSE IN LICENSE.md",
   "devDependencies": {
-    "electron": "39.8.5",
+    "electron": "41.10.6",
     "electron-builder": "^26.15.7",
     "lodash": "^4.18.1",
     "minimatch": "^10.2.3",
@@ -90,8 +92,51 @@
         "dmg"
       ],
       "hardenedRuntime": false,
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "HTML document",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Default",
+            "LSItemContentTypes": [
+              "public.html",
+              "public.xhtml"
+            ]
+          },
+          {
+            "CFBundleTypeName": "URL",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Default",
+            "LSItemContentTypes": [
+              "public.url"
+            ]
+          }
+        ]
+      }
     },
+    "protocols": [
+      {
+        "name": "Axis HTTP Link",
+        "schemes": [
+          "http",
+          "https"
+        ]
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "html",
+          "htm",
+          "shtml",
+          "xhtml"
+        ],
+        "name": "HTML Document",
+        "role": "Viewer",
+        "rank": "Default"
+      }
+    ],
     "dmg": {
       "background": "assets/dmg-background.png",
       "window": {
