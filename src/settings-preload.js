@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSidebarPosition: () => ipcRenderer.sendSync('axis-get-sidebar-position'),
   getSettingsWindowBootstrap: () => ipcRenderer.sendSync('axis-settings-window-bootstrap'),
   getSettingsProfileBootstrap: () => ipcRenderer.sendSync('axis-settings-profile-bootstrap'),
+  notifySettingsUiReady: () => ipcRenderer.send('axis-settings-ui-ready'),
   getSystemUiTheme: () => ipcRenderer.invoke('get-system-ui-theme'),
   onSystemUiThemeChanged: (callback) => {
     const handler = (_event, theme) => callback(theme);
@@ -22,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSettingsEditingContext: () => ipcRenderer.invoke('get-settings-editing-context'),
   setSettingsEditingProfile: (profileId) =>
     ipcRenderer.invoke('set-settings-editing-profile', profileId),
+  setSettingsUiActive: (active) => ipcRenderer.invoke('set-settings-ui-active', !!active),
   sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
   openSettingsWindow: (tab) => ipcRenderer.invoke('open-settings-window', tab),
   closeSettingsWindow: () => ipcRenderer.invoke('axis-close-settings-window'),
