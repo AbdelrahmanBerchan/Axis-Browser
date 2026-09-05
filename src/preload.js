@@ -4,10 +4,15 @@ const { contextBridge, ipcRenderer } = require('electron');
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
+  /**
+   * Home dir for `~/…` paths in the address bar.
+   * Sandboxed preload cannot `require('os')` — that crashed the whole preload and left a blank window.
+   */
+  homedir: process.env.HOME || process.env.USERPROFILE || '',
 
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
-  /** Window-wide sidebar side (left/right) — same for every profile. */
+  /** Window-wide sidebar side (left/right) - same for every profile. */
   getSidebarPosition: () => ipcRenderer.sendSync('axis-get-sidebar-position'),
   /** Sync; used by standalone `settings.html` before first paint so theme never follows the OS. */
   getSettingsWindowBootstrap: () => ipcRenderer.sendSync('axis-settings-window-bootstrap'),
@@ -19,7 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
   setSettingsBatch: (patch) => ipcRenderer.invoke('set-settings-batch', patch),
-  /** Sync write before quit — avoids losing tab groups when async setSetting does not finish. */
+  /** Sync write before quit - avoids losing tab groups when async setSetting does not finish. */
   flushSessionSync: (payload) => ipcRenderer.sendSync('axis-flush-session-sync', payload),
   flushSessionAsync: (payload) => ipcRenderer.invoke('axis-flush-session-async', payload),
   getSitePermissionOverrides: () => ipcRenderer.invoke('get-site-permission-overrides'),
@@ -32,6 +37,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   sendSettingsUpdated: () => ipcRenderer.send('settings-updated'),
   openSettingsWindow: (tab) => ipcRenderer.invoke('open-settings-window', tab),
+  setSettingsUiActive: (active) => ipcRenderer.invoke('set-settings-ui-active', !!active),
+  setSettingsEditingProfile: (profileId) =>
+    ipcRenderer.invoke('set-settings-editing-profile', profileId),
   listImportableBrowsers: () => ipcRenderer.invoke('list-importable-browsers'),
   listBrowserImportProfiles: (browserId) => ipcRenderer.invoke('list-browser-import-profiles', browserId),
   previewBrowserImport: (payload) => ipcRenderer.invoke('preview-browser-import', payload),
@@ -121,6 +129,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onHostResizeLive: (callback) => ipcRenderer.on('axis-host-resize-live', () => callback()),
   onHostResizeSettled: (callback) => ipcRenderer.on('axis-host-resize-settled', () => callback()),
   onOpenUrlInBrowser: (callback) => ipcRenderer.on('open-url-in-browser', (event, url) => callback(url)),
+  onGuestOpenUrlInNewTab: (callback) => {
+    const handler = (_event, payload) => {
+      if (payload && typeof payload === 'object' && payload.url) {
+        callback(payload);
+        return;
+      }
+      callback({ url: payload, sourceWebContentsId: 0 });
+    };
+    ipcRenderer.on('guest-open-url-in-new-tab', handler);
+    return () => ipcRenderer.removeListener('guest-open-url-in-new-tab', handler);
+  },
   onOpenSettingsTab: (callback) => ipcRenderer.on('open-settings-tab', (event, section) => callback(section)),
   onSettingsUpdated: (callback) =>
     ipcRenderer.on('settings-updated', (_event, data) => callback(data)),
@@ -191,6 +210,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vaultGetAutofillInjectJs: () => ipcRenderer.invoke('axis-vault-get-autofill-inject-js'),
   vaultBuildAutofillShowJs: (items, theme, kind) =>
     ipcRenderer.invoke('axis-vault-build-autofill-show-js', { items, theme, kind }),
+  vaultFetchFavicon: (origin) => ipcRenderer.invoke('axis-vault-fetch-favicon', origin),
   vaultBuildAutofillFillJs: (cred) => ipcRenderer.invoke('axis-vault-build-autofill-fill-js', cred),
   vaultReportCredentials: (payload) => ipcRenderer.invoke('axis-vault-report-credentials', payload),
   vaultVerifyDevice: (reason) => ipcRenderer.invoke('axis-vault-verify-device', reason),
@@ -212,6 +232,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vaultDeleteAddress: (id) => ipcRenderer.invoke('axis-vault-delete-address', id),
   vaultGetAddressForFill: (id) => ipcRenderer.invoke('axis-vault-get-address-for-fill', id),
   vaultShouldOfferAddressSave: (payload) => ipcRenderer.invoke('axis-vault-should-offer-address-save', payload),
+  vaultShouldOfferCardSave: (payload) => ipcRenderer.invoke('axis-vault-should-offer-card-save', payload),
   vaultCaptureLogin: (payload) => ipcRenderer.invoke('axis-vault-capture-login', payload),
   vaultShouldOfferLoginSave: (payload) => ipcRenderer.invoke('axis-vault-should-offer-login-save', payload),
   vaultFillCandidates: (payload) => ipcRenderer.invoke('axis-vault-fill-candidates', payload),
@@ -278,5 +299,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Icon picker
   showIconPicker: (type) => ipcRenderer.invoke('show-icon-picker', type),
-  onTriggerNativeEmojiPicker: (callback) => ipcRenderer.on('trigger-native-emoji-picker', (event, type) => callback(type))
+  onTriggerNativeEmojiPicker: (callback) => ipcRenderer.on('trigger-native-emoji-picker', (event, type) => callback(type)),
+
+  getUpdateStatus: () => ipcRenderer.invoke('axis-update-get-status'),
+  restartToUpdate: () => ipcRenderer.invoke('axis-update-restart'),
+  dismissUpdateBanner: () => ipcRenderer.invoke('axis-update-dismiss'),
+  onAxisUpdateStatus: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('axis-update-status', handler);
+    return () => ipcRenderer.removeListener('axis-update-status', handler);
+  },
+  getWindowFullscreen: () => ipcRenderer.invoke('axis-window-get-fullscreen'),
+  onWindowFullscreen: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('axis-window-fullscreen', handler);
+    return () => ipcRenderer.removeListener('axis-window-fullscreen', handler);
+  },
+  onGuestHtmlFullscreen: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('axis-guest-html-fullscreen', handler);
+    return () => ipcRenderer.removeListener('axis-guest-html-fullscreen', handler);
+  }
 });
