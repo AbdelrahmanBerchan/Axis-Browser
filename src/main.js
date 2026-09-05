@@ -6,6 +6,145 @@ app.setName('Axis');
 try {
   app.setPath('userData', path.join(app.getPath('appData'), 'Axis'));
 } catch (_) {}
+
+/**
+ * Single-instance + external http(s) links (macOS open-url, Windows/Linux argv).
+ * Must be registered before ready so Launch Services can hand off URLs.
+ */
+const axisPendingOpenUrls = [];
+let axisShellReadyForUrls = false;
+
+function axisExtractHttpUrlsFromArgv(argv) {
+  const out = [];
+  for (const raw of argv || []) {
+    if (typeof raw !== 'string' || !raw) continue;
+    // Ignore electron/node switches and file paths.
+    if (raw.startsWith('-')) continue;
+    try {
+      const u = new URL(raw);
+      if (u.protocol === 'http:' || u.protocol === 'https:') out.push(u.href);
+    } catch (_) {}
+  }
+  return out;
+}
+
+function axisFocusBrowserWindow(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } catch (_) {}
+}
+
+function axisOpenExternalHttpUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  let href = '';
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    href = u.href;
+  } catch (_) {
+    return false;
+  }
+  if (!axisShellReadyForUrls) {
+    axisPendingOpenUrls.push(href);
+    return true;
+  }
+  const focused = BrowserWindow.getFocusedWindow();
+  let target =
+    focused &&
+    !focused.isDestroyed() &&
+    !focused.__axisIsSettingsWindow &&
+    (() => {
+      try {
+        return (focused.webContents.getURL() || '').includes('index.html');
+      } catch (_) {
+        return false;
+      }
+    })()
+      ? focused
+      : null;
+  if (!target || target.isDestroyed()) {
+    target =
+      mainWindow && !mainWindow.isDestroyed()
+        ? mainWindow
+        : BrowserWindow.getAllWindows().find((w) => {
+            if (!w || w.isDestroyed() || w.__axisIsSettingsWindow) return false;
+            try {
+              return (w.webContents.getURL() || '').includes('index.html');
+            } catch (_) {
+              return false;
+            }
+          }) || null;
+  }
+  if (!target || target.isDestroyed()) {
+    axisPendingOpenUrls.push(href);
+    try {
+      createWindow({ profileId: AXIS_DEFAULT_PROFILE_ID });
+    } catch (_) {}
+    return true;
+  }
+  axisFocusBrowserWindow(target);
+  try {
+    target.webContents.send('open-url-in-browser', href);
+  } catch (_) {
+    axisPendingOpenUrls.push(href);
+  }
+  return true;
+}
+
+function axisFlushPendingOpenUrls() {
+  axisShellReadyForUrls = true;
+  const queued = axisPendingOpenUrls.splice(0, axisPendingOpenUrls.length);
+  for (const href of queued) {
+    axisOpenExternalHttpUrl(href);
+  }
+}
+
+function axisRegisterDefaultBrowserProtocolClients() {
+  try {
+    if (process.defaultApp) {
+      // `npm start` / electron . - Launch Services needs the script path as an arg.
+      const appEntry =
+        process.argv.length >= 2 ? path.resolve(process.argv[1]) : path.join(__dirname, 'main.js');
+      app.setAsDefaultProtocolClient('http', process.execPath, [appEntry]);
+      app.setAsDefaultProtocolClient('https', process.execPath, [appEntry]);
+    } else {
+      app.setAsDefaultProtocolClient('http');
+      app.setAsDefaultProtocolClient('https');
+    }
+  } catch (_) {}
+}
+
+const axisGotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!axisGotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    const urls = axisExtractHttpUrlsFromArgv(argv);
+    if (urls.length) {
+      urls.forEach((u) => axisOpenExternalHttpUrl(u));
+    } else {
+      const win =
+        (mainWindow && !mainWindow.isDestroyed() && mainWindow) ||
+        BrowserWindow.getAllWindows().find((w) => w && !w.isDestroyed());
+      axisFocusBrowserWindow(win);
+    }
+  });
+}
+
+// macOS: URL opens arrive here (including when Axis was not running).
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  axisOpenExternalHttpUrl(url);
+});
+
+// Cold-start URLs from the command line (Windows / Linux / some macOS launches).
+for (const href of axisExtractHttpUrlsFromArgv(process.argv)) {
+  axisPendingOpenUrls.push(href);
+}
+
 const Store = require('electron-store');
 const fs = require('fs');
 const os = require('os');
@@ -42,8 +181,69 @@ const {
   buildVaultAutofillFillCardJs,
   buildVaultAutofillFillAddressJs
 } = require('./axis-vault-autofill-inject');
+const {
+  getAxisLibraryRootDirs: getAxisLibraryRootDirsHelper,
+  isPathInsideAxisLibraryRoots: isPathInsideAxisLibraryRootsHelper,
+  isAxisSettingsGuestUrl,
+  isAxisShellFileUrl,
+  isWebsiteGuestUrl,
+  isExtensionPageUrl,
+  isZipEntryPathSafe,
+  formatAddressCandidateSummary
+} = require('./axis-security-helpers');
+const {
+  sealSecret: sealAxisSecret,
+  openSecret: openAxisSecret,
+  isSealedSecret: isAxisSealedSecret
+} = require('./axis-vault');
 const { installAxisPageSecurityOnSession, installAxisPageSecurityOnWebContents, getPageSecurityInfo } = require('./axis-page-security');
 const axisUpdateCheck = require('./axis-update-check');
+const AxisI18n = require('./axis-i18n');
+const AxisUiFonts = require('./axis-ui-fonts');
+require('./axis-locale-packs');
+require('./axis-locale-packs-more');
+require('./axis-locale-packs-fix');
+require('./axis-locale-quality');
+require('./axis-locale-auto');
+
+function getMenuLocaleProfileId() {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || getActiveAxisWindow();
+    if (win && !win.isDestroyed()) {
+      if (win.__axisIsIncognito === true) return 'incognito';
+      // Dedicated Settings window only: menu follows the profile Settings is editing.
+      if (win.__axisIsSettingsWindow) {
+        return (
+          getSettingsEditingProfileIdForWindow(win) ||
+          sanitizeProfileId(win.__axisSettingsProfileId) ||
+          AXIS_DEFAULT_PROFILE_ID
+        );
+      }
+      // Browsing window (even with embedded Settings open): menu follows the
+      // profile you are browsing as, so a profile swipe cannot leave the menu stuck.
+      if (win.__axisProfileId) return sanitizeProfileId(win.__axisProfileId);
+    }
+  } catch (_) {}
+  return getActiveProfileId();
+}
+
+function syncMenuLocale(profileId) {
+  try {
+    const pid = sanitizeProfileId(profileId || getMenuLocaleProfileId());
+    const loc = resolveUiLanguageForProfile(pid);
+    AxisI18n.setLocale(loc);
+  } catch (_) {
+    try { AxisI18n.setLocale('en'); } catch (__) {}
+  }
+}
+
+function uiT(key, vars) {
+  try {
+    return AxisI18n.t(key, vars);
+  } catch (_) {
+    return key;
+  }
+}
 
 /** App branding image (project root). Used for windows, macOS Dock, About panel, and packaged .app icon. */
 const APP_ICON_PATH = path.join(__dirname, '..', 'Axis_logo.png');
@@ -62,7 +262,7 @@ function getAppIconNativeImage() {
 }
 
 /**
- * macOS: `app.dock.setIcon()` draws the bitmap as-is — unlike a bundled .icns, the Dock does not apply the
+ * macOS: `app.dock.setIcon()` draws the bitmap as-is - unlike a bundled .icns, the Dock does not apply the
  * standard squircle mask. Apply a superellipse (n=4) alpha mask so the tile matches other apps.
  */
 function applySquircleAlphaToJimp(image) {
@@ -122,7 +322,7 @@ async function getMacSquircleIconNativeImage() {
     const image = await Jimp.read(APP_ICON_PATH);
     const side = 512;
     // `app.dock.setIcon()` does not apply the template mask. Build a full-tile squircle first, then
-    // shrink that bitmap — do NOT inset the logo *before* masking: a small square bitmap fully inside
+    // shrink that bitmap - do NOT inset the logo *before* masking: a small square bitmap fully inside
     // the squircle reads as a square tile (no curved silhouette). System icons look smaller because the
     // whole squircle is scaled down with margin, not because the art is an unmasked square.
     image.contain({ w: side, h: side });
@@ -166,10 +366,10 @@ async function showMacAboutDialog() {
   const iconImg = (await getMacSquircleIconNativeImage()) || getAppIconNativeImage();
   const opts = {
     type: 'info',
-    title: `About ${appName}`,
+    title: uiT('app.about', { name: appName }),
     message: appName,
-    detail: `Version ${app.getVersion()}\n\nCopyright © 2026 Abdelrahman Berchan.`,
-    buttons: ['OK'],
+    detail: uiT('app.aboutVersion', { ver: app.getVersion() }),
+    buttons: [uiT('common.ok')],
     defaultId: 0
   };
   if (iconImg && !iconImg.isEmpty()) {
@@ -185,8 +385,84 @@ async function showMacAboutDialog() {
 // Initialize settings store
 const store = new Store();
 const AXIS_LAST_CLEAN_EXIT_KEY = 'axisLastSessionCleanExit';
-/** Window-wide sidebar dock side — shared across every profile in this window. */
+/** Window-wide sidebar dock side - shared across every profile in this window. */
 const AXIS_SIDEBAR_POSITION_KEY = 'sidebarPosition';
+/** App-wide UI language override (all profiles + Incognito) when enabled. */
+const AXIS_UNIVERSAL_LANG_ENABLED_KEY = 'universalBrowserLanguage';
+const AXIS_UNIVERSAL_LANG_CODE_KEY = 'universalUiLanguage';
+/** App-wide UI font override (all profiles + Incognito) when enabled. */
+const AXIS_UNIVERSAL_FONT_ENABLED_KEY = 'universalBrowserFont';
+const AXIS_UNIVERSAL_FONT_CODE_KEY = 'universalUiFont';
+
+function sanitizeUiFontId(raw) {
+  return AxisUiFonts.sanitizeId(raw);
+}
+
+function getUiFontStack(id) {
+  return AxisUiFonts.getStack(id);
+}
+
+function isUniversalBrowserFontEnabled() {
+  return store.get(AXIS_UNIVERSAL_FONT_ENABLED_KEY) === true;
+}
+
+function getUniversalUiFontId() {
+  return sanitizeUiFontId(store.get(AXIS_UNIVERSAL_FONT_CODE_KEY, 'default') || 'default');
+}
+
+function setUniversalBrowserFontEnabled(on, seedFont) {
+  const enabled = !!on;
+  store.set(AXIS_UNIVERSAL_FONT_ENABLED_KEY, enabled);
+  if (enabled) {
+    let font = '';
+    if (seedFont != null && String(seedFont).trim() !== '') {
+      font = sanitizeUiFontId(seedFont);
+    } else {
+      font = sanitizeUiFontId(store.get(AXIS_UNIVERSAL_FONT_CODE_KEY, '') || '');
+    }
+    if (!font) {
+      try {
+        font = sanitizeUiFontId(
+          getProfileStore(AXIS_DEFAULT_PROFILE_ID).get('uiFont', 'default') || 'default'
+        );
+      } catch (_) {
+        font = 'default';
+      }
+    }
+    store.set(AXIS_UNIVERSAL_FONT_CODE_KEY, font);
+    return { enabled: true, uiFont: font, universalUiFont: font };
+  }
+  return {
+    enabled: false,
+    uiFont: getUniversalUiFontId(),
+    universalUiFont: getUniversalUiFontId()
+  };
+}
+
+function setUniversalUiFontId(code) {
+  const font = sanitizeUiFontId(code);
+  store.set(AXIS_UNIVERSAL_FONT_CODE_KEY, font);
+  return font;
+}
+
+function resolveUiFontForProfile(profileId, profileSettings) {
+  if (isUniversalBrowserFontEnabled()) {
+    return getUniversalUiFontId();
+  }
+  const raw =
+    (profileSettings && profileSettings.uiFont) ||
+    (() => {
+      try {
+        if (profileId === 'incognito') {
+          return ensureIncognitoProfileStore().get('uiFont', 'default');
+        }
+        return getProfileStore(profileId).get('uiFont', 'default');
+      } catch (_) {
+        return 'default';
+      }
+    })();
+  return sanitizeUiFontId(raw);
+}
 
 function getGlobalSidebarPosition() {
   if (store.has(AXIS_SIDEBAR_POSITION_KEY)) {
@@ -217,10 +493,123 @@ function setGlobalSidebarPosition(value) {
   return v;
 }
 
-function mergeGlobalSettingsIntoProfileSettings(profileSettings) {
+function isUniversalBrowserLanguageEnabled() {
+  return store.get(AXIS_UNIVERSAL_LANG_ENABLED_KEY) === true;
+}
+
+function getUniversalUiLanguageCode() {
+  try {
+    const raw = store.get(AXIS_UNIVERSAL_LANG_CODE_KEY, '') || '';
+    const loc = AxisI18n.sanitizeLocale(raw);
+    if (loc) return loc;
+  } catch (_) {}
+  try {
+    return AxisI18n.sanitizeLocale(app.getLocale()) || 'en';
+  } catch (_) {
+    return 'en';
+  }
+}
+
+function setUniversalBrowserLanguageEnabled(on, seedLocale) {
+  const enabled = !!on;
+  store.set(AXIS_UNIVERSAL_LANG_ENABLED_KEY, enabled);
+  if (enabled) {
+    let loc = '';
+    try {
+      loc = AxisI18n.sanitizeLocale(seedLocale || store.get(AXIS_UNIVERSAL_LANG_CODE_KEY) || '') || '';
+    } catch (_) {}
+    if (!loc) {
+      try {
+        loc =
+          AxisI18n.sanitizeLocale(getProfileStore(AXIS_DEFAULT_PROFILE_ID).get('uiLanguage', '')) ||
+          AxisI18n.sanitizeLocale(app.getLocale()) ||
+          'en';
+      } catch (_) {
+        loc = 'en';
+      }
+    }
+    store.set(AXIS_UNIVERSAL_LANG_CODE_KEY, loc);
+    // Do not overwrite each profile's stored uiLanguage - resolve at read time so
+    // turning Universal off restores each profile's own language.
+    return { enabled: true, uiLanguage: loc, universalUiLanguage: loc };
+  }
   return {
-    ...(profileSettings && typeof profileSettings === 'object' ? profileSettings : {}),
-    sidebarPosition: getGlobalSidebarPosition()
+    enabled: false,
+    uiLanguage: getUniversalUiLanguageCode(),
+    universalUiLanguage: getUniversalUiLanguageCode()
+  };
+}
+
+function setUniversalUiLanguageCode(code) {
+  let loc = 'en';
+  try {
+    loc = AxisI18n.sanitizeLocale(code) || 'en';
+  } catch (_) {}
+  store.set(AXIS_UNIVERSAL_LANG_CODE_KEY, loc);
+  return loc;
+}
+
+function resolveUiLanguageForProfile(profileId, profileSettings) {
+  if (isUniversalBrowserLanguageEnabled()) {
+    return getUniversalUiLanguageCode();
+  }
+  const raw =
+    (profileSettings && profileSettings.uiLanguage) ||
+    (() => {
+      try {
+        if (profileId === 'incognito') {
+          return ensureIncognitoProfileStore().get('uiLanguage', '');
+        }
+        return getProfileStore(profileId).get('uiLanguage', '');
+      } catch (_) {
+        return '';
+      }
+    })();
+  try {
+    return AxisI18n.sanitizeLocale(raw) || AxisI18n.sanitizeLocale(app.getLocale()) || 'en';
+  } catch (_) {
+    return 'en';
+  }
+}
+
+function mergeGlobalSettingsIntoProfileSettings(profileSettings) {
+  const raw =
+    profileSettings && typeof profileSettings === 'object' ? { ...profileSettings } : {};
+  let profileLang = '';
+  try {
+    profileLang = AxisI18n.sanitizeLocale(raw.uiLanguage) || '';
+  } catch (_) {
+    profileLang = String(raw.uiLanguage || '');
+  }
+  const universalOn = isUniversalBrowserLanguageEnabled();
+  const universalLang = getUniversalUiLanguageCode();
+  const profileFont = sanitizeUiFontId(raw.uiFont || 'default');
+  const universalFontOn = isUniversalBrowserFontEnabled();
+  const universalFont = getUniversalUiFontId();
+  return {
+    ...raw,
+    sidebarPosition: getGlobalSidebarPosition(),
+    universalBrowserLanguage: universalOn,
+    universalUiLanguage: universalLang,
+    // Raw per-profile language (for the greyed-out picker while Universal is on).
+    // Never fall back to the universal code - that made disable look like it
+    // "stole" the profile picker's language.
+    profileUiLanguage: profileLang,
+    uiLanguage: universalOn
+      ? universalLang
+      : profileLang ||
+        (() => {
+          try {
+            return AxisI18n.sanitizeLocale(app.getLocale()) || 'en';
+          } catch (_) {
+            return 'en';
+          }
+        })(),
+    universalBrowserFont: universalFontOn,
+    universalUiFont: universalFont,
+    profileUiFont: profileFont,
+    uiFont: universalFontOn ? universalFont : profileFont,
+    uiFontStack: getUiFontStack(universalFontOn ? universalFont : profileFont)
   };
 }
 /** Captured at process start before the session is marked dirty (renderer reads via IPC). */
@@ -248,7 +637,7 @@ const axisVaultByProfile = new Map();
 
 // Electron defaults `nativeTheme.themeSource` to `system`, so when the OS switches
 // light/dark, Chromium's `prefers-color-scheme`, vibrancy materials, and native form
-// chrome follow — which fights Axis (user theme + in-app Appearance). Pin a stable
+// chrome follow - which fights Axis (user theme + in-app Appearance). Pin a stable
 // dark scheme for the whole app; light “Appearance” remains overlay/CSS (`data-ui-theme`)
 // and `settings.html`'s own `color-scheme`, not OS-driven.
 try {
@@ -259,7 +648,7 @@ try {
 function getSystemUiThemePreference() {
   try {
     if (process.platform === 'darwin') {
-      // `isDarkMode` was removed in Electron 13+. Read the global OS setting directly —
+      // `isDarkMode` was removed in Electron 13+. Read the global OS setting directly -
       // `shouldUseDarkColorsForSystemIntegratedUI` mirrors the *app* theme on macOS, which
       // we pin to dark, so it cannot represent the system preference.
       if (typeof systemPreferences.getUserDefault === 'function') {
@@ -494,7 +883,7 @@ function refreshProfileWindowTitles(profileId) {
   const id = sanitizeProfileId(profileId);
   const name = getProfileName(id);
   const title =
-    id === AXIS_DEFAULT_PROFILE_ID && name === 'Personal' ? 'Axis Browser' : `Axis — ${name}`;
+    id === AXIS_DEFAULT_PROFILE_ID && name === 'Personal' ? 'Axis Browser' : `Axis - ${name}`;
   for (const w of BrowserWindow.getAllWindows()) {
     if (w.isDestroyed() || w.__axisIsIncognito) continue;
     if (sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID) === id) {
@@ -739,12 +1128,20 @@ function initializeProfileDefaults(profileId, profileStore) {
     ntpShowWidgetsEditButton: true,
     aiFeaturesEnabled: true,
     ntpGreetingName: 'User',
-    unpinnedClearMode: 'app-close',
+    unpinnedClearMode: 'never',
     unpinnedClearCustomMinutes: 60,
     ambientAudioEnabled: false,
     ambientMuteWhenTabAudio: true,
     ambientAudioPreset: 'rain',
-    ambientAudioVolume: 48
+    ambientAudioVolume: 48,
+    uiLanguage: (() => {
+      try {
+        return AxisI18n.sanitizeLocale(app.getLocale()) || 'en';
+      } catch (_) {
+        return 'en';
+      }
+    })(),
+    uiFont: 'default'
   };
   // Always fill missing keys (including on older profiles created before a setting existed).
   for (const [key, value] of Object.entries(defaults)) {
@@ -764,6 +1161,7 @@ function initializeProfileDefaults(profileId, profileStore) {
 
 function getProfilePartition(profileId) {
   const id = sanitizeProfileId(profileId);
+  if (id === 'incognito') return 'incognito';
   if (id === AXIS_DEFAULT_PROFILE_ID) {
     return AXIS_EXTENSION_SESSION_PARTITION;
   }
@@ -773,7 +1171,8 @@ function getProfilePartition(profileId) {
 function getProfileIdFromSession(sess) {
   if (!sess || typeof sess.getPartition !== 'function') return AXIS_DEFAULT_PROFILE_ID;
   const part = sess.getPartition();
-  if (!part || part === 'incognito') return AXIS_DEFAULT_PROFILE_ID;
+  if (part === 'incognito') return 'incognito';
+  if (!part) return AXIS_DEFAULT_PROFILE_ID;
   if (part === AXIS_EXTENSION_SESSION_PARTITION || part === 'persist:main') {
     return AXIS_DEFAULT_PROFILE_ID;
   }
@@ -1252,7 +1651,7 @@ function getAxisExtensionApiShimSource() {
   return `
 (function () {
   var root = typeof globalThis !== 'undefined' ? globalThis : self;
-  // Never create a blank chrome object — that blocks Electron's real chrome.* injection.
+  // Never create a blank chrome object - that blocks Electron's real chrome.* injection.
   var chromeObj = root.chrome;
   if (!chromeObj) return;
   function eventStub() {
@@ -1434,7 +1833,7 @@ async function prepareAxisExtensionLoadPath(record, manifest, opts = {}) {
     compatManifest.commands = cmds;
   }
 
-  // MV3 side_panel is unsupported in Electron — drop so load warnings stay quiet.
+  // MV3 side_panel is unsupported in Electron - drop so load warnings stay quiet.
   delete compatManifest.side_panel;
   delete compatManifest.sidePanel;
 
@@ -1472,7 +1871,7 @@ function parseChromeWebStoreExtensionId(raw) {
   return null;
 }
 
-/** Mozilla Add-ons slug / numeric id from URL or plain slug (not used for 32-char Chrome IDs — caller handles that first). */
+/** Mozilla Add-ons slug / numeric id from URL or plain slug (not used for 32-char Chrome IDs - caller handles that first). */
 function parseFirefoxAmoAddonKey(raw) {
   const s = String(raw || '').trim();
   if (!s) return null;
@@ -1509,7 +1908,7 @@ async function fetchXpiBufferForFirefoxAmo(addonKey) {
   });
   if (!res.ok) {
     throw new Error(
-      `Mozilla Add-ons API error (${res.status}). Check the add-on URL or slug — the listing may be missing or restricted.`
+      `Mozilla Add-ons API error (${res.status}). Check the add-on URL or slug - the listing may be missing or restricted.`
     );
   }
   const data = await res.json();
@@ -1530,7 +1929,7 @@ async function fetchXpiBufferForFirefoxAmo(addonKey) {
   }
   const buf = Buffer.from(await xpiRes.arrayBuffer());
   if (buf.length < 200) {
-    throw new Error('Download was too small — the add-on file may be unavailable.');
+    throw new Error('Download was too small - the add-on file may be unavailable.');
   }
   return buf;
 }
@@ -1540,11 +1939,7 @@ function extractZipSafelyTo(zip, destDir) {
   const entries = typeof zip.getEntries === 'function' ? zip.getEntries() : [];
   for (const entry of entries) {
     const name = String(entry.entryName || entry.name || '');
-    if (!name || name.includes('\0')) {
-      throw new Error('Archive contains an unsafe path');
-    }
-    const target = path.resolve(root, name);
-    if (target !== root && !target.startsWith(root + path.sep)) {
+    if (!isZipEntryPathSafe(root, name)) {
       throw new Error('Archive contains an unsafe path');
     }
   }
@@ -1552,27 +1947,11 @@ function extractZipSafelyTo(zip, destDir) {
 }
 
 function getAxisLibraryRootDirs() {
-  const home = os.homedir();
-  return [
-    path.resolve(path.join(home, 'Downloads')),
-    path.resolve(path.join(home, 'Desktop')),
-    path.resolve(path.join(home, 'Documents')),
-    path.resolve(path.join(home, 'Pictures'))
-  ];
+  return getAxisLibraryRootDirsHelper();
 }
 
 function isPathInsideAxisLibraryRoots(filePath) {
-  if (!filePath || typeof filePath !== 'string') return false;
-  let resolved;
-  try {
-    resolved = path.resolve(filePath);
-  } catch (_) {
-    return false;
-  }
-  if (resolved.includes('\0')) return false;
-  return getAxisLibraryRootDirs().some(
-    (root) => resolved === root || resolved.startsWith(root + path.sep)
-  );
+  return isPathInsideAxisLibraryRootsHelper(filePath);
 }
 
 async function installAxisExtensionFromXpiBuffer(
@@ -1677,7 +2056,7 @@ async function fetchCrxBufferForExtensionId(extensionId) {
   }
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length < 200) {
-    throw new Error('Download was too small. Google may have refused this request — try Install .crx or unpacked.');
+    throw new Error('Download was too small. Google may have refused this request - try Install .crx or unpacked.');
   }
   return buf;
 }
@@ -1782,7 +2161,7 @@ async function installAxisExtensionFromChromeWebStoreInput(
   const extId = parseChromeWebStoreExtensionId(rawInput);
   if (!extId) {
     throw new Error(
-      'Paste a Chrome Web Store link (chromewebstore.google.com / chrome.google.com) or the 32-character extension ID (letters a–p only).'
+      'Paste a Chrome Web Store link (chromewebstore.google.com / chrome.google.com) or the 32-character extension ID (letters a-p only).'
     );
   }
   const crx = await fetchCrxBufferForExtensionId(extId);
@@ -2039,8 +2418,8 @@ async function installAxisExtensionFromFolder(ownerWindow, profileId) {
       ? sanitizeProfileId(ownerWindow.__axisProfileId)
       : AXIS_DEFAULT_PROFILE_ID);
   const dialogOptions = {
-    title: 'Install Extension',
-    message: 'Choose an unpacked Chrome extension folder that contains manifest.json',
+    title: uiT('ext.installTitle'),
+    message: uiT('ext.installFolder'),
     properties: ['openDirectory']
   };
   const result = ownerWindow
@@ -2062,8 +2441,8 @@ async function installAxisExtensionFromCrxFile(ownerWindow, profileId) {
       ? sanitizeProfileId(ownerWindow.__axisProfileId)
       : AXIS_DEFAULT_PROFILE_ID);
   const dialogOptions = {
-    title: 'Install Extension from .crx',
-    message: 'Choose a Chrome extension package (.crx)',
+    title: uiT('ext.installCrxTitle'),
+    message: uiT('ext.installCrx'),
     properties: ['openFile'],
     filters: [{ name: 'Chrome Extension', extensions: ['crx'] }, { name: 'All Files', extensions: ['*'] }]
   };
@@ -2188,7 +2567,7 @@ async function openAxisExtensionOptions(id, profileId = AXIS_DEFAULT_PROFILE_ID)
     minWidth: 480,
     minHeight: 360,
     show: false,
-    title: `${view.name || 'Extension'} — Options`,
+    title: `${view.name || 'Extension'} - Options`,
     icon: fs.existsSync(APP_ICON_PATH) ? APP_ICON_PATH : undefined,
     parent: parentWin && !parentWin.isDestroyed() ? parentWin : undefined,
     autoHideMenuBar: true,
@@ -2374,7 +2753,7 @@ async function openAxisExtensionPageUrl(url, profileId = AXIS_DEFAULT_PROFILE_ID
   return true;
 }
 
-/** Open toolbar popup when available, otherwise options — shared by macOS menu and in-app UI. */
+/** Open toolbar popup when available, otherwise options - shared by macOS menu and in-app UI. */
 async function openAxisExtensionPopupOrOptions(id, profileId = AXIS_DEFAULT_PROFILE_ID, ownerWindow) {
   const pid = sanitizeProfileId(profileId);
   const record = getStoredAxisExtensions(pid).find((x) => x.id === id);
@@ -2457,18 +2836,52 @@ function cleanSitePermissionOverrides(raw) {
 function broadcastSettingsUpdated(profileId = null, changed = null) {
   const target = profileId != null ? sanitizeProfileId(profileId) : null;
   const changedKey = changed && typeof changed.key === 'string' ? changed.key : null;
+  const includeIncognito = !!(changed && changed.includeIncognito);
   for (const w of BrowserWindow.getAllWindows()) {
-    if (w.isDestroyed() || w.__axisIsIncognito) continue;
-    const browsingProfile = sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+    if (w.isDestroyed()) continue;
+    const isIncog = w.__axisIsIncognito === true;
+    if (!target && isIncog && !includeIncognito) continue;
+    const browsingProfile = isIncog
+      ? 'incognito'
+      : sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
     // Settings windows follow the profile they are editing. Browser windows must follow
-    // the *browsing* profile — otherwise a leftover "Editing profile" in Settings can
+    // the *browsing* profile - otherwise a leftover "Editing profile" in Settings can
     // block New Tab / chrome updates for the profile you are actually using.
     const matchProfile = w.__axisIsSettingsWindow
       ? getSettingsEditingProfileIdForWindow(w) || browsingProfile
       : browsingProfile;
-    if (target && matchProfile !== target) continue;
+    if (target && matchProfile !== target) {
+      // Still notify so parked runtime / bootstrap for `target` can be patched
+      // (otherwise a swipe later remounts a stale language/font).
+      if (changedKey) {
+        try {
+          const parked = {
+            profileId: target,
+            key: changedKey,
+            parkedOnly: true
+          };
+          if (changed && Object.prototype.hasOwnProperty.call(changed, 'value')) {
+            parked.value = changed.value;
+          }
+          if (changed && Object.prototype.hasOwnProperty.call(changed, 'uiLanguage')) {
+            parked.uiLanguage = changed.uiLanguage;
+          }
+          if (changed && Object.prototype.hasOwnProperty.call(changed, 'universalUiLanguage')) {
+            parked.universalUiLanguage = changed.universalUiLanguage;
+          }
+          if (changed && Object.prototype.hasOwnProperty.call(changed, 'uiFont')) {
+            parked.uiFont = changed.uiFont;
+          }
+          if (changed && Object.prototype.hasOwnProperty.call(changed, 'universalUiFont')) {
+            parked.universalUiFont = changed.universalUiFont;
+          }
+          w.webContents.send('settings-updated', parked);
+        } catch (_) {}
+      }
+      continue;
+    }
     try {
-      // Vibrancy only depends on chrome light / theme — skip on every toggle.
+      // Vibrancy only depends on chrome light / theme - skip on every toggle.
       if (!changedKey || changedKey === 'windowChromeLight' || changedKey === 'uiTheme') {
         applyVibrancyToWindow(w);
       }
@@ -2477,6 +2890,18 @@ function broadcastSettingsUpdated(profileId = null, changed = null) {
         payload.key = changedKey;
         if (changed && Object.prototype.hasOwnProperty.call(changed, 'value')) {
           payload.value = changed.value;
+        }
+        if (changed && Object.prototype.hasOwnProperty.call(changed, 'uiLanguage')) {
+          payload.uiLanguage = changed.uiLanguage;
+        }
+        if (changed && Object.prototype.hasOwnProperty.call(changed, 'universalUiLanguage')) {
+          payload.universalUiLanguage = changed.universalUiLanguage;
+        }
+        if (changed && Object.prototype.hasOwnProperty.call(changed, 'uiFont')) {
+          payload.uiFont = changed.uiFont;
+        }
+        if (changed && Object.prototype.hasOwnProperty.call(changed, 'universalUiFont')) {
+          payload.universalUiFont = changed.universalUiFont;
         }
       }
       w.webContents.send('settings-updated', payload);
@@ -2508,7 +2933,10 @@ function getProfileIdFromWebContents(webContents) {
   if (!webContents || webContents.isDestroyed()) return AXIS_DEFAULT_PROFILE_ID;
   try {
     const win = getWindowFromSender(webContents);
-    if (win && !win.isDestroyed() && win.__axisIsIncognito !== true && win.__axisProfileId) {
+    if (win && !win.isDestroyed() && win.__axisIsIncognito === true) {
+      return 'incognito';
+    }
+    if (win && !win.isDestroyed() && win.__axisProfileId) {
       return sanitizeProfileId(win.__axisProfileId);
     }
   } catch (_) {}
@@ -2523,6 +2951,7 @@ function recordSitePermissionDecision(origin, permission, decision, details, pro
   if (!origin || typeof origin !== 'string') return;
   if (decision !== 'allow' && decision !== 'deny') return;
   const pid = sanitizeProfileId(profileId);
+  if (pid === 'incognito') return;
   const profileStore = getProfileSitePermissionStore(pid);
   const raw = profileStore.get('sitePermissionOverrides', {});
     const base = raw && typeof raw === 'object' ? raw : {};
@@ -2559,46 +2988,46 @@ function describeSitePermissionPrompt(permission, details) {
     const wantsCam = !types.length || types.includes('video');
     const wantsMic = !types.length || types.includes('audio');
     if (wantsCam && wantsMic) {
-      return { title: 'Use camera and microphone?', detail: 'This site wants to use your camera and microphone.' };
+      return { title: uiT('perm.cameraMic.title'), detail: uiT('perm.cameraMic.detail') };
     }
-    if (wantsCam) return { title: 'Use your camera?', detail: 'This site wants to use your camera.' };
-    return { title: 'Use your microphone?', detail: 'This site wants to use your microphone.' };
+    if (wantsCam) return { title: uiT('perm.camera.title'), detail: uiT('perm.camera.detail') };
+    return { title: uiT('perm.mic.title'), detail: uiT('perm.mic.detail') };
   }
   const copy = {
-    geolocation: { title: 'Share your location?', detail: 'This site wants to know your location.' },
-    notifications: { title: 'Show notifications?', detail: 'This site wants to send you notifications.' },
-    'display-capture': { title: 'Share your screen?', detail: 'This site wants to capture your screen.' },
-    openExternal: { title: 'Open an outside app?', detail: 'This site wants to open another application.' },
-    'clipboard-read': { title: 'Read the clipboard?', detail: 'This site wants to read text from your clipboard.' },
+    geolocation: { title: uiT('perm.geo.title'), detail: uiT('perm.geo.detail') },
+    notifications: { title: uiT('perm.notify.title'), detail: uiT('perm.notify.detail') },
+    'display-capture': { title: uiT('perm.screen.title'), detail: uiT('perm.screen.detail') },
+    openExternal: { title: uiT('perm.external.title'), detail: uiT('perm.external.detail') },
+    'clipboard-read': { title: uiT('perm.clipRead.title'), detail: uiT('perm.clipRead.detail') },
     'clipboard-sanitized-write': {
-      title: 'Write to the clipboard?',
-      detail: 'This site wants to write text to your clipboard.'
+      title: uiT('perm.clipWrite.title'),
+      detail: uiT('perm.clipWrite.detail')
     },
-    fileSystem: { title: 'Access files?', detail: 'This site wants access to files on your computer.' },
-    midi: { title: 'Use MIDI devices?', detail: 'This site wants to connect to MIDI devices.' },
-    midiSysex: { title: 'Use MIDI devices?', detail: 'This site wants full MIDI system access.' },
-    'window-management': { title: 'Manage windows?', detail: 'This site wants to place or resize windows.' },
-    'speaker-selection': { title: 'Choose speakers?', detail: 'This site wants to pick an audio output.' },
-    fullscreen: { title: 'Go full screen?', detail: 'This site wants to enter full screen.' },
-    pointerLock: { title: 'Lock the pointer?', detail: 'This site wants to lock your mouse pointer.' },
-    keyboardLock: { title: 'Lock keyboard keys?', detail: 'This site wants to capture special keyboard keys.' },
-    'idle-detection': { title: 'Detect when you are idle?', detail: 'This site wants to know when you are away.' },
-    'storage-access': { title: 'Access site storage?', detail: 'This site wants access to cookies or storage across sites.' },
+    fileSystem: { title: uiT('perm.files.title'), detail: uiT('perm.files.detail') },
+    midi: { title: uiT('perm.midi.title'), detail: uiT('perm.midi.detail') },
+    midiSysex: { title: uiT('perm.midiSysex.title'), detail: uiT('perm.midiSysex.detail') },
+    'window-management': { title: uiT('perm.windows.title'), detail: uiT('perm.windows.detail') },
+    'speaker-selection': { title: uiT('perm.speakers.title'), detail: uiT('perm.speakers.detail') },
+    fullscreen: { title: uiT('perm.fullscreen.title'), detail: uiT('perm.fullscreen.detail') },
+    pointerLock: { title: uiT('perm.pointer.title'), detail: uiT('perm.pointer.detail') },
+    keyboardLock: { title: uiT('perm.keyboard.title'), detail: uiT('perm.keyboard.detail') },
+    'idle-detection': { title: uiT('perm.idle.title'), detail: uiT('perm.idle.detail') },
+    'storage-access': { title: uiT('perm.storage.title'), detail: uiT('perm.storage.detail') },
     'top-level-storage-access': {
-      title: 'Access site storage?',
-      detail: 'This site wants top-level storage access.'
+      title: uiT('perm.storage.title'),
+      detail: uiT('perm.storage.detail')
     },
-    mediaKeySystem: { title: 'Use protected media?', detail: 'This site wants to play protected (DRM) media.' },
-    usb: { title: 'Connect a USB device?', detail: 'This site wants to connect to a USB device.' },
-    hid: { title: 'Connect an HID device?', detail: 'This site wants to connect to an HID device.' },
-    serial: { title: 'Connect a serial port?', detail: 'This site wants to connect to a serial port.' },
-    bluetooth: { title: 'Use Bluetooth?', detail: 'This site wants to use Bluetooth devices.' },
-    sensors: { title: 'Use device sensors?', detail: 'This site wants access to motion or environment sensors.' },
-    unknown: { title: 'Allow this site?', detail: 'This site is asking for an extra permission.' }
+    mediaKeySystem: { title: uiT('perm.drm.title'), detail: uiT('perm.drm.detail') },
+    usb: { title: uiT('perm.usb.title'), detail: uiT('perm.usb.detail') },
+    hid: { title: uiT('perm.hid.title'), detail: uiT('perm.hid.detail') },
+    serial: { title: uiT('perm.serial.title'), detail: uiT('perm.serial.detail') },
+    bluetooth: { title: uiT('perm.bluetooth.title'), detail: uiT('perm.bluetooth.detail') },
+    sensors: { title: uiT('perm.sensors.title'), detail: uiT('perm.sensors.detail') },
+    unknown: { title: uiT('perm.allowSite'), detail: uiT('perm.extra') }
   };
   return copy[p] || {
-    title: 'Allow this site?',
-    detail: `This site is asking for “${p || 'a permission'}”.`
+    title: uiT('perm.allowSite'),
+    detail: uiT('perm.extra')
   };
 }
 
@@ -2619,9 +3048,10 @@ function findBrowserWindowForPermissionPrompt(webContents) {
 /**
  * Ask the user to Allow / Block with a native dialog.
  * (In-window modals are easy to miss behind <webview>; Electron also auto-approves
- * when no request handler answers — this path always blocks until the user chooses.)
+ * when no request handler answers - this path always blocks until the user chooses.)
  */
 async function askSitePermissionPrompt(webContents, origin, permission, details) {
+  syncMenuLocale(getProfileIdForWebContents(webContents));
   const win = findBrowserWindowForPermissionPrompt(webContents);
   const copy = describeSitePermissionPrompt(permission, details);
   let siteLabel = origin || 'This site';
@@ -2639,12 +3069,12 @@ async function askSitePermissionPrompt(webContents, origin, permission, details)
 
   const boxOpts = {
     type: 'question',
-    buttons: ['Block', 'Allow'],
+    buttons: [uiT('common.block'), uiT('common.allow')],
     defaultId: 0,
     cancelId: 0,
     noLink: true,
     normalizeAccessKeys: true,
-    title: 'Axis — site permission',
+    title: uiT('perm.dialogTitle'),
     message: copy.title,
     detail: `${siteLabel}\n\n${copy.detail}`
   };
@@ -2694,8 +3124,35 @@ function getSitePermissionDecision(origin, permission, profileId = AXIS_DEFAULT_
   return null;
 }
 
+function sendGuestHtmlFullscreenToShell(guestWebContents, active) {
+  if (!guestWebContents || guestWebContents.isDestroyed()) return;
+  try {
+    const hostWin = getWindowFromSender(guestWebContents);
+    if (!hostWin || hostWin.isDestroyed()) return;
+    const shell = hostWin.webContents;
+    if (active) {
+      shell.executeJavaScript(
+        'document.body.classList.add("axis-site-html-fullscreen")',
+        true
+      );
+    } else {
+      shell.executeJavaScript(
+        'document.body.classList.add("axis-site-html-fs-restore");' +
+          'document.body.classList.remove("axis-site-html-fullscreen");' +
+          'requestAnimationFrame(function(){requestAnimationFrame(function(){' +
+          'document.body.classList.remove("axis-site-html-fs-restore");});});',
+        true
+      );
+    }
+    shell.send('axis-guest-html-fullscreen', {
+      active: !!active,
+      guestWebContentsId: guestWebContents.id
+    });
+  } catch (_) {}
+}
+
 function permissionRequestHandler(webContents, permission, callback, details) {
-  // Always answer through our prompt path — Electron grants everything if this
+  // Always answer through our prompt path - Electron grants everything if this
   // handler is missing or never calls callback.
   const safeCallback = (allowed) => {
     try {
@@ -2720,6 +3177,17 @@ function permissionRequestHandler(webContents, permission, callback, details) {
     }
 
     const decided = getSitePermissionDecision(origin, permission, profileId, details);
+
+    if (permission === 'fullscreen') {
+      if (decided === 'deny') {
+        safeCallback(false);
+        return;
+      }
+      sendGuestHtmlFullscreenToShell(webContents, true);
+      safeCallback(true);
+      return;
+    }
+
   if (decided === 'deny') {
       safeCallback(false);
     return;
@@ -2757,7 +3225,7 @@ function permissionRequestHandler(webContents, permission, callback, details) {
   }
 }
 
-/** macOS: site Allow is not enough — the app also needs Camera / Mic OS access. */
+/** macOS: site Allow is not enough - the app also needs Camera / Mic OS access. */
 async function ensureOsMediaAccess(permission, details) {
   if (process.platform !== 'darwin' || !systemPreferences) return;
   try {
@@ -2790,6 +3258,7 @@ function permissionCheckHandler(webContents, permission, requestingOrigin, detai
     const decided = getSitePermissionDecision(origin, permission, profileId, details);
   if (decided === 'deny') return false;
   if (decided === 'allow') return true;
+    if (permission === 'fullscreen') return true;
     // Undecided: deny the sync check so Chromium issues a permission *request*
     // (handled by permissionRequestHandler → user prompt). Returning true here
     // would grant silently.
@@ -2842,7 +3311,7 @@ const axisPermissionHandlerBoundSessions = new WeakSet();
 function installSessionPermissionHandlers(sess) {
   if (!sess) return;
   // Clear any prior handler once per session object, then bind ours. Do not clear on
-  // every webview create — a null gap would let Electron auto-approve briefly.
+  // every webview create - a null gap would let Electron auto-approve briefly.
   if (!axisPermissionHandlerBoundSessions.has(sess)) {
     try {
       sess.setPermissionRequestHandler(null);
@@ -2944,7 +3413,7 @@ function attachThemeColorHeaderSniffer(sess) {
 function configureAxisSessionInstance(sess) {
   if (!sess) return;
   // Always (re)bind permission handlers. Electron auto-approves every request when
-  // no handler is set — never skip this, even if the partition was configured earlier.
+  // no handler is set - never skip this, even if the partition was configured earlier.
   try {
     installSessionPermissionHandlers(sess);
   } catch (_) {}
@@ -3007,18 +3476,31 @@ function getSettingsEditingProfileIdForWindow(win) {
 function setSettingsEditingProfileOnWindow(win, profileId) {
   if (!win || win.isDestroyed()) return null;
   const id = sanitizeProfileId(profileId);
+  if (id === 'incognito') {
+    if (win.__axisIsSettingsWindow) {
+      win.__axisSettingsProfileId = id;
+      win.__axisProfileId = id;
+    } else {
+      win.__axisSettingsEditingProfileId = id;
+      win.__axisSettingsUiActive = true;
+    }
+    return id;
+  }
   const profiles = listAxisProfiles();
   if (!profiles.some((p) => p.id === id)) return null;
   if (win.__axisIsSettingsWindow) {
     win.__axisSettingsProfileId = id;
+    // Keep menu-bar locale / active profile id aligned with Settings.
+    win.__axisProfileId = id;
   } else {
     win.__axisSettingsEditingProfileId = id;
+    win.__axisSettingsUiActive = true;
   }
   return id;
 }
 let sessionConfigured = false;
 
-/** One-time session configuration — must only run once per app lifecycle. */
+/** One-time session configuration - must only run once per app lifecycle. */
 function configureSession() {
   if (sessionConfigured) return;
   sessionConfigured = true;
@@ -3064,7 +3546,7 @@ function configureSession() {
   ensureAxisVaultForProfile(AXIS_DEFAULT_PROFILE_ID);
 }
 
-/** In-flight downloads from any Axis session — drives URL-bar ring + popup activity in renderer. */
+/** In-flight downloads from any Axis session - drives URL-bar ring + popup activity in renderer. */
 const axisActiveDownloadItems = new Set();
 const axisDownloadItemMeta = new Map();
 let nextAxisDownloadSessionId = 1;
@@ -3108,7 +3590,7 @@ function scheduleAxisDownloadProgressBroadcast() {
 }
 
 // ---------------------------------------------------------------------------
-// Ad blocker (@ghostery/adblocker-electron) — network + cosmetic filters per session
+// Privacy protection (@ghostery/adblocker-electron) - ads + trackers + fingerprinting
 // ---------------------------------------------------------------------------
 let axisAdblockBlocker = null;
 let axisAdblockLoadPromise = null;
@@ -3116,16 +3598,170 @@ const axisAdblockEnabledSessionKeys = new Set();
 const axisAdblockSessionToProfile = new Map();
 const axisAdblockStatsByProfile = new Map();
 let axisAdblockStatsBroadcastTimer = null;
+/** Ghostery registers global IPC once; skip duplicates so multi-session enable still attaches network hooks. */
+const axisGhosteryIpcRegistered = new Set();
+let axisGhosteryBlockingSessionCount = 0;
+const axisFingerprintPreloadBySession = new WeakMap();
+const AXIS_FINGERPRINT_PRELOAD_PATH = path.join(__dirname, 'axis-fingerprint-preload.js');
+const AXIS_GHOSTERY_COSMETIC_CHANNELS = [
+  '@ghostery/adblocker/inject-cosmetic-filters',
+  '@ghostery/adblocker/is-mutation-observer-enabled'
+];
 
 function getAdblockStatsBucket(profileId = AXIS_DEFAULT_PROFILE_ID) {
   const pid = sanitizeProfileId(profileId);
   if (!axisAdblockStatsByProfile.has(pid)) {
     axisAdblockStatsByProfile.set(pid, {
       totalBlocked: 0,
+      byCategory: { ads: 0, trackers: 0, other: 0 },
       byWebContents: new Map(),
     });
   }
   return axisAdblockStatsByProfile.get(pid);
+}
+
+function emptyAdblockPageStats(host = '') {
+  return {
+    host: host || '',
+    count: 0,
+    byCategory: { ads: 0, trackers: 0, other: 0 },
+    byType: {},
+    byOtherType: {},
+    recentHosts: [],
+    recentOtherHosts: [],
+    blockedItems: [],
+    fingerprintProtected: false,
+  };
+}
+
+function axisNormalizeBlockedResourceType(resourceType) {
+  const t = String(resourceType || 'other');
+  if (t === 'xhr' || t === 'fetch') return 'request';
+  if (t === 'mainFrame') return 'page';
+  if (t === 'subFrame') return 'frame';
+  if (
+    t === 'script' ||
+    t === 'image' ||
+    t === 'stylesheet' ||
+    t === 'font' ||
+    t === 'media' ||
+    t === 'websocket' ||
+    t === 'ping' ||
+    t === 'cspReport'
+  ) {
+    return t;
+  }
+  return 'misc';
+}
+
+function axisBumpBlockedItem(list, entry, max = 48) {
+  const host = String((entry && entry.host) || '').trim();
+  if (!host) return Array.isArray(list) ? list.slice() : [];
+  const category = entry.category === 'ads' || entry.category === 'trackers' ? entry.category : 'other';
+  const type = String((entry && entry.type) || 'misc');
+  const next = Array.isArray(list) ? list.slice() : [];
+  const i = next.findIndex((row) => row.host === host && row.category === category && row.type === type);
+  if (i >= 0) {
+    next[i] = { ...next[i], count: (next[i].count || 0) + 1 };
+  } else {
+    next.push({ host, category, type, count: 1 });
+  }
+  next.sort((a, b) => b.count - a.count || a.host.localeCompare(b.host));
+  return next.slice(0, max);
+}
+
+/** Heuristic categories for the shield panel (filter lists don't expose type over IPC). */
+function axisClassifyBlockedRequest(details) {
+  const url = String((details && details.url) || '').toLowerCase();
+  let host = '';
+  try {
+    host = new URL(details.url).hostname.toLowerCase();
+  } catch (_) {}
+  const type = String((details && details.resourceType) || 'other');
+  const blob = `${host} ${url}`;
+
+  const trackerHints = [
+    'google-analytics',
+    'googletagmanager',
+    'doubleclick',
+    'facebook.net',
+    'connect.facebook',
+    'hotjar',
+    'mixpanel',
+    'segment.',
+    'amplitude',
+    'sentry.io',
+    'clarity.ms',
+    'scorecardresearch',
+    'quantserve',
+    'newrelic',
+    'nr-data.net',
+    'fullstory',
+    'mouseflow',
+    'optimizely',
+    'heap-api',
+    'crazyegg',
+    'pingdom',
+    'adsrvr',
+    'adnxs',
+    'taboola',
+    'outbrain',
+    'criteo',
+    'moatads',
+    'tiktok.com/i18n/pixel',
+    'analytics',
+    'telemetry',
+    'tracking',
+    'tracker',
+    'pixel.',
+    '/pixel',
+    'beacon',
+  ];
+  const adHints = [
+    'googlesyndication',
+    'googleadservices',
+    'pagead',
+    'adsystem',
+    'amazon-adsystem',
+    '2mdn.net',
+    'googletagservices',
+    'fundingchoices',
+    'adservice',
+    'adserver',
+    'advertising',
+    'ads.',
+    '/ads/',
+    'adtech',
+    'sponsor',
+    'promoted',
+  ];
+
+  if (trackerHints.some((h) => blob.includes(h))) return { category: 'trackers', type, host };
+  if (adHints.some((h) => blob.includes(h))) return { category: 'ads', type, host };
+  if (type === 'image' || type === 'media' || type === 'stylesheet') {
+    if (/^ads?\d*\./.test(host) || host.startsWith('ad.') || host.includes('.ads.')) {
+      return { category: 'ads', type, host };
+    }
+  }
+  if (type === 'script' || type === 'xhr' || type === 'fetch') {
+    if (host.includes('cdn') && (blob.includes('track') || blob.includes('collect'))) {
+      return { category: 'trackers', type, host };
+    }
+  }
+  return { category: 'other', type, host };
+}
+
+function axisBumpRecentHost(list, host, max = 12) {
+  if (!host) return list || [];
+  const next = Array.isArray(list) ? list.slice() : [];
+  const i = next.findIndex((row) => row.host === host);
+  if (i >= 0) {
+    next[i] = { host, count: (next[i].count || 0) + 1 };
+  } else {
+    next.push({ host, count: 1 });
+  }
+  next.sort((a, b) => b.count - a.count || a.host.localeCompare(b.host));
+  return next.slice(0, max);
 }
 
 function axisProfileIdForAdblockDetails(details) {
@@ -3176,7 +3812,7 @@ function axisScheduleAdblockStatsBroadcast() {
   }, 180);
 }
 
-/** Per-tab page counter — resets on each main-frame navigation (reload, new URL). */
+/** Per-tab page counter - resets on each main-frame navigation (reload, new URL). */
 function axisResetAdblockPageStats(profileId, webContentsId, pageUrlOrHost) {
   const wcId = Number(webContentsId) || 0;
   if (!wcId) return;
@@ -3185,23 +3821,64 @@ function axisResetAdblockPageStats(profileId, webContentsId, pageUrlOrHost) {
       ? axisHostFromUrl(pageUrlOrHost)
       : String(pageUrlOrHost || '').trim();
   const bucket = getAdblockStatsBucket(profileId);
-  bucket.byWebContents.set(wcId, { host, count: 0 });
+  bucket.byWebContents.set(wcId, emptyAdblockPageStats(host));
   axisScheduleAdblockStatsBroadcast();
 }
 
 function axisRecordAdblockBlock(details) {
   const profileId = axisProfileIdForAdblockDetails(details);
   const bucket = getAdblockStatsBucket(profileId);
+  const classified = axisClassifyBlockedRequest(details);
+  const category =
+    classified.category === 'ads' || classified.category === 'trackers'
+      ? classified.category
+      : 'other';
+  const typeKey = axisNormalizeBlockedResourceType(classified.type);
+  const blockedHost = classified.host || axisHostFromUrl(details && details.url);
   bucket.totalBlocked += 1;
-  const host = axisPageHostFromAdblockDetails(details);
+  if (!bucket.byCategory) bucket.byCategory = { ads: 0, trackers: 0, other: 0 };
+  bucket.byCategory[category] = (bucket.byCategory[category] || 0) + 1;
+
+  const pageHost = axisPageHostFromAdblockDetails(details);
   const wcId = details && details.webContentsId;
   if (wcId) {
-    const prev = bucket.byWebContents.get(wcId) || { host, count: 0 };
-    if (host && !prev.host) prev.host = host;
-    prev.count += 1;
+    const prev = bucket.byWebContents.get(wcId) || emptyAdblockPageStats(pageHost);
+    if (pageHost && !prev.host) prev.host = pageHost;
+    if (!prev.byCategory) prev.byCategory = { ads: 0, trackers: 0, other: 0 };
+    if (!prev.byType || typeof prev.byType !== 'object') prev.byType = {};
+    if (!prev.byOtherType || typeof prev.byOtherType !== 'object') prev.byOtherType = {};
+    prev.count = (prev.count || 0) + 1;
+    prev.byCategory[category] = (prev.byCategory[category] || 0) + 1;
+    prev.byType[typeKey] = (prev.byType[typeKey] || 0) + 1;
+    if (category === 'other') {
+      prev.byOtherType[typeKey] = (prev.byOtherType[typeKey] || 0) + 1;
+      prev.recentOtherHosts = axisBumpRecentHost(prev.recentOtherHosts, blockedHost);
+    }
+    prev.recentHosts = axisBumpRecentHost(prev.recentHosts, blockedHost);
+    prev.blockedItems = axisBumpBlockedItem(prev.blockedItems, {
+      host: blockedHost,
+      category,
+      type: typeKey,
+    });
     bucket.byWebContents.set(wcId, prev);
   }
   axisScheduleAdblockStatsBroadcast();
+}
+
+function axisRecordFingerprintProtection(webContents, pageUrl) {
+  try {
+    if (!webContents || webContents.isDestroyed()) return;
+    const profileId = getProfileIdFromWebContents(webContents);
+    const wcId = webContents.id;
+    const bucket = getAdblockStatsBucket(profileId);
+    const host = axisHostFromUrl(typeof pageUrl === 'string' ? pageUrl : '');
+    const prev = bucket.byWebContents.get(wcId) || emptyAdblockPageStats(host);
+    if (host && !prev.host) prev.host = host;
+    if (prev.fingerprintProtected) return;
+    prev.fingerprintProtected = true;
+    bucket.byWebContents.set(wcId, prev);
+    axisScheduleAdblockStatsBroadcast();
+  } catch (_) {}
 }
 
 function wrapAxisAdblockStats(blocker) {
@@ -3236,8 +3913,136 @@ function wrapAxisAdblockStats(blocker) {
       const host = new URL(url).hostname;
       if (isAdblockDisabledForSite(profileId, host)) return;
     } catch (_) {}
-    return origCosmetic(event, url, msg);
+    // Ghostery calls executeJavaScript without awaiting; navigation races reject and
+    // spam UnhandledPromiseRejectionWarning (common on YouTube). Swallow those.
+    let sender = null;
+    let origExec = null;
+    try {
+      sender = event && event.sender;
+      if (sender && !sender.isDestroyed() && typeof sender.executeJavaScript === 'function') {
+        origExec = sender.executeJavaScript.bind(sender);
+        sender.executeJavaScript = (code, userGesture) => {
+          try {
+            const result = origExec(code, userGesture);
+            if (result && typeof result.then === 'function') {
+              return result.catch(() => undefined);
+            }
+            return result;
+          } catch (_) {
+            return Promise.resolve(undefined);
+          }
+        };
+      }
+      return await origCosmetic(event, url, msg);
+    } catch (_) {
+      return undefined;
+    } finally {
+      try {
+        if (sender && origExec && !sender.isDestroyed()) sender.executeJavaScript = origExec;
+      } catch (_) {}
+    }
   };
+  // Keep theme-color sniffing alive after Ghostery owns onHeadersReceived.
+  if (!blocker._axisThemeWrapped) {
+    blocker._axisThemeWrapped = true;
+    const origHeaders = blocker.onHeadersReceived.bind(blocker);
+    blocker.onHeadersReceived = (details, callback) => {
+      try {
+        if (details && details.resourceType === 'mainFrame') {
+          const raw = details.responseHeaders || {};
+          const themeColor =
+            (raw['theme-color'] && raw['theme-color'][0]) ||
+            (raw['Theme-Color'] && raw['Theme-Color'][0]);
+          if (themeColor && details.url) {
+            const payload = { url: details.url, color: String(themeColor).trim() };
+            for (const w of BrowserWindow.getAllWindows()) {
+              if (w.isDestroyed()) continue;
+              try {
+                w.webContents.send('axis-theme-color-header', payload);
+              } catch (_) {}
+            }
+          }
+        }
+      } catch (_) {}
+      return origHeaders(details, callback);
+    };
+  }
+}
+
+/**
+ * Ghostery's BlockingContext.enable() registers global ipcMain handlers every time.
+ * Second profile/session throws before network listeners attach. Guard handle/remove
+ * so every session still gets network + preload blocking.
+ */
+function withGhosteryCosmeticIpcGuard(fn, { enabling }) {
+  const origHandle = ipcMain.handle.bind(ipcMain);
+  const origRemove = ipcMain.removeHandler.bind(ipcMain);
+  ipcMain.handle = (channel, listener) => {
+    if (AXIS_GHOSTERY_COSMETIC_CHANNELS.includes(channel)) {
+      if (axisGhosteryIpcRegistered.has(channel)) return undefined;
+      const result = origHandle(channel, listener);
+      axisGhosteryIpcRegistered.add(channel);
+      return result;
+    }
+    return origHandle(channel, listener);
+  };
+  ipcMain.removeHandler = (channel) => {
+    if (AXIS_GHOSTERY_COSMETIC_CHANNELS.includes(channel)) {
+      // Keep handlers while any session still has blocking enabled.
+      if (axisGhosteryBlockingSessionCount > 1) return undefined;
+      axisGhosteryIpcRegistered.delete(channel);
+      return origRemove(channel);
+    }
+    return origRemove(channel);
+  };
+  try {
+    if (enabling) axisGhosteryBlockingSessionCount += 1;
+    const result = fn();
+    if (!enabling) {
+      axisGhosteryBlockingSessionCount = Math.max(0, axisGhosteryBlockingSessionCount - 1);
+    }
+    return result;
+  } catch (err) {
+    if (enabling) {
+      axisGhosteryBlockingSessionCount = Math.max(0, axisGhosteryBlockingSessionCount - 1);
+    }
+    throw err;
+  } finally {
+    ipcMain.handle = origHandle;
+    ipcMain.removeHandler = origRemove;
+  }
+}
+
+function syncFingerprintPreloadForSession(sess, enabled) {
+  if (!sess || typeof sess.registerPreloadScript !== 'function') return;
+  try {
+    const prev = axisFingerprintPreloadBySession.get(sess);
+    if (!enabled) {
+      if (prev) {
+        try {
+          sess.unregisterPreloadScript(prev);
+        } catch (_) {}
+        axisFingerprintPreloadBySession.delete(sess);
+      }
+      return;
+    }
+    if (prev) return;
+    const id = sess.registerPreloadScript({
+      type: 'frame',
+      filePath: AXIS_FINGERPRINT_PRELOAD_PATH
+    });
+    axisFingerprintPreloadBySession.set(sess, id);
+  } catch (err) {
+    console.warn('Axis: fingerprint preload registration failed:', err);
+  }
+}
+
+function isPrivacyProtectionEnabledForProfile(profileId) {
+  const pid = sanitizeProfileId(profileId);
+  if (pid === 'incognito') {
+    return ensureIncognitoProfileStore().get('adBlockerEnabled', true) !== false;
+  }
+  return getProfileStore(pid).get('adBlockerEnabled', true) !== false;
 }
 
 function normalizeAdblockHostname(hostname) {
@@ -3294,6 +4099,10 @@ function getAxisAdblockSessions() {
 
 function syncAdBlockerForProfile(profileId = AXIS_DEFAULT_PROFILE_ID) {
   const pid = sanitizeProfileId(profileId);
+  if (pid === 'incognito') {
+    syncAdBlockerForIncognitoSession();
+    return;
+  }
   const enabled = getProfileStore(pid).get('adBlockerEnabled', true) !== false;
   const sess = getAxisExtensionSession(pid);
   const key = getAxisSessionKey(sess);
@@ -3309,26 +4118,38 @@ async function syncAllProfilesAdBlocker() {
   for (const p of listAxisProfiles()) {
     syncAdBlockerForProfile(p.id);
   }
-  try {
-    await applyAxisAdBlockerToSession(session.fromPartition('incognito'), false);
-  } catch (_) {}
+  syncAdBlockerForIncognitoSession();
 }
 
 async function applyAxisAdBlockerToSession(sess, enabled) {
   if (!sess) return;
+  const key = getAxisSessionKey(sess);
   if (!enabled) {
-    if (!axisAdblockBlocker) return;
-      try {
+    syncFingerprintPreloadForSession(sess, false);
+    if (!axisAdblockBlocker) {
+      if (key) axisAdblockEnabledSessionKeys.delete(key);
+      return;
+    }
+    try {
       if (axisAdblockBlocker.isBlockingEnabled(sess)) {
-        axisAdblockBlocker.disableBlockingInSession(sess);
-        }
-      axisAdblockEnabledSessionKeys.delete(getAxisSessionKey(sess));
-      } catch (_) {}
+        withGhosteryCosmeticIpcGuard(() => {
+          axisAdblockBlocker.disableBlockingInSession(sess);
+        }, { enabling: false });
+      }
+      if (key) axisAdblockEnabledSessionKeys.delete(key);
+    } catch (_) {}
+    // Ghostery clears webRequest listeners on disable - restore theme sniffing.
+    try {
+      axisThemeColorSnifferSessions.delete(
+        typeof sess.getPartition === 'function' ? sess.getPartition() || 'default' : 'default'
+      );
+      attachThemeColorHeaderSniffer(sess);
+    } catch (_) {}
     return;
   }
   try {
     if (typeof globalThis.fetch !== 'function') {
-      console.warn('Axis: ad blocker needs global fetch (Electron 39+)');
+      console.warn('Axis: privacy protection needs global fetch (Electron 39+)');
       return;
     }
     const { ElectronBlocker } = require('@ghostery/adblocker-electron');
@@ -3342,32 +4163,31 @@ async function applyAxisAdBlockerToSession(sess, enabled) {
         write: (p, buf) => fsp.writeFile(p, buf),
       }).catch((err) => {
         axisAdblockLoadPromise = null;
-        console.error('Axis: failed to initialize ad blocker lists:', err);
+        console.error('Axis: failed to initialize privacy filter lists:', err);
         throw err;
       });
     }
     const blocker = await axisAdblockLoadPromise;
     axisAdblockBlocker = blocker;
     wrapAxisAdblockStats(blocker);
-    const key = getAxisSessionKey(sess);
     if (key && !axisAdblockSessionToProfile.has(key)) {
       axisAdblockSessionToProfile.set(key, AXIS_DEFAULT_PROFILE_ID);
     }
-    if (key && axisAdblockEnabledSessionKeys.has(key)) return;
-    if (!blocker.isBlockingEnabled(sess)) {
-      blocker.enableBlockingInSession(sess);
-        }
-        if (key) axisAdblockEnabledSessionKeys.add(key);
-      } catch (e) {
-        const msg = e && e.message ? String(e.message) : String(e);
-        if (msg.includes("Attempted to register a second handler for '@ghostery/adblocker/inject-cosmetic-filters'")) {
-      const key = getAxisSessionKey(sess);
-          if (key) axisAdblockEnabledSessionKeys.add(key);
+    if (key && axisAdblockEnabledSessionKeys.has(key) && blocker.isBlockingEnabled(sess)) {
+      syncFingerprintPreloadForSession(sess, true);
       return;
-        }
-        console.warn('Axis: enable ad blocker on session failed:', e);
-      }
     }
+    if (!blocker.isBlockingEnabled(sess)) {
+      withGhosteryCosmeticIpcGuard(() => {
+        blocker.enableBlockingInSession(sess);
+      }, { enabling: true });
+    }
+    if (key) axisAdblockEnabledSessionKeys.add(key);
+    syncFingerprintPreloadForSession(sess, true);
+  } catch (e) {
+    console.warn('Axis: enable privacy protection on session failed:', e);
+  }
+}
 
 async function applyAxisAdBlockerEnabled(enabled) {
   const sessions = getAxisAdblockSessions();
@@ -3386,7 +4206,7 @@ async function applyAxisAdBlockerEnabled(enabled) {
 /**
  * Enable Chromium spellchecker on a session. macOS uses the native OS spellchecker (no
  * dictionary download); Windows/Linux uses Hunspell and downloads dictionaries from the
- * default Chromium URL — do NOT call setSpellCheckerDictionaryDownloadURL('') or downloads
+ * default Chromium URL - do NOT call setSpellCheckerDictionaryDownloadURL('') or downloads
  * are disabled and nothing gets flagged. Languages default to the app locale + en-US as a
  * fallback so words are flagged on first right-click in a text field.
  */
@@ -3554,7 +4374,7 @@ function addWordToAllSpellCheckerDictionaries(word) {
 
 /**
  * Chrome Web Store / Mozilla AMO “Add” buttons often start a guest download of `.crx` / `.xpi`.
- * Cancel so files don’t land in Downloads — Axis installs via main-process fetch + Install in Axis.
+ * Cancel so files don’t land in Downloads - Axis installs via main-process fetch + Install in Axis.
  */
 function axisShouldCancelChromeExtensionPackageDownload(item) {
   try {
@@ -3635,10 +4455,18 @@ function listAxisActiveDownloads() {
 /** macOS vibrancy / Win32 acrylic for browser + Settings chrome from `windowChromeLight`. */
 function applyVibrancyToWindow(browserWindow) {
   if (!browserWindow || browserWindow.isDestroyed()) return;
-  const profileId =
-    browserWindow.__axisIsIncognito === true
-      ? AXIS_DEFAULT_PROFILE_ID
-      : sanitizeProfileId(browserWindow.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+  if (browserWindow.__axisIsIncognito === true) {
+    try {
+      if (process.platform === 'darwin') {
+        browserWindow.setVibrancy(null);
+      } else if (process.platform === 'win32') {
+        browserWindow.setBackgroundMaterial('none');
+      }
+      browserWindow.setBackgroundColor('#000000');
+    } catch (_) {}
+    return;
+  }
+  const profileId = sanitizeProfileId(browserWindow.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
   const raw = getProfileStore(profileId).get('windowChromeLight', 50);
   const n = Number(raw);
   const solidChrome = Number.isFinite(n) ? n <= 0 : false;
@@ -3684,7 +4512,7 @@ function applyMainWindowVibrancyFromStore() {
 let isQuitConfirmed = false;
 let isUserQuitting = false;
 
-/** macOS frameless + hiddenInset: inset from the content (client) edge — must match setWindowButtonPosition docs. */
+/** macOS frameless + hiddenInset: inset from the content (client) edge - must match setWindowButtonPosition docs. */
 const MACOS_TRAFFIC_LIGHT_INSET = 16;
 /**
  * Horizontal span of the close + minimize + zoom cluster in **points** (AppKit layout; varies slightly by OS).
@@ -3759,6 +4587,22 @@ function attachWebviewHostResizeSignals(browserWindow) {
   browserWindow.on('resized', () => send('axis-host-resize-settled'));
 }
 
+/** Tell the shell when OS fullscreen hides traffic lights so sidebar chrome can lift. */
+function attachFullscreenShellSignals(browserWindow) {
+  if (!browserWindow) return;
+  const send = () => {
+    if (browserWindow.isDestroyed()) return;
+    try {
+      browserWindow.webContents.send('axis-window-fullscreen', {
+        fullscreen: !!browserWindow.isFullScreen()
+      });
+    } catch (_) {}
+  };
+  browserWindow.on('enter-full-screen', send);
+  browserWindow.on('leave-full-screen', send);
+  browserWindow.webContents.on('did-finish-load', send);
+}
+
 // ========== Keyboard Shortcuts (Global Functions) ==========
 
 const AXIS_ARROW_KEY_ALIASES = {
@@ -3816,7 +4660,7 @@ function shortcutUsesArrowKey(accel) {
   return key === 'Left' || key === 'Right' || key === 'Up' || key === 'Down';
 }
 
-/** Per-profile shortcut maps — rebuilt only when shortcuts change. */
+/** Per-profile shortcut maps - rebuilt only when shortcuts change. */
 const axisShortcutCacheByProfile = new Map();
 
 function invalidateShortcutCache(profileId = null) {
@@ -3913,7 +4757,8 @@ function getBrowserWindowForWebContents(contents) {
 
 function getProfileIdForWebContents(contents) {
   const win = getBrowserWindowForWebContents(contents);
-  if (!win || win.__axisIsIncognito === true) return AXIS_DEFAULT_PROFILE_ID;
+  if (!win || win.isDestroyed()) return AXIS_DEFAULT_PROFILE_ID;
+  if (win.__axisIsIncognito === true) return 'incognito';
   return sanitizeProfileId(win.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
 }
 
@@ -3956,11 +4801,12 @@ function attachAxisArrowShortcutHandler(contents) {
       contentsType = typeof contents.getType === 'function' ? contents.getType() : '';
     } catch (_) {}
 
-    // Cmd+Z in a guest page is consumed by the site — intercept when Axis has sidebar undo pending.
+    // Cmd+Z → Axis undo when the window has a pending sidebar/tab undo.
     if (action === 'recover-tab') {
-      if (contentsType !== 'webview') return;
       const win = getBrowserWindowForWebContents(contents);
-      if (!win || !win.__axisUndoPending) return;
+      if (contentsType === 'webview' && (!win || !win.__axisUndoPending)) {
+        return;
+      }
       event.preventDefault();
       dispatchBrowserShortcutFromContents(contents, action);
       return;
@@ -3968,7 +4814,7 @@ function attachAxisArrowShortcutHandler(contents) {
 
     if (!shortcutUsesArrowKey(accel)) return;
 
-    /* One profile step per keypress — key repeat must not queue another switch. */
+    /* One profile step per keypress - key repeat must not queue another switch. */
     if (
       input.isAutoRepeat &&
       (action === 'next-profile' || action === 'previous-profile')
@@ -4025,7 +4871,12 @@ const getDefaultShortcuts = () => {
     'previous-tab': process.platform === 'darwin' ? 'Alt+Cmd+Left' : 'Ctrl+Shift+Tab',
     // Next / previous profile (Control+Cmd+arrows on macOS; Ctrl+Alt+arrows elsewhere)
     'next-profile': process.platform === 'darwin' ? 'Ctrl+Cmd+Right' : 'Ctrl+Alt+Right',
-    'previous-profile': process.platform === 'darwin' ? 'Ctrl+Cmd+Left' : 'Ctrl+Alt+Left'
+    'previous-profile': process.platform === 'darwin' ? 'Ctrl+Cmd+Left' : 'Ctrl+Alt+Left',
+    'go-back': process.platform === 'darwin' ? 'Cmd+[' : 'Alt+Left',
+    'go-forward': process.platform === 'darwin' ? 'Cmd+]' : 'Alt+Right',
+    'hard-reload': `${cmdOrCtrl}+Shift+R`,
+    'add-to-favorites':
+      process.platform === 'darwin' ? `${cmdOrCtrl}+Shift+D` : `${cmdOrCtrl}+Shift+D`
   };
 };
 
@@ -4035,7 +4886,10 @@ const getDefaultShortcuts = () => {
  */
 function getActiveProfileId() {
   const win = getActiveAxisWindow();
-  if (win && !win.isDestroyed() && win.__axisIsIncognito !== true && win.__axisProfileId) {
+  if (win && !win.isDestroyed() && win.__axisIsIncognito === true) {
+    return 'incognito';
+  }
+  if (win && !win.isDestroyed() && win.__axisProfileId) {
     return sanitizeProfileId(win.__axisProfileId);
   }
   return AXIS_DEFAULT_PROFILE_ID;
@@ -4107,7 +4961,7 @@ async function switchProfileInBrowserWindow(win, profileId) {
     console.error('switchProfileInBrowserWindow extensions:', e);
   }
   try {
-    createMenu();
+    createMenu(id);
   } catch (_) {}
   return true;
 }
@@ -4165,7 +5019,7 @@ function buildProfilesSubmenu() {
   const items = [];
 
   if (ctx.isIncognito) {
-    items.push({ label: 'Private browsing', enabled: false });
+    items.push({ label: uiT('chrome.privateBrowsing'), enabled: false });
     items.push({ type: 'separator' });
   }
 
@@ -4181,7 +5035,7 @@ function buildProfilesSubmenu() {
 
   items.push({ type: 'separator' });
   items.push({
-    label: 'New Profile…',
+    label: uiT('menu.newProfileEllipsis'),
     click: () => sendProfileMenuAction('create')
   });
 
@@ -4211,8 +5065,8 @@ function buildProfilesSubmenu() {
       });
     }
   } else if (ctx.isIncognito) {
-    items.push({ label: 'Edit Current Profile…', enabled: false });
-    items.push({ label: 'Delete Current Profile…', enabled: false });
+    items.push({ label: uiT('menu.editProfileEllipsis'), enabled: false });
+    items.push({ label: uiT('menu.deleteProfileEllipsis'), enabled: false });
   }
 
   return items;
@@ -4222,16 +5076,18 @@ function buildProfilesSubmenu() {
 const registerShortcuts = () => {
   const shortcuts = getShortcuts();
 
-  Object.entries(shortcuts).forEach(([action, key]) => {
+    Object.entries(shortcuts).forEach(([action, key]) => {
     if (action === 'find') return;
     // Cmd/Ctrl+A must be handled in the renderer so URL bar and other shell fields keep native select-all.
     if (action === 'select-all') {
       const norm = (key || '').replace(/\s/g, '').toLowerCase();
       if (norm === 'cmd+a' || norm === 'ctrl+a') return;
     }
+    // Cmd/Ctrl+Z is owned by the Edit menu + before-input (avoid fighting globalShortcut).
+    if (action === 'recover-tab') return;
     if (!key || typeof key !== 'string') return;
     const normalized = normalizeAccelerator(key);
-    // Arrow combos are handled in-window — macOS globalShortcut often misses laptop arrow keys.
+    // Arrow combos are handled in-window - macOS globalShortcut often misses laptop arrow keys.
     if (shortcutUsesArrowKey(normalized)) return;
     try {
       globalShortcut.register(normalized, () => {
@@ -4266,7 +5122,7 @@ const unregisterShortcuts = () => {
   app.commandLine.appendSwitch('enable-partial-raster');
   app.commandLine.appendSwitch('enable-lcd-text');
 
-  /* Allow Chromium to throttle timers/RAF when the window is occluded/minimized — lower idle CPU. */
+  /* Allow Chromium to throttle timers/RAF when the window is occluded/minimized - lower idle CPU. */
   app.commandLine.appendSwitch('js-flags', '--max-old-space-size=1024 --max-semi-space-size=64 --no-expose-gc');
 
   app.commandLine.appendSwitch('renderer-process-limit', '24');
@@ -4364,7 +5220,7 @@ function createWindow(options = {}) {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: profileName === 'Personal' ? 'Axis Browser' : `Axis — ${profileName}`,
+    title: profileName === 'Personal' ? 'Axis Browser' : `Axis - ${profileName}`,
     icon: APP_ICON_PATH,
     webPreferences: {
       nodeIntegration: false,
@@ -4399,6 +5255,7 @@ function createWindow(options = {}) {
     attachMacTrafficLightResize(win);
   }
   attachWebviewHostResizeSignals(win);
+  attachFullscreenShellSignals(win);
   win.__axisIsIncognito = false;
   win.__axisProfileId = profileId;
   win.__axisProfileName = profileName;
@@ -4427,6 +5284,10 @@ function createWindow(options = {}) {
       syncAdBlockerForProfile(profileId);
       void loadStoredAxisExtensionsForProfile(profileId);
     }, 250);
+    // External http(s) links queued before the shell was ready.
+    setTimeout(() => {
+      if (!win.isDestroyed()) axisFlushPendingOpenUrls();
+    }, 450);
   });
 
   // Handle window closed
@@ -4485,7 +5346,8 @@ function resolveProfileIdForSettings(profileIdHint = null) {
     return sanitizeProfileId(profileIdHint);
   }
   const focused = BrowserWindow.getFocusedWindow();
-  if (focused && !focused.isDestroyed() && focused.__axisIsIncognito !== true) {
+  if (focused && !focused.isDestroyed()) {
+    if (focused.__axisIsIncognito === true) return 'incognito';
     return sanitizeProfileId(focused.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
   }
   let win = mainWindow;
@@ -4509,6 +5371,12 @@ function getSettingsWindowLoadUrl(profileId, section = null) {
   return u.href;
 }
 
+function getSettingsWindowPartition(profileId) {
+  const id = sanitizeProfileId(profileId);
+  if (id === 'incognito') return AXIS_EXTENSION_SESSION_PARTITION;
+  return getProfilePartition(id);
+}
+
 /** Open Settings in a native frosted popup window (one window; switch profile inside). */
 function openSettingsWindow(section = null, profileIdHint = null) {
   const profileId = resolveProfileIdForSettings(profileIdHint);
@@ -4522,19 +5390,24 @@ function openSettingsWindow(section = null, profileIdHint = null) {
     if (existing.isMinimized()) existing.restore();
     existing.show();
     existing.focus();
-    try {
-      existing.webContents.send('axis-settings-store-updated');
-    } catch (_) {}
+    if (prevId !== nextId) {
+      try {
+        existing.webContents.send('axis-settings-store-updated');
+      } catch (_) {}
+    }
     if (prevId !== nextId) {
       try {
         existing.webContents.send('settings-editing-profile-changed', { profileId: nextId });
-  } catch (_) {}
+      } catch (_) {}
     }
     if (safeSection) {
       try {
         existing.webContents.send('switch-settings-tab', safeSection);
       } catch (_) {}
     }
+    try {
+      createMenu(nextId);
+    } catch (_) {}
     return existing;
   }
 
@@ -4542,7 +5415,7 @@ function openSettingsWindow(section = null, profileIdHint = null) {
     const anyBrowser = BrowserWindow.getAllWindows().find(
       (w) => !w.isDestroyed() && w.__axisIsIncognito !== true && !w.__axisIsSettingsWindow
     );
-    if (!anyBrowser) createWindow();
+    if (!anyBrowser && profileId !== 'incognito') createWindow();
   }
 
   const isDarwin = process.platform === 'darwin';
@@ -4578,7 +5451,7 @@ function openSettingsWindow(section = null, profileIdHint = null) {
       contextIsolation: true,
       sandbox: true,
       preload: path.join(__dirname, 'settings-preload.js'),
-      partition: getProfilePartition(profileId),
+      partition: getSettingsWindowPartition(profileId),
       backgroundThrottling: false,
       spellcheck: false,
       webSecurity: true
@@ -4628,10 +5501,16 @@ function openSettingsWindow(section = null, profileIdHint = null) {
     win.show();
     win.focus();
     if (isDarwin) win.setWindowButtonVisibility(true);
+    try {
+      createMenu(profileId);
+    } catch (_) {}
   });
 
   win.on('closed', () => {
     if (axisSettingsWindow === win) axisSettingsWindow = null;
+    try {
+      createMenu();
+    } catch (_) {}
   });
 
   axisSettingsWindow = win;
@@ -4641,7 +5520,16 @@ function openSettingsWindow(section = null, profileIdHint = null) {
 
 /** Open Settings (native popup). Kept for menu handlers. */
 function openSettingsInBrowserTab(section = null) {
-  openSettingsWindow(section);
+  const focused = BrowserWindow.getFocusedWindow();
+  let profileHint = null;
+  let sectionHint = section;
+  if (focused && !focused.isDestroyed() && focused.__axisIsIncognito === true) {
+    profileHint = 'incognito';
+    if (!sectionHint) sectionHint = 'customization';
+  } else if (focused && !focused.isDestroyed() && focused.__axisProfileId) {
+    profileHint = focused.__axisProfileId;
+  }
+  openSettingsWindow(sectionHint, profileHint);
 }
 
 function menuAccel(key) {
@@ -4650,12 +5538,7 @@ function menuAccel(key) {
 
 /** Open a URL in a new tab in the main Axis window (not the system browser). */
 function openUrlInAxisBrowser(url) {
-  if (!url || typeof url !== 'string' || !isSafeHttpUrl(url)) return;
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-  mainWindow.webContents.send('open-url-in-browser', url);
+  axisOpenExternalHttpUrl(url);
 }
 
 /**
@@ -4727,7 +5610,7 @@ function isBlockedFetchHostname(hostname) {
   ) {
     return true;
   }
-  // IPv4 literals (incl. decimal weirdness avoided — only dotted form).
+  // IPv4 literals (incl. decimal weirdness avoided - only dotted form).
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (m) {
     const parts = m.slice(1).map((n) => Number(n));
@@ -4742,7 +5625,7 @@ function isBlockedFetchHostname(hostname) {
     if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
     if (a >= 224) return true; // multicast / reserved
   }
-  // IPv6 literals — block loopback / link-local / ULA / IPv4-mapped prefix.
+  // IPv6 literals - block loopback / link-local / ULA / IPv4-mapped prefix.
   if (host.includes(':')) {
     if (
       host === '::1' ||
@@ -4885,7 +5768,7 @@ function buildExtensionsSubmenu() {
   /** @type {import('electron').MenuItemConstructorOptions[]} */
   const items = [];
   if (!exts.length) {
-    items.push({ label: 'No extensions installed', enabled: false });
+    items.push({ label: uiT('menu.noExtensions'), enabled: false });
   } else {
     for (const ext of exts) {
       const userDisabled = ext.enabled === false;
@@ -4908,10 +5791,10 @@ function buildExtensionsSubmenu() {
             const win = getActiveAxisWindow();
             void dialog.showMessageBox(win && !win.isDestroyed() ? win : BrowserWindow.getFocusedWindow() || undefined, {
               type: 'info',
-              title: 'Extension',
-              message: 'Could not open this extension.',
+              title: uiT('menu.extensionOpenFailTitle'),
+              message: uiT('menu.extensionOpenFail'),
               detail: msg,
-              buttons: ['OK']
+              buttons: [uiT('common.ok')]
             });
           }
         }
@@ -4922,22 +5805,25 @@ function buildExtensionsSubmenu() {
 
   items.push({ type: 'separator' });
   items.push({
-    label: 'Add extension (Chrome Web Store)',
+    label: uiT('menu.addExtensionCws'),
     click: () => openStoreListingUrlFromMenu('https://chromewebstore.google.com/')
   });
   items.push({
-    label: 'Add extension (Firefox Add-ons)',
+    label: uiT('menu.addExtensionAmo'),
     click: () => openStoreListingUrlFromMenu('https://addons.mozilla.org/firefox/extensions/')
   });
   items.push({
-    label: 'Manage Extensions…',
+    label: uiT('menu.manageExtensions'),
     click: () => openSettingsInBrowserTab('extensions')
   });
   return items;
 }
 
-function createMenu() {
-  const shortcuts = getShortcuts();
+function createMenu(profileIdHint) {
+  // Menu labels always follow the browsing (or dedicated Settings) profile —
+  // never the Settings "editing" profile id passed as a write hint.
+  syncMenuLocale(getMenuLocaleProfileId());
+  const shortcuts = getShortcuts(profileIdHint || getMenuLocaleProfileId());
   const closeTabShortcut = menuAccel(shortcuts['close-tab']);
   const settingsShortcut = menuAccel(shortcuts['settings']);
   const newTabShortcut = menuAccel(shortcuts['new-tab']);
@@ -4963,9 +5849,12 @@ function createMenu() {
   const copyUrlMarkdownShortcut = menuAccel(shortcuts['copy-url-markdown']);
   const nextTabShortcut = menuAccel(shortcuts['next-tab']);
   const previousTabShortcut = menuAccel(shortcuts['previous-tab']);
+  const goBackShortcut = menuAccel(shortcuts['go-back']);
+  const goForwardShortcut = menuAccel(shortcuts['go-forward']);
+  const hardReloadShortcut = menuAccel(shortcuts['hard-reload']);
 
-  const navBackAccel = process.platform === 'darwin' ? 'Cmd+[' : 'Alt+Left';
-  const navForwardAccel = process.platform === 'darwin' ? 'Cmd+]' : 'Alt+Right';
+  const navBackAccel = goBackShortcut || (process.platform === 'darwin' ? 'Cmd+[' : 'Alt+Left');
+  const navForwardAccel = goForwardShortcut || (process.platform === 'darwin' ? 'Cmd+]' : 'Alt+Right');
 
   const newWinAccel = process.platform === 'darwin' ? 'Shift+Cmd+N' : 'Ctrl+Shift+N';
   const newIncognitoAccel = process.platform === 'darwin' ? 'Alt+Cmd+N' : 'Ctrl+Shift+P';
@@ -4978,7 +5867,7 @@ function createMenu() {
       label: appName,
       submenu: [
         {
-          label: `About ${appName}`,
+          label: uiT('app.about', { name: appName }),
           click: () => {
             void showMacAboutDialog();
           }
@@ -4986,23 +5875,23 @@ function createMenu() {
         axisUpdateCheck.getCheckForUpdatesMenuItem(),
         { type: 'separator' },
         {
-          label: 'Settings…',
+          label: uiT('menu.settingsEllipsis'),
           ...(settingsShortcut ? { accelerator: settingsShortcut } : {}),
           click: () => openSettingsInBrowserTab()
         },
         {
-          label: 'Keyboard Shortcuts…',
+          label: uiT('menu.shortcutsEllipsis'),
           click: () => openSettingsInBrowserTab('shortcuts')
         },
         { type: 'separator' },
         { role: 'services', submenu: [] },
         { type: 'separator' },
-        { role: 'hide', label: `Hide ${appName}` },
-        { role: 'hideOthers' },
-        { role: 'unhide' },
+        { role: 'hide', label: uiT('app.hide', { name: appName }) },
+        { role: 'hideOthers', label: uiT('menu.hideOthers') },
+        { role: 'unhide', label: uiT('menu.showAll') },
         { type: 'separator' },
         {
-          label: `Quit ${appName}`,
+          label: uiT('app.quit', { name: appName }),
           accelerator: 'Cmd+Q',
           click: () => {
             const win = getActiveAxisWindow();
@@ -5021,34 +5910,34 @@ function createMenu() {
 
   const fileSubmenu = [
     {
-      label: 'New Tab',
+      label: uiT('chrome.newTab'),
       ...(newTabShortcut ? { accelerator: newTabShortcut } : {}),
       click: () => sendBrowserShortcut('new-tab')
     },
     {
-      label: 'New Window',
+      label: uiT('chrome.newWindow'),
       accelerator: newWinAccel,
       click: () => createWindow({ useNewWindowRules: true })
     },
     {
-      label: 'New Incognito Window',
+      label: uiT('chrome.newIncognitoWindow'),
       accelerator: newIncognitoAccel,
       click: () => createIncognitoWindow()
     },
     { type: 'separator' },
     {
-      label: 'Focus Address Bar',
+      label: uiT('menu.focusUrl'),
       ...(focusUrlShortcut ? { accelerator: focusUrlShortcut } : {}),
       click: () => sendBrowserShortcut('focus-url')
     },
     { type: 'separator' },
     {
-      label: 'Print…',
+      label: uiT('menu.print'),
       ...(printShortcut ? { accelerator: printShortcut } : {}),
       click: () => sendBrowserShortcut('print')
     },
     {
-      label: 'Downloads',
+      label: uiT('chrome.downloads'),
       ...(downloadsShortcut ? { accelerator: downloadsShortcut } : {}),
       click: () => sendBrowserShortcut('downloads')
     },
@@ -5056,7 +5945,7 @@ function createMenu() {
       ? [
           { type: 'separator' },
           {
-            label: 'Quit',
+            label: uiT('menu.quit'),
             accelerator: 'Ctrl+Q',
             click: () => {
               isUserQuitting = true;
@@ -5073,30 +5962,34 @@ function createMenu() {
   ];
 
   const editSubmenu = [
-    { role: 'undo' },
+    {
+      label: uiT('menu.undo'),
+      ...(recoverTabShortcut ? { accelerator: recoverTabShortcut } : { accelerator: 'CmdOrCtrl+Z' }),
+      click: () => sendBrowserShortcut('recover-tab')
+    },
     { role: 'redo' },
     { type: 'separator' },
     { role: 'cut' },
     { role: 'copy' },
     { role: 'paste' },
     {
-      label: 'Paste and Match Style',
+      label: uiT('menu.pasteMatchStyle'),
       ...(pasteMatchStyleShortcut ? { accelerator: pasteMatchStyleShortcut } : {}),
       click: () => sendBrowserShortcut('paste-match-style')
     },
     {
-      label: 'Copy Page URL',
+      label: uiT('menu.copyPageUrl'),
       ...(copyUrlShortcut ? { accelerator: copyUrlShortcut } : {}),
       click: () => sendBrowserShortcut('copy-url')
     },
     {
-      label: 'Copy URL as Markdown',
+      label: uiT('menu.copyUrlMarkdown'),
       ...(copyUrlMarkdownShortcut ? { accelerator: copyUrlMarkdownShortcut } : {}),
       click: () => sendBrowserShortcut('copy-url-markdown')
     },
     ...(process.platform === 'darwin' ? [{ role: 'delete' }] : []),
     {
-      label: 'Select All',
+      label: uiT('menu.selectAll'),
       ...(selectAllShortcut ? { accelerator: selectAllShortcut } : {}),
       click: () => sendBrowserShortcut('select-all')
     },
@@ -5104,7 +5997,7 @@ function createMenu() {
       ? [
           { type: 'separator' },
           {
-            label: 'Emoji and Symbols',
+            label: uiT('menu.emoji'),
             click: () => {
               const win = BrowserWindow.getFocusedWindow();
               showNativeEmojiPanel(win && !win.isDestroyed() ? win.webContents : null);
@@ -5114,7 +6007,7 @@ function createMenu() {
       : []),
     { type: 'separator' },
     {
-      label: 'Find in Page…',
+      label: uiT('menu.find'),
       ...(findShortcut ? { accelerator: findShortcut } : {}),
       click: () => sendBrowserShortcut('find')
     },
@@ -5129,7 +6022,7 @@ function createMenu() {
       ? [
           { type: 'separator' },
           {
-            label: 'Settings…',
+            label: uiT('menu.settingsEllipsis'),
             ...(settingsShortcut ? { accelerator: settingsShortcut } : {}),
             click: () => openSettingsInBrowserTab()
           }
@@ -5139,43 +6032,43 @@ function createMenu() {
 
   const tabsSubmenu = [
     {
-      label: 'New Tab',
+      label: uiT('chrome.newTab'),
       ...(newTabShortcut ? { accelerator: newTabShortcut } : {}),
       click: () => sendBrowserShortcut('new-tab')
     },
     {
-      label: 'Close Tab',
+      label: uiT('menu.closeTab'),
       ...(closeTabShortcut ? { accelerator: closeTabShortcut } : {}),
       click: () => sendBrowserShortcut('close-tab')
     },
     {
-      label: 'Undo',
+      label: uiT('menu.undoClose'),
       ...(recoverTabShortcut ? { accelerator: recoverTabShortcut } : {}),
       click: () => sendBrowserShortcut('recover-tab')
     },
     {
-      label: 'Duplicate Tab',
+      label: uiT('menu.duplicateTab'),
       ...(duplicateTabShortcut ? { accelerator: duplicateTabShortcut } : {}),
       click: () => sendBrowserShortcut('duplicate-tab')
     },
     {
-      label: 'Pin / Unpin Tab',
+      label: uiT('menu.pinUnpin'),
       ...(pinTabShortcut ? { accelerator: pinTabShortcut } : {}),
       click: () => sendBrowserShortcut('pin-tab')
     },
     {
-      label: 'Mute / Unmute Tab',
+      label: uiT('menu.muteUnmute'),
       ...(toggleMuteTabShortcut ? { accelerator: toggleMuteTabShortcut } : {}),
       click: () => sendBrowserShortcut('toggle-mute-tab')
     },
     { type: 'separator' },
     {
-      label: 'Show Next Tab',
+      label: uiT('menu.nextTab'),
       ...(nextTabShortcut ? { accelerator: nextTabShortcut } : {}),
       click: () => sendBrowserShortcut('next-tab')
     },
     {
-      label: 'Show Previous Tab',
+      label: uiT('menu.prevTab'),
       ...(previousTabShortcut ? { accelerator: previousTabShortcut } : {}),
       click: () => sendBrowserShortcut('previous-tab')
     }
@@ -5183,59 +6076,63 @@ function createMenu() {
 
   const viewSubmenu = [
     {
-      label: 'Back',
+      label: uiT('menu.back'),
       accelerator: navBackAccel,
       click: () => sendBrowserShortcut('go-back')
     },
     {
-      label: 'Forward',
+      label: uiT('menu.forward'),
       accelerator: navForwardAccel,
       click: () => sendBrowserShortcut('go-forward')
     },
     {
-      label: 'Stop Loading',
+      label: uiT('menu.stop'),
       click: () => sendBrowserShortcut('stop-loading')
     },
     {
-      label: 'Reload Page',
+      label: uiT('menu.reloadPage'),
       ...(refreshShortcut ? { accelerator: refreshShortcut } : {}),
       click: () => sendBrowserShortcut('refresh')
     },
-    { role: 'forceReload', label: 'Force Reload' },
-    { role: 'toggleDevTools', label: 'Toggle Developer Tools' },
+    {
+      label: uiT('menu.forceReload'),
+      ...(hardReloadShortcut ? { accelerator: hardReloadShortcut } : {}),
+      click: () => sendBrowserShortcut('hard-reload')
+    },
+    { role: 'toggleDevTools', label: uiT('menu.devTools') },
     { type: 'separator' },
     {
-      label: 'Actual Size',
+      label: uiT('menu.actualSize'),
       ...(resetZoomShortcut ? { accelerator: resetZoomShortcut } : {}),
       click: () => sendBrowserShortcut('reset-zoom')
     },
     {
-      label: 'Zoom In',
+      label: uiT('menu.zoomIn'),
       ...(zoomInShortcut ? { accelerator: zoomInShortcut } : {}),
       click: () => sendBrowserShortcut('zoom-in')
     },
     {
-      label: 'Zoom Out',
+      label: uiT('menu.zoomOut'),
       ...(zoomOutShortcut ? { accelerator: zoomOutShortcut } : {}),
       click: () => sendBrowserShortcut('zoom-out')
     },
     { type: 'separator' },
     {
-      label: 'Toggle Sidebar',
+      label: uiT('menu.toggleSidebar'),
       ...(toggleSidebarShortcut ? { accelerator: toggleSidebarShortcut } : {}),
       click: () => sendBrowserShortcut('toggle-sidebar')
     },
     {
-      label: 'Toggle Chat',
+      label: uiT('menu.toggleChat'),
       ...(toggleChatShortcut ? { accelerator: toggleChatShortcut } : {}),
       click: () => sendBrowserShortcut('toggle-chat')
     },
     { type: 'separator' },
     {
       id: 'axis-enter-fullscreen',
-      label: 'Enter Full Screen',
+      label: uiT('menu.enterFullscreen'),
       accelerator: process.platform === 'darwin' ? 'Ctrl+Command+F' : 'F11',
-      // macOS: do not use `role: 'togglefullscreen'` — it duplicates the OS-injected View item.
+      // macOS: do not use `role: 'togglefullscreen'` - it duplicates the OS-injected View item.
       click: () => {
         const win = BrowserWindow.getFocusedWindow();
         if (win && !win.isDestroyed()) {
@@ -5247,13 +6144,13 @@ function createMenu() {
 
   const historySubmenu = [
     {
-      label: 'Show History',
+      label: uiT('menu.showHistory'),
       ...(historyShortcut ? { accelerator: historyShortcut } : {}),
       click: () => sendBrowserShortcut('history')
     },
     { type: 'separator' },
     {
-      label: 'Clear Browsing History…',
+      label: uiT('menu.clearHistoryEllipsis'),
       ...(clearHistoryShortcut ? { accelerator: clearHistoryShortcut } : {}),
       click: () => sendBrowserShortcut('clear-history')
     }
@@ -5263,12 +6160,12 @@ function createMenu() {
     ...(process.platform === 'darwin'
       ? [
           {
-            label: 'New Window',
+            label: uiT('chrome.newWindow'),
             accelerator: 'Shift+Cmd+N',
             click: () => createWindow({ useNewWindowRules: true })
           },
           {
-            label: 'New Incognito Window',
+            label: uiT('chrome.newIncognitoWindow'),
             accelerator: 'Alt+Cmd+N',
             click: () => createIncognitoWindow()
           },
@@ -5280,14 +6177,14 @@ function createMenu() {
     ...(process.platform === 'darwin' ? [{ type: 'separator' }, { role: 'front' }] : []),
     { type: 'separator' },
     {
-      label: 'Close Window',
+      label: uiT('menu.closeWindow'),
       click: () => {
         const win = BrowserWindow.getFocusedWindow();
         if (win && !win.isDestroyed()) win.close();
       }
     },
     {
-      label: 'Close All Windows',
+      label: uiT('menu.closeAllWindows'),
       accelerator: process.platform === 'darwin' ? 'Alt+Cmd+W' : 'Ctrl+Shift+W',
       click: () => {
         BrowserWindow.getAllWindows().forEach((w) => {
@@ -5301,58 +6198,88 @@ function createMenu() {
     axisUpdateCheck.getCheckForUpdatesMenuItem(),
     { type: 'separator' },
     {
-      label: 'Visit Website',
+      label: uiT('menu.visitWebsite'),
       click: () => openUrlInAxisBrowser('https://www.axis-browser.com/')
     },
     { type: 'separator' },
     {
-      label: 'View License',
+      label: uiT('menu.viewLicense'),
       click: () =>
         openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser/blob/main/LICENSE.md')
     },
     {
-      label: 'Report an Issue',
+      label: uiT('menu.reportIssue'),
       click: () => openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser/issues')
     },
     {
-      label: 'Report a Vulnerability',
+      label: uiT('menu.reportVulnerability'),
       click: () =>
         openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser/security')
     },
     {
-      label: 'Donate',
+      label: uiT('menu.donate'),
       click: () => openUrlInAxisBrowser('https://www.patreon.com/cw/AbdelrahmanBerchan')
     },
     {
-      label: 'Visit GitHub Page',
+      label: uiT('menu.visitGithub'),
       click: () => openUrlInAxisBrowser('https://github.com/AbdelrahmanBerchan/Axis-Browser')
     }
   ];
 
-  template.push({ label: 'File', submenu: fileSubmenu });
-  template.push({ label: 'Edit', submenu: editSubmenu });
-  template.push({ label: 'Tabs', submenu: tabsSubmenu });
-  template.push({ label: 'View', submenu: viewSubmenu });
-  template.push({ label: 'Profiles', submenu: buildProfilesSubmenu() });
-  template.push({ label: 'History', submenu: historySubmenu });
-  template.push({ label: 'Extensions', submenu: buildExtensionsSubmenu() });
-  template.push({ label: 'Window', submenu: windowSubmenu });
-  template.push({ label: 'Help', submenu: helpSubmenu });
+  template.push({ label: uiT('menu.file'), submenu: fileSubmenu });
+  template.push({ label: uiT('menu.edit'), submenu: editSubmenu });
+  template.push({ label: uiT('menu.tabs'), submenu: tabsSubmenu });
+  template.push({ label: uiT('menu.view'), submenu: viewSubmenu });
+  template.push({ label: uiT('menu.profiles'), submenu: buildProfilesSubmenu() });
+  template.push({ label: uiT('menu.historyMenu'), submenu: historySubmenu });
+  template.push({ label: uiT('menu.extensions'), submenu: buildExtensionsSubmenu() });
+  template.push({ label: uiT('menu.window'), submenu: windowSubmenu });
+  template.push({ label: uiT('menu.help'), submenu: helpSubmenu });
 
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 }
 
+function countIncognitoWindows() {
+  return BrowserWindow.getAllWindows().filter(
+    (w) => w && !w.isDestroyed() && w.__axisIsIncognito === true
+  ).length;
+}
+
+function clearIncognitoSessionIfIdle() {
+  if (countIncognitoWindows() > 0) return;
+  try {
+    const incognitoSession = session.fromPartition('incognito');
+    incognitoSession.clearStorageData();
+    incognitoSession.clearCache();
+    incognitoSession.clearAuthCache();
+    incognitoSession.clearHostResolverCache();
+  } catch (_) {}
+}
+
+function syncIncognitoChromeProportionsFromActiveProfile() {
+  try {
+    const dest = ensureIncognitoProfileStore();
+    const srcId = getActiveProfileId();
+    const src = getProfileStore(srcId);
+    const zoom = src.get('sidebarZoom', 100);
+    if (zoom != null) dest.set('sidebarZoom', zoom);
+    const light = src.get('windowChromeLight', 50);
+    if (light != null) dest.set('windowChromeLight', light);
+  } catch (_) {}
+}
+
 function createIncognitoWindow(initialUrl = null) {
   // Create a new session for incognito mode
   const incognitoSession = session.fromPartition('incognito');
+  syncIncognitoChromeProportionsFromActiveProfile();
   
   const incognitoWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'Axis — Incognito',
+    title: 'Axis - Incognito',
     icon: APP_ICON_PATH,
     webPreferences: {
       nodeIntegration: false,
@@ -5363,7 +6290,8 @@ function createIncognitoWindow(initialUrl = null) {
       backgroundThrottling: true,
       offscreen: false,
       experimentalFeatures: true,
-      enableBlinkFeatures: 'CSSColorSchemeUARendering',
+      enableBlinkFeatures:
+        'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn',
       v8CacheOptions: 'code',
       spellcheck: false,
       webSecurity: true,
@@ -5392,6 +6320,7 @@ function createIncognitoWindow(initialUrl = null) {
     attachMacTrafficLightResize(incognitoWindow);
   }
   attachWebviewHostResizeSignals(incognitoWindow);
+  attachFullscreenShellSignals(incognitoWindow);
 
   if (initialUrl && isSafeHttpUrl(initialUrl)) {
     incognitoWindow.webContents.once('did-finish-load', () => {
@@ -5414,14 +6343,19 @@ function createIncognitoWindow(initialUrl = null) {
         if (!incognitoWindow.isDestroyed()) positionMacTrafficLights(incognitoWindow, side);
       });
     }
+    applyVibrancyToWindow(incognitoWindow);
     incognitoWindow.show();
+    setTimeout(() => {
+      if (incognitoWindow.isDestroyed()) return;
+      try {
+        configureAxisSessionInstance(incognitoSession);
+      } catch (_) {}
+      syncAdBlockerForIncognitoSession();
+    }, 250);
   });
 
   incognitoWindow.on('closed', () => {
-    incognitoSession.clearStorageData();
-    incognitoSession.clearCache();
-    incognitoSession.clearAuthCache();
-    incognitoSession.clearHostResolverCache();
+    clearIncognitoSessionIfIdle();
   });
 
   return incognitoWindow;
@@ -5463,7 +6397,7 @@ function updateDockMenu() {
 
   const dockMenu = Menu.buildFromTemplate([
     {
-      label: 'New Window',
+      label: uiT('chrome.newWindow'),
       click: () => {
         if (BrowserWindow.getAllWindows().length === 0) {
           createWindow();
@@ -5473,7 +6407,7 @@ function updateDockMenu() {
       }
     },
     {
-      label: 'New Incognito Window',
+      label: uiT('chrome.newIncognitoWindow'),
       click: () => {
         createIncognitoWindow();
       }
@@ -5540,6 +6474,12 @@ function warmUpMainProcessNativePaths() {
 }
 
 // App event handlers
+process.on('unhandledRejection', (reason) => {
+  const msg = String((reason && reason.message) || reason || '');
+  if (msg.includes('Script failed to execute')) return;
+  console.warn('Unhandled promise rejection:', reason);
+});
+
 app.whenReady().then(async () => {
   axisSessionLastExitClean = wasLastAxisSessionCleanExit();
   markAxisSessionRunning();
@@ -5572,7 +6512,7 @@ app.whenReady().then(async () => {
     });
 
     // Ensure every dynamic profile partition gets handlers (cookies, downloads, permissions, spellcheck).
-    // Permission handlers are re-bound every time — required because Electron auto-approves without them.
+    // Permission handlers are re-bound every time - required because Electron auto-approves without them.
     try {
       installSessionPermissionHandlers(contents.session);
     } catch (_) {}
@@ -5613,24 +6553,37 @@ app.whenReady().then(async () => {
           allowed = false;
         }
         if (!blocked && allowed) {
-          // Fire after handler returns; sync loadURL inside the handler can race the deny.
+          const hostWin = getWindowFromSender(contents);
+          const sourceWebContentsId = contents && typeof contents.id === 'number' ? contents.id : 0;
           setImmediate(() => {
-            if (!contents.isDestroyed()) {
-              contents.loadURL(url).catch(() => {});
+            if (hostWin && !hostWin.isDestroyed()) {
+              hostWin.webContents.send('guest-open-url-in-new-tab', { url, sourceWebContentsId });
             }
           });
         }
       }
       return { action: 'deny' };
     });
+
+    const notifyGuestHtmlFullscreen = (active) => {
+      sendGuestHtmlFullscreenToShell(contents, active);
+    };
+    contents.on('enter-html-full-screen', () => notifyGuestHtmlFullscreen(true));
+    contents.on('leave-html-full-screen', () => notifyGuestHtmlFullscreen(false));
   });
 
   configureSession();
   // First paint path: open the window immediately; defer non-critical warmups.
+  try {
+    if (store.get('__axisOnboardingPreviewV10') !== true) {
+      store.set('__axisOnboardingPreviewV10', true);
+      getProfileStore(AXIS_DEFAULT_PROFILE_ID).set('onboardingCompleted', false);
+    }
+  } catch (_) {}
   createWindow();
   updateDockMenu();
 
-  // After first window is up — spellcheck, clipboard/menu warm, other profiles, dock art, updates.
+  // After first window is up - spellcheck, clipboard/menu warm, other profiles, dock art, updates.
   setTimeout(() => {
     ensureSpellEngineLoaded();
     warmUpMainProcessNativePaths();
@@ -5656,6 +6609,11 @@ app.whenReady().then(async () => {
           if (focused && !focused.isDestroyed()) return focused;
           if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
           return null;
+        },
+        quitForUpdate: async () => {
+          isQuitConfirmed = true;
+          isUserQuitting = true;
+          await finishConfirmedQuit();
         }
       });
     } catch (_) {}
@@ -5702,11 +6660,11 @@ function showNativeQuitDialog() {
   } catch (_) {}
   const response = dialog.showMessageBoxSync(win, {
     type: 'question',
-    buttons: ['Cancel', 'Quit'],
+    buttons: [uiT('common.cancel'), uiT('menu.quit')],
     defaultId: 0,
     cancelId: 0,
-    message: 'Quit Axis?',
-    detail: 'Are you sure you want to exit the application?'
+    message: uiT('app.quitAsk'),
+    detail: uiT('app.quitDetail')
   });
   return response === 1;
 }
@@ -5860,7 +6818,7 @@ exit 1
 /**
  * Require real OS owner verification for vault secrets.
  * Never accept a bare "Continue" click as authentication.
- * Each sensitive action must authenticate — no unlock grace window.
+ * Each sensitive action must authenticate - no unlock grace window.
  */
 async function axisVerifyDeviceOwner(reason) {
   const text =
@@ -5870,7 +6828,7 @@ async function axisVerifyDeviceOwner(reason) {
 
   let ok = false;
   if (process.platform === 'darwin') {
-    // Prefer Electron's prompt when present — do not gate on canPromptTouchID()
+    // Prefer Electron's prompt when present - do not gate on canPromptTouchID()
     // (that check is Touch-ID-sensor-only and falsely skips Watch / passcode unlock).
     if (typeof systemPreferences.promptTouchID === 'function') {
       try {
@@ -5892,9 +6850,8 @@ async function axisVerifyDeviceOwner(reason) {
       await dialog.showMessageBox({
         type: 'warning',
         message: text,
-        detail:
-          'Axis could not verify you with Windows Hello. Set up Windows Hello (PIN or biometrics), then try again. A simple Confirm is not enough to unlock vault data.',
-        buttons: ['OK'],
+        detail: uiT('vault.windowsHelloFail'),
+        buttons: [uiT('common.ok')],
         defaultId: 0
       });
     }
@@ -5902,9 +6859,8 @@ async function axisVerifyDeviceOwner(reason) {
     await dialog.showMessageBox({
       type: 'warning',
       message: text,
-      detail:
-        'This system does not support device authentication for Axis vault data. Sensitive vault actions are blocked until an OS unlock method is available.',
-      buttons: ['OK'],
+      detail: uiT('vault.noDeviceAuth'),
+      buttons: [uiT('common.ok')],
       defaultId: 0
     });
     ok = false;
@@ -5933,15 +6889,22 @@ function vaultStatusPayload(profileId = AXIS_DEFAULT_PROFILE_ID) {
   };
 }
 
-ipcMain.handle('axis-vault-get-page-scan-js', () => AXIS_VAULT_PAGE_SCAN_JS);
+ipcMain.handle('axis-vault-get-page-scan-js', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return '';
+  return AXIS_VAULT_PAGE_SCAN_JS;
+});
 
-ipcMain.handle('axis-vault-get-autofill-inject-js', () => ({
-  bootstrap: AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS,
-  probe: AXIS_VAULT_AUTOFILL_PROBE_JS,
-  hide: AXIS_VAULT_AUTOFILL_HIDE_JS
-}));
+ipcMain.handle('axis-vault-get-autofill-inject-js', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { bootstrap: '', probe: '', hide: '' };
+  return {
+    bootstrap: AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS,
+    probe: AXIS_VAULT_AUTOFILL_PROBE_JS,
+    hide: AXIS_VAULT_AUTOFILL_HIDE_JS
+  };
+});
 
-ipcMain.handle('axis-vault-build-autofill-show-js', (_e, payload) => {
+ipcMain.handle('axis-vault-build-autofill-show-js', (event, payload) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return '(function(){})()';
   const data = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : { items: payload };
   const items = Array.isArray(data.items) ? data.items : [];
   const theme = data.theme === 'light' ? 'light' : 'dark';
@@ -5949,10 +6912,59 @@ ipcMain.handle('axis-vault-build-autofill-show-js', (_e, payload) => {
   return buildVaultAutofillShowMenuJs(items, theme, kind);
 });
 
-ipcMain.handle('axis-vault-build-autofill-fill-js', (_e, cred) => {
+/** Fetch a site favicon as a data URL (avoids guest-page CSP blocking images). */
+ipcMain.handle('axis-vault-fetch-favicon', async (_e, rawOrigin) => {
+  const origin = typeof rawOrigin === 'string' ? rawOrigin.trim() : '';
+  let host = '';
+  try {
+    host = new URL(origin).hostname.replace(/^www\./i, '');
+  } catch (_) {
+    host = String(origin || '')
+      .replace(/^https?:\/\//i, '')
+      .split('/')[0]
+      .replace(/^www\./i, '');
+  }
+  if (!host || host.length > 253) return { ok: false, dataUrl: '' };
+
+  const candidates = [
+    `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`,
+    `https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico`
+  ];
+  try {
+    const originUrl = origin.includes('://') ? origin : `https://${host}/`;
+    candidates.push(new URL('/favicon.ico', originUrl).href);
+  } catch (_) {}
+
+  for (const url of candidates) {
+    if (!isSafePublicHttpsUrl(url)) continue;
+    try {
+      const res = await net.fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        headers: {
+          Accept: 'image/*,*/*',
+          'User-Agent': 'Mozilla/5.0 (compatible; AxisBrowser/1.0)'
+        }
+      });
+      if (!res.ok) continue;
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length < 16 || buf.length > 200000) continue;
+      let mime = String(res.headers.get('content-type') || 'image/png')
+        .split(';')[0]
+        .trim();
+      if (!mime.startsWith('image/')) mime = 'image/png';
+      return { ok: true, dataUrl: `data:${mime};base64,${buf.toString('base64')}` };
+    } catch (_) {}
+  }
+  return { ok: false, dataUrl: '' };
+});
+
+ipcMain.handle('axis-vault-build-autofill-fill-js', (event, cred) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return '(function(){})()';
   if (!cred || typeof cred !== 'object') return '(function(){})()';
   if (cred.__axisFillKind === 'card' || cred.number) {
-    return buildVaultAutofillFillCardJs(cred);
+    // Never embed CVV into guest-executed fill scripts — user types it on the form.
+    return buildVaultAutofillFillCardJs({ ...cred, cvv: '' });
   }
   if (cred.__axisFillKind === 'address' || cred.addressLine1) {
     return buildVaultAutofillFillAddressJs(cred);
@@ -5965,6 +6977,7 @@ ipcMain.handle('axis-vault-status', (event) => vaultStatusPayload(getProfileIdFo
 ipcMain.handle('axis-vault-verify-device', async (_e, reason) => axisVerifyDeviceOwner(reason));
 
 ipcMain.handle('axis-vault-reveal-login', async (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, cancelled: true };
   const ok = await axisVerifyDeviceOwner('Show saved login');
   if (!ok) return { ok: false, cancelled: true };
   const login = ensureAxisVaultFromEvent(event).getLogin(id);
@@ -5981,6 +6994,7 @@ ipcMain.handle('axis-vault-reveal-login', async (event, id) => {
 });
 
 ipcMain.handle('axis-vault-reveal-card', async (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, cancelled: true };
   const ok = await axisVerifyDeviceOwner('Show saved card');
   if (!ok) return { ok: false, cancelled: true };
   const card = ensureAxisVaultFromEvent(event).getCard(id);
@@ -5997,12 +7011,16 @@ ipcMain.handle('axis-vault-reveal-card', async (event, id) => {
   };
 });
 
-ipcMain.handle('axis-vault-list-logins', (event) => ({
-  ok: true,
-  items: ensureAxisVaultFromEvent(event).listLogins()
-}));
+ipcMain.handle('axis-vault-list-logins', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, items: [] };
+  return {
+    ok: true,
+    items: ensureAxisVaultFromEvent(event).listLogins()
+  };
+});
 
 ipcMain.handle('axis-vault-get-login', async (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   const ok = await axisVerifyDeviceOwner('View saved login');
   if (!ok) return null;
   const login = ensureAxisVaultFromEvent(event).getLogin(id);
@@ -6017,6 +7035,7 @@ ipcMain.handle('axis-vault-get-login', async (event, id) => {
 });
 
 ipcMain.handle('axis-vault-save-login', async (event, entry) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   const ok = await axisVerifyDeviceOwner('Save password to vault');
   if (!ok) {
     const err = new Error('Authentication cancelled');
@@ -6027,6 +7046,7 @@ ipcMain.handle('axis-vault-save-login', async (event, entry) => {
 });
 
 ipcMain.handle('axis-vault-delete-login', async (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
   const ok = await axisVerifyDeviceOwner('Delete saved password');
   if (!ok) return false;
   ensureAxisVaultFromEvent(event).deleteLogin(id);
@@ -6049,6 +7069,113 @@ function getWebContentsPageOrigin(webContents) {
   } catch (_) {
     return null;
   }
+}
+
+/**
+ * Axis shell / Settings may call privileged IPC.
+ * Website guests, extension pages, and other webviews must not.
+ * (Do not trust BrowserWindow.fromWebContents alone — guest webviews can resolve to the host window.)
+ */
+function isTrustedAxisIpcSender(webContents) {
+  if (!webContents || webContents.isDestroyed()) return false;
+  let url = '';
+  try {
+    url = String(webContents.getURL?.() || '');
+  } catch (_) {
+    url = '';
+  }
+  if (isAxisSettingsGuestUrl(url)) return true;
+  if (isWebsiteGuestUrl(url) || isExtensionPageUrl(url)) return false;
+  if (isGuestWebContents(webContents)) return false;
+  try {
+    const win = BrowserWindow.fromWebContents(webContents);
+    if (!win || win.isDestroyed()) return false;
+    return isAxisShellFileUrl(url);
+  } catch (_) {
+    return false;
+  }
+}
+
+function assertTrustedAxisIpc(event) {
+  if (!isTrustedAxisIpcSender(event?.sender)) {
+    const err = new Error('IPC denied');
+    err.code = 'AXIS_IPC_DENIED';
+    throw err;
+  }
+}
+
+function assertTrustedAxisIpcOrNull(event) {
+  try {
+    assertTrustedAxisIpc(event);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Short-lived guest session after autofill UI is shown (card/address fill gate). */
+const guestVaultFillSessions = new WeakMap();
+
+function markGuestVaultFillSession(webContents, allowedIds) {
+  if (!webContents || webContents.isDestroyed()) return;
+  try {
+    const ids = Array.isArray(allowedIds)
+      ? new Set(allowedIds.map((id) => String(id)))
+      : null;
+    guestVaultFillSessions.set(webContents, { at: Date.now(), ids });
+  } catch (_) {}
+}
+
+function guestVaultFillSessionAllows(webContents, id) {
+  if (!webContents || webContents.isDestroyed()) return false;
+  try {
+    const sess = guestVaultFillSessions.get(webContents);
+    if (!sess) return false;
+    if (Date.now() - Number(sess.at || 0) >= 5 * 60 * 1000) return false;
+    if (sess.ids && id != null && !sess.ids.has(String(id))) return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function sealAiProvidersForDisk(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    const next = { ...entry };
+    const key = String(next.apiKey || '');
+    if (key && !isAxisSealedSecret(key)) {
+      try {
+        next.apiKey = sealAxisSecret(key);
+      } catch (_) {
+        /* keep plaintext if OS encryption unavailable — still better than crashing Settings */
+      }
+    }
+    return next;
+  });
+}
+
+function openAiProvidersForTrustedUi(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    const next = { ...entry };
+    next.apiKey = openAxisSecret(next.apiKey);
+    return next;
+  });
+}
+
+function redactSettingsSecretsForExport(raw) {
+  const out =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
+  if (Array.isArray(out.aiProviders)) {
+    out.aiProviders = openAiProvidersForTrustedUi(out.aiProviders);
+  }
+  if (typeof out.groqApiKey === 'string' && out.groqApiKey) {
+    out.groqApiKey = openAxisSecret(out.groqApiKey);
+  }
+  return out;
 }
 
 /**
@@ -6098,6 +7225,11 @@ ipcMain.handle('axis-vault-get-card-for-fill', async (event, id) => {
     if (!isGuest) {
       const ok = await axisVerifyDeviceOwner('Fill saved card');
       if (!ok) return null;
+    } else {
+      // Guests may only fill after autofill listed this card id for this page.
+      if (!guestVaultFillSessionAllows(event.sender, id)) return null;
+      const pageOrigin = getWebContentsPageOrigin(event.sender);
+      if (!pageOrigin || !/^https:/i.test(pageOrigin)) return null;
     }
     const card = ensureAxisVaultFromEvent(event).getCard(id);
     return {
@@ -6107,8 +7239,8 @@ ipcMain.handle('axis-vault-get-card-for-fill', async (event, id) => {
       number: card.number,
       expMonth: card.expMonth,
       expYear: card.expYear,
-      // Guests never receive CVV over IPC (type it yourself on the form).
-      cvv: isGuest ? '' : card.cvv,
+      // Never auto-fill CVV into pages (type it yourself). Settings reveal uses a separate path.
+      cvv: '',
       billingZip: card.billingZip
     };
   } catch (_) {
@@ -6116,12 +7248,16 @@ ipcMain.handle('axis-vault-get-card-for-fill', async (event, id) => {
   }
 });
 
-ipcMain.handle('axis-vault-list-cards', (event) => ({
-  ok: true,
-  items: ensureAxisVaultFromEvent(event).listCards()
-}));
+ipcMain.handle('axis-vault-list-cards', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, items: [] };
+  return {
+    ok: true,
+    items: ensureAxisVaultFromEvent(event).listCards()
+  };
+});
 
 ipcMain.handle('axis-vault-get-card', async (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   const ok = await axisVerifyDeviceOwner('View saved card');
   if (!ok) return null;
   const card = ensureAxisVaultFromEvent(event).getCard(id);
@@ -6137,6 +7273,7 @@ ipcMain.handle('axis-vault-get-card', async (event, id) => {
 });
 
 ipcMain.handle('axis-vault-save-card', async (event, entry) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   const ok = await axisVerifyDeviceOwner('Save card to vault');
   if (!ok) {
     const err = new Error('Authentication cancelled');
@@ -6147,18 +7284,23 @@ ipcMain.handle('axis-vault-save-card', async (event, entry) => {
 });
 
 ipcMain.handle('axis-vault-delete-card', async (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
   const ok = await axisVerifyDeviceOwner('Delete saved card');
   if (!ok) return false;
   ensureAxisVaultFromEvent(event).deleteCard(id);
   return true;
 });
 
-ipcMain.handle('axis-vault-list-addresses', (event) => ({
-  ok: true,
-  items: ensureAxisVaultFromEvent(event).listAddresses()
-}));
+ipcMain.handle('axis-vault-list-addresses', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, items: [] };
+  return {
+    ok: true,
+    items: ensureAxisVaultFromEvent(event).listAddresses()
+  };
+});
 
 ipcMain.handle('axis-vault-get-address', async (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   const ok = await axisVerifyDeviceOwner('View saved address');
   if (!ok) return null;
   const addr = ensureAxisVaultFromEvent(event).getAddress(id);
@@ -6180,6 +7322,7 @@ ipcMain.handle('axis-vault-get-address', async (event, id) => {
 });
 
 ipcMain.handle('axis-vault-save-address', async (event, entry) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   const ok = await axisVerifyDeviceOwner('Save address to vault');
   if (!ok) {
     const err = new Error('Authentication cancelled');
@@ -6190,6 +7333,7 @@ ipcMain.handle('axis-vault-save-address', async (event, entry) => {
 });
 
 ipcMain.handle('axis-vault-delete-address', async (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
   const ok = await axisVerifyDeviceOwner('Delete saved address');
   if (!ok) return false;
   ensureAxisVaultFromEvent(event).deleteAddress(id);
@@ -6198,9 +7342,15 @@ ipcMain.handle('axis-vault-delete-address', async (event, id) => {
 
 ipcMain.handle('axis-vault-get-address-for-fill', async (event, id) => {
   try {
-    if (!isGuestWebContents(event?.sender)) {
+    if (!event?.sender || event.sender.isDestroyed()) return null;
+    const isGuest = isGuestWebContents(event.sender);
+    if (!isGuest) {
       const ok = await axisVerifyDeviceOwner('Fill saved address');
       if (!ok) return null;
+    } else {
+      if (!guestVaultFillSessionAllows(event.sender, id)) return null;
+      const pageOrigin = getWebContentsPageOrigin(event.sender);
+      if (!pageOrigin || !/^https:/i.test(pageOrigin)) return null;
     }
     const addr = ensureAxisVaultFromEvent(event).getAddress(id);
     return {
@@ -6227,7 +7377,12 @@ ipcMain.handle('axis-vault-should-offer-address-save', (event, payload) => ({
   offer: ensureAxisVaultFromEvent(event).shouldOfferAddressSave(payload || {})
 }));
 
+ipcMain.handle('axis-vault-should-offer-card-save', (event, payload) => ({
+  offer: ensureAxisVaultFromEvent(event).shouldOfferCardSave(payload || {})
+}));
+
 ipcMain.handle('axis-vault-capture-login', (event, payload) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   return ensureAxisVaultFromEvent(event).captureLogin(payload || {});
 });
 
@@ -6271,22 +7426,32 @@ function vaultAutofillCandidates(profileId, payload, pageOriginOverride = null) 
       : payload && payload.kind === 'address'
         ? 'address'
         : 'login';
-  // Cards and addresses are not site-scoped — don't require a page origin.
+  // Cards and addresses are not site-scoped - don't require a page origin.
   if (kind === 'card') {
     const cards = v.matchCards().map((c) => ({
       id: c.id,
-      label: c.label,
-      cardholder: c.cardholder,
+      label: c.label || '',
       masked: c.masked,
-      expMonth: c.expMonth,
-      expYear: c.expYear,
-      billingZip: c.billingZip
-      // number/cvv intentionally omitted — fetch via get-card-for-fill on choose
+      brand: /^4/.test(String(c.number || '').replace(/\D/g, ''))
+        ? 'visa'
+        : /^(5[1-5]|2(2[2-9]|[3-6]|7[01]|720))/.test(
+              String(c.number || '').replace(/\D/g, '')
+            )
+          ? 'mastercard'
+          : /^3[47]/.test(String(c.number || '').replace(/\D/g, ''))
+            ? 'amex'
+            : 'card'
+      // number/cvv/cardholder/exp/billingZip omitted — fetch via get-card-for-fill on choose
     }));
     return { ok: true, kind: 'card', items: cards };
   }
   if (kind === 'address') {
-    const addresses = v.matchAddresses().map((a) => ({ ...a }));
+    // Candidates are picker-only: city/region/postal — full address via get-address-for-fill.
+    const addresses = v.matchAddresses().map((a) => ({
+      id: a.id,
+      label: a.label || '',
+      summary: formatAddressCandidateSummary(a)
+    }));
     return { ok: true, kind: 'address', items: addresses };
   }
   let origin =
@@ -6300,27 +7465,37 @@ function vaultAutofillCandidates(profileId, payload, pageOriginOverride = null) 
     .matchLogins(origin, payload && payload.usernameHint, payload && payload.pageUrl)
     .map((e) => ({
       id: e.id,
+      // Keep the *saved* origin so the shell can re-check site match (never rewrite to page).
+      origin: e.origin || origin,
       username: e.username,
-      title: e.title
-      // password intentionally omitted — fetch via get-login-for-fill on choose
+      title: e.title,
+      passwordHint: typeof v.passwordHint === 'function' ? v.passwordHint(e.password) : ''
+      // password intentionally omitted - fetch via get-login-for-fill on choose
     }));
   return { ok: true, kind: 'login', items: logins };
 }
 
-/** Guest preload: autofill menu data (invoke — reliable in webview). */
+/** Guest preload: autofill menu data (invoke - reliable in webview). */
 ipcMain.handle('axis-vault-autofill-query', (event, payload) => {
   // Prefer the real guest URL so a page cannot spoof another site's saved logins.
   const pageOrigin = isGuestWebContents(event.sender)
     ? getWebContentsPageOrigin(event.sender)
     : null;
-  return vaultAutofillCandidates(
+  const res = vaultAutofillCandidates(
     getProfileIdFromWebContents(event.sender),
     payload,
     pageOrigin
   );
+  if (isGuestWebContents(event.sender) && res && Array.isArray(res.items)) {
+    markGuestVaultFillSession(
+      event.sender,
+      res.items.map((item) => item && item.id).filter((id) => id != null)
+    );
+  }
+  return res;
 });
 
-/** Guest preload → shell (invoke — reliable in sandboxed guests). */
+/** Guest preload → shell (invoke - reliable in sandboxed guests). */
 ipcMain.handle('axis-vault-report-credentials', (event, payload) => {
   if (!payload || typeof payload !== 'object') return false;
   forwardVaultGuestMessageToShell(event, 'axis-vault-save-offer', payload);
@@ -6330,6 +7505,20 @@ ipcMain.handle('axis-vault-report-credentials', (event, payload) => {
 /** Guest preload → shell: show autofill menu (invoke; sendToHost backup). */
 ipcMain.handle('axis-vault-autofill-present', (event, payload) => {
   if (!payload || typeof payload !== 'object') return false;
+  if (isGuestWebContents(event.sender)) {
+    const pageOrigin = getWebContentsPageOrigin(event.sender);
+    const res = vaultAutofillCandidates(
+      getProfileIdFromWebContents(event.sender),
+      payload,
+      pageOrigin
+    );
+    markGuestVaultFillSession(
+      event.sender,
+      (res && Array.isArray(res.items) ? res.items : [])
+        .map((item) => item && item.id)
+        .filter((id) => id != null)
+    );
+  }
   forwardVaultGuestMessageToShell(event, 'axis-vault-autofill-request', payload);
   return true;
 });
@@ -6342,6 +7531,9 @@ ipcMain.on('axis-vault-guest-ipc', (event, msg) => {
 });
 
 ipcMain.handle('axis-vault-fill-candidates', (event, payload) => {
+  if (!assertTrustedAxisIpcOrNull(event)) {
+    return { ok: true, logins: [], cards: [], addresses: [] };
+  }
   const res = vaultAutofillCandidates(getProfileIdForEvent(event), payload || {});
   if (!res.ok) return { ok: true, logins: [], cards: [], addresses: [] };
   if (res.kind === 'card') {
@@ -6375,7 +7567,52 @@ const AXIS_SETTINGS_SECTION_IDS = new Set([
   'shortcuts',
   'permissions',
   'extensions',
-  'vault'
+  'vault',
+  'incognito'
+]);
+
+const AXIS_INCOGNITO_WRITABLE_SETTINGS = new Set([
+  'adBlockerEnabled',
+  'blockTrackers',
+  'blockAds',
+  'javascriptEnabled',
+  'linkPreview',
+  'searchEngine',
+  'httpsOnlyMode',
+  'alwaysShowFullUrl',
+  'uiTheme',
+  'theme',
+  'accentColor',
+  'themeColor',
+  'gradientEnabled',
+  'gradientColor',
+  'gradientDirection',
+  'transparentSites',
+  'siteThemeColor',
+  'windowChromeLight',
+  'sidebarZoom',
+  'speechEnabled',
+  'speechRate',
+  'speechPitch',
+  'speechVoice',
+  'ambientAudioEnabled',
+  'ambientMuteWhenTabAudio',
+  'ambientAudioPreset',
+  'ambientAudioVolume',
+  'ntpWelcomeEnabled',
+  'ntpWelcomeGreeting',
+  'ntpGreetingName',
+  'ntpAiSearchEnabled',
+  'ntpShowSettingsShortcut',
+  'ntpWidgetsEnabled',
+  'ntpWidgetBackgrounds',
+  'ntpShowWidgetsEditButton',
+  'ntpWidgetLayout',
+  'aiFeaturesEnabled',
+  'aiProviders',
+  'activeAiProviderId',
+  'uiLanguage',
+  'uiFont'
 ]);
 
 function sanitizeSettingsSectionId(section) {
@@ -6401,9 +7638,12 @@ function getWindowFromSender(webContents) {
 function getProfileIdForEvent(event) {
   const sender = event?.sender;
   // In-window profile switching updates `win.__axisProfileId` but the shell keeps the
-  // default `persist:main` session — always prefer the window's active profile first.
+  // default `persist:main` session - always prefer the window's active profile first.
   const win = getWindowFromSender(sender);
-  if (win && !win.isDestroyed() && win.__axisIsIncognito !== true) {
+  if (win && !win.isDestroyed() && win.__axisIsIncognito === true) {
+    return 'incognito';
+  }
+  if (win && !win.isDestroyed()) {
     const editingId = getSettingsEditingProfileIdForWindow(win);
     if (editingId && sender && !sender.isDestroyed() && isSettingsGuestWebContents(sender)) {
       return editingId;
@@ -6433,7 +7673,7 @@ function getSettingsStoreForEvent(event) {
 ipcMain.handle('get-settings-tab-load-url', (event, section) => {
   const win = getWindowFromSender(event?.sender);
   if (win && !win.isDestroyed() && !win.__axisIsSettingsWindow) {
-    delete win.__axisSettingsEditingProfileId;
+    win.__axisSettingsUiActive = true;
   }
   const filePath = path.join(__dirname, 'settings.html');
   const u = pathToFileURL(filePath);
@@ -6468,10 +7708,15 @@ ipcMain.on('settings-updated', (event) => {
 ipcMain.handle('print-page', (event, webContentsId) => {
   const { webContents } = require('electron');
   const guest = webContents.fromId(webContentsId);
-  if (guest && !guest.isDestroyed()) {
+  if (!guest || guest.isDestroyed()) return false;
+  try {
+    const url = guest.getURL();
+    if (!url || url === 'about:blank') return false;
     guest.print({ silent: false, printBackground: true });
+    return true;
+  } catch (_) {
+    return false;
   }
-  return true;
 });
 
 ipcMain.handle('open-url-in-browser', (event, url) => {
@@ -6493,7 +7738,7 @@ ipcMain.handle('open-url-in-browser', (event, url) => {
   };
 
   const senderWin = getWindowFromSender(event.sender);
-  // Settings (and other non-shell) windows have no tabs — never send the URL there.
+  // Settings (and other non-shell) windows have no tabs - never send the URL there.
   if (senderWin && !senderWin.isDestroyed() && !senderWin.__axisIsSettingsWindow) {
     try {
       const pageUrl = senderWin.webContents.getURL() || '';
@@ -6503,14 +7748,26 @@ ipcMain.handle('open-url-in-browser', (event, url) => {
     } catch (_) {}
   }
 
-  const profileId = sanitizeProfileId(getProfileIdForEvent(event) || AXIS_DEFAULT_PROFILE_ID);
+  const profileId = getProfileIdForEvent(event);
   const all = BrowserWindow.getAllWindows().filter(
     (w) => w && !w.isDestroyed() && !w.__axisIsSettingsWindow
   );
+  if (profileId === 'incognito') {
+    const incogWin =
+      (senderWin && senderWin.__axisIsIncognito === true && senderWin) ||
+      all.find((w) => w.__axisIsIncognito === true);
+    if (sendToBrowserWindow(incogWin)) {
+      return true;
+    }
+    createIncognitoWindow(trimmed);
+    return true;
+  }
+
+  const safeProfileId = sanitizeProfileId(profileId || AXIS_DEFAULT_PROFILE_ID);
   const sameProfile = all.find(
     (w) =>
       w.__axisIsIncognito !== true &&
-      sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID) === profileId
+      sanitizeProfileId(w.__axisProfileId || AXIS_DEFAULT_PROFILE_ID) === safeProfileId
   );
   const anyBrowser = all.find((w) => w.__axisIsIncognito !== true) || all[0];
   if (sendToBrowserWindow(sameProfile || anyBrowser || mainWindow)) {
@@ -6520,11 +7777,135 @@ ipcMain.handle('open-url-in-browser', (event, url) => {
   return true;
 });
 
+function getIncognitoSettingsDefaults() {
+  return {
+    uiTheme: 'dark',
+    theme: 'dark',
+    accentColor: '#555',
+    adBlockerEnabled: true,
+    adBlockerSiteExceptions: {},
+    blockTrackers: true,
+    blockAds: true,
+    javascriptEnabled: true,
+    transparentSites: false,
+    siteThemeColor: false,
+    linkPreview: true,
+    vaultAutofillEnabled: false,
+    windowChromeLight: 50,
+    sidebarZoom: 100,
+    gradientEnabled: false,
+    gradientColor: '#2a2a2a',
+    themeColor: '#1a1a1a',
+    searchEngine: 'google',
+    httpsOnlyMode: false,
+    alwaysShowFullUrl: false,
+    speechEnabled: true,
+    speechRate: 1,
+    speechPitch: 1,
+    ntpWelcomeEnabled: true,
+    ntpWelcomeGreeting: true,
+    ntpGreetingName: 'User',
+    ntpAiSearchEnabled: true,
+    ntpShowSettingsShortcut: true,
+    ntpWidgetsEnabled: false,
+    ntpWidgetBackgrounds: true,
+    ntpShowWidgetsEditButton: true,
+    ntpWidgetLayout: null,
+    ambientAudioEnabled: false,
+    ambientMuteWhenTabAudio: true,
+    ambientAudioPreset: 'rain',
+    ambientAudioVolume: 48,
+    aiFeaturesEnabled: false,
+    aiProviders: [],
+    activeAiProviderId: null,
+    uiLanguage: (() => {
+      try {
+        return AxisI18n.sanitizeLocale(app.getLocale()) || 'en';
+      } catch (_) {
+        return 'en';
+      }
+    })(),
+    uiFont: 'default'
+  };
+}
+
+function getIncognitoSettingsExport(store) {
+  const s = store || ensureIncognitoProfileStore();
+  const out = { ...getIncognitoSettingsDefaults() };
+  for (const key of Object.keys(out)) {
+    const val = s.get(key);
+    if (val !== undefined) out[key] = val;
+  }
+  for (const key of AXIS_INCOGNITO_WRITABLE_SETTINGS) {
+    const val = s.get(key);
+    if (val !== undefined) out[key] = val;
+  }
+  delete out.sitePermissionOverrides;
+  return out;
+}
+
+function ensureIncognitoProfileStore() {
+  const store = getProfileStore('incognito');
+  if (!store.get('__incognitoSeeded', false)) {
+    const defaults = getIncognitoSettingsDefaults();
+    for (const [key, value] of Object.entries(defaults)) {
+      if (store.get(key) === undefined) store.set(key, value);
+    }
+    store.set('__incognitoSeeded', true);
+    store.set('__incognitoChromeV2', true);
+  } else if (!store.get('__incognitoChromeV2', false)) {
+    const defaults = getIncognitoSettingsDefaults();
+    for (const [key, value] of Object.entries(defaults)) {
+      if (store.get(key) === undefined) store.set(key, value);
+    }
+    if (store.get('windowChromeLight') === 0) store.set('windowChromeLight', defaults.windowChromeLight);
+    if (store.get('themeColor') === '#000000') store.set('themeColor', defaults.themeColor);
+    if (store.get('gradientColor') === '#111111') store.set('gradientColor', defaults.gradientColor);
+    store.set('__incognitoChromeV2', true);
+  }
+  return store;
+}
+
+function syncAdBlockerForIncognitoSession() {
+  try {
+    const sess = session.fromPartition('incognito');
+    const key = getAxisSessionKey(sess);
+    if (key) axisAdblockSessionToProfile.set(key, 'incognito');
+    const enabled = ensureIncognitoProfileStore().get('adBlockerEnabled', true) !== false;
+    void applyAxisAdBlockerToSession(sess, enabled);
+  } catch (_) {}
+}
+
 ipcMain.handle('get-settings', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return {};
+  const pid = getProfileIdForEvent(event);
+  if (pid === 'incognito') {
+    return redactSettingsSecretsForExport(
+      mergeGlobalSettingsIntoProfileSettings(
+        getIncognitoSettingsExport(ensureIncognitoProfileStore())
+      )
+    );
+  }
   const s = getSettingsStoreForEvent(event);
   const raw =
     s && typeof s.store === 'object' && s.store && !Array.isArray(s.store) ? { ...s.store } : {};
-  return mergeGlobalSettingsIntoProfileSettings(raw);
+  const merged = mergeGlobalSettingsIntoProfileSettings(raw);
+  // Migrate plaintext AI keys to OS-sealed storage when possible.
+  try {
+    if (Array.isArray(merged.aiProviders) && merged.aiProviders.some((p) => p?.apiKey && !isAxisSealedSecret(p.apiKey))) {
+      const sealed = sealAiProvidersForDisk(merged.aiProviders);
+      s.set('aiProviders', sealed);
+      merged.aiProviders = sealed;
+    }
+    if (typeof merged.groqApiKey === 'string' && merged.groqApiKey && !isAxisSealedSecret(merged.groqApiKey)) {
+      try {
+        const sealedKey = sealAxisSecret(merged.groqApiKey);
+        s.set('groqApiKey', sealedKey);
+        merged.groqApiKey = sealedKey;
+      } catch (_) {}
+    }
+  } catch (_) {}
+  return redactSettingsSecretsForExport(merged);
 });
 
 ipcMain.handle('get-settings-editing-context', (event) => {
@@ -6537,13 +7918,16 @@ ipcMain.on('axis-settings-profile-bootstrap', (event) => {
 
 function getSettingsEditingContextPayload(event) {
   const profileId = getProfileIdForEvent(event);
+  const win = getWindowFromSender(event?.sender);
   return {
     profileId,
     profiles: listAxisProfiles().map((p) => ({
       id: p.id,
       name: p.name,
       icon: p.icon
-    }))
+    })),
+    incognitoProfile: { id: 'incognito', name: 'Incognito', icon: 'mask' },
+    fromIncognitoWindow: !!(win && !win.isDestroyed() && win.__axisIsIncognito === true)
   };
 }
 
@@ -6552,15 +7936,41 @@ ipcMain.handle('set-settings-editing-profile', (event, profileId) => {
   if (!win || win.isDestroyed()) return { ok: false, error: 'No window' };
   const id = setSettingsEditingProfileOnWindow(win, profileId);
   if (!id) return { ok: false, error: 'Profile not found' };
-  const meta = listAxisProfiles().find((p) => p.id === id);
+  const meta =
+    id === 'incognito'
+      ? { id: 'incognito', name: 'Incognito', icon: 'mask' }
+      : listAxisProfiles().find((p) => p.id === id);
+  try {
+    createMenu(id);
+  } catch (err) {
+    console.error('createMenu after set-settings-editing-profile failed', err);
+  }
   return { ok: true, profileId: id, profileName: meta?.name || id };
+});
+
+ipcMain.handle('set-settings-ui-active', (event, active) => {
+  const win = getWindowFromSender(event?.sender);
+  if (!win || win.isDestroyed()) return false;
+  win.__axisSettingsUiActive = !!active;
+  try {
+    if (active) {
+      const id =
+        getSettingsEditingProfileIdForWindow(win) ||
+        getProfileIdForEvent(event) ||
+        win.__axisProfileId;
+      createMenu(id);
+    } else {
+      createMenu(win.__axisProfileId || getActiveProfileId());
+    }
+  } catch (_) {}
+  return true;
 });
 
 ipcMain.on('axis-get-sidebar-position', (event) => {
   event.returnValue = getGlobalSidebarPosition();
 });
 
-/** Sync payload for `settings.html` first paint — `uiTheme` from the store only, never the OS. */
+/** Sync payload for `settings.html` first paint - `uiTheme` from the store only, never the OS. */
 ipcMain.on('axis-settings-window-bootstrap', (event) => {
   try {
     const s = getSettingsStoreForEvent(event);
@@ -6577,21 +7987,38 @@ ipcMain.on('axis-settings-window-bootstrap', (event) => {
     const windowChromeLight = Number.isFinite(wclRaw)
       ? Math.max(0, Math.min(100, wclRaw))
       : 50;
-    event.returnValue = { uiTheme, effectiveUiTheme, windowChromeLight };
+    const merged = mergeGlobalSettingsIntoProfileSettings(s.store || {});
+    event.returnValue = {
+      uiTheme,
+      effectiveUiTheme,
+      windowChromeLight,
+      uiLanguage: merged.uiLanguage || 'en',
+      uiFont: merged.uiFont || 'default',
+      settings: merged
+    };
   } catch (_) {
-    event.returnValue = { uiTheme: 'dark', effectiveUiTheme: 'dark', windowChromeLight: 50 };
+    event.returnValue = {
+      uiTheme: 'dark',
+      effectiveUiTheme: 'dark',
+      windowChromeLight: 50,
+      uiLanguage: 'en',
+      uiFont: 'default',
+      settings: {}
+    };
   }
 });
 
 ipcMain.handle('get-system-ui-theme', () => getSystemUiThemePreference());
 
 ipcMain.handle('get-site-permission-overrides', (event) => {
+  if (getProfileIdForEvent(event) === 'incognito') return {};
   const s = getSettingsStoreForEvent(event);
   return s.get('sitePermissionOverrides', {});
 });
 
 ipcMain.handle('set-site-permission-overrides', (event, obj) => {
   const pid = getProfileIdForEvent(event);
+  if (pid === 'incognito') return {};
   const s = getSettingsStoreForEvent(event);
   const cleaned = cleanSitePermissionOverrides(obj);
   s.set('sitePermissionOverrides', cleaned);
@@ -6626,13 +8053,15 @@ function normalizeFavoritesStoreList(items) {
     .filter(Boolean);
 }
 
-ipcMain.handle('get-favorites', (_event, profileId) => {
+ipcMain.handle('get-favorites', (event, profileId) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return [];
   const pid = sanitizeProfileId(profileId || AXIS_DEFAULT_PROFILE_ID);
   const raw = getProfileStore(pid).get('favorites', []);
   return Array.isArray(raw) ? raw : [];
 });
 
-ipcMain.handle('set-favorites', (_event, items, profileId) => {
+ipcMain.handle('set-favorites', (event, items, profileId) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, error: 'IPC denied' };
   const pid = sanitizeProfileId(profileId);
   if (!profileId) return { ok: false, error: 'profileId required' };
   getProfileStore(pid).set('favorites', normalizeFavoritesStoreList(items));
@@ -6696,8 +8125,9 @@ function persistOutgoingProfileStore(profileId, captured) {
   return { ok: true };
 }
 
-ipcMain.handle('persist-outgoing-profile', (_event, profileId, captured) => {
+ipcMain.handle('persist-outgoing-profile', (event, profileId, captured) => {
   try {
+    if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, error: 'IPC denied' };
     return persistOutgoingProfileStore(profileId, captured);
   } catch (e) {
     console.error('persist-outgoing-profile failed:', e);
@@ -6706,34 +8136,243 @@ ipcMain.handle('persist-outgoing-profile', (_event, profileId, captured) => {
 });
 
 ipcMain.handle('set-setting', (event, key, value) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
   const pid = getProfileIdForEvent(event);
+  let storeValue = value;
+  let broadcastValue = value;
+  if (key === 'aiProviders') {
+    storeValue = sealAiProvidersForDisk(value);
+    broadcastValue = openAiProvidersForTrustedUi(storeValue);
+  } else if (key === 'groqApiKey' && typeof value === 'string' && value) {
+    try {
+      storeValue = isAxisSealedSecret(value) ? value : sealAxisSecret(value);
+    } catch (_) {
+      storeValue = value;
+    }
+    broadcastValue = openAxisSecret(storeValue);
+  }
   if (key === 'sidebarPosition') {
     const next = setGlobalSidebarPosition(value);
     broadcastSettingsUpdated(null, { key, value: next });
     return true;
   }
+  if (key === 'universalBrowserLanguage') {
+    const enabledFlag =
+      typeof value === 'object' && value && typeof value.enabled === 'boolean'
+        ? value.enabled
+        : !!value;
+    const seed =
+      (typeof value === 'object' &&
+        value &&
+        (value.universalUiLanguage || value.uiLanguage)) ||
+      store.get(AXIS_UNIVERSAL_LANG_CODE_KEY, '') ||
+      (() => {
+        try {
+          return getSettingsStoreForEvent(event).get('uiLanguage', '');
+        } catch (_) {
+          return '';
+        }
+      })();
+    const result = setUniversalBrowserLanguageEnabled(enabledFlag, seed);
+    broadcastSettingsUpdated(null, {
+      key: 'universalBrowserLanguage',
+      value: result.enabled,
+      uiLanguage: result.enabled ? result.uiLanguage : undefined,
+      universalUiLanguage: result.universalUiLanguage,
+      includeIncognito: true
+    });
+    broadcastSettingsUpdated(null, {
+      key: 'universalUiLanguage',
+      value: result.universalUiLanguage,
+      includeIncognito: true
+    });
+    if (result.enabled) {
+      // Same effective language everywhere while Universal is on.
+      broadcastSettingsUpdated(null, {
+        key: 'uiLanguage',
+        value: result.uiLanguage,
+        includeIncognito: true
+      });
+    }
+    // When turning Universal off, do not broadcast a single uiLanguage - each
+    // window/profile reloads its own stored language via get-settings.
+    try {
+      createMenu(pid);
+    } catch (err) {
+      console.error('createMenu after universalBrowserLanguage failed', err);
+    }
+    return true;
+  }
+  if (key === 'universalUiLanguage') {
+    const loc = setUniversalUiLanguageCode(value);
+    broadcastSettingsUpdated(null, {
+      key: 'universalUiLanguage',
+      value: loc,
+      includeIncognito: true
+    });
+    if (isUniversalBrowserLanguageEnabled()) {
+      broadcastSettingsUpdated(null, {
+        key: 'uiLanguage',
+        value: loc,
+        includeIncognito: true
+      });
+      try {
+        createMenu(pid);
+      } catch (err) {
+        console.error('createMenu after universalUiLanguage failed', err);
+      }
+    }
+    return true;
+  }
+  if (key === 'uiLanguage') {
+    // Per-profile language only. While Universal is on, the profile picker is disabled
+    // and writes go nowhere (effective language comes from universalUiLanguage).
+    if (isUniversalBrowserLanguageEnabled()) {
+      return true;
+    }
+    let loc = 'en';
+    try {
+      loc = AxisI18n.sanitizeLocale(value) || 'en';
+    } catch (_) {}
+    if (pid === 'incognito') {
+      if (!AXIS_INCOGNITO_WRITABLE_SETTINGS.has(key)) return true;
+      ensureIncognitoProfileStore().set(key, loc);
+      broadcastSettingsUpdated('incognito', { key, value: loc });
+    } else {
+      getSettingsStoreForEvent(event).set(key, loc);
+      broadcastSettingsUpdated(pid, { key, value: loc });
+    }
+    try {
+      createMenu(pid);
+    } catch (err) {
+      console.error('createMenu after uiLanguage failed', err);
+    }
+    return true;
+  }
+  if (key === 'universalBrowserFont') {
+    const enabledFlag =
+      typeof value === 'object' && value && typeof value.enabled === 'boolean'
+        ? value.enabled
+        : !!value;
+    const seed =
+      (typeof value === 'object' && value && (value.universalUiFont || value.uiFont)) ||
+      store.get(AXIS_UNIVERSAL_FONT_CODE_KEY, '') ||
+      (() => {
+        try {
+          return getSettingsStoreForEvent(event).get('uiFont', 'default');
+        } catch (_) {
+          return 'default';
+        }
+      })();
+    const result = setUniversalBrowserFontEnabled(enabledFlag, seed);
+    broadcastSettingsUpdated(null, {
+      key: 'universalBrowserFont',
+      value: result.enabled,
+      uiFont: result.enabled ? result.uiFont : undefined,
+      universalUiFont: result.universalUiFont,
+      includeIncognito: true
+    });
+    broadcastSettingsUpdated(null, {
+      key: 'universalUiFont',
+      value: result.universalUiFont,
+      includeIncognito: true
+    });
+    if (result.enabled) {
+      broadcastSettingsUpdated(null, {
+        key: 'uiFont',
+        value: result.uiFont,
+        includeIncognito: true
+      });
+    }
+    return true;
+  }
+  if (key === 'universalUiFont') {
+    const font = setUniversalUiFontId(value);
+    broadcastSettingsUpdated(null, {
+      key: 'universalUiFont',
+      value: font,
+      includeIncognito: true
+    });
+    if (isUniversalBrowserFontEnabled()) {
+      broadcastSettingsUpdated(null, {
+        key: 'uiFont',
+        value: font,
+        includeIncognito: true
+      });
+    }
+    return true;
+  }
+  if (key === 'uiFont') {
+    if (isUniversalBrowserFontEnabled()) {
+      return true;
+    }
+    const font = sanitizeUiFontId(value);
+    if (pid === 'incognito') {
+      if (!AXIS_INCOGNITO_WRITABLE_SETTINGS.has(key)) return true;
+      ensureIncognitoProfileStore().set(key, font);
+      broadcastSettingsUpdated('incognito', { key, value: font });
+    } else {
+      getSettingsStoreForEvent(event).set(key, font);
+      broadcastSettingsUpdated(pid, { key, value: font });
+    }
+    return true;
+  }
+  if (pid === 'incognito') {
+    if (!AXIS_INCOGNITO_WRITABLE_SETTINGS.has(key)) return true;
+    const s = ensureIncognitoProfileStore();
+    s.set(key, storeValue);
+    if (key === 'adBlockerEnabled') syncAdBlockerForIncognitoSession();
+    broadcastSettingsUpdated('incognito', { key, value: broadcastValue });
+    return true;
+  }
   const s = getSettingsStoreForEvent(event);
-  s.set(key, value);
+  s.set(key, storeValue);
   if (key === 'adBlockerEnabled') {
     syncAdBlockerForProfile(pid);
   }
-  broadcastSettingsUpdated(pid, { key, value });
+  broadcastSettingsUpdated(pid, { key, value: broadcastValue });
   return true;
 });
 
 /** Write several profile settings in one store flush + one settings-updated broadcast. */
 ipcMain.handle('set-settings-batch', (event, patch) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return false;
   const pid = getProfileIdForEvent(event);
+  // Language / font / Universal keys have dedicated set-setting logic (guards + broadcasts).
+  const AXIS_BATCH_SKIP_KEYS = new Set([
+    'uiLanguage',
+    'universalBrowserLanguage',
+    'universalUiLanguage',
+    'uiFont',
+    'universalBrowserFont',
+    'universalUiFont'
+  ]);
+  if (pid === 'incognito') {
+    const s = ensureIncognitoProfileStore();
+    let adBlockChanged = false;
+    for (const [key, value] of Object.entries(patch)) {
+      if (!AXIS_INCOGNITO_WRITABLE_SETTINGS.has(key)) continue;
+      if (AXIS_BATCH_SKIP_KEYS.has(key)) continue;
+      const storeValue = key === 'aiProviders' ? sealAiProvidersForDisk(value) : value;
+      s.set(key, storeValue);
+      if (key === 'adBlockerEnabled') adBlockChanged = true;
+    }
+    if (adBlockChanged) syncAdBlockerForIncognitoSession();
+    broadcastSettingsUpdated('incognito');
+    return true;
+  }
   const s = getSettingsStoreForEvent(event);
   let touchedAdblock = false;
   let sidebarNext = null;
   for (const [key, value] of Object.entries(patch)) {
+    if (AXIS_BATCH_SKIP_KEYS.has(key)) continue;
     if (key === 'sidebarPosition') {
       sidebarNext = setGlobalSidebarPosition(value);
       continue;
     }
-    s.set(key, value);
+    const storeValue = key === 'aiProviders' ? sealAiProvidersForDisk(value) : value;
+    s.set(key, storeValue);
     if (key === 'adBlockerEnabled') touchedAdblock = true;
   }
   if (touchedAdblock) syncAdBlockerForProfile(pid);
@@ -6784,23 +8423,76 @@ ipcMain.handle('get-extensions', async (event) => {
 ipcMain.handle('axis-get-adblock-stats', (event, opts = {}) => {
   const pid = getProfileIdForEvent(event);
   const bucket = getAdblockStatsBucket(pid);
-  const enabled = getProfileStore(pid).get('adBlockerEnabled', true) !== false;
+  const enabled = isPrivacyProtectionEnabledForProfile(pid);
   const webContentsId = Number(opts.webContentsId) || 0;
   const pageHostname = typeof opts.pageHostname === 'string' ? opts.pageHostname.trim() : '';
   const siteDisabled = pageHostname ? isAdblockDisabledForSite(pid, pageHostname) : false;
-  let pageBlocked = 0;
-  if (webContentsId > 0) {
-    pageBlocked = bucket.byWebContents.get(webContentsId)?.count || 0;
-  }
+  const page = webContentsId > 0 ? bucket.byWebContents.get(webContentsId) : null;
+  const pageBlocked = page ? Number(page.count) || 0 : 0;
+  const byCategory = page?.byCategory || { ads: 0, trackers: 0, other: 0 };
+  const byType = page?.byType && typeof page.byType === 'object' ? page.byType : {};
+  const byOtherType = page?.byOtherType && typeof page.byOtherType === 'object' ? page.byOtherType : {};
+  const recentHosts = Array.isArray(page?.recentHosts) ? page.recentHosts : [];
+  const recentOtherHosts = Array.isArray(page?.recentOtherHosts) ? page.recentOtherHosts : [];
+  const blockedItems = Array.isArray(page?.blockedItems) ? page.blockedItems : [];
+  const toTypeRows = (obj) =>
+    Object.entries(obj || {})
+      .map(([type, count]) => ({ type, count: Number(count) || 0 }))
+      .filter((row) => row.count > 0)
+      .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type))
+      .slice(0, 10);
   return {
     enabled,
     siteDisabled,
     active: enabled && !siteDisabled,
+    fingerprintProtection: enabled && !siteDisabled,
+    fingerprintProtected: !!(page && page.fingerprintProtected),
     totalBlocked: bucket.totalBlocked,
+    sessionByCategory: bucket.byCategory || { ads: 0, trackers: 0, other: 0 },
     pageBlocked,
+    pageByCategory: {
+      ads: Number(byCategory.ads) || 0,
+      trackers: Number(byCategory.trackers) || 0,
+      other: Number(byCategory.other) || 0,
+    },
+    pageByType: toTypeRows(byType),
+    pageByOtherType: toTypeRows(byOtherType),
+    recentHosts: recentHosts.slice(0, 10),
+    recentOtherHosts: recentOtherHosts.slice(0, 8),
+    blockedItems: blockedItems.slice(0, 48).map((row) => ({
+      host: String(row.host || ''),
+      category: row.category === 'ads' || row.category === 'trackers' ? row.category : 'other',
+      type: String(row.type || 'misc'),
+      count: Number(row.count) || 0,
+    })),
     pageHostname,
     engineReady: !!axisAdblockBlocker,
   };
+});
+
+/** Sync: guest fingerprint preload asks whether to inject for this URL. */
+ipcMain.on('axis-privacy-fp-enabled', (event, pageUrl) => {
+  try {
+    const pid = getProfileIdFromWebContents(event.sender);
+    if (!isPrivacyProtectionEnabledForProfile(pid)) {
+      event.returnValue = false;
+      return;
+    }
+    const host = axisHostFromUrl(typeof pageUrl === 'string' ? pageUrl : '');
+    if (host && isAdblockDisabledForSite(pid, host)) {
+      event.returnValue = false;
+      return;
+    }
+    event.returnValue = true;
+  } catch (_) {
+    event.returnValue = false;
+  }
+});
+
+ipcMain.on('axis-privacy-fp-applied', (event, pageUrl) => {
+  try {
+    axisRecordFingerprintProtection(event.sender, pageUrl);
+  } catch (_) {}
 });
 
 ipcMain.handle('axis-reset-adblock-page-stats', (event, payload = {}) => {
@@ -6830,7 +8522,10 @@ ipcMain.handle('axis-get-page-security-info', async (event, opts = {}) => {
 });
 
 /** Fetch remote text (RSS feeds, weather, etc.) without renderer CORS limits. */
-ipcMain.handle('axis-fetch-text', async (_event, rawUrl) => {
+ipcMain.handle('axis-fetch-text', async (event, rawUrl) => {
+  if (!assertTrustedAxisIpcOrNull(event)) {
+    return { ok: false, text: '', error: 'ipc-denied' };
+  }
   const url = typeof rawUrl === 'string' ? rawUrl.trim() : '';
   if (!isSafePublicHttpsUrl(url)) {
     return { ok: false, text: '', error: 'invalid-url' };
@@ -6960,7 +8655,7 @@ ipcMain.handle('install-extension-from-web-store', async (event, rawInput) => {
   return { canceled: false, ...out };
 });
 
-/** Absolute path for `<webview preload>` — Chrome Web Store click bridge. */
+/** Absolute path for `<webview preload>` - Chrome Web Store click bridge. */
 ipcMain.handle('get-webview-cws-preload-path', () =>
   path.join(__dirname, 'webview-preload-bundle.js')
 );
@@ -7047,11 +8742,14 @@ ipcMain.handle('enable-shortcuts', () => {
 
 // History management
 ipcMain.handle('get-history', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return [];
   return getHistoryItems(getProfileIdForEvent(event));
 });
 
 ipcMain.handle('add-history-item', (event, item) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   const pid = getProfileIdForEvent(event);
+  if (pid === 'incognito') return null;
   const history = getHistoryItems(pid);
   const newItem = {
     id: Date.now(),
@@ -7074,11 +8772,13 @@ ipcMain.handle('add-history-item', (event, item) => {
 });
 
 ipcMain.handle('clear-history', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
   setHistoryItems(getProfileIdForEvent(event), []);
   return true;
 });
 
 ipcMain.handle('delete-history-item', (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
   const pid = getProfileIdForEvent(event);
   const history = getHistoryItems(pid);
   const filtered = history.filter((item) => item.id !== id);
@@ -7088,6 +8788,7 @@ ipcMain.handle('delete-history-item', (event, id) => {
 
 // Downloads management (history of browser downloads)
 ipcMain.handle('get-downloads', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return [];
   return getDownloadItems(getProfileIdForEvent(event));
 });
 
@@ -7113,6 +8814,7 @@ ipcMain.handle('cancel-active-download', (_event, axisId) => {
 });
 
 ipcMain.handle('add-download', (event, downloadInfo) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   const pid = getProfileIdForEvent(event);
   const downloads = getDownloadItems(pid);
   const newDownload = {
@@ -7132,6 +8834,7 @@ ipcMain.handle('add-download', (event, downloadInfo) => {
 });
 
 ipcMain.handle('update-download-progress', (event, id, progress) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   const pid = getProfileIdForEvent(event);
   const downloads = getDownloadItems(pid);
   const download = downloads.find((d) => d.id === id);
@@ -7144,11 +8847,13 @@ ipcMain.handle('update-download-progress', (event, id, progress) => {
 });
 
 ipcMain.handle('clear-downloads', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
   setDownloadItems(getProfileIdForEvent(event), []);
   return true;
 });
 
 ipcMain.handle('delete-download', (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
   const pid = getProfileIdForEvent(event);
   const downloads = getDownloadItems(pid);
   const filtered = downloads.filter((item) => item.id !== id);
@@ -7159,6 +8864,7 @@ ipcMain.handle('delete-download', (event, id) => {
 // Library management - show files from common user folders (Downloads, Desktop, Documents, Pictures)
 ipcMain.handle('get-library-items', async (event, locationKey = 'all') => {
   try {
+    if (!assertTrustedAxisIpcOrNull(event)) return { baseDir: null, items: [] };
     const home = os.homedir();
     const locations = {
       downloads: path.join(home, 'Downloads'),
@@ -7249,6 +8955,7 @@ ipcMain.handle('get-library-items', async (event, locationKey = 'all') => {
 
 ipcMain.handle('open-library-item', async (event, fullPath) => {
   try {
+    if (!assertTrustedAxisIpcOrNull(event)) return false;
     if (!fullPath || !isPathInsideAxisLibraryRoots(fullPath)) return false;
     await shell.openPath(path.resolve(fullPath));
     return true;
@@ -7260,6 +8967,7 @@ ipcMain.handle('open-library-item', async (event, fullPath) => {
 
 ipcMain.handle('show-item-in-folder', async (event, filePath) => {
   try {
+    if (!assertTrustedAxisIpcOrNull(event)) return false;
     if (!filePath || !isPathInsideAxisLibraryRoots(filePath)) return false;
     shell.showItemInFolder(path.resolve(filePath));
     return true;
@@ -7288,10 +8996,33 @@ ipcMain.handle('open-or-focus-personal-window', () => {
 });
 
 ipcMain.handle('check-for-updates', async (event) => {
+  if (!axisUpdateCheck.isShellIpc(event)) return { ok: false };
+  syncMenuLocale(getProfileIdForEvent(event));
   const win = BrowserWindow.fromWebContents(event.sender);
   return axisUpdateCheck.checkForUpdates({
     parentWindow: win && !win.isDestroyed() ? win : undefined
   });
+});
+
+ipcMain.handle('axis-update-get-status', (event) => {
+  if (!axisUpdateCheck.isShellIpc(event)) return { available: false };
+  return axisUpdateCheck.getUpdateStatus();
+});
+
+ipcMain.handle('axis-update-restart', async (event) => {
+  if (!axisUpdateCheck.isShellIpc(event)) return { ok: false };
+  return axisUpdateCheck.applyAvailableUpdate();
+});
+
+ipcMain.handle('axis-update-dismiss', (event) => {
+  if (!axisUpdateCheck.isShellIpc(event)) return { available: false };
+  return axisUpdateCheck.dismissUpdateBanner();
+});
+
+ipcMain.handle('axis-window-get-fullscreen', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) return false;
+  return !!win.isFullScreen();
 });
 
 ipcMain.handle('open-external-url', async (_event, url) => {
@@ -7352,14 +9083,13 @@ ipcMain.handle('delete-profile', async (_event, payload) => {
   }
   const profileName = getProfileName(id);
   if (payload?.skipChecks !== true) {
-    const authed = await axisVerifyDeviceOwner('Delete this profile');
+    const authed = await axisVerifyDeviceOwner(uiT('profile.deleteAuthReason'));
     if (!authed) return { ok: false, cancelled: true };
     const { response } = await dialog.showMessageBox({
       type: 'warning',
-      message: `Delete “${profileName}”?`,
-      detail:
-        'The profile will be moved to trash with its tabs, cookies, history, saved passwords, extensions, and settings. You can restore it from Settings → Profiles or press ⌘Z right after deleting.',
-      buttons: ['Cancel', 'Delete Profile'],
+      message: uiT('profile.deleteNamed', { name: profileName }),
+      detail: uiT('profile.deleteBodyNamed', { name: profileName }),
+      buttons: [uiT('common.cancel'), uiT('profile.deleteConfirm')],
       defaultId: 0,
       cancelId: 0,
       noLink: true
@@ -7442,7 +9172,8 @@ ipcMain.handle('axis-get-default-browser-status', () => {
 ipcMain.handle('axis-set-as-default-browser', async () => {
   let registered = false;
   try {
-    registered = !!(app.setAsDefaultProtocolClient('http') && app.setAsDefaultProtocolClient('https'));
+    axisRegisterDefaultBrowserProtocolClients();
+    registered = !!(app.isDefaultProtocolClient('http') || app.isDefaultProtocolClient('https'));
   } catch (_) {
     registered = false;
   }
@@ -7499,8 +9230,11 @@ function isAxisAllowedImportFolder(folderPath) {
   }
 }
 
-ipcMain.handle('inspect-import-profile-folder', (_event, folderPath) => {
+ipcMain.handle('inspect-import-profile-folder', (event, folderPath) => {
   try {
+    if (!assertTrustedAxisIpcOrNull(event)) {
+      return { ok: false, error: 'IPC denied' };
+    }
     if (!isAxisAllowedImportFolder(folderPath)) {
       return {
         ok: false,
@@ -7514,6 +9248,7 @@ ipcMain.handle('inspect-import-profile-folder', (_event, folderPath) => {
 });
 
 ipcMain.handle('pick-browser-profile-folder', async (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, cancelled: true };
   const win = getWindowFromSender(event?.sender);
   const result = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : undefined, {
     title: 'Choose a browser profile folder',
@@ -7526,6 +9261,9 @@ ipcMain.handle('pick-browser-profile-folder', async (event) => {
 
 ipcMain.handle('import-browser-profile', async (event, payload) => {
   try {
+    if (!assertTrustedAxisIpcOrNull(event)) {
+      return { ok: false, error: 'IPC denied' };
+    }
     const body = payload && typeof payload === 'object' ? payload : {};
     const customPath = body.customProfilePath || body.customFolderPath || body.folderPath || body.profilePath || '';
     if (customPath && !isAxisAllowedImportFolder(customPath)) {
@@ -7570,7 +9308,19 @@ ipcMain.handle('import-browser-profile', async (event, payload) => {
 
 ipcMain.handle('preview-browser-import', (_event, payload) => {
   try {
-    return previewBrowserImport(payload || {});
+    if (!assertTrustedAxisIpcOrNull(_event)) {
+      return { ok: false, error: 'IPC denied' };
+    }
+    const body = payload && typeof payload === 'object' ? payload : {};
+    const customPath =
+      body.customProfilePath || body.customFolderPath || body.folderPath || body.profilePath || '';
+    if (customPath && !isAxisAllowedImportFolder(customPath)) {
+      return {
+        ok: false,
+        error: 'Choose a profile folder with the folder picker before previewing.'
+      };
+    }
+    return previewBrowserImport(body);
   } catch (e) {
     return { ok: false, error: String(e?.message || e) };
   }
@@ -7591,6 +9341,7 @@ ipcMain.handle('get-profiles-overview-for-window', (event) => ({
 }));
 
 ipcMain.handle('export-axis-profile', async (event, profileId) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, error: 'IPC denied' };
   const pid = sanitizeProfileId(profileId || getProfileIdForEvent(event));
   const meta = listAxisProfiles().find((p) => p.id === pid);
   const vault = ensureAxisVaultForProfile(pid).ensureLoaded();
@@ -7608,6 +9359,7 @@ ipcMain.handle('export-axis-profile', async (event, profileId) => {
 });
 
 ipcMain.handle('import-axis-profile-backup', async (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, error: 'IPC denied' };
   const win = getWindowFromSender(event?.sender);
   const result = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : undefined, {
     title: 'Import Axis profile backup',
@@ -7646,10 +9398,12 @@ ipcMain.handle('open-url-in-new-window', (event, url) => {
 
 // Notes management
 ipcMain.handle('get-notes', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return [];
   return getNoteItems(getProfileIdForEvent(event));
 });
 
 ipcMain.handle('save-note', (event, note) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return null;
   const pid = getProfileIdForEvent(event);
   const notes = getNoteItems(pid);
   const existingIndex = notes.findIndex(n => n.id === note.id);
@@ -7679,6 +9433,7 @@ ipcMain.handle('save-note', (event, note) => {
 });
 
 ipcMain.handle('delete-note', (event, id) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
   const pid = getProfileIdForEvent(event);
   const notes = getNoteItems(pid);
   const filtered = notes.filter((note) => note.id !== id);
@@ -7747,41 +9502,42 @@ function appendEmojiAndSymbolsMenuItems(template, targetWebContents = null) {
     template.push({ type: 'separator' });
   }
   template.push({
-    label: 'Emoji and Symbols',
+    label: uiT('menu.emoji'),
     click: () => showNativeEmojiPanel(targetWebContents)
   });
 }
 
-// Sidebar context menu — creation actions, then chrome (toggle / position)
+// Sidebar context menu - creation actions, then chrome (toggle / position)
 ipcMain.handle('show-sidebar-context-menu', async (event, x, y, isRight) => {
+  syncMenuLocale(getProfileIdForEvent(event));
   const template = [
     {
-      label: 'New Tab',
+      label: uiT('chrome.newTab'),
       click: () => {
         event.sender.send('sidebar-context-menu-action', 'new-tab');
       }
     },
     {
-      label: 'New Tab Group',
+      label: uiT('chrome.newTabGroup'),
       click: () => {
         event.sender.send('sidebar-context-menu-action', 'new-tab-group');
       }
     },
     {
-      label: 'New Incognito Tab',
+      label: uiT('chrome.newIncognito'),
       click: () => {
         event.sender.send('sidebar-context-menu-action', 'new-incognito-tab');
       }
     },
     { type: 'separator' },
     {
-      label: 'Toggle Sidebar',
+      label: uiT('menu.toggleSidebar'),
       click: () => {
         event.sender.send('sidebar-context-menu-action', 'toggle-sidebar');
       }
     },
     {
-      label: isRight ? 'Move Sidebar Left' : 'Move Sidebar Right',
+      label: isRight ? uiT('menu.moveSidebarLeft') : uiT('menu.moveSidebarRight'),
       click: () => {
         event.sender.send('sidebar-context-menu-action', 'toggle-position');
       }
@@ -7802,8 +9558,9 @@ ipcMain.handle('add-to-spellcheck-dictionary', async (_event, word) => {
   return addWordToAllSpellCheckerDictionaries(word);
 });
 
-// Webpage context menu — spelling (editable) → link → image → navigation → edit → selection tools → page
+// Webpage context menu - spelling (editable) → link → image → navigation → edit → selection tools → page
 ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => {
+  syncMenuLocale(getProfileIdForEvent(event));
   const ctx = contextInfo || {};
   const template = [];
 
@@ -7904,10 +9661,10 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
         });
       }
     } else {
-      template.push({ label: 'No spelling suggestions', enabled: false });
+      template.push({ label: uiT('menu.noSpelling'), enabled: false });
     }
     template.push({
-      label: 'Add to Dictionary',
+      label: uiT('menu.addToDictionary'),
       click: () => {
         event.sender.send('webpage-context-menu-action', 'add-to-dictionary', { word: misspelled });
       }
@@ -7918,27 +9675,27 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
   // --- Link (target hit is a link)
   if (ctx.linkURL && ctx.linkURL.length > 0) {
     template.push({
-      label: 'Open Link in New Tab',
+      label: uiT('menu.openLinkNewTab'),
       click: () => {
         event.sender.send('webpage-context-menu-action', 'open-link-new-tab', { linkURL: ctx.linkURL });
       }
     });
     if (isSafeHttpUrl(ctx.linkURL)) {
       template.push({
-        label: 'Open Link in New Window',
+        label: uiT('menu.openLinkNewWindow'),
         click: () => {
           openUrlInNewBrowserWindow(ctx.linkURL);
         }
       });
       template.push({
-        label: 'Open Link in Incognito Window',
+        label: uiT('menu.openLinkIncognito'),
         click: () => {
           createIncognitoWindow(ctx.linkURL);
         }
       });
     }
     template.push({
-      label: 'Copy Link Address',
+      label: uiT('menu.copyLink'),
       click: () => {
         event.sender.send('webpage-context-menu-action', 'copy-link', { linkURL: ctx.linkURL });
       }
@@ -7949,7 +9706,7 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
   // --- Image
   if (ctx.mediaType === 'image' && ctx.srcURL) {
     template.push({
-      label: 'Open Image in New Tab',
+      label: uiT('menu.openImageNewTab'),
       click: () => {
         event.sender.send('webpage-context-menu-action', 'open-image-new-tab', {
           srcURL: ctx.srcURL,
@@ -7958,7 +9715,7 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
       }
     });
     template.push({
-      label: 'Save Image',
+      label: uiT('menu.saveImage'),
       click: () => {
         event.sender.send('webpage-context-menu-action', 'save-image', {
           srcURL: ctx.srcURL,
@@ -7967,7 +9724,7 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
       }
     });
     template.push({
-      label: 'Copy Image',
+      label: uiT('menu.copyImage'),
       click: () => {
         event.sender.send('webpage-context-menu-action', 'copy-image', {
           x: ctx.x || 0,
@@ -7977,7 +9734,7 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
       }
     });
     template.push({
-      label: 'Copy Image Address',
+      label: uiT('menu.copyImageUrl'),
       click: () => {
         event.sender.send('webpage-context-menu-action', 'copy-image-url', {
           srcURL: ctx.srcURL,
@@ -7990,21 +9747,21 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
 
   // --- Navigation
   template.push({
-    label: 'Back',
+    label: uiT('menu.back'),
     enabled: ctx.canGoBack || false,
     click: () => {
       event.sender.send('webpage-context-menu-action', 'back');
     }
   });
   template.push({
-    label: 'Forward',
+    label: uiT('menu.forward'),
     enabled: ctx.canGoForward || false,
     click: () => {
       event.sender.send('webpage-context-menu-action', 'forward');
     }
   });
   template.push({
-    label: 'Reload',
+    label: uiT('menu.reload'),
     click: () => {
       event.sender.send('webpage-context-menu-action', 'reload');
     }
@@ -8013,35 +9770,35 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
 
   // --- Edit
   template.push({
-    label: 'Cut',
+    label: uiT('menu.cut'),
     enabled: ctx.canCut || ctx.isEditable || false,
     click: () => {
       event.sender.send('webpage-context-menu-action', 'cut');
     }
   });
   template.push({
-    label: 'Copy',
+    label: uiT('menu.copy'),
     enabled: ctx.canCopy || (ctx.hasSelection && ctx.selectionText && ctx.selectionText.length > 0) || false,
     click: () => {
       event.sender.send('webpage-context-menu-action', 'copy');
     }
   });
   template.push({
-    label: 'Paste',
+    label: uiT('menu.paste'),
     enabled: ctx.canPaste || ctx.isEditable || false,
     click: () => {
       event.sender.send('webpage-context-menu-action', 'paste');
     }
   });
   template.push({
-    label: 'Paste and Match Style',
+    label: uiT('menu.pasteMatchStyle'),
     enabled: ctx.canPaste || ctx.isEditable || false,
     click: () => {
       event.sender.send('webpage-context-menu-action', 'paste-match-style');
     }
   });
   template.push({
-    label: 'Select All',
+    label: uiT('menu.selectAll'),
     click: () => {
       event.sender.send('webpage-context-menu-action', 'select-all');
     }
@@ -8059,7 +9816,7 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
       displayText = displayText.substring(0, 20) + '...';
     }
     template.push({
-      label: `Search for "${displayText}"`,
+      label: uiT('menu.searchFor', { text: displayText }),
       click: () => {
         event.sender.send('webpage-context-menu-action', 'search-selection', { selectionText: ctx.selectionText });
       }
@@ -8067,11 +9824,11 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
 
     if (ctx.speechEnabled !== false) {
       template.push({
-        label: 'Speech',
+        label: uiT('menu.speech'),
         enabled: !!ctx.selectionText && ctx.selectionText.trim().length > 0,
         submenu: [
           {
-            label: 'Start Speaking',
+            label: uiT('menu.startSpeaking'),
             enabled: !ctx.isSpeaking,
             click: () => {
               event.sender.send('webpage-context-menu-action', 'speech-start', {
@@ -8080,7 +9837,7 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
             }
           },
           {
-            label: 'Stop Speaking',
+            label: uiT('menu.stopSpeaking'),
             enabled: !!ctx.isSpeaking,
             click: () => {
               event.sender.send('webpage-context-menu-action', 'speech-stop');
@@ -8108,25 +9865,25 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
   }
 
   template.push({
-    label: 'Copy Page URL',
+    label: uiT('menu.copyPageUrl'),
     click: () => {
       event.sender.send('webpage-context-menu-action', 'copy-url');
     }
   });
   template.push({
-    label: 'Copy URL as Markdown',
+    label: uiT('menu.copyUrlMarkdown'),
     click: () => {
       event.sender.send('webpage-context-menu-action', 'copy-url-markdown');
     }
   });
   template.push({
-    label: 'Print…',
+    label: uiT('menu.print'),
     click: () => {
       event.sender.send('webpage-context-menu-action', 'print');
     }
   });
   template.push({
-    label: 'Inspect Element',
+    label: uiT('menu.inspect'),
     click: () => {
       const hasXY =
         typeof ctx.x === 'number' &&
@@ -8145,7 +9902,7 @@ ipcMain.handle('show-webpage-context-menu', async (event, x, y, contextInfo) => 
   return true;
 });
 
-/** Save image from guest context menu — uses webview session (cookies) via `downloadURL`. */
+/** Save image from guest context menu - uses webview session (cookies) via `downloadURL`. */
 ipcMain.handle('save-image-from-url', async (event, payload) => {
   const { webContents } = require('electron');
   const url = typeof payload?.url === 'string' ? payload.url.trim() : '';
@@ -8170,7 +9927,7 @@ ipcMain.handle('save-image-from-url', async (event, payload) => {
   }
 });
 
-/** Copy image at (x,y) in a guest webview — more reliable than `<webview>.copyImageAt` in some cases. */
+/** Copy image at (x,y) in a guest webview - more reliable than `<webview>.copyImageAt` in some cases. */
 ipcMain.handle('copy-image-at-guest', async (_event, payload) => {
   const { webContents } = require('electron');
   const guestId = Number(payload?.guestWebContentsId) || 0;
@@ -8188,8 +9945,9 @@ ipcMain.handle('copy-image-at-guest', async (_event, payload) => {
 });
 
 /** When `navigator.clipboard` / `execCommand` fail (common right after a native context menu). */
-ipcMain.handle('write-clipboard-text', (_event, text) => {
+ipcMain.handle('write-clipboard-text', (event, text) => {
   try {
+    if (!assertTrustedAxisIpcOrNull(event)) return { ok: false, error: 'IPC denied' };
     if (typeof text !== 'string') return { ok: false, error: 'not-string' };
     clipboard.writeText(text);
     return { ok: true };
@@ -8198,42 +9956,43 @@ ipcMain.handle('write-clipboard-text', (_event, text) => {
   }
 });
 
-// URL bar — standard edit cluster, then navigation (paste and go)
+// URL bar - standard edit cluster, then navigation (paste and go)
 ipcMain.handle('show-urlbar-context-menu', async (event, x, y, contextInfo) => {
+  syncMenuLocale(getProfileIdForEvent(event));
   const ctx = contextInfo || {};
   const clipText = (clipboard.readText() || '').trim();
   const canPasteAndGo = clipText.length > 0;
   const template = [
     {
-      label: 'Cut',
+      label: uiT('menu.cut'),
       enabled: !!ctx.isEditable,
       click: () => {
         event.sender.send('urlbar-context-menu-action', 'cut');
       }
     },
     {
-      label: 'Copy',
+      label: uiT('menu.copy'),
       enabled: !!ctx.hasSelection,
       click: () => {
         event.sender.send('urlbar-context-menu-action', 'copy');
       }
     },
     {
-      label: 'Paste',
+      label: uiT('menu.paste'),
       enabled: canPasteAndGo,
       click: () => {
         event.sender.send('urlbar-context-menu-action', 'paste', { text: clipboard.readText() || '' });
       }
     },
     {
-      label: 'Paste and Match Style',
+      label: uiT('menu.pasteMatchStyle'),
       enabled: canPasteAndGo,
       click: () => {
         event.sender.send('urlbar-context-menu-action', 'paste-match-style');
       }
     },
     {
-      label: 'Select All',
+      label: uiT('menu.selectAll'),
       click: () => {
         event.sender.send('urlbar-context-menu-action', 'select-all');
       }
@@ -8243,7 +10002,7 @@ ipcMain.handle('show-urlbar-context-menu', async (event, x, y, contextInfo) => {
   template.push(
     { type: 'separator' },
     {
-      label: 'Paste and Go',
+      label: uiT('menu.pasteAndGo'),
       enabled: canPasteAndGo,
       click: () => {
         event.sender.send('urlbar-context-menu-action', 'paste-and-go', { text: clipboard.readText() || '' });
@@ -8257,27 +10016,28 @@ ipcMain.handle('show-urlbar-context-menu', async (event, x, y, contextInfo) => {
   return true;
 });
 
-/** Shell text fields (search, chat, find, rename, etc.) — standard edit + emoji. */
+/** Shell text fields (search, chat, find, rename, etc.) - standard edit + emoji. */
 ipcMain.handle('show-editable-context-menu', async (event, _x, _y, contextInfo) => {
+  syncMenuLocale(getProfileIdForEvent(event));
   const ctx = contextInfo || {};
   const template = [
     {
-      label: 'Cut',
+      label: uiT('menu.cut'),
       enabled: ctx.canCut !== false && !!ctx.isEditable,
       role: 'cut'
     },
     {
-      label: 'Copy',
+      label: uiT('menu.copy'),
       enabled: ctx.canCopy !== false && (!!ctx.hasSelection || !!ctx.isEditable),
       role: 'copy'
     },
     {
-      label: 'Paste',
+      label: uiT('menu.paste'),
       enabled: ctx.canPaste !== false && !!ctx.isEditable,
       role: 'paste'
     },
     {
-      label: 'Select All',
+      label: uiT('menu.selectAll'),
       role: 'selectAll'
     }
   ];
@@ -8288,18 +10048,19 @@ ipcMain.handle('show-editable-context-menu', async (event, _x, _y, contextInfo) 
   return true;
 });
 
-// Tab — identity & tab actions, grouping, then destructive close
+// Tab - identity & tab actions, grouping, then destructive close
 ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
+  syncMenuLocale(getProfileIdForEvent(event));
   const info = tabInfo || {};
   const template = [
     {
-      label: 'Rename Tab',
+      label: uiT('menu.renameTab'),
       click: () => {
         event.sender.send('tab-context-menu-action', 'rename');
       }
     },
     {
-      label: 'Duplicate Tab',
+      label: uiT('menu.duplicateTab'),
       click: () => {
         event.sender.send('tab-context-menu-action', 'duplicate');
       }
@@ -8307,7 +10068,7 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
   ];
   if (!info.isIncognito) {
     template.push({
-      label: info.isPinned ? 'Unpin Tab' : 'Pin Tab',
+      label: info.isPinned ? uiT('menu.unpinTab') : uiT('menu.pinTab'),
       click: () => {
         event.sender.send('tab-context-menu-action', 'toggle-pin');
       }
@@ -8315,19 +10076,19 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
   }
   template.push(
     {
-      label: info.isMuted ? 'Unmute Tab' : 'Mute Tab',
+      label: info.isMuted ? uiT('menu.unmuteTab') : uiT('menu.muteTab'),
       click: () => {
         event.sender.send('tab-context-menu-action', 'toggle-mute');
       }
     },
     {
-      label: 'Change Icon',
+      label: uiT('menu.changeIcon'),
       click: () => {
         event.sender.send('tab-context-menu-action', 'change-icon');
       }
     },
     {
-      label: 'Reset Icon',
+      label: uiT('menu.resetIcon'),
       enabled: !!info.hasCustomIcon,
       click: () => {
         event.sender.send('tab-context-menu-action', 'reset-icon');
@@ -8336,7 +10097,7 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
   );
   if (!info.isIncognito) {
     template.push({
-      label: 'Add to Favorites',
+      label: uiT('menu.addFavorite'),
       click: () => {
         event.sender.send('tab-context-menu-action', 'add-to-favorites');
       }
@@ -8360,7 +10121,7 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
 
   if (inGroup) {
     template.push({
-      label: 'Remove from Tab Group',
+      label: uiT('menu.removeFromGroup'),
       click: () => {
         event.sender.send('tab-context-menu-action', 'remove-from-tab-group', { tabGroupId: inGroupId });
       }
@@ -8368,7 +10129,7 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
     const otherGroups = tabGroups.filter((g) => String(g.id) !== String(inGroupId));
     if (otherGroups.length > 0) {
       template.push({
-        label: 'Move to another tab group',
+        label: uiT('menu.moveToGroup'),
         submenu: otherGroups.map((g) => ({
           label: g.name,
           click: () => {
@@ -8379,7 +10140,7 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
     }
   } else if (tabGroups.length > 0) {
     template.push({
-      label: 'Add to Tab Group',
+      label: uiT('menu.addToGroup'),
       submenu: tabGroups.map((g) => ({
         label: g.name,
         click: () => {
@@ -8391,7 +10152,14 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
 
   template.push({ type: 'separator' });
   template.push({
-    label: 'Close Tab',
+    label: uiT('menu.tabAncestry'),
+    click: () => {
+      event.sender.send('tab-context-menu-action', 'show-ancestry');
+    }
+  });
+  template.push({ type: 'separator' });
+  template.push({
+    label: uiT('menu.closeTab'),
     click: () => {
       event.sender.send('tab-context-menu-action', 'close');
     }
@@ -8405,32 +10173,27 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
   return true;
 });
 
-// Sidebar favorites — navigation, copy, rename/icon, remove (no instant delete on right-click)
+// Sidebar favorites - navigation, icon, remove (no instant delete on right-click)
 ipcMain.handle('show-favorite-context-menu', async (event, _x, _y, info) => {
+  syncMenuLocale(getProfileIdForEvent(event));
   const meta = info || {};
   const template = [
     {
-      label: 'Open',
+      label: uiT('common.open'),
       click: () => {
         event.sender.send('favorite-context-menu-action', 'open');
       }
     },
     {
-      label: 'Open in New Tab',
+      label: uiT('menu.openLinkNewTab'),
       click: () => {
         event.sender.send('favorite-context-menu-action', 'open-new-tab');
-      }
-    },
-    {
-      label: 'Copy Link',
-      click: () => {
-        event.sender.send('favorite-context-menu-action', 'copy-link');
       }
     }
   ];
   if (meta.canUpdateSavedLink) {
     template.push({
-      label: 'Update Link to Current Page',
+      label: uiT('menu.updateLinkCurrent'),
       click: () => {
         event.sender.send('favorite-context-menu-action', 'update-saved-link');
       }
@@ -8438,20 +10201,34 @@ ipcMain.handle('show-favorite-context-menu', async (event, _x, _y, info) => {
   }
   template.push(
     {
-      label: 'Rename…',
+      label: uiT('menu.duplicateFavorite'),
       click: () => {
-        event.sender.send('favorite-context-menu-action', 'rename');
+        event.sender.send('favorite-context-menu-action', 'duplicate');
+      }
+    },
+    {
+      label: uiT('menu.moveFavoriteLeft'),
+      enabled: meta.canMoveLeft !== false,
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'move-left');
+      }
+    },
+    {
+      label: uiT('menu.moveFavoriteRight'),
+      enabled: meta.canMoveRight !== false,
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'move-right');
       }
     },
     { type: 'separator' },
     {
-      label: 'Change Icon',
+      label: uiT('menu.changeIcon'),
       click: () => {
         event.sender.send('favorite-context-menu-action', 'change-icon');
       }
     },
     {
-      label: 'Reset Icon',
+      label: uiT('menu.resetIcon'),
       enabled: !!meta.hasCustomIcon,
       click: () => {
         event.sender.send('favorite-context-menu-action', 'reset-icon');
@@ -8459,7 +10236,7 @@ ipcMain.handle('show-favorite-context-menu', async (event, _x, _y, info) => {
     },
     { type: 'separator' },
     {
-      label: 'Remove from Favorites',
+      label: uiT('menu.removeFavorite'),
       click: () => {
         event.sender.send('favorite-context-menu-action', 'remove');
       }
@@ -8471,36 +10248,37 @@ ipcMain.handle('show-favorite-context-menu', async (event, _x, _y, info) => {
   return true;
 });
 
-// Tab group — edit & appearance, then destructive delete
+// Tab group - edit & appearance, then destructive delete
 ipcMain.handle('show-tab-group-context-menu', async (event, _x, _y, info) => {
+  syncMenuLocale(getProfileIdForEvent(event));
   const meta = info || {};
   const template = [
     {
-      label: 'Rename Tab Group',
+      label: uiT('menu.renameGroup'),
       click: () => {
         event.sender.send('tab-group-context-menu-action', 'rename');
       }
     },
     {
-      label: 'Duplicate Tab Group',
+      label: uiT('menu.duplicateGroup'),
       click: () => {
         event.sender.send('tab-group-context-menu-action', 'duplicate');
       }
     },
     {
-      label: 'Change Color',
+      label: uiT('menu.changeColor'),
       click: () => {
         event.sender.send('tab-group-context-menu-action', 'change-color');
       }
     },
     {
-      label: 'Change Icon',
+      label: uiT('menu.changeIcon'),
       click: () => {
         event.sender.send('tab-group-context-menu-action', 'change-icon');
       }
     },
     {
-      label: 'Reset Icon',
+      label: uiT('menu.resetIcon'),
       enabled: !!meta.hasCustomIcon,
       click: () => {
         event.sender.send('tab-group-context-menu-action', 'reset-icon');
@@ -8508,7 +10286,7 @@ ipcMain.handle('show-tab-group-context-menu', async (event, _x, _y, info) => {
     },
     { type: 'separator' },
     {
-      label: 'Delete Tab Group',
+      label: uiT('menu.deleteGroup'),
       click: () => {
         event.sender.send('tab-group-context-menu-action', 'delete');
       }
@@ -8542,6 +10320,7 @@ function formatTimeAgo(timestamp) {
 // Get downloads from folder for custom popup
 ipcMain.handle('get-downloads-from-folder', async (event) => {
   try {
+    if (!assertTrustedAxisIpcOrNull(event)) return [];
     const home = os.homedir();
     const downloadsPath = path.join(home, 'Downloads');
     
@@ -8580,11 +10359,13 @@ ipcMain.handle('get-downloads-from-folder', async (event) => {
   }
 });
 
-// Real file previews (HEIC, PDF, video, etc.) via OS thumbnail APIs — not <img src=file://>
+// Real file previews (HEIC, PDF, video, etc.) via OS thumbnail APIs - not <img src=file://>
 ipcMain.handle('get-file-thumbnail-data-url', async (event, filePath, maxSize = 128) => {
   try {
+    if (!assertTrustedAxisIpcOrNull(event)) return null;
     if (!filePath || typeof filePath !== 'string') return null;
     const resolved = path.resolve(filePath);
+    if (!isPathInsideAxisLibraryRoots(resolved)) return null;
     const st = await fs.promises.stat(resolved).catch(() => null);
     if (!st || !st.isFile()) return null;
     const dim = Math.min(Math.max(64, Number(maxSize) || 128), 512);
@@ -8605,15 +10386,16 @@ ipcMain.handle('get-file-thumbnail-data-url', async (event, filePath, maxSize = 
 
 // Context menu for downloads items
 ipcMain.handle('show-downloads-item-context-menu', async (event, x, y, filePath) => {
+  syncMenuLocale(getProfileIdForEvent(event));
   const template = [
     {
-      label: 'Open',
+      label: uiT('common.open'),
       click: () => {
         event.sender.send('downloads-popup-action', 'open', { path: filePath });
       }
     },
     {
-      label: 'Show in Folder',
+      label: uiT('menu.showInFolder'),
       click: () => {
         event.sender.send('downloads-popup-action', 'show-in-folder', { path: filePath });
       }
@@ -8654,9 +10436,9 @@ function getFallbackFileIcon() {
   return nativeImage.createEmpty();
 }
 
-/** Max longest side (px) for drag ghost — full-size file previews cover the entire screen */
+/** Max longest side (px) for drag ghost - full-size file previews cover the entire screen */
 const DRAG_ICON_MAX_PX = 32;
-/** Drag ghost bitmaps (OS thumbnails when possible — matches downloads popup previews) */
+/** Drag ghost bitmaps (OS thumbnails when possible - matches downloads popup previews) */
 const dragIconCache = new Map();
 const DRAG_ICON_CACHE_MAX = 40;
 
@@ -8686,7 +10468,7 @@ function scaleNativeImageToMax(icon, maxDim) {
   }
 }
 
-/** Never empty — startDrag with an empty icon is skipped and looks like drag is broken */
+/** Never empty - startDrag with an empty icon is skipped and looks like drag is broken */
 function getGuaranteedDragFallbackIcon() {
   const dataUrl =
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAOklEQVQ4T2NkYGD4z0ABYBzVMKoBBg0MBv8ZGP4zMPxnYPjPwPD/PwPDfwYGhv8MDP8ZGP4zMPxnYPgPALmJCm0bicgAAAAASUVORK5CYII=';
@@ -8736,6 +10518,7 @@ function getDragPreviewIconSync(filePath) {
 }
 
 ipcMain.handle('cache-drag-icons', async (event, paths) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return;
   if (!Array.isArray(paths)) return;
 
   const storeForPath = (p, nativeImg) => {
@@ -8753,6 +10536,7 @@ ipcMain.handle('cache-drag-icons', async (event, paths) => {
       let resolved;
       try {
         resolved = path.resolve(p);
+        if (!isPathInsideAxisLibraryRoots(resolved)) return;
         const st = await fs.promises.stat(resolved).catch(() => null);
         if (!st || !st.isFile()) return;
       } catch (e) {
@@ -8783,10 +10567,12 @@ ipcMain.handle('cache-drag-icons', async (event, paths) => {
   );
 });
 
-// Native file drag (must run synchronously during HTML dragstart — use on/send, not handle/invoke)
+// Native file drag (must run synchronously during HTML dragstart - use on/send, not handle/invoke)
 ipcMain.on('start-file-drag', (event, filePath) => {
   try {
+    if (!assertTrustedAxisIpcOrNull(event)) return;
     if (!filePath || typeof filePath !== 'string') return;
+    if (!isPathInsideAxisLibraryRoots(filePath)) return;
 
     let icon = getDragPreviewIconSync(filePath);
     if (!icon || icon.isEmpty()) icon = getGuaranteedDragFallbackIcon();
@@ -8802,6 +10588,7 @@ ipcMain.on('start-file-drag', (event, filePath) => {
 
 // Downloads popup - native macOS menu showing recent files from Downloads folder
 ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWidth, buttonHeight) => {
+  syncMenuLocale(getProfileIdForEvent(event));
   try {
     // Get files from Downloads folder
     const home = os.homedir();
@@ -8843,7 +10630,7 @@ ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWid
     
     if (files.length === 0) {
       template.push({
-        label: 'No downloads',
+        label: uiT('menu.noDownloads'),
         enabled: false
       });
     } else {
@@ -8887,7 +10674,7 @@ ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWid
           },
           submenu: [
             {
-              label: 'Reveal in Finder',
+              label: uiT('menu.showInFolder'),
               click: () => {
                 event.sender.send('downloads-popup-action', 'show-in-folder', { path: filePath });
               }
@@ -8920,7 +10707,7 @@ ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWid
     }
     
     template.push({
-      label: 'Open Downloads',
+      label: uiT('sidebar.openDownloads'),
       icon: folderIcon,
       click: () => {
         shell.openPath(downloadsPath).catch((err) => console.error('Failed to open Downloads:', err));
@@ -9018,7 +10805,7 @@ ipcMain.handle('show-downloads-popup', async (event, buttonX, buttonY, buttonWid
   }
 });
 
-// Icon picker — in-renderer macOS-style popover (renderer owns UI)
+// Icon picker - in-renderer macOS-style popover (renderer owns UI)
 ipcMain.handle('show-icon-picker', async () => true);
 
 ipcMain.on('axis-undo-pending', (event, pending) => {
@@ -9038,10 +10825,16 @@ ipcMain.on('cancel-quit', () => {
   isUserQuitting = false;
 });
 
-// Toggle window button visibility (macOS traffic lights)
+// Toggle window button visibility (macOS traffic lights) - per-window (main + incognito).
 ipcMain.handle('set-window-button-visibility', (event, visible) => {
-  if (mainWindow) {
-    mainWindow.setWindowButtonVisibility(visible);
+  if (process.platform !== 'darwin') return;
+  const win = getWindowFromSender(event?.sender) || BrowserWindow.fromWebContents(event?.sender);
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.setWindowButtonVisibility(!!visible);
+  } catch (_) {}
+  if (visible) {
+    positionMacTrafficLights(win, !!win.__axisSidebarRight);
   }
 });
 
