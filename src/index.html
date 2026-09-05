@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Axis Browser</title>
     <link rel="stylesheet" href="styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,200..1000;1,200..1000&display=swap" rel="stylesheet">
+    <script src="axis-ui-fonts.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
@@ -27,29 +27,29 @@
             <!-- Left Sidebar -->
             <aside id="sidebar">
                 <div id="sidebar-scale" class="sidebar-scale">
-                <div class="sidebar-tabs-topbar" aria-label="Sidebar actions">
-                    <button type="button" id="clear-unpinned-floating" class="clear-unpinned-floating hidden" title="Clear all unpinned tabs">
-                        <span>Clear</span>
+                <div class="sidebar-tabs-topbar" aria-label="Sidebar actions" data-i18n-aria="chrome.sidebarActions">
+                    <button type="button" id="clear-unpinned-floating" class="clear-unpinned-floating hidden" title="Clear all unpinned tabs" data-i18n-title="chrome.clearUnpinned">
+                        <span data-i18n="common.clear">Clear</span>
                         <i class="fas fa-arrow-down clear-arrow" aria-hidden="true"></i>
                     </button>
                 </div>
             <div class="sidebar-section tabs-section">
-                    <section id="favorites-section" class="favorites-section hidden" aria-label="Favorites">
+                    <section id="favorites-section" class="favorites-section hidden" aria-label="Favorites" data-i18n-aria="chrome.favorites">
                         <div id="favorites-grid" class="favorites-grid" role="list"></div>
                     </section>
                     <div id="tabs-container" class="tabs-container vertical">
                         <!-- Pinned tabs will be added above the separator -->
                         <!-- Separator between pinned and unpinned tabs -->
                         <div id="tabs-separator" class="tabs-separator">
-                            <button class="clear-unpinned-btn" title="Clear all unpinned tabs">
-                                <span class="clear-text">Clear</span>
+                            <button class="clear-unpinned-btn" title="Clear all unpinned tabs" data-i18n-title="chrome.clearUnpinned">
+                                <span class="clear-text" data-i18n="common.clear">Clear</span>
                                 <i class="fas fa-arrow-down clear-arrow" aria-hidden="true"></i>
                             </button>
                         </div>
-                        <button type="button" id="sidebar-new-tab-btn" class="sidebar-new-tab-btn" title="New Tab" draggable="false">
+                        <button type="button" id="sidebar-new-tab-btn" class="sidebar-new-tab-btn" title="New Tab" data-i18n-title="chrome.newTab" draggable="false">
                             <span class="sidebar-new-tab-btn-inner">
                                 <i class="fas fa-plus sidebar-new-tab-btn-icon" aria-hidden="true"></i>
-                                <span class="sidebar-new-tab-btn-label">New Tab</span>
+                                <span class="sidebar-new-tab-btn-label" data-i18n="chrome.newTab">New Tab</span>
                             </span>
                         </button>
                         <!-- Unpinned tabs will be added below -->
@@ -57,25 +57,45 @@
                 </div>
 
             <div class="sidebar-section sidebar-footer">
-                <div id="sidebar-media-dock" class="sidebar-media-dock hidden" aria-label="Mini player — background media">
+                <div id="sidebar-update-banner" class="sidebar-update-banner hidden" hidden aria-live="polite">
+                    <div class="sidebar-update-banner-card">
+                        <div class="sidebar-update-banner-row">
+                            <div class="sidebar-update-banner-copy">
+                                <span class="sidebar-update-banner-title" id="sidebar-update-banner-title" data-i18n="chrome.updateAvailable">Update available</span>
+                                <span class="sidebar-update-banner-meta" id="sidebar-update-banner-meta"></span>
+                            </div>
+                            <button type="button" class="sidebar-update-banner-restart" id="sidebar-update-banner-restart" data-i18n="common.restart">Restart</button>
+                        </div>
+                        <div class="sidebar-update-banner-expand" id="sidebar-update-banner-expand">
+                            <div class="sidebar-update-banner-expand-inner">
+                                <button type="button" class="sidebar-update-banner-notes" id="sidebar-update-banner-notes" title="What’s new" aria-label="What’s new" data-i18n="chrome.whatsNew">What’s new</button>
+                                <button type="button" class="sidebar-update-banner-dismiss" id="sidebar-update-banner-dismiss" title="Dismiss" aria-label="Dismiss" data-i18n-title="common.dismiss" data-i18n-aria="common.dismiss">
+                                    <i class="fas fa-times" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <span class="sidebar-update-banner-hint hidden" id="sidebar-update-banner-hint" hidden></span>
+                    </div>
+                </div>
+                <div id="sidebar-media-dock" class="sidebar-media-dock hidden" aria-label="Mini player - background media" data-i18n-aria="chrome.media">
                     <div class="sidebar-media-dock-card">
                         <div class="sidebar-media-dock-row">
-                            <span class="sidebar-media-source-wrap" title="Source" aria-hidden="true">
+                            <span class="sidebar-media-source-wrap" title="Source" aria-hidden="true" data-i18n-title="chrome.media">
                                 <span class="sidebar-media-source" id="sidebar-media-source-badge"></span>
                             </span>
-                            <button type="button" class="sidebar-media-meta-btn" id="sidebar-media-title-btn" title="Go to tab">
+                            <button type="button" class="sidebar-media-meta-btn" id="sidebar-media-title-btn" title="Go to tab" data-i18n-title="chrome.goToTab">
                                 <span class="sidebar-media-title-mask" id="sidebar-media-title-mask">
-                                    <span id="sidebar-media-title" class="sidebar-media-title-text">Media</span>
+                                    <span id="sidebar-media-title" class="sidebar-media-title-text" data-i18n="chrome.media">Media</span>
                                 </span>
                             </button>
-                            <div class="sidebar-media-dock-transport" role="group" aria-label="Playback">
-                                <button type="button" class="sidebar-media-ctrl-btn" id="sidebar-media-prev-btn" title="Back 10 seconds" aria-label="Back 10 seconds">
+                            <div class="sidebar-media-dock-transport" role="group" aria-label="Playback" data-i18n-aria="chrome.media">
+                                <button type="button" class="sidebar-media-ctrl-btn" id="sidebar-media-prev-btn" title="Back 10 seconds" aria-label="Back 10 seconds" data-i18n-title="chrome.back10" data-i18n-aria="chrome.back10">
                                     <i class="fas fa-backward-step" aria-hidden="true"></i>
                                 </button>
-                                <button type="button" class="sidebar-media-ctrl-btn" id="sidebar-media-play-btn" title="Play or pause" aria-label="Play or pause">
+                                <button type="button" class="sidebar-media-ctrl-btn" id="sidebar-media-play-btn" title="Play or pause" aria-label="Play or pause" data-i18n-title="chrome.playPause" data-i18n-aria="chrome.playPause">
                                     <i class="fas fa-play" aria-hidden="true"></i>
                                 </button>
-                                <button type="button" class="sidebar-media-ctrl-btn" id="sidebar-media-next-btn" title="Forward 10 seconds" aria-label="Forward 10 seconds">
+                                <button type="button" class="sidebar-media-ctrl-btn" id="sidebar-media-next-btn" title="Forward 10 seconds" aria-label="Forward 10 seconds" data-i18n-title="chrome.forward10" data-i18n-aria="chrome.forward10">
                                     <i class="fas fa-forward-step" aria-hidden="true"></i>
                                 </button>
                             </div>
@@ -83,15 +103,15 @@
                         <div class="sidebar-media-dock-expand" id="sidebar-media-dock-expand">
                             <div class="sidebar-media-dock-expand-inner">
                                 <div class="sidebar-media-expand-actions sidebar-media-expand-actions--leading" role="group" aria-label="Volume and picture in picture">
-                                    <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-vol-btn" title="Mute or unmute" aria-label="Mute or unmute">
+                                    <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-vol-btn" title="Mute or unmute" aria-label="Mute or unmute" data-i18n-title="chrome.muteUnmute" data-i18n-aria="chrome.muteUnmute">
                                         <i class="fas fa-volume-high" aria-hidden="true"></i>
                                     </button>
-                                    <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-pip-btn" title="Picture in picture" aria-label="Picture in picture">
+                                    <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-pip-btn" title="Picture in picture" aria-label="Picture in picture" data-i18n-title="chrome.pip" data-i18n-aria="chrome.pip">
                                         <i class="fas fa-clone" aria-hidden="true"></i>
                                     </button>
                                 </div>
                                 <div class="sidebar-media-expand-actions sidebar-media-expand-actions--trailing" role="group" aria-label="Close mini player">
-                                    <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-dismiss-btn" title="Pause and hide" aria-label="Pause and hide">
+                                    <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-dismiss-btn" title="Pause and hide" aria-label="Pause and hide" data-i18n-title="chrome.pauseHide" data-i18n-aria="chrome.pauseHide">
                                         <i class="fas fa-times" aria-hidden="true"></i>
                                     </button>
                                 </div>
@@ -99,14 +119,14 @@
                         </div>
                     </div>
                 </div>
-                <div id="sidebar-profile-footer" class="sidebar-footer-profile-row" aria-label="Profile">
-                    <div id="profile-switcher-menu" class="profile-switcher-menu hidden" role="menu" aria-label="Profiles" aria-hidden="true">
+                <div id="sidebar-profile-footer" class="sidebar-footer-profile-row" aria-label="Profile" data-i18n-aria="profile.label">
+                    <div id="profile-switcher-menu" class="profile-switcher-menu hidden" role="menu" aria-label="Profiles" data-i18n-aria="menu.profiles" aria-hidden="true">
                         <div id="profile-switcher-panel" class="profile-switcher-panel">
                             <div id="profile-switcher-list"></div>
                             <div class="profile-switcher-divider" role="separator" aria-hidden="true"></div>
-                            <button type="button" id="profile-menu-add" class="profile-switch-btn profile-switch-btn-add" role="menuitem" title="Create profile">
+                            <button type="button" id="profile-menu-add" class="profile-switch-btn profile-switch-btn-add" role="menuitem" title="Create profile" data-i18n-title="chrome.createProfile">
                                 <span class="profile-switch-avatar profile-switch-avatar-add" aria-hidden="true"><i class="fas fa-plus"></i></span>
-                                <span>New profile</span>
+                                <span data-i18n="chrome.newProfile">New profile</span>
                             </button>
                         </div>
                     </div>
@@ -129,21 +149,21 @@
             <div id="sidebar-plus-menu" class="context-menu hidden">
                 <div class="context-menu-item" id="sidebar-plus-new-tab">
                     <i class="fas fa-plus"></i>
-                    <span>New Tab</span>
+                    <span data-i18n="chrome.newTab">New Tab</span>
                 </div>
                 <div class="context-menu-item" id="sidebar-plus-new-tab-group">
                     <i class="fas fa-layer-group"></i>
-                    <span>New Tab Group</span>
+                    <span data-i18n="chrome.newTabGroup">New Tab Group</span>
                 </div>
                 <div class="context-menu-item" id="sidebar-plus-incognito">
                     <i class="fas fa-mask"></i>
-                    <span>New Incognito Tab</span>
+                    <span data-i18n="chrome.newIncognito">New Incognito Tab</span>
                 </div>
             </div>
                 </div><!-- /.sidebar-scale -->
             </aside>
 
-            <div id="sidebar-resize-handle" class="resize-handle" title="Drag to resize sidebar" aria-label="Resize sidebar"></div>
+            <div id="sidebar-resize-handle" class="resize-handle" title="Drag to resize sidebar" aria-label="Resize sidebar" data-i18n-title="chrome.resizeSidebar" data-i18n-aria="chrome.resizeSidebar"></div>
 
             <!-- Web Content Area -->
             <div id="content-area">
@@ -153,7 +173,7 @@
                         <!-- Themed URL Bar -->
                         <div id="webview-url-bar" class="webview-url-bar">
                             <div class="url-bar-left">
-                                <button type="button" class="url-bar-btn url-bar-downloads-btn" id="downloads-btn-footer" title="Downloads" aria-busy="false">
+                                <button type="button" class="url-bar-btn url-bar-downloads-btn" id="downloads-btn-footer" title="Downloads" data-i18n-title="chrome.downloads" aria-busy="false" aria-expanded="false">
                                     <span class="url-bar-downloads-btn-visual" aria-hidden="true">
                                         <i class="far fa-circle-down url-bar-downloads-icon"></i>
                                         <svg class="url-bar-downloads-ring" viewBox="0 0 24 24" width="18" height="18" focusable="false">
@@ -162,13 +182,13 @@
                                         </svg>
                                     </span>
                                 </button>
-                                <button class="url-bar-btn" id="url-bar-back" title="Go Back" disabled>
+                                <button class="url-bar-btn" id="url-bar-back" title="Go Back" data-i18n-title="chrome.goBack" disabled>
                                     <i class="fas fa-chevron-left"></i>
                                 </button>
-                                <button class="url-bar-btn" id="url-bar-forward" title="Go Forward" disabled>
+                                <button class="url-bar-btn" id="url-bar-forward" title="Go Forward" data-i18n-title="chrome.goForward" disabled>
                                     <i class="fas fa-chevron-right"></i>
                                 </button>
-                                <button class="url-bar-btn" id="url-bar-refresh" title="Reload">
+                                <button class="url-bar-btn" id="url-bar-refresh" title="Reload" data-i18n-title="chrome.reload">
                                     <i class="fas fa-redo-alt"></i>
                                 </button>
                             </div>
@@ -178,19 +198,19 @@
                                     <span class="url-bar-url" id="url-bar-display"></span>
                                 </div>
                                 <div class="url-bar-actions">
-                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-adblock-btn" id="url-bar-adblock" title="Ad blocker" aria-pressed="true">
+                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-adblock-btn" id="url-bar-adblock" title="Privacy protection" data-i18n-title="adblock.title" aria-pressed="true" aria-expanded="false">
                                         <i class="fas fa-shield-halved" aria-hidden="true"></i>
                                     </button>
-                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-copy-btn" id="url-bar-copy" title="Copy Link">
+                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-copy-btn" id="url-bar-copy" title="Copy Link" data-i18n-title="chrome.copyLinkShort">
                                         <i class="fas fa-link"></i>
                                     </button>
-                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-extensions-btn" id="url-bar-extensions" title="Extensions">
+                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-extensions-btn" id="url-bar-extensions" title="Extensions" data-i18n-title="chrome.extensions" aria-expanded="false">
                                         <i class="fas fa-puzzle-piece" aria-hidden="true"></i>
                                     </button>
-                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-cws-install hidden" id="url-bar-cws-install" title="Install this extension in Axis" aria-hidden="true">
+                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-cws-install hidden" id="url-bar-cws-install" title="Install this extension in Axis" data-i18n-title="chrome.installExtension" aria-hidden="true">
                                         <i class="fas fa-download" aria-hidden="true"></i>
                                     </button>
-                                    <button class="url-bar-btn url-bar-action-btn" id="url-bar-security" title="Security Info">
+                                    <button class="url-bar-btn url-bar-action-btn" id="url-bar-security" title="Security Info" data-i18n-title="chrome.securityInfo" aria-expanded="false">
                                         <i class="fas fa-lock"></i>
                                     </button>
                                 </div>
@@ -199,8 +219,8 @@
                                 </div>
                             </div>
                             <div class="url-bar-right">
-                                <button class="url-bar-chat-btn" id="url-bar-chat" title="Chat">
-                                    <span>Chat</span>
+                                <button class="url-bar-chat-btn" id="url-bar-chat" title="Chat" data-i18n-title="chrome.chat">
+                                    <span data-i18n="chrome.chat">Chat</span>
                                 </button>
                             </div>
                         </div>
@@ -214,13 +234,13 @@
                             <div class="axis-store-install-host-leading">
                                 <span id="axis-store-install-host-badge" class="axis-store-install-host-badge hidden" aria-hidden="true">
                                     <i class="fas fa-check" aria-hidden="true"></i>
-                                    <span>Installed</span>
+                                    <span data-i18n="sidebar.installed">Installed</span>
                                 </span>
                                 <span id="axis-store-install-host-text" class="axis-store-install-host-text"></span>
                             </div>
                             <div class="axis-store-install-host-actions">
-                                <button type="button" id="axis-store-install-host-open" class="axis-store-install-host-open hidden" title="Open extensions menu">Extensions</button>
-                                <button type="button" id="axis-store-install-host-btn" class="axis-store-install-host-btn" aria-busy="false">Install in Axis</button>
+                                <button type="button" id="axis-store-install-host-open" class="axis-store-install-host-open hidden" title="Open extensions menu" data-i18n-title="sidebar.openExtensions" data-i18n="chrome.extensions">Extensions</button>
+                                <button type="button" id="axis-store-install-host-btn" class="axis-store-install-host-btn" aria-busy="false" data-i18n="sidebar.installInAxis">Install in Axis</button>
                             </div>
                         </div>
                         <!-- Tab pages use dynamic webviews in #webviews-container (no static guest). -->
@@ -258,22 +278,22 @@
                                     </div>
                                     <div class="new-tab-search-section">
                                         <div id="new-tab-ask-setup" class="new-tab-ask-setup hidden" role="note">
-                                            <p class="new-tab-ask-setup-title">Add an API key to use Ask</p>
-                                            <p class="new-tab-ask-setup-desc">Add a key in Settings → AI Chat (Groq, OpenAI, Gemini, and more). Then you can chat here and in the sidebar AI panel.</p>
+                                            <p class="new-tab-ask-setup-title" data-i18n="ntp.askSetupTitle">Add an API key to use Ask</p>
+                                            <p class="new-tab-ask-setup-desc" data-i18n="ntp.askSetupDesc">Add a key in Settings → AI Chat (Groq, OpenAI, Gemini, and more). Then you can chat here and in the sidebar AI panel.</p>
                                             <div class="new-tab-ask-setup-actions">
-                                                <button type="button" id="new-tab-ask-setup-settings" class="new-tab-ask-setup-btn">Open AI settings</button>
-                                                <button type="button" id="new-tab-ask-setup-groq" class="new-tab-ask-setup-link">Get free key</button>
+                                                <button type="button" id="new-tab-ask-setup-settings" class="new-tab-ask-setup-btn" data-i18n="ntp.openAiSettings">Open AI settings</button>
+                                                <button type="button" id="new-tab-ask-setup-groq" class="new-tab-ask-setup-link" data-i18n="ntp.getFreeKey">Get free key</button>
                                             </div>
                                         </div>
                                         <div class="new-tab-search-wrapper" id="new-tab-search-wrapper">
                                             <div class="ai-chat-composer-chrome" id="new-tab-composer-chrome">
                                                 <div id="new-tab-attach-preview" class="ai-chat-attach-preview hidden" aria-live="polite"></div>
                                                 <div class="new-tab-search-bar" id="new-tab-search-bar">
-                                                    <button type="button" id="new-tab-attach-btn" class="ai-chat-attach-btn hidden" title="Attach image (up to 4)" aria-label="Attach image">
+                                                    <button type="button" id="new-tab-attach-btn" class="ai-chat-attach-btn hidden" title="Attach image (up to 4)" aria-label="Attach image" data-i18n-title="chrome.attachImage" data-i18n-aria="chrome.attachImage">
                                                         <i class="fas fa-image" aria-hidden="true"></i>
                                                     </button>
-                                                    <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search or Enter URL..." autocomplete="off" aria-label="Search or URL">
-                                                    <button type="button" id="new-tab-send-btn" class="new-tab-send-btn is-disabled" disabled aria-label="Send message" title="Send">
+                                                    <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search or Enter URL..." data-i18n-placeholder="chrome.searchOrUrl" autocomplete="off" aria-label="Search or URL" data-i18n-aria="chrome.searchOrUrlAria">
+                                                    <button type="button" id="new-tab-send-btn" class="new-tab-send-btn is-disabled" disabled aria-label="Send message" title="Send" data-i18n-title="chrome.send" data-i18n-aria="chrome.send">
                                                         <i class="fas fa-arrow-up" aria-hidden="true"></i>
                                                     </button>
                                                 </div>
@@ -286,25 +306,25 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <button type="button" id="ntp-widgets-opt-in" class="ntp-widgets-opt-in hidden" aria-label="Add widgets to new tab">
+                                    <button type="button" id="ntp-widgets-opt-in" class="ntp-widgets-opt-in hidden" aria-label="Add widgets to new tab" data-i18n-aria="chrome.addWidgetsAria">
                                         <i class="fas fa-grip" aria-hidden="true"></i>
-                                        <span>Add widgets</span>
+                                        <span data-i18n="ntp.addWidgets">Add widgets</span>
                                     </button>
                                     </div>
                                     </div>
-                                    <div class="new-tab-widgets-section ntp-widgets-empty-layout hidden" id="new-tab-widgets-section" aria-label="Widgets">
+                                    <div class="new-tab-widgets-section ntp-widgets-empty-layout hidden" id="new-tab-widgets-section" aria-label="Widgets" data-i18n-aria="chrome.widgets">
                                         <div id="ntp-widgets-grid" class="ntp-widgets-grid"></div>
                                         <div class="ntp-widgets-foot">
-                                            <button type="button" id="ntp-widgets-add-btn" class="ntp-widgets-add-btn hidden" aria-expanded="false">Add widget</button>
-                                            <button type="button" id="ntp-widgets-edit-btn" class="ntp-widgets-edit-btn" aria-pressed="false">Edit</button>
-                                            <div id="ntp-widget-add-strip" class="ntp-widget-add-strip hidden" aria-label="Add a widget">
+                                            <button type="button" id="ntp-widgets-add-btn" class="ntp-widgets-add-btn hidden" aria-expanded="false" data-i18n="ntp.addWidget">Add widget</button>
+                                            <button type="button" id="ntp-widgets-edit-btn" class="ntp-widgets-edit-btn" aria-pressed="false" data-i18n="ntp.edit">Edit</button>
+                                            <div id="ntp-widget-add-strip" class="ntp-widget-add-strip hidden" aria-label="Add a widget" data-i18n-aria="ntp.addWidget">
                                                 <div id="ntp-widget-catalog" class="ntp-widget-add-chips"></div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            <div id="new-tab-ai-chat-view" class="new-tab-ai-chat-view hidden" aria-label="AI Chat conversation">
+                            <div id="new-tab-ai-chat-view" class="new-tab-ai-chat-view hidden" aria-label="AI Chat conversation" data-i18n-aria="chrome.aiChat">
                                 <div class="new-tab-ask-messages hidden" id="new-tab-ask-messages"></div>
                                 <div class="new-tab-ai-composer" id="new-tab-ai-composer">
                                     <div class="new-tab-ai-composer-stack">
@@ -312,7 +332,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <button type="button" id="new-tab-menu-btn" class="new-tab-menu-btn" aria-label="New tab settings" title="New tab settings">
+                            <button type="button" id="new-tab-menu-btn" class="new-tab-menu-btn" aria-label="New tab settings" title="New tab settings" data-i18n-aria="chrome.newTabSettings" data-i18n-title="chrome.newTabSettings">
                                 <span class="new-tab-menu-icon" aria-hidden="true"></span>
                             </button>
                         </div>
@@ -322,36 +342,36 @@
                                 <div class="empty-state-icon">
                                     <i class="fas fa-window-maximize"></i>
                                 </div>
-                                <h2 class="empty-state-title">No tabs open</h2>
-                                <p class="empty-state-subtitle">Create a new tab to start browsing</p>
+                                <h2 class="empty-state-title" data-i18n="chrome.noTabs">No tabs open</h2>
+                                <p class="empty-state-subtitle" data-i18n="chrome.noTabsHint">Create a new tab to start browsing</p>
                                 <div class="empty-state-actions">
                                     <button class="empty-state-btn" id="empty-state-new-tab-empty">
                                         <i class="fas fa-plus"></i>
-                                        <span>New Tab</span>
+                                        <span data-i18n="chrome.newTab">New Tab</span>
                                     </button>
                                 </div>
                             </div>
                         </div>
                         <!-- AI Chat Panel (inside webview container) -->
                         <div id="ai-chat-panel" class="ai-chat-panel hidden">
-                            <div id="ai-chat-resize-handle" class="ai-chat-resize-handle" title="Drag to resize"></div>
+                            <div id="ai-chat-resize-handle" class="ai-chat-resize-handle" title="Drag to resize" data-i18n-title="chrome.dragResize"></div>
                             <div class="ai-chat-header">
-                                <button id="ai-chat-close" class="ai-chat-close-btn" title="Close Chat">
-                                    <i class="fas fa-times"></i>
+                                <button id="ai-chat-close" class="ai-chat-close-btn" title="Close Chat" aria-label="Close Chat" data-i18n-title="chrome.closeChat" data-i18n-aria="chrome.closeChat">
+                                    <svg class="tab-close-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M4.25 4.25l7.5 7.5M11.75 4.25l-7.5 7.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
                                 </button>
                             </div>
                             <div id="ai-chat-setup" class="ai-chat-setup hidden">
                                 <div class="ai-chat-setup-icon" aria-hidden="true"><i class="fas fa-message"></i></div>
-                                <h3 class="ai-chat-setup-title">Set up AI chat</h3>
-                                <p class="ai-chat-setup-desc">Add an API key in <strong>Settings → AI Chat</strong> to chat here and use <strong>Ask</strong> on the new tab page. Groq, OpenAI, Gemini, and more are supported.</p>
-                                <button type="button" id="ai-chat-setup-settings" class="ai-chat-setup-btn">Add API key in Settings</button>
-                                <button type="button" id="ai-chat-setup-groq" class="ai-chat-setup-link">Get a free API key</button>
+                                <h3 class="ai-chat-setup-title" data-i18n="ai.setupTitle">Set up AI chat</h3>
+                                <p class="ai-chat-setup-desc" data-i18n="ai.setupDesc">Add an API key in Settings → AI Chat to chat here and use Ask on the new tab page. Groq, OpenAI, Gemini, and more are supported.</p>
+                                <button type="button" id="ai-chat-setup-settings" class="ai-chat-setup-btn" data-i18n="ai.addKey">Add API key in Settings</button>
+                                <button type="button" id="ai-chat-setup-groq" class="ai-chat-setup-link" data-i18n="ai.getFreeKey">Get a free API key</button>
                             </div>
                             <div class="ai-chat-messages" id="ai-chat-messages"></div>
                             <div id="ai-chat-quote-bar" class="ai-chat-quote-bar hidden">
                                 <i class="fas fa-quote-right ai-chat-quote-icon"></i>
                                 <div class="ai-chat-quote-text" id="ai-chat-quote-text"></div>
-                                <button type="button" id="ai-chat-quote-dismiss" class="ai-chat-quote-dismiss" title="Remove quote">
+                                <button type="button" id="ai-chat-quote-dismiss" class="ai-chat-quote-dismiss" title="Remove quote" data-i18n-title="chrome.removeQuote">
                                     <i class="fas fa-times"></i>
                                 </button>
                             </div>
@@ -359,18 +379,19 @@
                                 <div class="ai-chat-composer-chrome" id="ai-chat-composer-chrome">
                                     <div id="ai-chat-attach-preview" class="ai-chat-attach-preview hidden" aria-live="polite"></div>
                                     <div class="ai-chat-composer-bar ai-chat-input-row">
-                                        <button type="button" id="ai-chat-attach-btn" class="ai-chat-attach-btn hidden" title="Attach image (up to 4)" aria-label="Attach image">
+                                        <button type="button" id="ai-chat-attach-btn" class="ai-chat-attach-btn hidden" title="Attach image (up to 4)" aria-label="Attach image" data-i18n-title="chrome.attachImage" data-i18n-aria="chrome.attachImage">
                                             <i class="fas fa-image" aria-hidden="true"></i>
                                         </button>
                                         <textarea 
                                             id="ai-chat-input" 
                                             class="ai-chat-input" 
                                             placeholder="Add an API key in Settings to start chatting"
+                                            data-i18n-placeholder="ai.setupPlaceholder"
                                             rows="1"
                                             disabled
                                             aria-disabled="true"
                                         ></textarea>
-                                        <button id="ai-chat-send" class="ai-chat-send-btn" title="Send (Enter)" disabled aria-disabled="true">
+                                        <button id="ai-chat-send" class="ai-chat-send-btn" title="Send (Enter)" data-i18n-title="chrome.sendEnter" disabled aria-disabled="true">
                                             <i class="fas fa-arrow-up"></i>
                                         </button>
                                     </div>
@@ -383,8 +404,8 @@
                         <div id="extensions-menu-backdrop" class="extensions-menu-backdrop hidden" aria-hidden="true"></div>
                         <div id="adblock-panel-backdrop" class="adblock-panel-backdrop hidden" aria-hidden="true"></div>
                         <div id="security-panel-backdrop" class="security-panel-backdrop hidden" aria-hidden="true"></div>
-                        <div id="vault-autofill-panel" class="vault-autofill-panel hidden" role="listbox" aria-label="Saved passwords">
-                            <ul id="vault-autofill-list" class="vault-autofill-list"></ul>
+                        <div id="vault-autofill-panel" class="vault-af-menu hidden" role="listbox" aria-label="Saved passwords" data-i18n-aria="chrome.savedPasswords">
+                            <ul id="vault-autofill-list" class="vault-af-menu-list"></ul>
                         </div>
                     </div>
             </div>
@@ -403,32 +424,32 @@
     <div id="tab-context-menu" class="context-menu hidden">
         <div class="context-menu-item" id="rename-tab-option">
             <i class="fas fa-edit"></i>
-            <span>Rename Tab</span>
+            <span data-i18n="menu.renameTab">Rename Tab</span>
         </div>
         <div class="context-menu-item" id="duplicate-tab-option">
             <i class="fas fa-copy"></i>
-            <span>Duplicate Tab</span>
+            <span data-i18n="menu.duplicateTab">Duplicate Tab</span>
         </div>
         <div class="context-menu-item" id="pin-tab-option">
             <i class="fas fa-thumbtack"></i>
-            <span id="pin-tab-text">Pin Tab</span>
+            <span id="pin-tab-text" data-i18n="menu.pinTab">Pin Tab</span>
         </div>
         <div class="context-menu-item" id="mute-tab-option">
             <i id="mute-tab-icon" class="fas fa-volume-mute"></i>
-            <span id="mute-tab-text">Mute Tab</span>
+            <span id="mute-tab-text" data-i18n="menu.muteTab">Mute Tab</span>
         </div>
         <div class="context-menu-item" id="change-tab-icon-option">
             <i class="fas fa-icons"></i>
-            <span>Change Icon</span>
+            <span data-i18n="menu.changeIcon">Change Icon</span>
         </div>
         <div class="context-menu-item" id="add-tab-favorite-option">
             <i class="fas fa-star"></i>
-            <span>Add to Favorites</span>
+            <span data-i18n="menu.addFavorite">Add to Favorites</span>
         </div>
         <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="close-tab-option">
             <i class="fas fa-times"></i>
-            <span>Close Tab</span>
+            <span data-i18n="menu.closeTab">Close Tab</span>
         </div>
     </div>
     
@@ -436,31 +457,31 @@
     <div id="tab-group-context-menu" class="context-menu hidden">
         <div class="context-menu-item" id="rename-tab-group-option">
             <i class="fas fa-edit"></i>
-            <span>Rename Tab Group</span>
+            <span data-i18n="menu.renameGroup">Rename Tab Group</span>
         </div>
         <div class="context-menu-item" id="duplicate-tab-group-option">
             <i class="fas fa-copy"></i>
-            <span>Duplicate Tab Group</span>
+            <span data-i18n="menu.duplicateGroup">Duplicate Tab Group</span>
         </div>
         <div class="context-menu-item" id="change-tab-group-color-option">
             <i class="fas fa-palette"></i>
-            <span>Change Color</span>
+            <span data-i18n="menu.changeColor">Change Color</span>
         </div>
         <div class="context-menu-item" id="change-tab-group-icon-option">
             <i class="fas fa-icons"></i>
-            <span>Change Icon</span>
+            <span data-i18n="menu.changeIcon">Change Icon</span>
         </div>
         <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="delete-tab-group-option">
             <i class="fas fa-times"></i>
-            <span>Delete Tab Group</span>
+            <span data-i18n="menu.deleteGroup">Delete Tab Group</span>
         </div>
     </div>
     
     <!-- Tab Group Color Picker -->
     <div id="tab-group-color-picker" class="color-picker hidden">
         <div class="color-picker-header">
-            <span>Choose Color</span>
+            <span data-i18n="menu.chooseColor">Choose Color</span>
             <button class="color-picker-close">
                 <i class="fas fa-times"></i>
             </button>
@@ -485,39 +506,39 @@
     <div id="sidebar-context-menu" class="context-menu hidden">
         <div class="context-menu-item" id="sidebar-new-tab-option">
             <i class="fas fa-plus"></i>
-            <span>New Tab</span>
+            <span data-i18n="chrome.newTab">New Tab</span>
         </div>
         <div class="context-menu-item" id="sidebar-new-tab-group-option">
             <i class="fas fa-layer-group"></i>
-            <span>New Tab Group</span>
+            <span data-i18n="chrome.newTabGroup">New Tab Group</span>
         </div>
         <div class="context-menu-item" id="sidebar-new-incognito-option">
             <i class="fas fa-mask"></i>
-            <span>New Incognito Tab</span>
+            <span data-i18n="chrome.newIncognito">New Incognito Tab</span>
         </div>
         <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="sidebar-toggle-option">
             <i class="fas fa-sidebar"></i>
-            <span>Toggle Sidebar</span>
+            <span data-i18n="menu.toggleSidebar">Toggle Sidebar</span>
         </div>
         <div class="context-menu-item" id="sidebar-position-option">
             <i class="fas fa-arrows-alt-h"></i>
-            <span id="sidebar-position-context-text">Move Sidebar Right</span>
+            <span id="sidebar-position-context-text" data-i18n="menu.moveSidebarRight">Move Sidebar Right</span>
         </div>
     </div>
     
     <!-- Search Modal -->
     <div id="search-modal" class="search-modal hidden">
         <div class="search-container">
-            <input type="text" id="search-input" placeholder="Search on this page..." autocomplete="off">
+            <input type="text" id="search-input" placeholder="Search on this page..." data-i18n-placeholder="find.placeholder" autocomplete="off">
             <div class="search-controls">
-                <button id="search-prev" class="search-btn" title="Previous">
+                <button id="search-prev" class="search-btn" title="Previous" data-i18n-title="find.prev">
                     <i class="fas fa-chevron-up"></i>
                 </button>
-                <button id="search-next" class="search-btn" title="Next">
+                <button id="search-next" class="search-btn" title="Next" data-i18n-title="find.next">
                     <i class="fas fa-chevron-down"></i>
                 </button>
-                <button id="search-close" class="search-btn" title="Close">
+                <button id="search-close" class="search-btn" title="Close" data-i18n-title="common.close">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -529,68 +550,68 @@
         <!-- Link -->
         <div class="context-menu-item link-option" id="webpage-open-link-new-tab">
             <i class="fas fa-external-link-alt"></i>
-            <span>Open Link in New Tab</span>
+            <span data-i18n="menu.openLinkNewTab">Open Link in New Tab</span>
         </div>
         <div class="context-menu-item link-option" id="webpage-copy-link">
             <i class="fas fa-link"></i>
-            <span>Copy Link Address</span>
+            <span data-i18n="menu.copyLink">Copy Link Address</span>
         </div>
         <div class="context-menu-separator link-option"></div>
 
         <!-- Image -->
         <div class="context-menu-item image-option" id="webpage-open-image-new-tab">
             <i class="fas fa-image"></i>
-            <span>Open Image in New Tab</span>
+            <span data-i18n="menu.openImageNewTab">Open Image in New Tab</span>
         </div>
         <div class="context-menu-item image-option" id="webpage-save-image">
             <i class="fas fa-download"></i>
-            <span>Save Image</span>
+            <span data-i18n="menu.saveImage">Save Image</span>
         </div>
         <div class="context-menu-item image-option" id="webpage-copy-image">
             <i class="fas fa-copy"></i>
-            <span>Copy Image</span>
+            <span data-i18n="menu.copyImage">Copy Image</span>
         </div>
         <div class="context-menu-item image-option" id="webpage-copy-image-url">
             <i class="fas fa-link"></i>
-            <span>Copy Image Address</span>
+            <span data-i18n="menu.copyImageUrl">Copy Image Address</span>
         </div>
         <div class="context-menu-separator image-option"></div>
 
         <!-- Navigation -->
         <div class="context-menu-item nav-option" id="webpage-back">
             <i class="fas fa-arrow-left"></i>
-            <span>Back</span>
+            <span data-i18n="menu.back">Back</span>
         </div>
         <div class="context-menu-item nav-option" id="webpage-forward">
             <i class="fas fa-arrow-right"></i>
-            <span>Forward</span>
+            <span data-i18n="menu.forward">Forward</span>
         </div>
         <div class="context-menu-item" id="webpage-reload">
             <i class="fas fa-redo"></i>
-            <span>Reload</span>
+            <span data-i18n="menu.reload">Reload</span>
         </div>
         <div class="context-menu-separator"></div>
 
         <!-- Edit -->
         <div class="context-menu-item edit-option" id="webpage-cut">
             <i class="fas fa-cut"></i>
-            <span>Cut</span>
+            <span data-i18n="menu.cut">Cut</span>
         </div>
         <div class="context-menu-item" id="webpage-copy">
             <i class="fas fa-copy"></i>
-            <span>Copy</span>
+            <span data-i18n="menu.copy">Copy</span>
         </div>
         <div class="context-menu-item" id="webpage-paste">
             <i class="fas fa-paste"></i>
-            <span>Paste</span>
+            <span data-i18n="menu.paste">Paste</span>
         </div>
         <div class="context-menu-item" id="webpage-paste-match-style">
             <i class="fas fa-paste"></i>
-            <span>Paste and Match Style</span>
+            <span data-i18n="menu.pasteMatchStyle">Paste and Match Style</span>
         </div>
         <div class="context-menu-item" id="webpage-select-all">
             <i class="fas fa-check-square"></i>
-            <span>Select All</span>
+            <span data-i18n="menu.selectAll">Select All</span>
         </div>
         <div class="context-menu-separator"></div>
 
@@ -604,26 +625,26 @@
         <!-- Page -->
         <div class="context-menu-item" id="webpage-copy-url">
             <i class="fas fa-globe"></i>
-            <span>Copy Page URL</span>
+            <span data-i18n="menu.copyPageUrl">Copy Page URL</span>
         </div>
         <div class="context-menu-item" id="webpage-copy-url-markdown">
             <i class="fa-brands fa-markdown"></i>
-            <span>Copy URL as Markdown</span>
+            <span data-i18n="menu.copyUrlMarkdown">Copy URL as Markdown</span>
         </div>
         <div class="context-menu-item" id="webpage-print">
             <i class="fas fa-print"></i>
-            <span>Print…</span>
+            <span data-i18n="menu.print">Print…</span>
         </div>
         <div class="context-menu-item" id="webpage-inspect">
             <i class="fas fa-code"></i>
-            <span>Inspect Element</span>
+            <span data-i18n="menu.inspect">Inspect Element</span>
         </div>
     </div>
 
     <!-- AI Text Selection Button -->
     <div id="ai-selection-button" class="ai-selection-button hidden">
-        <button class="ai-button" title="Quote selection and ask in Chat">
-            <span class="ai-button-text">Ask</span>
+        <button class="ai-button" title="Quote selection and ask in Chat" data-i18n-title="ai.quoteAsk">
+            <span class="ai-button-text" data-i18n="chrome.ask">Ask</span>
             <i class="fas fa-quote-right ai-button-icon"></i>
         </button>
     </div>
@@ -655,22 +676,22 @@
         <!-- Settings Panel -->
         <div id="settings-panel" class="settings-panel hidden">
             <div class="settings-header">
-                <h3>Settings</h3>
+                <h3 data-i18n="settings.title">Settings</h3>
                 <button id="close-settings" class="close-settings">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="settings-content">
                 <div class="settings-tabs">
-                    <button class="settings-tab active" data-tab="general">General</button>
-                    <button class="settings-tab" data-tab="history">History</button>
-                    <button class="settings-tab" data-tab="shortcuts">Shortcuts</button>
+                    <button class="settings-tab active" data-tab="general" data-i18n="settings.nav.general">General</button>
+                    <button class="settings-tab" data-tab="history" data-i18n="settings.nav.history">History</button>
+                    <button class="settings-tab" data-tab="shortcuts" data-i18n="settings.nav.shortcuts">Shortcuts</button>
                 </div>
                 
                 <!-- General Settings Tab -->
                 <div class="settings-tab-content active" id="general-tab">
                      <div class="setting-group">
-                         <h4>Privacy & Security</h4>
+                         <h4 data-i18n="legacy.privacy">Privacy & Security</h4>
                          <div class="setting-item">
                              <label>
                                  <input type="checkbox" id="block-trackers">
@@ -691,15 +712,15 @@
                          </div>
                      </div>
                     <div class="settings-actions">
-                        <button id="save-settings" class="save-btn hidden">Save Changes</button>
+                        <button id="save-settings" class="save-btn hidden" data-i18n="common.saveChanges">Save Changes</button>
                     </div>
                 </div>
                 
                 <!-- History Tab -->
                 <div class="settings-tab-content" id="history-tab">
                     <div class="history-controls">
-                        <input type="text" id="history-search" placeholder="Search history..." class="history-search">
-                        <button id="clear-history" class="clear-btn" title="Clear All History">
+                        <input type="text" id="history-search" placeholder="Search history..." data-i18n-placeholder="history.search" class="history-search">
+                        <button id="clear-history" class="clear-btn" title="Clear All History" data-i18n-title="history.clearAll">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -713,98 +734,98 @@
                 <!-- Keyboard Shortcuts Tab -->
                 <div class="settings-tab-content" id="shortcuts-tab">
                     <div class="shortcut-group">
-                        <h4>Navigation</h4>
+                        <h4 data-i18n="legacy.navigation">Navigation</h4>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + T</span>
-                            <span class="shortcut-desc">New Tab</span>
+                            <span class="shortcut-desc" data-i18n="shortcut.newTab">New Tab</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + W</span>
-                            <span class="shortcut-desc">Close Tab</span>
+                            <span class="shortcut-desc" data-i18n="shortcut.closeTab">Close Tab</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + Z</span>
-                            <span class="shortcut-desc">Recover Closed Tab</span>
+                            <span class="shortcut-desc" data-i18n="legacy.recoverTab">Recover Closed Tab</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + R</span>
-                            <span class="shortcut-desc">Refresh Page</span>
+                            <span class="shortcut-desc" data-i18n="legacy.refresh">Refresh Page</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + L</span>
-                            <span class="shortcut-desc">Focus URL Bar</span>
+                            <span class="shortcut-desc" data-i18n="legacy.focusUrl">Focus URL Bar</span>
                         </div>
                     </div>
                     
                     <div class="shortcut-group">
-                        <h4>Tab Management</h4>
+                        <h4 data-i18n="legacy.tabManagement">Tab Management</h4>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + 1-9</span>
-                            <span class="shortcut-desc">Switch to tab 1-9</span>
+                            <span class="shortcut-desc" data-i18n="legacy.switchTabs">Switch to tab 1-9</span>
                         </div>
                     </div>
                     
                     <div class="shortcut-group">
-                        <h4>Panels & Menus</h4>
+                        <h4 data-i18n="legacy.panels">Panels & Menus</h4>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + B</span>
-                            <span class="shortcut-desc">Toggle Sidebar</span>
+                            <span class="shortcut-desc" data-i18n="shortcut.toggleSidebar">Toggle Sidebar</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + Y</span>
-                            <span class="shortcut-desc">Open History</span>
+                            <span class="shortcut-desc" data-i18n="legacy.openHistory">Open History</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + J</span>
-                            <span class="shortcut-desc">Open Downloads</span>
+                            <span class="shortcut-desc" data-i18n="legacy.openDownloads">Open Downloads</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + F</span>
-                            <span class="shortcut-desc">Find in Page</span>
+                            <span class="shortcut-desc" data-i18n="legacy.find">Find in Page</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + ,</span>
-                            <span class="shortcut-desc">Open Settings</span>
+                            <span class="shortcut-desc" data-i18n="legacy.openSettings">Open Settings</span>
                         </div>
                     </div>
                     
                     <div class="shortcut-group">
-                        <h4>Zoom Controls</h4>
+                        <h4 data-i18n="legacy.zoom">Zoom Controls</h4>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + +</span>
-                            <span class="shortcut-desc">Zoom In</span>
+                            <span class="shortcut-desc" data-i18n="shortcut.zoomIn">Zoom In</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + -</span>
-                            <span class="shortcut-desc">Zoom Out</span>
+                            <span class="shortcut-desc" data-i18n="shortcut.zoomOut">Zoom Out</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + 0</span>
-                            <span class="shortcut-desc">Reset Zoom</span>
+                            <span class="shortcut-desc" data-i18n="shortcut.resetZoom">Reset Zoom</span>
                         </div>
                     </div>
                     
                     <div class="shortcut-group">
-                        <h4>Data Management</h4>
+                        <h4 data-i18n="legacy.data">Data Management</h4>
                         <div class="shortcut-item">
                             <span class="shortcut-key">⌘ + Shift + H</span>
-                            <span class="shortcut-desc">Clear History</span>
+                            <span class="shortcut-desc" data-i18n="legacy.clearHistory">Clear History</span>
                         </div>
                     </div>
                     
                     <div class="shortcut-group">
-                        <h4>Browser Controls</h4>
+                        <h4 data-i18n="legacy.browser">Browser Controls</h4>
                         <div class="shortcut-item">
                             <span class="shortcut-key">←</span>
-                            <span class="shortcut-desc">Go Back</span>
+                            <span class="shortcut-desc" data-i18n="legacy.goBack">Go Back</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">→</span>
-                            <span class="shortcut-desc">Go Forward</span>
+                            <span class="shortcut-desc" data-i18n="legacy.goForward">Go Forward</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-key">Escape</span>
-                            <span class="shortcut-desc">Close Search/Modals</span>
+                            <span class="shortcut-desc" data-i18n="legacy.closeModals">Close Search/Modals</span>
                         </div>
                     </div>
                 </div>
@@ -815,7 +836,7 @@
         <!-- Library Panel -->
         <div id="downloads-panel" class="downloads-panel hidden">
             <div class="downloads-header">
-                <h3>Library</h3>
+                <h3 data-i18n="chrome.library">Library</h3>
                 <button id="close-downloads" class="close-settings">
                     <i class="fas fa-times"></i>
                 </button>
@@ -830,7 +851,7 @@
         <!-- Notes Panel -->
         <div id="notes-panel" class="notes-panel hidden">
             <div class="notes-header">
-                <h3>Notes</h3>
+                <h3 data-i18n="chrome.notes">Notes</h3>
                     <button id="close-notes" class="close-settings">
                         <i class="fas fa-times"></i>
                     </button>
@@ -843,21 +864,21 @@
                         <i class="fas fa-plus"></i>
                     </div>
                     <div class="new-note-text">
-                        <span class="new-note-title">Create New Note</span>
-                        <span class="new-note-subtitle">Start writing your thoughts</span>
+                        <span class="new-note-title" data-i18n="notes.create">Create New Note</span>
+                        <span class="new-note-subtitle" data-i18n="notes.createHint">Start writing your thoughts</span>
                     </div>
                 </button>
             </div>
             
             <!-- Search Section -->
             <div class="notes-search">
-                <input type="text" id="notes-search-input" placeholder="Search notes...">
+                <input type="text" id="notes-search-input" placeholder="Search notes..." data-i18n-placeholder="notes.search">
             </div>
             
             <!-- Saved Notes Section -->
             <div class="notes-saved-section">
                 <div class="notes-section-header">
-                    <h4>Saved Notes</h4>
+                    <h4 data-i18n="notes.saved">Saved Notes</h4>
                     <span id="notes-count" class="notes-count">0 notes</span>
             </div>
             <div class="notes-content">
@@ -866,8 +887,8 @@
                 </div>
                 <div id="no-notes" class="no-notes hidden">
                         <i class="fas fa-sticky-note"></i>
-                    <p>No notes yet</p>
-                        <p>Create your first note to get started</p>
+                    <p data-i18n="notes.empty">No notes yet</p>
+                        <p data-i18n="notes.emptyHint">Create your first note to get started</p>
                     </div>
                 </div>
             </div>
@@ -877,9 +898,9 @@
         <div id="note-editor-modal" class="note-editor-modal hidden">
             <div class="note-editor-content">
                 <div class="note-editor-header">
-                    <input type="text" id="note-title-input" class="note-title-input" placeholder="Note title...">
+                    <input type="text" id="note-title-input" class="note-title-input" placeholder="Note title..." data-i18n-placeholder="notes.titlePlaceholder">
                     <div class="note-editor-actions">
-                        <button id="save-note-btn" class="save-note-btn" title="Save (Ctrl+S)">
+                        <button id="save-note-btn" class="save-note-btn" title="Save (Ctrl+S)" data-i18n-title="notes.saveShortcut">
                             <i class="fas fa-save"></i>
                         </button>
                         <button id="close-note-editor" class="close-note-editor" title="Close (Esc)">
@@ -888,7 +909,7 @@
                     </div>
                 </div>
                 <div class="note-editor-body">
-                    <textarea id="note-content-textarea" class="note-content-textarea" placeholder="Start writing your note..."></textarea>
+                    <textarea id="note-content-textarea" class="note-content-textarea" placeholder="Start writing your note..." data-i18n-placeholder="notes.contentPlaceholder"></textarea>
                 </div>
             </div>
         </div>
@@ -902,13 +923,13 @@
                         <span class="file-preview-time" id="file-preview-time"></span>
                     </div>
                     <div class="file-preview-actions">
-                        <button class="file-preview-nav-btn" id="file-preview-prev" disabled title="Previous item">
+                        <button class="file-preview-nav-btn" id="file-preview-prev" disabled title="Previous item" data-i18n-title="find.prev">
                             <i class="fas fa-chevron-left"></i>
                         </button>
-                        <button class="file-preview-nav-btn" id="file-preview-next" disabled title="Next item">
+                        <button class="file-preview-nav-btn" id="file-preview-next" disabled title="Next item" data-i18n-title="find.next">
                             <i class="fas fa-chevron-right"></i>
                         </button>
-                        <button class="file-preview-close-btn" id="file-preview-close" title="Close">
+                        <button class="file-preview-close-btn" id="file-preview-close" title="Close" data-i18n-title="common.close">
                             <i class="fas fa-times"></i>
                         </button>
                         <button class="file-preview-open-btn" id="file-preview-open">
@@ -927,80 +948,111 @@
             <div id="downloads-popup-list" class="downloads-popup-list">
                 <!-- Download items will be populated here -->
             </div>
-            <button id="downloads-popup-open-folder" class="downloads-popup-footer" title="Open Downloads folder">
+            <button id="downloads-popup-open-folder" class="downloads-popup-footer" title="Open Downloads folder" data-i18n-title="chrome.downloadsFolder">
                 <i class="fas fa-folder-open"></i>
-                <span>Open Downloads</span>
+                <span data-i18n="chrome.openDownloads">Open Downloads</span>
             </button>
         </div>
 
-        <div id="extensions-menu-panel" class="extensions-menu-panel hidden" role="dialog" aria-label="Extensions">
+        <div id="extensions-menu-panel" class="extensions-menu-panel hidden" role="dialog" aria-label="Extensions" data-i18n-aria="chrome.extensions">
             <div class="extensions-menu-header">
                 <div class="extensions-menu-title">
                     <i class="fas fa-puzzle-piece" aria-hidden="true"></i>
-                    <span>Extensions</span>
+                    <span data-i18n="chrome.extensions">Extensions</span>
                 </div>
-                <button type="button" id="extensions-menu-close" class="extensions-menu-close-btn" title="Close">
+                <button type="button" id="extensions-menu-close" class="extensions-menu-close-btn" title="Close" data-i18n-title="common.close">
                     <i class="fas fa-times" aria-hidden="true"></i>
                 </button>
             </div>
             <div id="extensions-menu-list" class="extensions-menu-list"></div>
-            <button type="button" id="extensions-menu-manage" class="downloads-popup-footer extensions-menu-manage-footer" title="Open extension settings">
+            <button type="button" id="extensions-menu-manage" class="downloads-popup-footer extensions-menu-manage-footer" title="Open extension settings" data-i18n-title="sidebar.manageExtensions">
                 <i class="fas fa-sliders-h" aria-hidden="true"></i>
-                <span>Manage extensions…</span>
+                <span data-i18n="sidebar.manageExtensions">Manage extensions…</span>
             </button>
         </div>
 
-        <div id="adblock-panel" class="adblock-panel hidden" role="dialog" aria-label="Ad blocker">
+        <div id="adblock-panel" class="adblock-panel hidden" role="dialog" aria-label="Privacy protection" data-i18n-aria="adblock.title">
             <div class="adblock-panel-header">
                 <div class="adblock-panel-title">
                     <span class="adblock-panel-icon-wrap" aria-hidden="true">
                         <i class="fas fa-shield-halved adblock-panel-icon"></i>
                     </span>
-                    <span class="adblock-panel-heading">Ad blocker</span>
+                    <span class="adblock-panel-heading" data-i18n="adblock.title">Privacy protection</span>
                     <span id="adblock-panel-badge" class="adblock-badge adblock-badge--on">On</span>
                 </div>
-                <button type="button" id="adblock-panel-close" class="extensions-menu-close-btn" title="Close" aria-label="Close">
+                <button type="button" id="adblock-panel-close" class="extensions-menu-close-btn" title="Close" data-i18n-title="common.close" aria-label="Close" data-i18n-aria="common.close">
                     <i class="fas fa-times" aria-hidden="true"></i>
                 </button>
             </div>
             <div class="adblock-panel-body">
                 <div id="adblock-panel-stat-wrap" class="adblock-panel-stat-wrap">
-                    <span id="adblock-panel-page-count" class="adblock-panel-stat-num">0</span>
-                    <span class="adblock-panel-stat-label">blocked this page</span>
+                    <div class="adblock-panel-stat-hero">
+                        <span id="adblock-panel-page-count" class="adblock-panel-stat-num">0</span>
+                        <span class="adblock-panel-stat-label" data-i18n="adblock.blockedThisSession">blocked this session</span>
+                    </div>
+                    <div id="adblock-panel-chips" class="adblock-panel-chips" aria-hidden="true">
+                        <span class="adblock-chip" data-cat="ads"><span class="adblock-chip-num" id="adblock-chip-ads">0</span> <span data-i18n="adblock.cat.ads">Ads</span></span>
+                        <span class="adblock-chip" data-cat="trackers"><span class="adblock-chip-num" id="adblock-chip-trackers">0</span> <span data-i18n="adblock.cat.trackers">Trackers</span></span>
+                        <span class="adblock-chip" data-cat="other"><span class="adblock-chip-num" id="adblock-chip-other">0</span> <span data-i18n="adblock.cat.other">Others</span></span>
+                    </div>
                 </div>
-                <p id="adblock-panel-status" class="adblock-panel-status">Blocking ads and trackers on this site.</p>
+                <p id="adblock-panel-status" class="adblock-panel-status" data-i18n="adblock.statusOn">Blocking ads, trackers, and fingerprinting on this site.</p>
+                <details id="adblock-panel-details" class="adblock-panel-details hidden">
+                    <summary data-i18n="adblock.details">Details</summary>
+                    <div class="adblock-panel-details-body">
+                        <div class="adblock-panel-section">
+                            <div class="adblock-panel-section-label" data-i18n="adblock.breakdown">Breakdown</div>
+                            <dl id="adblock-panel-breakdown" class="adblock-panel-facts"></dl>
+                        </div>
+                        <div id="adblock-panel-blocked-wrap" class="adblock-panel-section hidden">
+                            <div class="adblock-panel-section-label" data-i18n="adblock.blockedList">What was blocked</div>
+                            <ul id="adblock-panel-blocked" class="adblock-panel-blocked" role="list"></ul>
+                        </div>
+                    </div>
+                </details>
                 <div class="adblock-panel-actions">
-                    <button type="button" id="adblock-panel-site-btn" class="adblock-panel-btn adblock-panel-btn--secondary hidden">Allow this site</button>
-                    <button type="button" id="adblock-panel-global-btn" class="adblock-panel-btn adblock-panel-btn--primary">Turn off everywhere</button>
+                    <button type="button" id="adblock-panel-site-btn" class="adblock-panel-btn adblock-panel-btn--secondary hidden" data-i18n="adblock.allowSite">Allow this site</button>
+                    <button type="button" id="adblock-panel-global-btn" class="adblock-panel-btn adblock-panel-btn--primary" data-i18n="adblock.turnOffEverywhere">Turn off everywhere</button>
                 </div>
             </div>
         </div>
 
-        <div id="security-panel" class="security-panel hidden" role="dialog" aria-label="Page security">
+        <div id="tab-ancestry-backdrop" class="tab-ancestry-backdrop hidden" aria-hidden="true"></div>
+        <div id="tab-ancestry-panel" class="tab-ancestry-panel hidden" role="dialog" aria-labelledby="tab-ancestry-heading" aria-modal="true">
+            <div class="tab-ancestry-arrow" aria-hidden="true"></div>
+            <div class="tab-ancestry-card">
+                <div class="tab-ancestry-header">
+                    <h3 id="tab-ancestry-heading" class="tab-ancestry-heading" data-i18n="ancestry.title">How you got here:</h3>
+                </div>
+                <div id="tab-ancestry-body" class="tab-ancestry-body">
+                    <ol id="tab-ancestry-trail" class="tab-ancestry-trail" role="list"></ol>
+                    <p id="tab-ancestry-empty" class="tab-ancestry-empty hidden" data-i18n="ancestry.empty">No trail yet for this tab.</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="security-panel" class="security-panel hidden" role="dialog" aria-label="Page security" data-i18n-aria="chrome.pageSecurity">
             <div class="security-panel-header">
                 <div class="security-panel-title-row">
                     <span id="security-panel-status-icon" class="security-panel-status-icon security-panel-status-icon--secure" aria-hidden="true">
                         <i class="fas fa-lock"></i>
                     </span>
                     <div class="security-panel-heading-wrap">
-                        <h3 id="security-panel-heading" class="security-panel-heading">Connection is secure</h3>
-                        <p id="security-panel-subheading" class="security-panel-subheading">—</p>
+                        <h3 id="security-panel-heading" class="security-panel-heading" data-i18n="security.secure">Connection is secure</h3>
+                        <p id="security-panel-subheading" class="security-panel-subheading">-</p>
                     </div>
                 </div>
-                <button type="button" id="close-security" class="extensions-menu-close-btn" title="Close" aria-label="Close">
+                <button type="button" id="close-security" class="extensions-menu-close-btn" title="Close" data-i18n-title="common.close" aria-label="Close" data-i18n-aria="common.close">
                     <i class="fas fa-times" aria-hidden="true"></i>
                 </button>
             </div>
             <div class="security-panel-body">
-                <p id="security-panel-loading" class="security-panel-loading hidden">Checking connection…</p>
+                <p id="security-panel-loading" class="security-panel-loading hidden" data-i18n="security.checking">Checking connection…</p>
                 <dl id="security-panel-facts" class="security-panel-facts"></dl>
                 <details id="security-panel-chain-wrap" class="security-panel-disclosure hidden">
-                    <summary>Certificate chain</summary>
+                    <summary data-i18n="security.certChain">Certificate chain</summary>
                     <div id="security-cert-chain" class="security-cert-chain" role="list"></div>
                 </details>
-                <div class="security-panel-actions">
-                    <button type="button" id="security-settings" class="security-panel-btn">HTTPS-only mode</button>
-                </div>
             </div>
         </div>
 
@@ -1010,73 +1062,73 @@
     <!-- Vault modals on <body> so they paint above guest <webview> layers -->
     <div id="site-permission-modal" class="vault-modal vault-save-modal hidden" role="dialog" aria-labelledby="site-permission-title" aria-modal="true">
         <div class="vault-save-modal__card">
-            <h2 id="site-permission-title" class="vault-save-modal__title">Allow this site?</h2>
-            <p id="site-permission-site" class="vault-save-modal__site">—</p>
-            <p id="site-permission-detail" class="vault-save-modal__hint">This site is asking for an extra permission.</p>
+            <h2 id="site-permission-title" class="vault-save-modal__title" data-i18n="perm.allowSite">Allow this site?</h2>
+            <p id="site-permission-site" class="vault-save-modal__site">-</p>
+            <p id="site-permission-detail" class="vault-save-modal__hint" data-i18n="perm.extra">This site is asking for an extra permission.</p>
             <div class="vault-save-modal__actions">
-                <button type="button" class="vault-save-modal__btn" id="site-permission-deny">Block</button>
-                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--primary" id="site-permission-allow">Allow</button>
+                <button type="button" class="vault-save-modal__btn" id="site-permission-deny" data-i18n="common.block">Block</button>
+                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--primary" id="site-permission-allow" data-i18n="common.allow">Allow</button>
             </div>
         </div>
     </div>
 
     <div id="vault-save-modal" class="vault-modal vault-save-modal hidden" role="dialog" aria-labelledby="vault-save-title" aria-modal="true">
         <div class="vault-save-modal__card">
-            <h2 id="vault-save-title" class="vault-save-modal__title">Save password?</h2>
-            <p id="vault-save-site" class="vault-save-modal__site">—</p>
+            <h2 id="vault-save-title" class="vault-save-modal__title" data-i18n="vault.savePassword">Save password?</h2>
+            <p id="vault-save-site" class="vault-save-modal__site">-</p>
             <p id="vault-save-user-row" class="vault-save-modal__meta">
-                <span class="vault-save-modal__meta-label">Account</span>
-                <span id="vault-save-user" class="vault-save-modal__meta-value">—</span>
+                <span class="vault-save-modal__meta-label" data-i18n="vault.account">Account</span>
+                <span id="vault-save-user" class="vault-save-modal__meta-value">-</span>
             </p>
             <p id="vault-save-card-row" class="vault-save-modal__meta hidden">
-                <span class="vault-save-modal__meta-label">Card</span>
-                <span id="vault-save-card" class="vault-save-modal__meta-value">—</span>
+                <span class="vault-save-modal__meta-label" data-i18n="vault.card">Card</span>
+                <span id="vault-save-card" class="vault-save-modal__meta-value">-</span>
             </p>
             <p id="vault-save-address-row" class="vault-save-modal__meta hidden">
-                <span class="vault-save-modal__meta-label">Address</span>
-                <span id="vault-save-address" class="vault-save-modal__meta-value">—</span>
+                <span class="vault-save-modal__meta-label" data-i18n="vault.address">Address</span>
+                <span id="vault-save-address" class="vault-save-modal__meta-value">-</span>
             </p>
-            <p id="vault-save-desc" class="vault-save-modal__hint">Stored only on this Mac.</p>
+            <p id="vault-save-desc" class="vault-save-modal__hint" data-i18n="vault.storedLocal">Stored only on this Mac.</p>
             <div class="vault-save-modal__actions">
-                <button type="button" class="vault-save-modal__btn" id="vault-save-never">Not now</button>
-                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--primary" id="vault-save-confirm">Save</button>
+                <button type="button" class="vault-save-modal__btn" id="vault-save-never" data-i18n="common.notNow">Not now</button>
+                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--primary" id="vault-save-confirm" data-i18n="common.save">Save</button>
             </div>
         </div>
     </div>
     <div id="vault-pick-modal" class="vault-modal hidden" role="dialog" aria-labelledby="vault-pick-title">
         <div class="vault-modal-card vault-modal-card--pick">
-            <h2 id="vault-pick-title">Choose an item</h2>
+            <h2 id="vault-pick-title" data-i18n="vault.chooseItem">Choose an item</h2>
             <ul id="vault-pick-list" class="vault-pick-list"></ul>
             <div class="vault-modal-actions">
-                <button type="button" class="vault-modal-btn secondary" id="vault-pick-cancel">Cancel</button>
+                <button type="button" class="vault-modal-btn secondary" id="vault-pick-cancel" data-i18n="common.cancel">Cancel</button>
             </div>
         </div>
     </div>
 
     <div id="profile-create-modal" class="vault-modal vault-save-modal hidden" role="dialog" aria-labelledby="profile-create-title" aria-modal="true" data-ui-theme="dark">
         <div class="vault-save-modal__card">
-            <h2 id="profile-create-title" class="vault-save-modal__title">New profile</h2>
-            <p id="profile-create-hint" class="vault-save-modal__hint">Separate tabs, cookies, and settings from your other profiles.</p>
-            <label for="profile-create-name-input" class="profile-create-name-label">Name</label>
-            <input type="text" id="profile-create-name-input" class="profile-create-name-input" placeholder="Profile name" maxlength="48" autocomplete="off" spellcheck="false" />
+            <h2 id="profile-create-title" class="vault-save-modal__title" data-i18n="profile.new">New profile</h2>
+            <p id="profile-create-hint" class="vault-save-modal__hint" data-i18n="profile.hint">Separate tabs, cookies, and settings from your other profiles.</p>
+            <label for="profile-create-name-input" class="profile-create-name-label" data-i18n="common.name">Name</label>
+            <input type="text" id="profile-create-name-input" class="profile-create-name-input" placeholder="Profile name" data-i18n-placeholder="profile.namePlaceholder" maxlength="48" autocomplete="off" spellcheck="false" />
             <div class="profile-create-icon-field">
-                <span class="profile-create-icon-label" id="profile-create-icon-label">Icon</span>
+                <span class="profile-create-icon-label" id="profile-create-icon-label" data-i18n="profile.icon">Icon</span>
                 <div id="profile-create-icon-grid" class="profile-create-icon-grid" role="radiogroup" aria-labelledby="profile-create-icon-label"></div>
             </div>
             <div class="vault-save-modal__actions">
-                <button type="button" class="vault-save-modal__btn" id="profile-create-cancel">Cancel</button>
-                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--primary" id="profile-create-confirm">Create</button>
+                <button type="button" class="vault-save-modal__btn" id="profile-create-cancel" data-i18n="common.cancel">Cancel</button>
+                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--primary" id="profile-create-confirm" data-i18n="common.create">Create</button>
             </div>
         </div>
     </div>
 
     <div id="profile-delete-modal" class="vault-modal vault-save-modal hidden" role="alertdialog" aria-labelledby="profile-delete-title" aria-modal="true" data-ui-theme="dark">
         <div class="vault-save-modal__card">
-            <h2 id="profile-delete-title" class="vault-save-modal__title">Delete profile?</h2>
-            <p id="profile-delete-message" class="vault-save-modal__hint">This profile will be moved to trash with its tabs, cookies, history, passwords, extensions, and settings. You can restore it from trash or press ⌘Z right after deleting.</p>
+            <h2 id="profile-delete-title" class="vault-save-modal__title" data-i18n="profile.deleteTitle">Delete profile?</h2>
+            <p id="profile-delete-message" class="vault-save-modal__hint" data-i18n="profile.deleteBody">This profile will be moved to trash with its tabs, cookies, history, passwords, extensions, and settings. You can restore it from trash or press ⌘Z right after deleting.</p>
             <div class="vault-save-modal__actions">
-                <button type="button" class="vault-save-modal__btn" id="profile-delete-cancel">Cancel</button>
-                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--danger" id="profile-delete-confirm">Delete profile</button>
+                <button type="button" class="vault-save-modal__btn" id="profile-delete-cancel" data-i18n="common.cancel">Cancel</button>
+                <button type="button" class="vault-save-modal__btn vault-save-modal__btn--danger" id="profile-delete-confirm" data-i18n="profile.deleteConfirm">Delete profile</button>
             </div>
         </div>
     </div>
@@ -1092,14 +1144,14 @@
         <div class="ob-shell">
             <section class="ob-screen ob-screen--welcome" data-ob-screen="welcome">
                 <div class="ob-welcome-copy">
-                    <h1 id="ob-welcome-title" class="ob-hero-title">Welcome.</h1>
+                    <h1 id="ob-welcome-title" class="ob-hero-title" data-i18n="onboarding.welcome">Welcome.</h1>
                     <p class="ob-hero-product">
                         <span>Axis Browser</span>
                         <span class="ob-hero-logo" aria-hidden="true"></span>
                     </p>
                 </div>
                 <button type="button" class="ob-btn ob-btn--welcome" id="ob-start-btn">
-                    <span>Start</span>
+                    <span data-i18n="onboarding.start">Start</span>
                     <span class="ob-btn-arrow" aria-hidden="true">→</span>
                 </button>
             </section>
@@ -1111,30 +1163,46 @@
                     </div>
                     <div class="ob-header-meta">
                         <p class="ob-step-caption" id="ob-step-caption"></p>
-                        <div class="ob-stepper" id="ob-stepper" aria-label="Setup progress"></div>
+                        <div class="ob-stepper" id="ob-stepper" aria-label="Setup progress" data-i18n-aria="onboarding.stepper"></div>
                     </div>
                 </header>
 
                 <div class="ob-body">
+                    <div class="ob-panel" data-ob-panel="language" hidden>
+                        <h2 class="ob-title" id="ob-language-title" data-i18n="onboarding.language.title">Your language</h2>
+                        <p class="ob-desc" data-i18n="onboarding.language.desc">Menus, Settings, and setup. Websites keep their own language.</p>
+                        <div id="ob-ui-language-picker" class="ob-lang-picker-host" role="group" aria-labelledby="ob-language-title"></div>
+                        <div class="ob-group ob-group--universal-lang">
+                            <label class="ob-option" id="ob-universal-language-option" for="ob-universal-language">
+                                <input type="checkbox" id="ob-universal-language">
+                                <span class="ob-check-box" aria-hidden="true"></span>
+                                <span class="ob-option-text">
+                                    <span class="ob-option-title" data-i18n="onboarding.language.universalTitle">Universal language</span>
+                                    <span class="ob-option-desc" data-i18n="onboarding.language.universalDesc">Use this language for every profile and Incognito. You can change this later in Settings.</span>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
                     <div class="ob-panel" data-ob-panel="default" hidden>
-                        <h2 class="ob-title" id="ob-default-title">Default browser</h2>
-                        <p class="ob-desc">Open web links from other apps in Axis. You can change this later in system settings.</p>
+                        <h2 class="ob-title" id="ob-default-title" data-i18n="onboarding.default.title">Default browser</h2>
+                        <p class="ob-desc" data-i18n="onboarding.default.desc">Open web links from other apps in Axis. You can change this later in system settings.</p>
                         <div class="ob-seg" role="radiogroup" aria-labelledby="ob-default-title">
                             <button type="button" class="ob-seg-btn" data-ob-default="yes" aria-pressed="false">
-                                <span class="ob-seg-title">Yes, set as default</span>
-                                <span class="ob-seg-sub">Use Axis for http and https links</span>
+                                <span class="ob-seg-title" data-i18n="onboarding.default.yes">Yes, set as default</span>
+                                <span class="ob-seg-sub" data-i18n="onboarding.default.yesSub">Use Axis for http and https links</span>
                             </button>
                             <button type="button" class="ob-seg-btn" data-ob-default="no" aria-pressed="false">
-                                <span class="ob-seg-title">Not now</span>
-                                <span class="ob-seg-sub">Keep your current default browser</span>
+                                <span class="ob-seg-title" data-i18n="onboarding.default.no">Not now</span>
+                                <span class="ob-seg-sub" data-i18n="onboarding.default.noSub">Keep your current default browser</span>
                             </button>
                         </div>
                         <p class="ob-hint" id="ob-default-hint" hidden></p>
                     </div>
 
                     <div class="ob-panel" data-ob-panel="search" hidden>
-                        <h2 class="ob-title" id="ob-search-title">Search engine</h2>
-                        <p class="ob-desc">Used from the address bar and New Tab. Change anytime in Settings.</p>
+                        <h2 class="ob-title" id="ob-search-title" data-i18n="onboarding.search.title">Search engine</h2>
+                        <p class="ob-desc" data-i18n="onboarding.search.desc">Used from the address bar and New Tab. Change anytime in Settings.</p>
                         <div class="ob-choice-board" role="radiogroup" aria-labelledby="ob-search-title">
                             <button type="button" class="ob-choice ob-choice--search" data-ob-search="google" aria-pressed="false">
                                 <span class="ob-choice-icon" aria-hidden="true"><img class="ob-brand-logo" src="assets/brands/google.svg" alt="" draggable="false" /></span>
@@ -1160,152 +1228,152 @@
                     </div>
 
                     <div class="ob-panel" data-ob-panel="data" hidden>
-                        <h2 class="ob-title" id="ob-data-title">Your browsing data</h2>
-                        <p class="ob-desc">Import from Chrome, Edge, Firefox, and other browsers on this computer — or start clean.</p>
+                        <h2 class="ob-title" id="ob-data-title" data-i18n="onboarding.data.title">Your browsing data</h2>
+                        <p class="ob-desc" data-i18n="onboarding.data.desc">Import from Chrome, Edge, Firefox, and other browsers on this computer - or start clean.</p>
                         <div class="ob-seg" role="radiogroup" aria-labelledby="ob-data-title">
                             <button type="button" class="ob-seg-btn" data-ob-data="import" aria-pressed="false">
-                                <span class="ob-seg-title">Import</span>
-                                <span class="ob-seg-sub">Favorites, passwords, history, tabs, and more</span>
+                                <span class="ob-seg-title" data-i18n="onboarding.data.import">Import</span>
+                                <span class="ob-seg-sub" data-i18n="onboarding.data.importSub">Favorites, passwords, history, tabs, and more</span>
                             </button>
                             <button type="button" class="ob-seg-btn" data-ob-data="fresh" aria-pressed="false">
-                                <span class="ob-seg-title">Start fresh</span>
-                                <span class="ob-seg-sub">Skip import — you can do this later in Settings</span>
+                                <span class="ob-seg-title" data-i18n="onboarding.data.fresh">Start fresh</span>
+                                <span class="ob-seg-sub" data-i18n="onboarding.data.freshSub">Skip import - you can do this later in Settings</span>
                             </button>
                         </div>
                     </div>
 
                     <div class="ob-panel" data-ob-panel="import" hidden>
-                        <h2 class="ob-title" id="ob-import-title">Import</h2>
-                        <p class="ob-desc">Choose a browser, then profiles and what to bring over. The first profile merges into your current Axis profile; extras become new ones.</p>
+                        <h2 class="ob-title" id="ob-import-title" data-i18n="onboarding.import.title">Import</h2>
+                        <p class="ob-desc" data-i18n="onboarding.import.desc">Choose a browser, then profiles and what to bring over. The first profile merges into your current Axis profile; extras become new ones.</p>
 
                         <div class="ob-section" id="ob-browser-section">
-                            <span class="ob-section-label">Browser</span>
+                            <span class="ob-section-label" data-i18n="onboarding.import.browser">Browser</span>
                             <div class="ob-browser-selected" id="ob-browser-selected" hidden></div>
                             <div class="ob-browser-board" id="ob-browser-list" aria-label="Detected browsers">
-                                <div class="ob-empty">Looking for browsers…</div>
+                                <div class="ob-empty" data-i18n="onboarding.import.looking">Looking for browsers…</div>
                             </div>
                         </div>
 
                         <div class="ob-import-details" id="ob-profiles-wrap" hidden>
                             <div class="ob-section">
-                                <span class="ob-section-label">Profiles</span>
+                                <span class="ob-section-label" data-i18n="onboarding.import.profiles">Profiles</span>
                                 <div class="ob-seg" role="radiogroup" aria-label="Profile selection mode">
                                     <button type="button" class="ob-seg-btn" data-ob-profile-mode="all" aria-pressed="false">
-                                        <span class="ob-seg-title">All profiles</span>
-                                        <span class="ob-seg-sub">Bring everything over</span>
+                                        <span class="ob-seg-title" data-i18n="onboarding.import.all">All profiles</span>
+                                        <span class="ob-seg-sub" data-i18n="onboarding.import.allSub">Bring everything over</span>
                                     </button>
                                     <button type="button" class="ob-seg-btn" data-ob-profile-mode="pick" aria-pressed="false">
-                                        <span class="ob-seg-title">Choose</span>
-                                        <span class="ob-seg-sub">Pick specific ones</span>
+                                        <span class="ob-seg-title" data-i18n="onboarding.import.pick">Choose</span>
+                                        <span class="ob-seg-sub" data-i18n="onboarding.import.pickSub">Pick specific ones</span>
                                     </button>
                                 </div>
                                 <div class="ob-profile-picks" id="ob-profile-list" hidden></div>
                             </div>
 
                             <div class="ob-section">
-                                <span class="ob-section-label">What to import</span>
+                                <span class="ob-section-label" data-i18n="onboarding.import.what">What to import</span>
                                 <div class="ob-import-chips" id="ob-import-options"></div>
                             </div>
                         </div>
                     </div>
 
                     <div class="ob-panel" data-ob-panel="look" hidden>
-                        <h2 class="ob-title" id="ob-look-title">Look &amp; layout</h2>
-                        <p class="ob-desc">Appearance for menus and chrome, your theme color, and which side the sidebar sits on.</p>
+                        <h2 class="ob-title" id="ob-look-title" data-i18n="onboarding.look.title">Look &amp; layout</h2>
+                        <p class="ob-desc" data-i18n="onboarding.look.desc">Appearance for menus and chrome, your theme color, and which side the sidebar sits on.</p>
 
                         <div class="ob-section">
-                            <span class="ob-section-label">Appearance</span>
+                            <span class="ob-section-label" data-i18n="onboarding.look.appearance">Appearance</span>
                             <div class="ob-seg ob-seg--3" role="radiogroup" aria-label="Appearance">
-                                <button type="button" class="ob-seg-btn" data-ob-ui-theme="dark" aria-pressed="false"><span class="ob-seg-title">Dark</span></button>
-                                <button type="button" class="ob-seg-btn" data-ob-ui-theme="light" aria-pressed="false"><span class="ob-seg-title">Light</span></button>
-                                <button type="button" class="ob-seg-btn" data-ob-ui-theme="system" aria-pressed="false"><span class="ob-seg-title">System</span></button>
+                                <button type="button" class="ob-seg-btn" data-ob-ui-theme="dark" aria-pressed="false"><span class="ob-seg-title" data-i18n="common.dark">Dark</span></button>
+                                <button type="button" class="ob-seg-btn" data-ob-ui-theme="light" aria-pressed="false"><span class="ob-seg-title" data-i18n="common.light">Light</span></button>
+                                <button type="button" class="ob-seg-btn" data-ob-ui-theme="system" aria-pressed="false"><span class="ob-seg-title" data-i18n="common.system">System</span></button>
                             </div>
                         </div>
 
                         <div class="ob-section">
-                            <span class="ob-section-label">Theme color</span>
+                            <span class="ob-section-label" data-i18n="onboarding.look.themeColor">Theme color</span>
                             <label class="ob-color-field" for="ob-theme-color">
                                 <input type="color" id="ob-theme-color" class="ob-color-picker" value="#1a1a1a" aria-label="Theme color" />
                                 <span class="ob-color-meta">
-                                    <span class="ob-color-meta-label">Any color</span>
+                                    <span class="ob-color-meta-label" data-i18n="onboarding.look.anyColor">Any color</span>
                                     <input type="text" id="ob-theme-hex" class="ob-color-hex" value="#1A1A1A" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Theme color hex" />
                                 </span>
                             </label>
                         </div>
 
                         <div class="ob-section">
-                            <span class="ob-section-label">Sidebar</span>
+                            <span class="ob-section-label" data-i18n="onboarding.look.sidebar">Sidebar</span>
                             <div class="ob-seg" role="radiogroup" aria-label="Sidebar position">
                                 <button type="button" class="ob-seg-btn" data-ob-sidebar="left" aria-pressed="false">
-                                    <span class="ob-seg-title">Left</span>
-                                    <span class="ob-seg-sub">Tabs on the left (default)</span>
+                                    <span class="ob-seg-title" data-i18n="common.left">Left</span>
+                                    <span class="ob-seg-sub" data-i18n="onboarding.look.leftSub">Tabs on the left (default)</span>
                                 </button>
                                 <button type="button" class="ob-seg-btn" data-ob-sidebar="right" aria-pressed="false">
-                                    <span class="ob-seg-title">Right</span>
-                                    <span class="ob-seg-sub">Tabs on the right</span>
+                                    <span class="ob-seg-title" data-i18n="common.right">Right</span>
+                                    <span class="ob-seg-sub" data-i18n="onboarding.look.rightSub">Tabs on the right</span>
                                 </button>
                             </div>
                         </div>
                     </div>
 
                     <div class="ob-panel" data-ob-panel="you" hidden>
-                        <h2 class="ob-title" id="ob-you-title">What should we call you?</h2>
-                        <p class="ob-desc">Used in the New Tab greeting. You can change this later in Settings.</p>
+                        <h2 class="ob-title" id="ob-you-title" data-i18n="onboarding.you.title">What should we call you?</h2>
+                        <p class="ob-desc" data-i18n="onboarding.you.desc">Used in the New Tab greeting. You can change this later in Settings.</p>
                         <label class="ob-name-field" for="ob-greeting-name">
-                            <span class="ob-name-label">Your name</span>
-                            <input type="text" id="ob-greeting-name" class="ob-name-input" maxlength="48" placeholder="Optional" autocomplete="nickname" spellcheck="false" />
+                            <span class="ob-name-label" data-i18n="onboarding.you.name">Your name</span>
+                            <input type="text" id="ob-greeting-name" class="ob-name-input" maxlength="48" placeholder="Optional" data-i18n-placeholder="common.optional" autocomplete="nickname" spellcheck="false" />
                         </label>
                     </div>
 
                     <div class="ob-panel" data-ob-panel="features" hidden>
-                        <h2 class="ob-title" id="ob-features-title">Features</h2>
-                        <p class="ob-desc">A few core options — change anything later in Settings.</p>
+                        <h2 class="ob-title" id="ob-features-title" data-i18n="onboarding.features.title">Features</h2>
+                        <p class="ob-desc" data-i18n="onboarding.features.desc">A few core options - change anything later in Settings.</p>
 
                         <div class="ob-section">
-                            <span class="ob-section-label">Extras</span>
+                            <span class="ob-section-label" data-i18n="onboarding.features.extras">Extras</span>
                             <div class="ob-feature-board">
                                 <button type="button" class="ob-feature-card is-on" data-ob-feature="adBlockerEnabled" aria-pressed="true">
                                     <span class="ob-feature-card-top">
-                                        <span class="ob-row-title">Ad blocker</span>
+                                        <span class="ob-row-title" data-i18n="onboarding.features.adblock">Privacy protection</span>
                                         <span class="ob-feature-state">On</span>
                                     </span>
-                                    <span class="ob-row-desc">Block ads and trackers. Use the shield in the URL bar for site exceptions.</span>
+                                    <span class="ob-row-desc" data-i18n="onboarding.features.adblockDesc">Blocks ads, trackers, and fingerprinting. Use the shield in the URL bar for site exceptions.</span>
                                 </button>
                                 <button type="button" class="ob-feature-card is-on" data-ob-feature="aiFeaturesEnabled" aria-pressed="true">
                                     <span class="ob-feature-card-top">
-                                        <span class="ob-row-title">AI features</span>
+                                        <span class="ob-row-title" data-i18n="onboarding.features.ai">AI features</span>
                                         <span class="ob-feature-state">On</span>
                                     </span>
-                                    <span class="ob-row-desc">Ask AI, chat, and related New Tab options.</span>
+                                    <span class="ob-row-desc" data-i18n="onboarding.features.aiDesc">Ask AI, chat, and related New Tab options.</span>
                                 </button>
                             </div>
                         </div>
 
                         <div class="ob-section ob-section--unpinned">
-                            <span class="ob-section-label">Clear unpinned tabs</span>
-                            <p class="ob-section-hint">Pinned tabs stay. Unpinned tabs and groups follow this rule.</p>
+                            <span class="ob-section-label" data-i18n="onboarding.features.unpinned">Clear unpinned tabs</span>
+                            <p class="ob-section-hint" data-i18n="onboarding.features.unpinnedHint">Pinned tabs stay. Unpinned tabs and groups follow this rule.</p>
                             <div class="ob-seg ob-seg--unpinned" role="radiogroup" aria-label="Clear unpinned tabs">
                                 <button type="button" class="ob-seg-btn" data-ob-unpinned="app-close" aria-pressed="false">
-                                    <span class="ob-seg-title">When Axis closes</span>
-                                    <span class="ob-seg-sub">Clear when you quit the app</span>
+                                    <span class="ob-seg-title" data-i18n="onboarding.features.appClose">When Axis closes</span>
+                                    <span class="ob-seg-sub" data-i18n="onboarding.features.appCloseSub">Clear when you quit the app</span>
                                 </button>
                                 <button type="button" class="ob-seg-btn" data-ob-unpinned="custom" aria-pressed="false">
-                                    <span class="ob-seg-title">Custom interval</span>
-                                    <span class="ob-seg-sub">Set your own time</span>
+                                    <span class="ob-seg-title" data-i18n="onboarding.features.custom">Custom interval</span>
+                                    <span class="ob-seg-sub" data-i18n="onboarding.features.customSub">Set your own time</span>
                                 </button>
                                 <button type="button" class="ob-seg-btn" data-ob-unpinned="24h" aria-pressed="false">
-                                    <span class="ob-seg-title">Every day</span>
-                                    <span class="ob-seg-sub">Clear once a day</span>
+                                    <span class="ob-seg-title" data-i18n="onboarding.features.daily">Every day</span>
+                                    <span class="ob-seg-sub" data-i18n="onboarding.features.dailySub">Clear once a day</span>
                                 </button>
                                 <button type="button" class="ob-seg-btn" data-ob-unpinned="never" aria-pressed="false">
-                                    <span class="ob-seg-title">Never</span>
-                                    <span class="ob-seg-sub">Keep them until you close them</span>
+                                    <span class="ob-seg-title" data-i18n="onboarding.features.never">Never</span>
+                                    <span class="ob-seg-sub" data-i18n="onboarding.features.neverSub">Keep them until you close them</span>
                                 </button>
                             </div>
                             <div class="ob-unpinned-custom-row" id="ob-unpinned-custom-row" hidden>
-                                <span class="ob-unpinned-custom-label">Custom</span>
+                                <span class="ob-unpinned-custom-label" data-i18n="onboarding.features.customLabel">Custom</span>
                                 <label class="ob-unpinned-custom-control" for="ob-unpinned-custom-minutes">
-                                    <span class="ob-unpinned-custom-prefix">Clear after</span>
+                                    <span class="ob-unpinned-custom-prefix" data-i18n="onboarding.features.clearAfter">Clear after</span>
                                     <input
                                         type="number"
                                         id="ob-unpinned-custom-minutes"
@@ -1315,7 +1383,7 @@
                                         step="1"
                                         value="60"
                                     />
-                                    <span class="ob-unpinned-custom-unit">minutes</span>
+                                    <span class="ob-unpinned-custom-unit" data-i18n="common.minutes">minutes</span>
                                 </label>
                             </div>
                         </div>
@@ -1323,19 +1391,19 @@
 
                     <div class="ob-panel ob-panel--ready" data-ob-panel="ready" hidden>
                         <span class="ob-ready-mark" aria-hidden="true"></span>
-                        <h2 class="ob-title" id="ob-ready-title">You’re ready</h2>
-                        <p class="ob-desc">Review what we’ll apply, then open Axis.</p>
+                        <h2 class="ob-title" id="ob-ready-title" data-i18n="onboarding.ready.title">You’re ready</h2>
+                        <p class="ob-desc" data-i18n="onboarding.ready.desc">Review what we’ll apply, then open Axis.</p>
                         <div class="ob-group ob-summary" id="ob-ready-summary"></div>
                         <p class="ob-status" id="ob-ready-status" hidden></p>
                     </div>
                 </div>
 
                 <footer class="ob-footer">
-                    <button type="button" class="ob-btn ob-btn--ghost" id="ob-skip-btn" aria-haspopup="dialog" aria-controls="ob-skip-overlay">Skip setup</button>
+                    <button type="button" class="ob-btn ob-btn--ghost" id="ob-skip-btn" aria-haspopup="dialog" aria-controls="ob-skip-overlay" data-i18n="onboarding.skip">Skip setup</button>
                     <div class="ob-footer-right">
-                        <button type="button" class="ob-btn ob-btn--ghost" id="ob-back-btn">Back</button>
+                        <button type="button" class="ob-btn ob-btn--ghost" id="ob-back-btn" data-i18n="onboarding.back">Back</button>
                         <button type="button" class="ob-btn ob-btn--primary" id="ob-next-btn">
-                            <span id="ob-next-label">Continue</span>
+                            <span id="ob-next-label" data-i18n="onboarding.continue">Continue</span>
                         </button>
                     </div>
                 </footer>
@@ -1355,18 +1423,18 @@
             <div class="ob-skip-overlay-panel">
                 <div class="ob-skip-overlay-progress" aria-hidden="true">
                     <span class="ob-skip-overlay-progress-line"></span>
-                    <span class="ob-skip-overlay-progress-label">Less than a minute left</span>
+                    <span class="ob-skip-overlay-progress-label" data-i18n="onboarding.skip.timeLeft">Less than a minute left</span>
                     <span class="ob-skip-overlay-progress-line"></span>
                 </div>
-                <h2 class="ob-skip-overlay-title" id="ob-skip-overlay-title">Are you sure?</h2>
+                <h2 class="ob-skip-overlay-title" id="ob-skip-overlay-title" data-i18n="onboarding.skip.title">Are you sure?</h2>
                 <div class="ob-skip-overlay-copy" id="ob-skip-overlay-desc">
-                    <p>Setup usually takes less than a minute — it doesn’t collect personal information or install bloatware. You can always change things later in Settings.</p>
+                    <p data-i18n="onboarding.skip.body">Setup usually takes less than a minute - it doesn’t collect personal information or install bloatware. You can always change things later in Settings.</p>
                 </div>
                 <div class="ob-skip-overlay-actions">
                     <button type="button" class="ob-skip-overlay-btn ob-skip-overlay-btn--stay" id="ob-skip-continue-btn">
                         <span class="ob-skip-overlay-btn-text">
-                            <span class="ob-skip-overlay-btn-title">Stay in Setup</span>
-                            <span class="ob-skip-overlay-btn-sub">Recommended</span>
+                            <span class="ob-skip-overlay-btn-title" data-i18n="onboarding.skip.stay">Stay in Setup</span>
+                            <span class="ob-skip-overlay-btn-sub" data-i18n="common.recommended">Recommended</span>
                         </span>
                         <span class="ob-skip-overlay-btn-icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -1376,8 +1444,8 @@
                     </button>
                     <button type="button" class="ob-skip-overlay-btn ob-skip-overlay-btn--exit" id="ob-skip-confirm-btn">
                         <span class="ob-skip-overlay-btn-text">
-                            <span class="ob-skip-overlay-btn-title">Exit Setup</span>
-                            <span class="ob-skip-overlay-btn-sub">Not advised</span>
+                            <span class="ob-skip-overlay-btn-title" data-i18n="onboarding.skip.exit">Exit Setup</span>
+                            <span class="ob-skip-overlay-btn-sub" data-i18n="onboarding.skip.notAdvised">Not advised</span>
                         </span>
                         <span class="ob-skip-overlay-btn-icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
@@ -1390,6 +1458,12 @@
         </div>
     </div>
 
+    <script src="axis-i18n.js"></script>
+    <script src="axis-locale-packs.js"></script>
+    <script src="axis-locale-packs-more.js"></script>
+    <script src="axis-locale-packs-fix.js"></script>
+    <script src="axis-locale-quality.js"></script>
+    <script src="axis-locale-auto.js"></script>
     <script src="axis-profile-icons.js"></script>
     <script src="axis-icon-picker.js"></script>
     <script src="axis-ntp-greetings.js"></script>
@@ -1398,6 +1472,9 @@
     <script src="axis-undo.js"></script>
     <script src="axis-ai-providers.js"></script>
     <script src="axis-onboarding.js"></script>
+    <script src="axis-tab-ancestry.js"></script>
+    <script src="axis-local-file-url.js"></script>
+    <script src="axis-clean-url.js"></script>
     <script src="renderer.js"></script>
 </body>
 </html>
