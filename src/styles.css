@@ -13,7 +13,14 @@ html, body {
  */
 
 /* CSS Variables for custom colors - Enhanced */
+@property --axis-chat-t {
+    syntax: '<number>';
+    inherits: true;
+    initial-value: 0;
+}
+
 :root {
+    --axis-chat-t: 0;
     /* Default shell: very light tint over the desktop */
     --background-color: rgba(26, 26, 26, 0.04);
     --accent-color: #555;
@@ -70,20 +77,20 @@ html, body {
     --animation-border-hover: rgba(255, 255, 255, 0.2);
     --animation-focus-ring: rgba(255, 255, 255, 0.15);
     --animation-focus-ring-light: rgba(255, 255, 255, 0.1);
-    /* Frosted idle well — flat tint (multi-stop gradients band on opaque chrome). */
+    /* Frosted idle well - flat tint (multi-stop gradients band on opaque chrome). */
     --axis-webview-idle-well: rgba(255, 255, 255, 0.03);
     --axis-webview-idle-backdrop: blur(44px) saturate(185%);
     --axis-webview-idle-well-inset:
         inset 0 1px 0 rgba(255, 255, 255, 0.04),
         inset 0 -28px 56px rgba(0, 0, 0, 0.055);
-    /* Outer panel outline on `#content-area::after` — only when idle / empty / New Tab
+    /* Outer panel outline on `#content-area::after` - only when idle / empty / New Tab
      * (not on real websites). Off by default; panel states flip this token on. */
     --axis-webview-panel-ring: 0 0 0 0 transparent;
     --axis-webview-panel-ring-on: 0 0 0 1px rgba(var(--shell-ink-rgb), 0.14);
     /* URL bar + webview stack + #content-area lift shadow: same right-edge radius so nothing looks squared when the guest is transparent. */
     --axis-content-panel-radius: 6px;
     /*
-     * Web panel elevation behind `#content-area::after`: blur-only penumbra — no 1px contact
+     * Web panel elevation behind `#content-area::after`: blur-only penumbra - no 1px contact
      * ring in this token (the outline lives in `--axis-webview-panel-ring` instead).
      */
     --axis-webview-elevation-shadow:
@@ -92,37 +99,74 @@ html, body {
         0 0 28px rgba(0, 0, 0, 0.045),
         0 0 52px rgba(0, 0, 0, 0.028),
         0 0 80px rgba(0, 0, 0, 0.014);
+    /* Axis chrome typeface (Settings → Appearance). JS may override --axis-ui-font. */
+    --axis-ui-font: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-body.incognito-window {
-    --axis-webview-idle-well: rgba(255, 255, 255, 0.025);
-    --axis-webview-idle-backdrop: blur(44px) saturate(145%) brightness(0.88);
-    --axis-webview-idle-well-inset:
-        inset 0 1px 0 rgba(255, 255, 255, 0.03),
-        inset 0 -28px 56px rgba(0, 0, 0, 0.08);
+/* Incognito uses the same chrome as a normal window. Only personal / install surfaces stay off. */
+body.incognito-window #url-bar-extensions,
+body.incognito-window #url-bar-cws-install,
+body.incognito-window .axis-store-install-host-bar,
+body.incognito-window #favorites-section,
+body.incognito-window #sidebar-update-banner,
+body.incognito-window #sidebar-profile-footer,
+body.incognito-window .clear-unpinned-floating {
+    display: none !important;
+}
+
+/* Reserve the profile footer footprint so tab spacing matches a normal window. */
+body.incognito-window .sidebar-section.sidebar-footer:not(:has(#sidebar-media-dock.sidebar-media-dock--shown)) {
+    flex-shrink: 0;
+    padding: 6px 10px 8px;
+    margin: 0;
+    margin-top: auto;
+    min-height: 42px;
+    box-sizing: border-box;
+    visibility: hidden;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+body.incognito-window .sidebar-section.sidebar-footer:not(:has(#sidebar-media-dock.sidebar-media-dock--shown)) > * {
+    display: none !important;
+}
+
+body.incognito-window .sidebar-section.sidebar-footer:has(#sidebar-media-dock.sidebar-media-dock--shown) {
+    padding-top: 6px;
+    padding-bottom: 8px;
+}
+
+/* Clear button is forced off - hide the empty topbar strip. */
+body.incognito-window .sidebar-tabs-topbar {
+    display: none !important;
+}
+
+body.incognito-window:not(.incognito-ai-on) #ai-chat-panel,
+body.incognito-window:not(.incognito-ai-on) .url-bar-chat-btn {
+    display: none !important;
 }
 
 /*
- * Light-mode OVERLAYS (:root[data-ui-theme="light"]) — driven by the `uiTheme` setting.
+ * Light-mode OVERLAYS (:root[data-ui-theme="light"]) - driven by the `uiTheme` setting.
  *
- * SCOPE: only secondary / overlay surfaces are flipped — popups, menus, Cmd+F modal,
+ * SCOPE: only secondary / overlay surfaces are flipped - popups, menus, Cmd+F modal,
  * security panel, zoom indicator, context menus, notes / history / downloads /
  * bookmark panels. Settings, new tab, and AI chat always stay dark.
  *
  * The MAIN SHELL (tabs, sidebar, url bar strip, nav buttons, background gradient) is
  * deliberately UNTOUCHED in both modes. The user's theme color drives those surfaces
- * identically in dark and light mode — this file never overrides shell backgrounds,
+ * identically in dark and light mode - this file never overrides shell backgrounds,
  * shell text colors, `--background-color`, `--sidebar-background`, `--tab-*`,
  * `--url-bar-*`, `--theme-color`, `--gradient-color`, `--primary-gradient`, or
  * `--accent-color`. The macOS window frame / vibrancy is OS-owned and also untouched.
  * Profile switcher chrome (icons, names, menus in the sidebar footer) uses the same
- * `--shell-ink-rgb` / theme-derived tokens as tabs — never flipped by light mode.
+ * `--shell-ink-rgb` / theme-derived tokens as tabs - never flipped by light mode.
  * The profile *popover* (`.profile-switcher-panel`) does flip to light glass when
  * `uiTheme` is light so it matches other overlay menus.
  * Webview content is a separate document and never inherits these rules.
  */
 
-/* Surface flip for overlay panels / popups / menus / modals. Narrow list — anything
+/* Surface flip for overlay panels / popups / menus / modals. Narrow list - anything
  * that renders *on top of* the shell (and is hardcoded dark in the base stylesheet)
  * gets a light glass fill. Main shell classes (.tab, .sidebar-section, .url-bar,
  * .nav-btn, etc.) are NOT included here. */
@@ -173,7 +217,7 @@ body.incognito-window {
 :root[data-ui-theme="light"] .extensions-menu-panel,
 :root[data-ui-theme="light"] .extensions-menu-panel *:not(.download-progress):not(.download-icon),
 :root[data-ui-theme="light"] .adblock-panel,
-:root[data-ui-theme="light"] .adblock-panel *:not(.adblock-badge):not(.adblock-panel-stat-num):not(.adblock-panel-icon),
+:root[data-ui-theme="light"] .adblock-panel *:not(.adblock-badge):not(.adblock-panel-stat-num):not(.adblock-panel-icon):not(.adblock-chip-num):not(.adblock-recent-count),
 :root[data-ui-theme="light"] .history-popup,
 :root[data-ui-theme="light"] .history-popup *,
 :root[data-ui-theme="light"] .bookmark-popup,
@@ -194,7 +238,7 @@ body.incognito-window {
     color: #1a1a1a !important;
 }
 
-/* Placeholder flip only inside overlay surfaces — shell inputs are
+/* Placeholder flip only inside overlay surfaces - shell inputs are
  * themed and inherit --url-bar-text-muted. */
 :root[data-ui-theme="light"] #search-input::placeholder,
 :root[data-ui-theme="light"] .spotlight-input::placeholder,
@@ -205,14 +249,14 @@ body.incognito-window {
     opacity: 1;
 }
 
-/* Border flip for overlay chrome only (not AI chat — stays dark). */
+/* Border flip for overlay chrome only (not AI chat - stays dark). */
 :root[data-ui-theme="light"] [class*="-popup"]:not([class*="color-picker"]),
 :root[data-ui-theme="light"] [class*="-panel"]:not([class*="color-picker"]):not(.ai-chat-panel):not(.settings-panel):not(.profile-switcher-panel) {
     border-color: rgba(0, 0, 0, 0.08) !important;
 }
 
 /*
- * Security popup — light appearance.
+ * Security popup - light appearance.
  */
 :root[data-ui-theme="light"] .security-panel {
     background: rgba(248, 248, 250, 0.98) !important;
@@ -259,7 +303,7 @@ body.incognito-window {
 }
 
 /*
- * Shared popup close (X) — extensions, ad blocker, security, notes, library, etc.
+ * Shared popup close (X) - extensions, ad blocker, security, notes, library, etc.
  * Base styles use white-alpha fills that disappear on light glass.
  */
 :root[data-ui-theme="light"] .extensions-menu-close-btn {
@@ -366,7 +410,7 @@ body.incognito-window {
 }
 
 /*
- * Notes / History / Downloads / Bookmarks panel chrome — backgrounds flip via
+ * Notes / History / Downloads / Bookmarks panel chrome - backgrounds flip via
  * the main panel rule above; text + search inputs + section headers + items
  * need their own flip since they use hardcoded rgba(255,255,255,…) + `#333` /
  * `#383838` borders.
@@ -404,7 +448,7 @@ body.incognito-window {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: var(--axis-ui-font);
 }
 
 *::before,
@@ -448,7 +492,7 @@ html {
 }
 
 body {
-    font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: var(--axis-ui-font);
     font-weight: 400;
     box-sizing: border-box;
     min-height: 100%;
@@ -473,14 +517,14 @@ body {
 }
 
 /* macOS transparent window: full-body `transform`/layer promotion can offset the root layer ~1px vs the
- * system rounded mask (reads as a black hairline). Let the platform clip the view — no custom corner CSS. */
+ * system rounded mask (reads as a black hairline). Let the platform clip the view - no custom corner CSS. */
 html.platform-darwin body {
     transform: none;
     perspective: none;
     backface-visibility: visible;
 }
 
-/* Grain removed — keep bezel rules for any leftover ::after from older builds. */
+/* Grain removed - keep bezel rules for any leftover ::after from older builds. */
 html.platform-darwin #app::after {
     display: none;
 }
@@ -546,7 +590,7 @@ body.profile-swipe-theme-active {
 
 body.profile-swipe-theme-active #content-area::after,
 body.axis-profile-ring-pinned #content-area::after {
-    /* Pin the ring captured at swipe start — no random drop or bold flash mid-gesture. */
+    /* Pin the ring captured at swipe start - no random drop or bold flash mid-gesture. */
     box-shadow:
         var(--axis-webview-elevation-shadow),
         var(--axis-webview-panel-ring-swipe, var(--axis-webview-panel-ring));
@@ -559,7 +603,7 @@ body.profile-swipe-theme-active #app > :not(#axis-profile-swipe-theme-overlay) {
     z-index: 1;
 }
 
-/* Main app shell — no CSS window rounding (fight with system mask → hairline). Vibrancy + blur only. */
+/* Main app shell - no CSS window rounding (fight with system mask → hairline). Vibrancy + blur only. */
 #app {
     height: 100vh;
     display: flex;
@@ -814,7 +858,7 @@ body.profile-swipe-theme-active #app > :not(#axis-profile-swipe-theme-overlay) {
     cursor: not-allowed;
 }
 
-/* Sidebar — collapse animates width + opacity + margin only (no min/max-width transitions: avoids clamp glitches) */
+/* Sidebar - collapse animates width + opacity + margin only (no min/max-width transitions: avoids clamp glitches) */
 #sidebar {
     --sidebar-ui-zoom: 1; /* 1 = current default size (Settings → Sidebar zoom 100%) */
     width: 300px;
@@ -844,7 +888,7 @@ body.profile-swipe-theme-active #app > :not(#axis-profile-swipe-theme-overlay) {
 }
 
 /*
- * Scale UI inside a fixed sidebar width — transform only (never CSS zoom).
+ * Scale UI inside a fixed sidebar width - transform only (never CSS zoom).
  * Absolute fill so flex sizing can’t leave empty bands when zoom ≠ 100%.
  */
 #sidebar .sidebar-scale {
@@ -856,7 +900,7 @@ body.profile-swipe-theme-active #app > :not(#axis-profile-swipe-theme-overlay) {
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 0;
     width: calc(100% / var(--sidebar-ui-zoom, 1));
     height: calc(100% / var(--sidebar-ui-zoom, 1));
     transform: scale(var(--sidebar-ui-zoom, 1));
@@ -872,7 +916,7 @@ body.profile-swipe-theme-active #app > :not(#axis-profile-swipe-theme-overlay) {
 }
 
 /* Left-edge strip: only when sidebar is collapsed (hidden). Otherwise it sits on top of the
-   sidebar/webview seam and shows the grey hover highlight — must not be hit-testable. */
+   sidebar/webview seam and shows the grey hover highlight - must not be hit-testable. */
 #sidebar-hover-area {
     position: fixed;
     top: 0;
@@ -920,7 +964,7 @@ body.profile-swipe-theme-active #app > :not(#axis-profile-swipe-theme-overlay) {
     opacity: 0;
     overflow: hidden !important;
     pointer-events: none !important;
-    /* Defer visibility until width/opacity finish — removes “invisible but still wide” + stray focus */
+    /* Defer visibility until width/opacity finish - removes “invisible but still wide” + stray focus */
     visibility: hidden;
     transition: width 0.36s cubic-bezier(0.25, 0.9, 0.25, 1),
                 min-width 0.36s cubic-bezier(0.25, 0.9, 0.25, 1),
@@ -957,7 +1001,7 @@ body.profile-swipe-theme-active #app > :not(#axis-profile-swipe-theme-overlay) {
     right: 0;
 }
 
-/* Sidebar slide-out: transform-only (no opacity fade — keeps the panel solid while moving) */
+/* Sidebar slide-out: transform-only (no opacity fade - keeps the panel solid while moving) */
 @keyframes sidebarSlideInLeft {
     from {
         transform: translate3d(-102%, 0, 0);
@@ -1007,7 +1051,7 @@ body.profile-swipe-theme-active #app > :not(#axis-profile-swipe-theme-overlay) {
     width: var(--sidebar-reveal-width, 300px) !important;
     opacity: 1 !important;
     visibility: visible !important;
-    /* Do not set transform !important here — it overrides keyframe slide in/out */
+    /* Do not set transform !important here - it overrides keyframe slide in/out */
     overflow: hidden !important;
     position: fixed !important;
     top: 0 !important;
@@ -1064,7 +1108,7 @@ body.light-theme #sidebar.sidebar-right.slide-out {
         -22px 0 56px rgba(0, 0, 0, 0.08) !important;
 }
 
-/* Sidebar resize — invisible seam along the full webview column (position synced in JS) */
+/* Sidebar resize - invisible seam along the full webview column (position synced in JS) */
 #sidebar-resize-handle.resize-handle {
     position: absolute;
     width: 12px;
@@ -1110,7 +1154,7 @@ body.resizing .ai-chat-resize-handle {
     pointer-events: auto !important;
 }
 
-/* Edge drags must track the pointer instantly — no 0.42s slide on webview/url bar. */
+/* Edge drags must track the pointer instantly - no 0.42s slide on webview/url bar. */
 body.resizing .webview-container .webview-url-bar,
 body.resizing .webview-container #webviews-container,
 body.resizing .webview-container #webview,
@@ -1118,22 +1162,33 @@ body.resizing .webview-container #axis-nav-gesture-layer,
 body.resizing .webview-container #new-tab-page,
 body.resizing .webview-container #empty-state,
 body.resizing .webview-container .axis-store-install-host-bar,
-body.host-resizing .webview-container .webview-url-bar,
-body.host-resizing .webview-container #webviews-container,
-body.host-resizing .webview-container #webview,
-body.host-resizing .webview-container #axis-nav-gesture-layer,
-body.host-resizing .webview-container #new-tab-page,
-body.host-resizing .webview-container #empty-state,
-body.host-resizing .webview-container .axis-store-install-host-bar {
+body.host-resizing:not(.axis-chat-sliding) .webview-container .webview-url-bar,
+body.host-resizing:not(.axis-chat-sliding) .webview-container #webviews-container,
+body.host-resizing:not(.axis-chat-sliding) .webview-container #webview,
+body.host-resizing:not(.axis-chat-sliding) .webview-container #axis-nav-gesture-layer,
+body.host-resizing:not(.axis-chat-sliding) .webview-container #new-tab-page,
+body.host-resizing:not(.axis-chat-sliding) .webview-container #empty-state,
+body.host-resizing:not(.axis-chat-sliding) .webview-container .axis-store-install-host-bar {
     transition: none !important;
 }
 
-/* During host drags: CSS-only — no JS size overrides (those fight the guest embed). */
-body.host-resizing #webviews-container {
+/* Chat slide: keep page `right` transitions - never snap guests full-bleed mid-slide. */
+#content-area.chat-sliding .webview-container .webview-url-bar,
+#content-area.chat-sliding .webview-container #webviews-container,
+#content-area.chat-sliding .webview-container #webview,
+#content-area.chat-sliding .webview-container #axis-nav-gesture-layer,
+#content-area.chat-sliding .webview-container #new-tab-page,
+#content-area.chat-sliding .webview-container #empty-state,
+#content-area.chat-sliding .webview-container .axis-store-install-host-bar {
+    transition: right var(--axis-chat-slide-duration, 0.3s) var(--axis-chat-slide-ease, cubic-bezier(0.22, 1, 0.36, 1)) !important;
+}
+
+/* During host drags (not chat): snap guests - chat slide keeps CSS `right` animation. */
+body.host-resizing:not(.axis-chat-sliding) #webviews-container {
     transition: none !important;
 }
 
-body.host-resizing #webviews-container webview:not(.inactive) {
+body.host-resizing:not(.axis-chat-sliding) #webviews-container webview:not(.inactive) {
     inset: 0 !important;
     width: 100% !important;
     height: 100% !important;
@@ -1150,10 +1205,13 @@ body.host-resizing #webviews-container webview:not(.inactive) {
     margin: 1px 0;
 }
 
-/* Post-PiP mini player — aligned with profile switcher below */
+/* Post-PiP mini player + update banner.
+ * Top padding matches Favorites’ air above its hairline so the tab-list line isn’t glued to cards/profile.
+ * Bottom padding matches #content-area (8px) so the profile lines up with the webview. */
 .sidebar-section.sidebar-footer {
     flex-shrink: 0;
-    padding: 4px 14px 10px;
+    padding: 6px 10px 8px;
+    margin: 0;
     margin-top: auto;
     -webkit-app-region: no-drag;
     position: relative;
@@ -1161,7 +1219,7 @@ body.host-resizing #webviews-container webview:not(.inactive) {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 4px;
+    gap: 6px;
     overflow: visible;
 }
 
@@ -1181,7 +1239,7 @@ html.axis-ai-features-disabled #new-tab-ai-chat-view {
     overflow: hidden;
 }
 
-/* While the finger/trackpad is actively swiping, ignore sidebar clicks — restore on peel. */
+/* While the finger/trackpad is actively swiping, ignore sidebar clicks - restore on peel. */
 #sidebar.is-profile-swiping #sidebar-profile-swipe-stage,
 #sidebar.is-profile-swiping .favorites-section {
     pointer-events: none;
@@ -1212,7 +1270,7 @@ html.axis-ai-features-disabled #new-tab-ai-chat-view {
 /*
  * During commit, hide the entire outgoing live pane (not just tabs/favorites).
  * Mounting the next profile into the live pane mid-spring must never flash
- * "ghost tabs" on the profile you're leaving — the preview covers the gesture.
+ * "ghost tabs" on the profile you're leaving - the preview covers the gesture.
  */
 #sidebar.is-profile-swiping.axis-sidebar-profile-switching #sidebar-profile-swipe-track.axis-sidebar-coupled-duo .sidebar-profile-pane--live {
     visibility: hidden;
@@ -1315,7 +1373,7 @@ html.axis-ai-features-disabled #new-tab-ai-chat-view {
     will-change: transform;
 }
 
-/* Full-resolution sidebar text after profile swipe — not while the track is on a GPU layer. */
+/* Full-resolution sidebar text after profile swipe - not while the track is on a GPU layer. */
 #sidebar:not(.is-profile-swiping) .sidebar-profile-pane--live .tab-title,
 #sidebar:not(.is-profile-swiping) .sidebar-profile-pane--live .tab-favicon {
     -webkit-font-smoothing: antialiased;
@@ -1326,7 +1384,7 @@ html.axis-ai-features-disabled #new-tab-ai-chat-view {
     min-height: 0;
 }
 
-/* Neighbor pane in the coupled carousel — full sidebar clone, rides beside the live pane. */
+/* Neighbor pane in the coupled carousel - full sidebar clone, rides beside the live pane. */
 .sidebar-profile-pane--preview {
     position: relative;
     flex: none;
@@ -1371,6 +1429,246 @@ webview.axis-profile-webview-suspended {
     display: none !important;
 }
 
+.sidebar-update-banner {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow: visible;
+}
+
+.sidebar-update-banner.hidden {
+    display: none !important;
+}
+
+.sidebar-update-banner-card {
+    --sidebar-card-inset-x: 8px;
+    --sidebar-card-ctrl: 24px;
+    --sidebar-card-row-h: 28px;
+    display: flex;
+    flex-direction: column-reverse;
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--shell-ink-rgb), 0.14);
+    background: rgba(var(--shell-ink-rgb), 0.07);
+    box-shadow: none;
+    transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.sidebar-update-banner:not(.hidden):hover .sidebar-update-banner-card,
+.sidebar-update-banner:not(.hidden):has(:focus-visible) .sidebar-update-banner-card {
+    border-color: rgba(var(--shell-ink-rgb), 0.22);
+    background: rgba(var(--shell-ink-rgb), 0.1);
+}
+
+.sidebar-update-banner-row {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 4px;
+    min-width: 0;
+    height: var(--sidebar-card-row-h);
+    min-height: var(--sidebar-card-row-h);
+    padding: 0 var(--sidebar-card-inset-x);
+    box-sizing: border-box;
+}
+
+.sidebar-update-banner-copy {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 6px;
+    overflow: hidden;
+}
+
+.sidebar-update-banner-title {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: rgba(var(--shell-ink-rgb), 0.92);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-update-banner-meta {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 40%;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: rgba(var(--shell-ink-rgb), 0.45);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+}
+
+.sidebar-update-banner-expand {
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+    transition: max-height 0.18s ease, opacity 0.14s ease;
+}
+
+.sidebar-update-banner:not(.hidden):hover .sidebar-update-banner-expand,
+.sidebar-update-banner:not(.hidden):has(:focus-visible) .sidebar-update-banner-expand,
+.sidebar-update-banner.is-busy .sidebar-update-banner-expand {
+    max-height: var(--sidebar-card-row-h);
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.sidebar-update-banner-expand-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    height: var(--sidebar-card-row-h);
+    min-height: var(--sidebar-card-row-h);
+    padding: 0 var(--sidebar-card-inset-x);
+    box-sizing: border-box;
+}
+
+.sidebar-update-banner-notes,
+.sidebar-update-banner-restart,
+.sidebar-update-banner-dismiss {
+    flex-shrink: 0;
+    height: var(--sidebar-card-ctrl);
+    min-height: var(--sidebar-card-ctrl);
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    white-space: nowrap;
+    color: rgba(var(--shell-ink-rgb), 0.52);
+    -webkit-tap-highlight-color: transparent;
+    will-change: transform;
+    transition:
+        color 0.16s ease,
+        opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.34s cubic-bezier(0.22, 1.55, 0.36, 1);
+}
+
+.sidebar-update-banner-notes {
+    flex: 0 1 auto;
+    min-width: 0;
+    justify-content: flex-start;
+    padding: 0;
+    transform-origin: left center;
+}
+
+.sidebar-update-banner-restart {
+    flex: 0 0 auto;
+    min-width: 0;
+    justify-content: flex-end;
+    padding: 0;
+    color: rgba(var(--shell-ink-rgb), 0.62);
+    transform-origin: right center;
+}
+
+.sidebar-update-banner-dismiss {
+    flex: 0 0 auto;
+    width: var(--sidebar-card-ctrl);
+    justify-content: flex-end;
+    padding: 0;
+    font-size: 10px;
+    color: rgba(var(--shell-ink-rgb), 0.52);
+    transform-origin: right center;
+}
+
+.sidebar-update-banner-dismiss i {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    font-size: 9px;
+    line-height: 1;
+}
+
+.sidebar-update-banner-notes:hover:not(:disabled),
+.sidebar-update-banner-restart:hover:not(:disabled),
+.sidebar-update-banner-dismiss:hover:not(:disabled) {
+    color: rgba(var(--shell-ink-rgb), 0.94);
+    background: transparent;
+}
+
+.sidebar-update-banner-notes:active:not(:disabled),
+.sidebar-update-banner-restart:active:not(:disabled),
+.sidebar-update-banner-dismiss:active:not(:disabled) {
+    transform: scale(0.88) translateY(0.5px);
+    opacity: 0.55;
+    transition:
+        color 0.06s ease,
+        opacity 0.05s ease,
+        transform 0.06s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.sidebar-update-banner-notes:disabled,
+.sidebar-update-banner-restart:disabled {
+    opacity: 0.4;
+    cursor: default;
+    will-change: auto;
+}
+
+.sidebar-update-banner-hint {
+    display: none;
+}
+
+.sidebar-update-banner-hint.hidden {
+    display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sidebar-update-banner-card,
+    .sidebar-update-banner-expand {
+        transition: none !important;
+    }
+
+    .sidebar-update-banner-notes,
+    .sidebar-update-banner-restart,
+    .sidebar-update-banner-dismiss {
+        transition: color 0.12s ease, opacity 0.12s ease !important;
+    }
+
+    .sidebar-update-banner-notes:active:not(:disabled),
+    .sidebar-update-banner-restart:active:not(:disabled),
+    .sidebar-update-banner-dismiss:active:not(:disabled) {
+        transform: none;
+        opacity: 0.7;
+    }
+
+    .sidebar-update-banner:not(.hidden) .sidebar-update-banner-expand {
+        max-height: var(--sidebar-card-row-h, 28px);
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
 .sidebar-media-dock {
     width: 100%;
     min-width: 0;
@@ -1396,6 +1694,9 @@ webview.axis-profile-webview-suspended {
 }
 
 .sidebar-media-dock-card {
+    --sidebar-card-inset-x: 8px;
+    --sidebar-card-ctrl: 24px;
+    --sidebar-card-row-h: 28px;
     --sidebar-media-glow-r: 88;
     --sidebar-media-glow-g: 118;
     --sidebar-media-glow-b: 198;
@@ -1411,7 +1712,7 @@ webview.axis-profile-webview-suspended {
     border: 1px solid rgba(var(--shell-ink-rgb), 0.14);
     background: rgba(var(--shell-ink-rgb), 0.07);
     box-shadow: none;
-    transition: border-color 0.2s ease, background-color 0.2s ease;
+    transition: border-color 0.16s ease, background-color 0.16s ease;
 }
 
 .sidebar-media-dock-card::before {
@@ -1451,24 +1752,24 @@ webview.axis-profile-webview-suspended {
     opacity: 0;
     overflow: hidden;
     pointer-events: none;
-    transition: max-height 0.24s ease, opacity 0.18s ease;
+    transition: max-height 0.18s ease, opacity 0.14s ease;
 }
 
 .sidebar-media-dock:not(.hidden):hover .sidebar-media-dock-expand,
 .sidebar-media-dock:not(.hidden):has(:focus-visible) .sidebar-media-dock-expand {
-    max-height: 28px;
+    max-height: var(--sidebar-card-row-h);
     opacity: 1;
     pointer-events: auto;
 }
 
 .sidebar-media-dock-expand-inner {
-    padding: 2px 5px 3px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 0 var(--sidebar-card-inset-x);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 4px;
-    min-height: 26px;
+    height: var(--sidebar-card-row-h);
+    min-height: var(--sidebar-card-row-h);
     box-sizing: border-box;
 }
 
@@ -1486,26 +1787,58 @@ webview.axis-profile-webview-suspended {
     justify-content: flex-end;
 }
 
-.sidebar-media-expand-btn {
-    width: 24px;
-    height: 24px;
+.sidebar-media-expand-btn,
+.sidebar-media-ctrl-btn,
+.sidebar-media-meta-btn {
     border: none;
-    border-radius: 6px;
+    border-radius: 0;
     background: transparent;
-    color: rgba(var(--shell-ink-rgb), 0.62);
     cursor: pointer;
+    margin: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    transform-origin: center center;
+    will-change: transform;
+    transition:
+        color 0.16s ease,
+        opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.34s cubic-bezier(0.22, 1.55, 0.36, 1);
+}
+
+.sidebar-media-expand-btn {
+    width: var(--sidebar-card-ctrl);
+    height: var(--sidebar-card-ctrl);
+    color: rgba(var(--shell-ink-rgb), 0.52);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     font-size: 10px;
     padding: 0;
-    box-sizing: border-box;
-    transition: color 0.12s ease, background 0.12s ease;
 }
 
-.sidebar-media-expand-btn:hover {
-    color: rgba(var(--shell-ink-rgb), 0.95);
-    background: rgba(var(--shell-ink-rgb), 0.09);
+.sidebar-media-expand-btn:hover,
+.sidebar-media-ctrl-btn:hover,
+.sidebar-media-meta-btn:hover {
+    color: rgba(var(--shell-ink-rgb), 0.94);
+    background: transparent;
+}
+
+.sidebar-media-expand-btn:active,
+.sidebar-media-ctrl-btn:active {
+    transform: scale(0.86) translateY(0.5px);
+    opacity: 0.55;
+    transition:
+        color 0.06s ease,
+        opacity 0.05s ease,
+        transform 0.06s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.sidebar-media-meta-btn:active {
+    transform: none;
+    opacity: 0.62;
+    transition:
+        color 0.06s ease,
+        opacity 0.05s ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1514,6 +1847,19 @@ webview.axis-profile-webview-suspended {
     .sidebar-media-dock-expand,
     .sidebar-media-title-text {
         transition: none !important;
+    }
+
+    .sidebar-media-expand-btn,
+    .sidebar-media-ctrl-btn,
+    .sidebar-media-meta-btn {
+        transition: color 0.12s ease, opacity 0.12s ease !important;
+    }
+
+    .sidebar-media-expand-btn:active,
+    .sidebar-media-ctrl-btn:active,
+    .sidebar-media-meta-btn:active {
+        transform: none;
+        opacity: 0.7;
     }
 
     .sidebar-media-dock.sidebar-media-dock--mounted:not(.sidebar-media-dock--shown) {
@@ -1525,7 +1871,7 @@ webview.axis-profile-webview-suspended {
     }
 
     .sidebar-media-dock:not(.hidden) .sidebar-media-dock-expand {
-        max-height: 28px;
+        max-height: var(--sidebar-card-row-h, 28px);
         opacity: 1;
         pointer-events: auto;
     }
@@ -1536,11 +1882,11 @@ webview.axis-profile-webview-suspended {
     z-index: 1;
     display: flex;
     align-items: center;
-    gap: 0;
+    gap: 4px;
     min-width: 0;
-    height: 28px;
-    min-height: 28px;
-    padding: 0 6px 0 0;
+    height: var(--sidebar-card-row-h);
+    min-height: var(--sidebar-card-row-h);
+    padding: 0 var(--sidebar-card-inset-x);
     box-sizing: border-box;
 }
 
@@ -1549,8 +1895,8 @@ webview.axis-profile-webview-suspended {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: var(--sidebar-card-ctrl);
+    height: var(--sidebar-card-ctrl);
     margin: 0;
     padding: 0;
     background: none;
@@ -1604,24 +1950,14 @@ webview.axis-profile-webview-suspended {
 .sidebar-media-meta-btn {
     flex: 1 1 0%;
     min-width: 0;
-    height: 28px;
-    min-height: 28px;
-    border: none;
-    background: transparent;
-    padding: 0 6px;
-    margin: 0;
-    cursor: pointer;
+    height: var(--sidebar-card-row-h);
+    min-height: var(--sidebar-card-row-h);
+    padding: 0;
     text-align: left;
-    border-radius: 0;
     font: inherit;
-    color: rgba(var(--shell-ink-rgb), 0.9);
+    color: rgba(var(--shell-ink-rgb), 0.78);
     display: flex;
     align-items: center;
-    box-sizing: border-box;
-}
-
-.sidebar-media-meta-btn:hover {
-    color: rgba(var(--shell-ink-rgb), 0.98);
 }
 
 .sidebar-media-title-mask {
@@ -1672,11 +2008,11 @@ webview.axis-profile-webview-suspended {
 .sidebar-media-dock-transport {
     flex-shrink: 0;
     display: grid;
-    grid-template-columns: repeat(3, 24px);
+    grid-template-columns: repeat(3, var(--sidebar-card-ctrl));
     align-items: center;
     justify-items: center;
-    height: 28px;
-    padding: 0 2px 0 0;
+    height: var(--sidebar-card-row-h);
+    padding: 0;
     margin: 0;
     gap: 0;
     background: transparent;
@@ -1684,21 +2020,14 @@ webview.axis-profile-webview-suspended {
 }
 
 .sidebar-media-ctrl-btn {
-    width: 24px;
-    height: 24px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: rgba(var(--shell-ink-rgb), 0.72);
-    cursor: pointer;
+    width: var(--sidebar-card-ctrl);
+    height: var(--sidebar-card-ctrl);
+    color: rgba(var(--shell-ink-rgb), 0.62);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     padding: 0;
-    margin: 0;
-    box-sizing: border-box;
     line-height: 0;
-    transition: color 0.12s ease, background 0.12s ease;
 }
 
 .sidebar-media-ctrl-btn i,
@@ -1711,11 +2040,6 @@ webview.axis-profile-webview-suspended {
     font-size: 9px;
     line-height: 1;
     transform: none;
-}
-
-.sidebar-media-ctrl-btn:hover {
-    color: rgba(var(--shell-ink-rgb), 0.96);
-    background: rgba(var(--shell-ink-rgb), 0.09);
 }
 
 #sidebar-media-play-btn i {
@@ -1918,7 +2242,7 @@ webview.axis-profile-webview-suspended {
     padding-right: 60px;
     color: var(--url-bar-text-muted);
     font-size: 14px;
-    font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: var(--axis-ui-font);
     font-weight: 400;
     outline: none;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -2162,7 +2486,7 @@ webview.axis-profile-webview-suspended {
     border-color: rgba(255, 255, 255, 0.15) !important;
 }
 
-/* Zoom Indicator — same shell as Cmd+F; no enter/exit motion */
+/* Zoom Indicator - same shell as Cmd+F; no enter/exit motion */
 .zoom-indicator {
     position: absolute;
     top: 42px;
@@ -2234,6 +2558,7 @@ webview.axis-profile-webview-suspended {
     transition:
         opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1),
         transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+        right var(--axis-chat-slide-duration, 0.3s) var(--axis-chat-slide-ease, cubic-bezier(0.22, 1, 0.36, 1)),
         background 0.4s ease,
         box-shadow 0.4s ease;
 }
@@ -2577,9 +2902,14 @@ webview.axis-profile-webview-suspended {
     min-height: 0;
     position: relative;
     padding: 36px 0 0 0;
+    transition: padding-top 0.18s ease;
 }
 
-/* Top row: floating Clear (when separator hidden) — traffic-light side */
+body.axis-window-fullscreen .tabs-section {
+    padding-top: 6px;
+}
+
+/* Top row: floating Clear (when separator hidden) - traffic-light side */
 .sidebar-tabs-topbar {
     position: absolute;
     top: 11px;
@@ -2592,6 +2922,11 @@ webview.axis-profile-webview-suspended {
     z-index: 50;
     pointer-events: none;
     -webkit-app-region: no-drag;
+    transition: top 0.18s ease;
+}
+
+body.axis-window-fullscreen .sidebar-tabs-topbar {
+    top: 2px;
 }
 
 #sidebar > .sidebar-scale > .sidebar-tabs-topbar {
@@ -2655,6 +2990,8 @@ webview.axis-profile-webview-suspended {
     position: relative;
     overflow: visible;
     -webkit-app-region: no-drag;
+    margin: 0;
+    padding: 0;
 }
 
 #sidebar-profile-footer.is-open {
@@ -2715,20 +3052,6 @@ webview.axis-profile-webview-suspended {
     opacity: 0.85;
 }
 
-body.incognito-window .clear-unpinned-floating {
-    color: rgba(255, 255, 255, 0.38);
-}
-
-body.incognito-window .clear-unpinned-floating:hover {
-    color: rgba(255, 255, 255, 0.88);
-    background: rgba(255, 255, 255, 0.08);
-}
-
-body.incognito-window .clear-unpinned-floating:active {
-    color: rgba(255, 255, 255, 0.96);
-    background: rgba(255, 255, 255, 0.11);
-}
-
 .profile-switcher-trigger {
     appearance: none;
     border: none;
@@ -2747,16 +3070,14 @@ body.incognito-window .clear-unpinned-floating:active {
     -webkit-app-region: no-drag;
 }
 
-.profile-switcher-trigger:hover {
+.profile-switcher-trigger:hover,
+.profile-switcher-trigger[aria-expanded="true"] {
     background: rgba(var(--shell-ink-rgb), 0.09);
+    color: rgba(var(--shell-ink-rgb), 0.98);
 }
 
 .profile-switcher-trigger:active {
     transform: scale(0.97);
-}
-
-.profile-switcher-trigger[aria-expanded="true"] {
-    color: rgba(var(--shell-ink-rgb), 0.98);
 }
 
 .profile-switcher-trigger .profile-switch-avatar--icon {
@@ -2776,7 +3097,7 @@ body.incognito-window .clear-unpinned-floating:active {
     font-size: 12px;
 }
 
-/* Compact profile popover — anchored to trigger, stays in sidebar */
+/* Compact profile popover - anchored to trigger, stays in sidebar */
 .profile-switcher-menu {
     position: absolute;
     left: 0;
@@ -2985,7 +3306,7 @@ body.incognito-window .clear-unpinned-floating:active {
     min-width: 108px;
     padding: 3px;
     border-radius: 8px;
-    /* Match context menus — nearly opaque so sibling panel text cannot bleed through. */
+    /* Match context menus - nearly opaque so sibling panel text cannot bleed through. */
     background: rgba(28, 28, 30, 0.97) !important;
     border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
@@ -3144,7 +3465,7 @@ body.incognito-window .clear-unpinned-floating:active {
     background: rgba(var(--shell-ink-rgb), 0.05);
 }
 
-/* Profile popover only — light glass when uiTheme is light; sidebar trigger stays on shell ink. */
+/* Profile popover only - light glass when uiTheme is light; sidebar trigger stays on shell ink. */
 :root[data-ui-theme="light"] .profile-switcher-panel {
     background: rgba(248, 248, 250, 0.96) !important;
     border-color: rgba(0, 0, 0, 0.08) !important;
@@ -3264,6 +3585,23 @@ body.incognito-window .clear-unpinned-floating:active {
     padding: 8px 10px 6px;
     margin: 0;
     -webkit-app-region: no-drag;
+    position: relative;
+    z-index: 2;
+}
+
+/* Hairline scroll edges - same weight top (under Favorites) and bottom; not tied to footer cards */
+.tabs-section.is-tabs-scrolled:has(.favorites-section:not(.hidden)) #tabs-container {
+    box-shadow: inset 0 1px 0 rgba(var(--shell-ink-rgb), 0.05);
+}
+
+.tabs-section.is-tabs-scrolled-bottom #tabs-container {
+    box-shadow: inset 0 -1px 0 rgba(var(--shell-ink-rgb), 0.05);
+}
+
+.tabs-section.is-tabs-scrolled.is-tabs-scrolled-bottom:has(.favorites-section:not(.hidden)) #tabs-container {
+    box-shadow:
+        inset 0 1px 0 rgba(var(--shell-ink-rgb), 0.05),
+        inset 0 -1px 0 rgba(var(--shell-ink-rgb), 0.05);
 }
 
 .favorites-section.hidden {
@@ -3329,9 +3667,9 @@ body.incognito-window .clear-unpinned-floating:active {
 }
 
 .favorite-icon-wrap {
-    width: 22px;
-    height: 22px;
-    display: inline-flex;
+    width: 20px;
+    height: 20px;
+    display: flex;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
@@ -3340,45 +3678,59 @@ body.incognito-window .clear-unpinned-floating:active {
 .favorite-favicon {
     width: 20px;
     height: 20px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
     object-fit: contain;
     border-radius: 4px;
+    flex: 0 0 auto;
+    box-sizing: border-box;
 }
 
-.favorite-favicon-emoji,
-.favorite-favicon-fa,
+.favorite-favicon-custom {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+    overflow: hidden;
+    text-align: center;
+}
+
+.favorite-favicon-custom--emoji {
+    font-size: 15px;
+}
+
+.favorite-favicon-custom--fa {
+    color: rgba(var(--shell-ink-rgb), 0.88);
+}
+
+.favorite-favicon-custom--fa > i {
+    font-family: "Font Awesome 6 Free" !important;
+    font-weight: 900;
+    font-style: normal;
+    font-size: 12px;
+    line-height: 1;
+    display: block;
+    width: 12px;
+    height: 12px;
+    text-align: center;
+    -webkit-font-smoothing: antialiased;
+    color: inherit;
+    transform: translateY(-1px);
+}
+
 .favorite-favicon-fallback {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     justify-content: center;
     color: rgba(var(--shell-ink-rgb), 0.92);
-    font-size: 13px;
-    line-height: 1;
-}
-
-.favorite-favicon-fallback {
-    width: 20px;
-    height: 20px;
-    border-radius: 5px;
-    background: rgba(var(--shell-ink-rgb), 0.1);
     font-size: 10px;
     font-weight: 800;
-}
-
-body.incognito-window .favorite-item {
-    border-color: rgba(255, 255, 255, 0.14);
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.9);
-}
-
-body.incognito-window .favorite-item:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.22);
-}
-
-body.incognito-window .favorite-item.active {
-    background: rgba(var(--favorite-accent-rgb), 0.16);
-    border-color: rgb(var(--favorite-accent-rgb));
-    box-shadow: 0 0 0 1px rgba(var(--favorite-accent-rgb), 0.4);
+    line-height: 1;
+    border-radius: 5px;
+    background: rgba(var(--shell-ink-rgb), 0.1);
 }
 
 .tabs-actions {
@@ -3394,11 +3746,16 @@ body.incognito-window .favorite-item.active {
     flex-direction: column;
     width: 100%;
     box-sizing: border-box;
-    padding: 8px 10px;
+    padding: 6px 10px 0;
     margin: 0;
     position: relative;
-    /* Never reserve gutter space — overlay thumb is painted separately */
+    /* Never reserve gutter space - overlay thumb is painted separately */
     scrollbar-width: none;
+}
+
+/* No update/mini-player cards: same 6px air under the last tab as Favorites has above its line */
+#sidebar:not(:has(#sidebar-update-banner:not(.hidden))):not(:has(#sidebar-media-dock.sidebar-media-dock--shown)) #tabs-container {
+    padding-bottom: 6px;
 }
 .tabs-container::-webkit-scrollbar {
     width: 0 !important;
@@ -3410,7 +3767,7 @@ body.incognito-window .favorite-item.active {
     flex-direction: column;
 }
 
-/* Overlay scrollbar — floats over tabs, does not push layout */
+/* Overlay scrollbar - floats over tabs, does not push layout */
 .tabs-section > .tabs-sb-overlay {
     position: absolute;
     top: 0;
@@ -3435,7 +3792,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     opacity: 0;
 }
 
-/* Drop indicator – thin line showing exact drop position (tabs-container has padding 8px 10px) */
+/* Drop indicator - thin line showing exact drop position (tabs-container has padding 8px 10px) */
 .tab-drag-drop-indicator {
     position: absolute;
     left: 10px;
@@ -3486,7 +3843,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     overflow: visible;
     /* Truncated line end: small gap + ~Clear+chevron width (tune via this one variable) */
     --tabs-separator-short-right: calc(4px + 42px);
-    /* Horizontal inset from sidebar edges — smaller = longer line */
+    /* Horizontal inset from sidebar edges - smaller = longer line */
     --tabs-separator-inset-inline: 8px;
 }
 
@@ -3514,7 +3871,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     opacity: 1;
 }
 
-/* Hover: shorter line (fades in); full line fades out — no right-edge slide */
+/* Hover: shorter line (fades in); full line fades out - no right-edge slide */
 .tabs-separator::after {
     right: var(--tabs-separator-short-right);
     opacity: 0;
@@ -3557,7 +3914,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     display: none;
 }
 
-/* Clear unpinned — line swaps via ::before/::after opacity crossfade on #sidebar:hover */
+/* Clear unpinned - line swaps via ::before/::after opacity crossfade on #sidebar:hover */
 .clear-unpinned-btn {
     position: absolute;
     right: 0;
@@ -3660,7 +4017,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     transition: opacity 0.2s ease;
 }
 
-/* "+ New Tab" button – matches tab layout (favicon-sized icon + label), no gradient */
+/* "+ New Tab" button - matches tab layout (favicon-sized icon + label), no gradient */
 .sidebar-new-tab-btn {
     width: 100%;
     min-height: 32px;
@@ -3752,7 +4109,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     background: transparent;
     border-radius: 10px;
     cursor: pointer;
-    transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease !important;
+    transition: background 0.16s ease, box-shadow 0.16s ease;
     position: relative;
     border: none;
     box-shadow: none;
@@ -3761,11 +4118,12 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     overflow: hidden;
     display: flex;
     align-items: center;
+    flex-shrink: 0;
     user-select: none;
     -webkit-user-select: none;
 }
 
-/* Inline rename field (input replaces .tab-title span) — tabs and tab groups */
+/* Inline rename field (input replaces .tab-title span) - tabs and tab groups */
 .tab input.tab-title,
 .tab-group input.tab-title {
     font-size: 13px;
@@ -3794,7 +4152,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
 .tab-group > .tab-content .tab-title {
     font-size: 13px;
     font-weight: 600;
-    line-height: 1.4;
+    line-height: 15px;
     color: var(--text-color-secondary);
 }
 
@@ -3867,28 +4225,47 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     -webkit-user-drag: none;
 }
 
-.tab:hover,
-.tab:hover *,
-.tab:hover::before,
-.tab:hover::after {
-    transition: none !important;
-    transition-duration: 0s !important;
-    transition-delay: 0s !important;
-    animation: none !important;
+.tab:hover:not(.closing):not(.entering) {
+    transition-property: background, box-shadow;
 }
 
-/* Smooth close animation: shrink height and fade out so siblings move smoothly */
+/* Tab open/close - JS clips the row; face stays full-size (no squash). */
+.tab.entering,
 .tab.closing {
-    height: 0 !important;
-    min-height: 0 !important;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    opacity: 0 !important;
-    transform: translateY(-4px) !important;
+    pointer-events: none !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+    flex-shrink: 0;
+    contain: layout style;
+    transition: none !important;
+    background-clip: padding-box;
+}
+
+.tab.entering > .tab-content,
+.tab.closing > .tab-content {
+    height: 32px;
+    min-height: 32px;
+    flex-shrink: 0;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
+body.axis-tab-sidebar-motion .tabs-section {
+    contain: layout style;
+}
+
+/* Do not lock overflow while animating - that blocked fast scrolling/clicks in a tall tab list. */
+
+@media (prefers-reduced-motion: reduce) {
+    body.axis-window-fullscreen .tabs-section,
+    body.axis-window-fullscreen .sidebar-tabs-topbar,
+    .tabs-section {
+        transition: none !important;
+    }
 }
 
 /* Smooth in-place drag system for tabs */
-/* Dragged tab: slide only, no levitate – same look as other tabs */
+/* Dragged tab: slide only, no levitate - same look as other tabs */
 .tab.smooth-dragging {
     z-index: 2 !important;
     position: relative !important;
@@ -3913,7 +4290,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     pointer-events: none !important;
 }
 
-/* Tabs being displaced — transform driven every frame in JS; CSS transition fights pointer */
+/* Tabs being displaced - transform driven every frame in JS; CSS transition fights pointer */
 .tab.drag-sliding {
     transition: none !important;
     will-change: transform !important;
@@ -3927,7 +4304,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     transition: none !important;
 }
 
-/* Smooth in-place drag system for tab groups — slide only, no drop shadow */
+/* Smooth in-place drag system for tab groups - slide only, no drop shadow */
 .tab-group.smooth-dragging {
     z-index: 1000 !important;
     position: relative !important;
@@ -3945,7 +4322,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     pointer-events: none !important;
 }
 
-/* Base tab group style – matches single tab row height and outline */
+/* Base tab group style - matches single tab row height and outline */
 .tab-group {
     width: 100%;
     min-height: 32px;
@@ -3972,7 +4349,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     box-shadow: 0 0 0 1px rgba(var(--shell-ink-rgb), 0.08);
 }
 
-/* Tab groups being displaced — same as tabs: JS owns transform */
+/* Tab groups being displaced - same as tabs: JS owns transform */
 .tab-group.drag-sliding {
     transition: none !important;
     will-change: transform !important;
@@ -4132,7 +4509,7 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 7px 13px;
+    padding: 2px 4px 2px 10px;
     min-height: 32px;
     height: 32px;
     position: relative;
@@ -4145,36 +4522,47 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
 .tab-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     min-width: 0;
     flex: 1;
     overflow: hidden;
     width: 100%;
 }
 
+.tab-left > .tab-favicon,
+.tab-left > .tab-group-icon {
+    align-self: center;
+    flex-shrink: 0;
+}
+
+.tab-left .tab-title {
+    line-height: 15px;
+    align-self: center;
+}
+
 .tab-right {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 2px;
+    gap: 0;
     flex-shrink: 0;
     opacity: 0;
     pointer-events: none;
     transition: none !important;
-    transform: translateX(8px);
+    transform: none;
     width: 0;
     overflow: hidden;
     margin: 0;
     padding: 0;
-    height: 18px;
+    height: 28px;
 }
 
 /* Close button only shows on hover - applies to ALL tabs including active */
 .tab:hover .tab-right {
     opacity: 1;
     pointer-events: auto;
-    transform: translateX(0);
-    width: auto;
+    transform: none;
+    width: 28px;
     transition: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
@@ -4184,49 +4572,49 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
 .tab.active .tab-right {
     opacity: 0;
     pointer-events: none;
-    transform: translateX(8px);
+    transform: none;
 }
 
 /* Pinned tabs follow same rule - only show on hover */
 .tab.pinned .tab-right {
     opacity: 0;
     pointer-events: none;
-    transform: translateX(8px);
+    transform: none;
 }
 
 /* Active pinned tabs don't show buttons unless hovered */
 .tab.pinned.active .tab-right {
     opacity: 0;
     pointer-events: none;
-    transform: translateX(8px);
+    transform: none;
 }
 
 .tab.pinned:hover .tab-right {
     opacity: 1;
     pointer-events: auto;
-    transform: translateX(0);
-    width: auto;
+    transform: none;
+    width: 28px;
 }
 
 /* Closed pinned tabs follow same rule - only show on hover */
 .tab.pinned.closed .tab-right {
     opacity: 0;
     pointer-events: none;
-    transform: translateX(8px);
+    transform: none;
 }
 
 /* Active closed pinned tabs don't show buttons unless hovered */
 .tab.pinned.closed.active .tab-right {
     opacity: 0;
     pointer-events: none;
-    transform: translateX(8px);
+    transform: none;
 }
 
 .tab.pinned.closed:hover .tab-right {
     opacity: 1;
     pointer-events: auto;
-    transform: translateX(0);
-    width: auto;
+    transform: none;
+    width: 28px;
 }
 
 .tab-favicon {
@@ -4235,12 +4623,97 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     min-width: 15px;
     max-width: 15px;
     min-height: 15px;
-    max-height: 16px;
-    border-radius: 4px;
+    max-height: 15px;
+    border-radius: 3px;
     transition: none !important;
     flex-shrink: 0;
-    object-fit: contain;
+    box-sizing: border-box;
+}
+
+img.tab-favicon {
     display: block;
+    width: 15px;
+    height: 15px;
+    object-fit: contain;
+    object-position: center;
+}
+
+.tab-favicon.tab-favicon-custom,
+.tab-favicon.tab-favicon-builtin,
+.tab-group-icon.tab-favicon.tab-favicon-custom,
+.tab-group-icon.tab-favicon.tab-group-icon--builtin {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+    line-height: 0;
+    align-self: center;
+    flex-shrink: 0;
+}
+
+.tab-favicon.tab-favicon-custom--emoji,
+.tab-group-icon.tab-favicon-custom--emoji {
+    font-size: 12px;
+    line-height: 1;
+}
+
+.tab-favicon.tab-favicon-custom--fa,
+.tab-group-icon.tab-favicon-custom--fa {
+    color: rgba(var(--shell-ink-rgb), 0.72);
+}
+
+.tab-favicon.tab-favicon-custom--fa > i,
+.tab-group-icon.tab-favicon-custom--fa > i,
+.tab-favicon.tab-favicon-builtin > i,
+.tab-group-icon.tab-group-icon--builtin > i {
+    font-family: "Font Awesome 6 Free" !important;
+    font-weight: 900;
+    font-style: normal;
+    font-size: 11px;
+    line-height: 1;
+    display: block;
+    width: 11px;
+    height: 11px;
+    text-align: center;
+    -webkit-font-smoothing: antialiased;
+    color: inherit;
+    transform: translateY(-1px);
+}
+
+.tab-group-icon.tab-favicon.tab-favicon-custom {
+    opacity: 1;
+}
+
+.tab-group-icon.tab-group-icon--builtin,
+.tab-group-icon.tab-favicon-custom--fa.tab-group-icon {
+    color: var(--text-color-muted);
+    opacity: 0.85;
+}
+
+/* Legacy direct <i> group icons (profile preview / old nodes) */
+i.tab-group-icon.fas {
+    width: 15px;
+    height: 15px;
+    min-width: 15px;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--text-color-muted);
+    opacity: 0.85;
+    font-family: "Font Awesome 6 Free" !important;
+    font-weight: 900;
+    font-style: normal;
+    line-height: 1;
+    -webkit-font-smoothing: antialiased;
+    transform: translateY(-1px);
+}
+
+.tab-favicon.tab-favicon-builtin {
+    color: rgba(var(--shell-ink-rgb), 0.72);
 }
 
 .tab:hover .tab-favicon {
@@ -4354,41 +4827,73 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
 }
 
 .tab-close {
-    width: 18px;
-    height: 18px;
-    min-width: 18px;
-    min-height: 18px;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
     margin: 0;
     padding: 0;
     border: none;
     background: transparent;
     color: var(--tab-close-color);
     cursor: pointer;
-    border-radius: 5px;
+    border-radius: 6px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     line-height: 0;
-    transition: background 0.12s ease, color 0.12s ease;
+    position: relative;
+    overflow: visible;
+    transform: none !important;
+    transition: background 0.12s ease, color 0.12s ease !important;
+}
+
+.tab-close::before,
+.tab-close::after {
+    content: none !important;
+    display: none !important;
+}
+
+.tab-close-glyph {
+    width: 14px;
+    height: 14px;
+    display: block;
+    flex-shrink: 0;
+    opacity: 0.72;
+    pointer-events: none;
 }
 
 .tab-close i,
 .tab-close .fas,
 .tab-close .fa {
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1;
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
+    opacity: 0.72;
 }
 
 .tab-close:hover {
-    background: var(--button-hover);
+    background: rgba(var(--shell-ink-rgb), 0.07);
     color: var(--tab-close-hover);
-    transform: none;
+    transform: none !important;
+}
+
+.tab-close:hover .tab-close-glyph,
+.tab-close:hover i,
+.tab-close:hover .fas,
+.tab-close:hover .fa {
+    opacity: 1;
+}
+
+.tab-close:active {
+    background: rgba(var(--shell-ink-rgb), 0.11);
+    transform: none !important;
+    transition: background 0.08s ease, color 0.08s ease !important;
 }
 
 .tab-pin {
@@ -4433,49 +4938,6 @@ html[data-ui-theme="light"] .tabs-section > .tabs-sb-overlay {
     color: rgba(255, 255, 255, 0.6);
     font-size: 14px;
     margin-right: 6px;
-}
-
-/* Incognito window: force black everywhere */
-body.incognito-window #app,
-body.incognito-window #sidebar,
-body.incognito-window .sidebar-section {
-    background: #000000 !important;
-}
-body.incognito-window {
-    background: #000000 !important;
-}
-
-/* Incognito: sidebar is pure #000 and z-index:1000. The global negative margins
-   (sidebar -8px, webview -1px) pull it ON TOP of the webview → a full-height black seam.
-   Cancel those margins so the seam is edge-to-edge, not stacked; keep radius + overflow
-   so the resize handle stays clipped at the corners. */
-body.incognito-window #main-area:not(.sidebar-right) #sidebar {
-    margin-right: 0;
-    border-top-right-radius: 6px;
-    border-bottom-right-radius: 6px;
-    overflow: hidden;
-}
-
-body.incognito-window #main-area:not(.sidebar-right) .webview-container {
-    margin-left: 0;
-}
-
-body.incognito-window #main-area.sidebar-right #sidebar {
-    margin-left: 0;
-    border-top-left-radius: 6px;
-    border-bottom-left-radius: 6px;
-    overflow: hidden;
-}
-
-body.incognito-window #main-area.sidebar-right .webview-container {
-    margin-right: 0;
-}
-
-body.incognito-window #webviews-container {
-    background: transparent !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    box-shadow: none !important;
 }
 
 /* Content Area */
@@ -4524,11 +4986,11 @@ body.incognito-window #webviews-container {
     box-shadow:
         var(--axis-webview-elevation-shadow),
         var(--axis-webview-panel-ring);
-    /* Opacity only — animating box-shadow made the webview outline blink on profile switch. */
+    /* Opacity only - animating box-shadow made the webview outline blink on profile switch. */
     transition: opacity 0.22s ease;
 }
 
-/* Outline only when nothing solid is filling the panel — not on real websites / Settings. */
+/* Outline only when nothing solid is filling the panel - not on real websites / Settings. */
 body.chrome-no-tabs,
 body.panel-idle,
 body.panel-ntp {
@@ -4544,6 +5006,9 @@ body.panel-settings {
     --chat-panel-border: rgba(255, 255, 255, 0.06);
     --chat-panel-text: rgba(255, 255, 255, 0.95);
     --chat-panel-text-muted: rgba(255, 255, 255, 0.5);
+    --axis-chat-slide-duration: 0.3s;
+    --axis-chat-slide-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --chat-panel-width: 400px;
     width: 100%;
     height: 100%;
     flex: 1 1 auto;
@@ -4552,7 +5017,7 @@ body.panel-settings {
     overflow: hidden;
     position: relative;
     background: transparent;
-    border-radius: var(--axis-content-panel-radius); /* All corners — matches shadow and window chrome */
+    border-radius: var(--axis-content-panel-radius); /* All corners - matches shadow and window chrome */
     margin: 0;
     box-shadow: none;
     backdrop-filter: none;
@@ -4561,7 +5026,7 @@ body.panel-settings {
     flex-shrink: 1;
     isolation: isolate;
     z-index: 1;
-    /* Single authoritative clip — child layers stay square so corners never shift by mode. */
+    /* Single authoritative clip - child layers stay square so corners never shift by mode. */
     clip-path: inset(0 round var(--axis-content-panel-radius));
 }
 
@@ -4588,7 +5053,7 @@ body.panel-settings {
     visibility: hidden;
 }
 
-/* All webviews: no literal idle fill — guests stay transparent; stack shows shell / desktop. */
+/* All webviews: no literal idle fill - guests stay transparent; stack shows shell / desktop. */
 webview {
     background: transparent !important;
     position: relative;
@@ -4660,7 +5125,7 @@ body.panel-settings #webviews-container {
     background: #363330 !important;
 }
 
-/* Active guest: one geometry for every mode (NTP, AI chat, website) — container does the only clip. */
+/* Active guest: one geometry for every mode (NTP, AI chat, website) - container does the only clip. */
 #webviews-container webview:not(.inactive) {
     position: absolute !important;
     inset: 0 !important;
@@ -4683,11 +5148,7 @@ body.panel-settings #webviews-container {
     background: transparent !important;
 }
 
-body.incognito-window #webviews-container webview.inactive {
-    background: transparent !important;
-}
-
-/* No idle overlay over the webview region — we want nothing to show where the guest sits when it's not in use. */
+/* No idle overlay over the webview region - we want nothing to show where the guest sits when it's not in use. */
 webview::before {
     content: none;
     display: none !important;
@@ -4713,7 +5174,7 @@ webview:not(.inactive)[style*='opacity:1']::before {
     opacity: 0;
 }
 
-/* Idle webview area is fully transparent — no frosted well, no fill, no inset shadow. */
+/* Idle webview area is fully transparent - no frosted well, no fill, no inset shadow. */
 body.transparent-sites-mode #webviews-container,
 body.chrome-no-tabs #webviews-container {
     background: transparent !important;
@@ -4762,6 +5223,7 @@ body.transparent-sites-mode.chrome-no-tabs #webviews-container webview.inactive:
     pointer-events: auto;
     overflow: hidden;
     border-radius: 0;
+    transition: right var(--axis-chat-slide-duration, 0.3s) var(--axis-chat-slide-ease, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
 .empty-state.hidden {
@@ -5656,6 +6118,7 @@ body.light-theme .tab-close {
 
 body.light-theme .tab-close:hover {
     color: #333;
+    background: rgba(0, 0, 0, 0.08);
 }
 
 body.light-theme .tab-pin {
@@ -6575,7 +7038,7 @@ body.light-theme .shortcut-desc {
     vertical-align: bottom;
 }
 
-/* Search Modal (Cmd+F) — sits just under themed URL bar; sizes match compact toolbar */
+/* Search Modal (Cmd+F) - sits just under themed URL bar; sizes match compact toolbar */
 .search-modal {
     position: fixed;
     /* #content-area padding-top (8px) + .webview-url-bar height (36px) + small gap */
@@ -7069,7 +7532,7 @@ body.light-theme .shortcut-desc {
     color: #fff;
 }
 
-/* Security panel — anchored page info / certificate viewer */
+/* Security panel - anchored page info / certificate viewer */
 .security-panel-backdrop {
     position: fixed;
     inset: 0;
@@ -7331,6 +7794,381 @@ body.light-theme .shortcut-desc {
     font-size: 11px;
 }
 
+/* Tab ancestry — compact popover under a sidebar tab */
+.tab-ancestry-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1003;
+    background: transparent;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.tab-ancestry-backdrop:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.tab-ancestry-panel {
+    --ta-bg: #171719;
+    --ta-border: rgba(255, 255, 255, 0.12);
+    --ta-pill-bg: rgba(255, 255, 255, 0.05);
+    --ta-pill-border: rgba(255, 255, 255, 0.12);
+    --ta-pill-hover-bg: rgba(255, 255, 255, 0.09);
+    --ta-pill-hover-border: rgba(255, 255, 255, 0.18);
+    --ta-pill-current-bg: rgba(255, 255, 255, 0.12);
+    --ta-pill-current-border: rgba(255, 255, 255, 0.28);
+    --ta-text: rgba(255, 255, 255, 0.94);
+    --ta-text-muted: rgba(255, 255, 255, 0.48);
+    --ta-text-step: rgba(255, 255, 255, 0.72);
+    --ta-dot: rgba(255, 255, 255, 0.34);
+    --ta-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --ta-dur: 0.12s;
+    position: fixed;
+    z-index: 1004;
+    width: 236px;
+    max-height: min(52vh, 380px);
+    display: flex;
+    flex-direction: column;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-5px) scale(0.97);
+    transform-origin: top center;
+    transition:
+        opacity var(--ta-dur) var(--ta-ease),
+        visibility var(--ta-dur),
+        transform var(--ta-dur) var(--ta-ease);
+    pointer-events: none;
+    overflow: visible;
+    box-sizing: border-box;
+}
+
+.tab-ancestry-panel.is-open {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+.tab-ancestry-panel.is-closing {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-3px) scale(0.98);
+    pointer-events: none;
+}
+
+.tab-ancestry-panel.hidden {
+    display: none;
+}
+
+/* Caret: outer = border color, inner = fill (matches card outline) */
+.tab-ancestry-arrow {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 14px;
+    height: 8px;
+    margin-left: -7px;
+    z-index: 3;
+    pointer-events: none;
+}
+
+.tab-ancestry-arrow::before,
+.tab-ancestry-arrow::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-left-color: transparent;
+    border-right-color: transparent;
+    border-top: 0;
+}
+
+.tab-ancestry-arrow::before {
+    top: 0;
+    border-width: 0 7px 8px 7px;
+    border-bottom-color: var(--ta-border);
+}
+
+.tab-ancestry-arrow::after {
+    top: 1px;
+    border-width: 0 6px 7px 6px;
+    border-bottom-color: var(--ta-bg);
+}
+
+.tab-ancestry-card {
+    position: relative;
+    margin-top: 7px;
+    display: flex;
+    flex-direction: column;
+    max-height: min(52vh, 380px);
+    border-radius: 12px;
+    border: 1px solid var(--ta-border);
+    background: var(--ta-bg);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+/* Hide the top border under the caret so the outline looks continuous */
+.tab-ancestry-card::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: var(--ta-arrow-x, 50%);
+    width: 12px;
+    height: 2px;
+    margin-left: -6px;
+    background: var(--ta-bg);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.tab-ancestry-header {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 12px 8px;
+    flex-shrink: 0;
+    z-index: 2;
+}
+
+.tab-ancestry-heading {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--ta-text);
+    line-height: 1.25;
+    text-align: center;
+}
+
+.tab-ancestry-header::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 12px;
+    pointer-events: none;
+    opacity: 0;
+    background: linear-gradient(to bottom, var(--ta-bg) 0%, transparent 100%);
+    transition: opacity 0.12s ease;
+    z-index: 2;
+}
+
+.tab-ancestry-panel.is-scrolled .tab-ancestry-header::after {
+    opacity: 0.92;
+}
+
+.tab-ancestry-body {
+    padding: 0 10px 12px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    overscroll-behavior: contain;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* legacy Edge */
+    scroll-behavior: auto;
+}
+
+.tab-ancestry-body::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none; /* Chromium / Electron */
+}
+
+.tab-ancestry-trail {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.tab-ancestry-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.tab-ancestry-step-dots {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2.5px;
+    padding: 5px 0;
+    pointer-events: none;
+}
+
+.tab-ancestry-step-dots span {
+    width: 2.5px;
+    height: 2.5px;
+    border-radius: 50%;
+    background: var(--ta-dot);
+}
+
+.tab-ancestry-step-btn {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    min-height: 30px;
+    padding: 6px 10px;
+    border: 1px solid var(--ta-pill-border);
+    border-radius: 999px;
+    background: var(--ta-pill-bg);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.tab-ancestry-step-btn:hover {
+    background: var(--ta-pill-hover-bg);
+    border-color: var(--ta-pill-hover-border);
+}
+
+.tab-ancestry-step-btn:active {
+    background: var(--ta-pill-current-bg);
+}
+
+.tab-ancestry-step-btn.is-current {
+    border-color: var(--ta-pill-current-border);
+    background: var(--ta-pill-current-bg);
+}
+
+.tab-ancestry-step-btn.is-current .tab-ancestry-step-title {
+    font-weight: 600;
+    color: var(--ta-text);
+}
+
+.tab-ancestry-step-btn:not(.is-current) .tab-ancestry-step-title {
+    color: var(--ta-text-step);
+}
+
+.tab-ancestry-step-btn:disabled {
+    cursor: default;
+}
+
+.tab-ancestry-step-btn:focus-visible {
+    border-color: var(--ta-pill-hover-border);
+    box-shadow: 0 0 0 2px rgba(120, 160, 255, 0.28);
+}
+
+.tab-ancestry-step-icon {
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    font-size: 9px;
+    color: var(--ta-text);
+    background: rgba(255, 255, 255, 0.06);
+    box-sizing: border-box;
+}
+
+.tab-ancestry-step-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.tab-ancestry-step-icon--search {
+    background: transparent;
+}
+
+.tab-ancestry-step-text {
+    min-width: 0;
+    flex: 1;
+}
+
+.tab-ancestry-step-title {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.25;
+    color: var(--ta-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tab-ancestry-empty {
+    margin: 2px 4px 4px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--ta-text-muted);
+    text-align: center;
+}
+
+:root[data-ui-theme="light"] .tab-ancestry-panel,
+.tab-ancestry-panel[data-ui-theme="light"] {
+    --ta-bg: #f3f3f5;
+    --ta-border: rgba(0, 0, 0, 0.12);
+    --ta-pill-bg: #ffffff;
+    --ta-pill-border: rgba(0, 0, 0, 0.12);
+    --ta-pill-hover-bg: #ffffff;
+    --ta-pill-hover-border: rgba(0, 0, 0, 0.18);
+    --ta-pill-current-bg: rgba(0, 0, 0, 0.04);
+    --ta-pill-current-border: rgba(0, 0, 0, 0.28);
+    --ta-text: rgba(0, 0, 0, 0.9);
+    --ta-text-muted: rgba(0, 0, 0, 0.48);
+    --ta-text-step: rgba(0, 0, 0, 0.62);
+    --ta-dot: rgba(0, 0, 0, 0.28);
+}
+
+:root[data-ui-theme="light"] .tab-ancestry-card,
+.tab-ancestry-panel[data-ui-theme="light"] .tab-ancestry-card {
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-ui-theme="light"] .tab-ancestry-step-icon,
+.tab-ancestry-panel[data-ui-theme="light"] .tab-ancestry-step-icon {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+:root[data-ui-theme="light"] .tab-ancestry-step-icon--search,
+.tab-ancestry-panel[data-ui-theme="light"] .tab-ancestry-step-icon--search {
+    background: transparent;
+}
+
+:root[data-ui-theme="light"] .tab-ancestry-step-btn:focus-visible,
+.tab-ancestry-panel[data-ui-theme="light"] .tab-ancestry-step-btn:focus-visible {
+    box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tab-ancestry-panel {
+        --ta-dur: 0.01s;
+    }
+}
+
 .security-panel-actions {
     display: flex;
     gap: 8px;
@@ -7364,7 +8202,7 @@ body.light-theme .shortcut-desc {
     }
 }
 
-/* New Tab Page overlay only — do not use class `new-tab-page` on `#webview-url-bar`. */
+/* New Tab Page overlay only - do not use class `new-tab-page` on `#webview-url-bar`. */
 @keyframes settingsSlideOut {
     0% {
         opacity: 1;
@@ -7388,7 +8226,7 @@ body.light-theme .shortcut-desc {
     }
 }
 
-/* New Tab Page overlay only — do not use class `new-tab-page` on `#webview-url-bar`. */
+/* New Tab Page overlay only - do not use class `new-tab-page` on `#webview-url-bar`. */
 #new-tab-page.new-tab-page {
     position: absolute;
     top: 0;
@@ -7400,6 +8238,7 @@ body.light-theme .shortcut-desc {
     flex-direction: column;
     align-items: stretch;
     border-radius: 0;
+    transition: right var(--axis-chat-slide-duration, 0.3s) var(--axis-chat-slide-ease, cubic-bezier(0.22, 1, 0.36, 1));
     --ntp-ink: rgba(255, 255, 255, 0.88);
     --ntp-ink-strong: #fff;
     --ntp-ink-muted: rgba(255, 255, 255, 0.55);
@@ -7446,7 +8285,6 @@ body.light-theme .shortcut-desc {
     -webkit-app-region: no-drag;
     overflow: hidden;
     padding: 0;
-    transition: right 0.42s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .webview-container:has(.webview-url-bar.hidden) #new-tab-page.new-tab-page {
     top: 0;
@@ -7565,6 +8403,15 @@ body.light-theme .shortcut-desc {
     transform: translateY(16px);
     background: transparent;
     transition: opacity 0.4s ease 0.05s, transform 0.42s cubic-bezier(0.4, 0, 0.2, 1) 0.05s;
+}
+/* Restoring a tab already in chat - keep messages where they were, no welcome slide. */
+#new-tab-page.ntp-ai-chat-instant .new-tab-ai-chat-view,
+#new-tab-page.ntp-ai-chat-instant .new-tab-start-view {
+    transition: none !important;
+}
+#new-tab-page.ntp-ai-chat-instant.ntp-ai-chat-mode .new-tab-ai-chat-view:not(.hidden) {
+    opacity: 1;
+    transform: none;
 }
 .new-tab-ai-chat-view.hidden {
     display: none;
@@ -7693,16 +8540,52 @@ body.light-theme .shortcut-desc {
     transform: translateY(-4px);
 }
 .new-tab-greeting {
-    margin: 0;
+    margin: 0 auto;
     font-size: clamp(26px, 4vw, 34px);
     font-weight: 300;
     letter-spacing: -0.02em;
-    line-height: 1.2;
+    line-height: 1.3;
     color: var(--ntp-greeting, rgba(255, 255, 255, 0.96));
     text-shadow: var(--ntp-text-shadow, 0 1px 24px rgba(0, 0, 0, 0.35));
+    display: inline-flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: baseline;
+    max-width: min(920px, 100%);
+    gap: 0;
+    unicode-bidi: isolate;
+}
+.new-tab-greeting[dir="ltr"] {
+    direction: ltr;
+}
+.new-tab-greeting[dir="rtl"],
+.new-tab-greeting.is-rtl-greet {
+    direction: rtl;
+    letter-spacing: 0;
+}
+.new-tab-greeting .ntp-g-before,
+.new-tab-greeting .ntp-g-after,
+.new-tab-greeting .ntp-g-name {
+    display: inline-block;
+    white-space: pre;
+    max-width: 100%;
+}
+.new-tab-greeting .ntp-g-name {
+    unicode-bidi: isolate;
+    direction: ltr;
+    font-weight: 400;
+}
+.new-tab-greeting .ntp-g-before,
+.new-tab-greeting .ntp-g-after {
+    unicode-bidi: isolate;
+}
+.new-tab-greeting.is-rtl-greet .ntp-g-before,
+.new-tab-greeting.is-rtl-greet .ntp-g-after {
+    direction: rtl;
 }
 
-/* —— New Tab widgets —— */
+/* -- New Tab widgets -- */
 .ntp-widgets-opt-in {
     display: inline-flex;
     align-items: center;
@@ -8069,7 +8952,7 @@ body.light-theme .shortcut-desc {
     color: var(--ntp-edit-btn-hover, rgba(255, 255, 255, 0.9));
     background: var(--ntp-widget-edit-bg, rgba(255, 255, 255, 0.06));
 }
-/* Done — solid accent so it reads apart from Add widget */
+/* Done - solid accent so it reads apart from Add widget */
 .ntp-widgets-editing .ntp-widgets-edit-btn {
     color: var(--ntp-done-btn-fg, #111);
     background: var(--ntp-done-btn-bg, rgba(255, 255, 255, 0.92));
@@ -8199,7 +9082,7 @@ body.light-theme .shortcut-desc {
     contain: layout;
 }
 
-/* Weather widget — centered cluster, city label at every size */
+/* Weather widget - centered cluster, city label at every size */
 .ntp-widget--weather {
     border: none !important;
     background: var(--ntp-widget-bg, rgba(255, 255, 255, 0.045)) !important;
@@ -8410,7 +9293,7 @@ body.light-theme .shortcut-desc {
     right: 6px;
 }
 
-/* Clock + World Clock — same clear centered style as Weather */
+/* Clock + World Clock - same clear centered style as Weather */
 .ntp-widget--clock,
 .ntp-widget--worldclock {
     border: none !important;
@@ -8898,6 +9781,38 @@ body.light-theme .shortcut-desc {
     color: #fff;
     font-weight: 700;
 }
+
+/* Light appearance - widget tiles/accents stay clear on white New Tab */
+:root[data-ui-theme="light"] .ntp-w-weather[data-weather-kind="sun"] { --ntp-weather-icon: #d97706; }
+:root[data-ui-theme="light"] .ntp-w-weather[data-weather-kind="partly"] { --ntp-weather-icon: #2563eb; }
+:root[data-ui-theme="light"] .ntp-w-weather[data-weather-kind="cloud"] { --ntp-weather-icon: #475569; }
+:root[data-ui-theme="light"] .ntp-w-weather[data-weather-kind="rain"],
+:root[data-ui-theme="light"] .ntp-w-weather[data-weather-kind="storm"] { --ntp-weather-icon: #1d4ed8; }
+:root[data-ui-theme="light"] .ntp-w-weather[data-weather-kind="snow"] { --ntp-weather-icon: #64748b; }
+:root[data-ui-theme="light"] .ntp-w-weather[data-weather-kind="fog"] { --ntp-weather-icon: #64748b; }
+
+:root[data-ui-theme="light"] .ntp-w-aq[data-aq-kind="good"] { --ntp-aq-icon: #059669; }
+:root[data-ui-theme="light"] .ntp-w-aq[data-aq-kind="moderate"] { --ntp-aq-icon: #ca8a04; }
+:root[data-ui-theme="light"] .ntp-w-aq[data-aq-kind="usg"] { --ntp-aq-icon: #ea580c; }
+:root[data-ui-theme="light"] .ntp-w-aq[data-aq-kind="unhealthy"] { --ntp-aq-icon: #dc2626; }
+:root[data-ui-theme="light"] .ntp-w-aq[data-aq-kind="very"],
+:root[data-ui-theme="light"] .ntp-w-aq[data-aq-kind="hazard"] { --ntp-aq-icon: #9333ea; }
+
+:root[data-ui-theme="light"] .ntp-w-markets-row[data-dir="up"] .ntp-w-markets-chg { color: #059669; }
+:root[data-ui-theme="light"] .ntp-w-markets-row[data-dir="down"] .ntp-w-markets-chg { color: #dc2626; }
+
+:root[data-ui-theme="light"] .ntp-w-cal-cell.is-today {
+    background: rgba(0, 0, 0, 0.1);
+    color: rgba(0, 0, 0, 0.92);
+}
+:root[data-ui-theme="light"] .ntp-w-cal-nav:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--ntp-ink-strong, rgba(0, 0, 0, 0.92));
+}
+:root[data-ui-theme="light"] .ntp-w-cal-title:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
 .ntp-w-cal--mode-month.ntp-w-cal--xs .ntp-w-cal-cell,
 .ntp-w-cal--mode-month.ntp-w-cal--sm .ntp-w-cal-cell {
     font-size: clamp(9px, 8cqmin, 11px);
@@ -9823,7 +10738,7 @@ body.light-theme .shortcut-desc {
     color: var(--ntp-ink-faint, rgba(255, 255, 255, 0.35));
     font-variant-numeric: tabular-nums;
 }
-/* Legacy weather layout overrides removed — see .ntp-w-weather above */
+/* Legacy weather layout overrides removed - see .ntp-w-weather above */
 .ntp-w-weather-hero {
     display: flex;
     align-items: center;
@@ -9936,7 +10851,7 @@ body.light-theme .shortcut-desc {
     color: var(--ntp-ink-label, rgba(255, 255, 255, 0.5));
     text-shadow: var(--ntp-text-shadow, none);
 }
-/* Legacy worldclock centering removed — see adaptive .ntp-w-world block above */
+/* Legacy worldclock centering removed - see adaptive .ntp-w-world block above */
 .ntp-w-headlines--xs {
     display: flex;
     flex-direction: column;
@@ -10436,7 +11351,7 @@ body.light-theme .shortcut-desc {
     color: var(--ntp-ink, rgba(255, 255, 255, 0.75));
     text-shadow: var(--ntp-text-shadow, 0 1px 3px rgba(0, 0, 0, 0.55));
 }
-/* Legacy .ntp-w-weather / icon font-size overrides removed — see weather block above */
+/* Legacy .ntp-w-weather / icon font-size overrides removed - see weather block above */
 .ntp-w-weather--compact {
     gap: 8px;
 }
@@ -10807,7 +11722,7 @@ body.light-theme .shortcut-desc {
     background: var(--ntp-suggestion-active, rgba(255, 255, 255, 0.09));
 }
 
-/* Light appearance — search chrome, menu, suggestions (ink vars handle widgets/greeting). */
+/* Light appearance - search chrome, menu, suggestions (ink vars handle widgets/greeting). */
 :root[data-ui-theme="light"] .new-tab-search-wrapper {
     border-color: rgba(0, 0, 0, 0.08);
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06),
@@ -10821,7 +11736,7 @@ body.light-theme .shortcut-desc {
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.08),
                 inset 0 1px 0 rgba(255, 255, 255, 1);
 }
-/* Widgets layout — one solid panel; no inset highlight on the input half. */
+/* Widgets layout - one solid panel; no inset highlight on the input half. */
 :root[data-ui-theme="light"] #new-tab-page .new-tab-search-wrapper,
 :root[data-ui-theme="light"] #new-tab-page .new-tab-search-wrapper:hover,
 :root[data-ui-theme="light"] #new-tab-page .new-tab-search-wrapper:focus-within {
@@ -10870,7 +11785,7 @@ body.light-theme .shortcut-desc {
     color: rgba(0, 0, 0, 0.55);
 }
 
-/* Widget ink fallbacks — #new-tab-page sets --ntp-* from JS when theme toggles. */
+/* Widget ink fallbacks - #new-tab-page sets --ntp-* from JS when theme toggles. */
 #new-tab-page .ntp-widgets-section :is(
     .ntp-w-today-time,
     .ntp-w-world-time,
@@ -10939,6 +11854,9 @@ body.light-theme .shortcut-desc {
     overflow-y: auto;
     scroll-behavior: smooth;
 }
+.new-tab-ask-messages.ntp-ask-instant-scroll {
+    scroll-behavior: auto !important;
+}
 .new-tab-ask-messages.hidden {
     display: none;
 }
@@ -10953,8 +11871,10 @@ body.light-theme .shortcut-desc {
     padding: 12px 4px;
     font-size: 15px;
     line-height: 1.65;
-    animation: ntpMessageIn 0.32s cubic-bezier(0.23, 1, 0.32, 1);
     box-sizing: border-box;
+}
+#new-tab-page.ntp-ai-chat-mode .new-tab-ask-message.ntp-ask-message-enter {
+    animation: ntpMessageIn 0.32s cubic-bezier(0.23, 1, 0.32, 1);
 }
 @keyframes ntpMessageIn {
     from { opacity: 0; transform: translateY(8px); }
@@ -11799,7 +12719,8 @@ body.light-theme .shortcut-desc {
 .tab:hover .tab-right {
     opacity: 1;
     pointer-events: auto;
-    transform: translateX(0);
+    transform: none;
+    width: 28px;
     transition: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
@@ -11852,7 +12773,7 @@ body.light-theme .shortcut-desc {
     transform: none !important;
 }
 
-/* Pinned tabs: EXACTLY like unpinned – same dimensions, no glow, same active/hover */
+/* Pinned tabs: EXACTLY like unpinned - same dimensions, no glow, same active/hover */
 .tab.pinned {
     min-height: 32px;
     height: 32px;
@@ -11870,7 +12791,8 @@ body.light-theme .shortcut-desc {
     display: none;
 }
 .tab.pinned .tab-content {
-    padding: 7px 13px;
+    /* Match unpinned padding so the close (− / ×) sits in the same place. */
+    padding: 2px 4px 2px 10px;
     min-height: 32px;
     height: 32px;
 }
@@ -11963,7 +12885,7 @@ body.light-theme .shortcut-desc {
     box-shadow: none !important;
 }
 
-/* Header row matches single tab height (32px) – tight padding so title reaches further */
+/* Header row matches single tab height (32px) - tight padding so title reaches further */
 .tab-group > .tab-content {
     height: 32px;
     min-height: 32px;
@@ -11975,28 +12897,98 @@ body.light-theme .shortcut-desc {
     align-items: center;
 }
 
-/* Tab group header row — same icon + title layout as sidebar tabs */
-.tab-group .tab-content .tab-left {
+/* Tab group header row - balanced icon + title spacing */
+.tab-group > .tab-content .tab-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
     flex: 1;
     min-width: 0;
 }
 
-.tab-group-icon {
+.tab-group-icon:not(.tab-favicon-custom):not(.tab-group-icon--builtin) {
     color: var(--text-color-muted);
-    font-size: 16px;
-    width: 16px;
-    height: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     flex-shrink: 0;
-    opacity: 0.7;
-    transition: color 0.2s ease;
+    transition: color 0.2s ease, opacity 0.2s ease;
 }
 
+.profile-switcher-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10048;
+    background: transparent;
+    pointer-events: auto;
+}
+
+.profile-switcher-backdrop.hidden {
+    display: none;
+    pointer-events: none;
+}
+
+/* Site HTML fullscreen: collapse chrome instantly — no webview slide / stretch. */
+body.axis-site-html-fullscreen .webview-container {
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+body.axis-site-html-fullscreen .webview-url-bar,
+body.axis-site-html-fullscreen .axis-store-install-host-bar {
+    display: none !important;
+    flex: 0 0 0 !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: hidden !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+body.axis-site-html-fullscreen #webviews-container {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: 100% !important;
+}
+
+body.axis-site-html-fullscreen #axis-nav-gesture-layer,
+body.axis-site-html-fullscreen #webview {
+    top: 0 !important;
+}
+
+body.axis-site-html-fullscreen .webview-container,
+body.axis-site-html-fullscreen .webview-container #webviews-container,
+body.axis-site-html-fullscreen .webview-container #axis-nav-gesture-layer,
+body.axis-site-html-fullscreen .webview-container #webview,
+body.axis-site-html-fullscreen .webview-container .webview-url-bar,
+body.axis-site-html-fullscreen .webview-container .axis-store-install-host-bar,
+body.axis-site-html-fullscreen #webviews-container webview {
+    transition: none !important;
+    animation: none !important;
+}
+
+body.axis-site-html-fullscreen.host-resizing .webview-container,
+body.axis-site-html-fullscreen.host-resizing .webview-container * {
+    transition: none !important;
+    animation: none !important;
+}
+
+/* Site fullscreen exit: snap chrome back instantly (no 0.3s url bar / webview slide). */
+body.axis-site-html-fs-restore .webview-container .webview-url-bar,
+body.axis-site-html-fs-restore .webview-container #webviews-container,
+body.axis-site-html-fs-restore .webview-container #axis-nav-gesture-layer,
+body.axis-site-html-fs-restore .webview-container #webview,
+body.axis-site-html-fs-restore .webview-container .axis-store-install-host-bar {
+    transition: none !important;
+    animation: none !important;
+}
 
 /* Drag-over outline - thin, same dimensions as group */
 .tab-group::before {
@@ -12077,7 +13069,7 @@ body.light-theme .shortcut-desc {
 
 .tab-group-content.open {
     opacity: 1;
-    padding: 2px 6px 6px 6px;
+    padding: 2px 4px 6px 4px;
     visibility: visible;
     display: flex;
     transition: max-height 0.2s cubic-bezier(0.22, 1, 0.32, 1),
@@ -12118,10 +13110,52 @@ body.light-theme .shortcut-desc {
 .tab-group .tab .tab-content {
     height: 32px !important;
     min-height: 32px !important;
-    padding: 4px 6px !important;
+    padding: 2px 4px 2px 10px !important;
     opacity: 1 !important;
     visibility: visible !important;
     display: flex !important;
+    align-items: center !important;
+    box-sizing: border-box !important;
+}
+
+.tab-group .tab .tab-left {
+    gap: 8px;
+    align-items: center;
+}
+
+.tab-group .tab .tab-left .tab-title {
+    line-height: 15px;
+    align-self: center;
+}
+
+.tab-group .tab .tab-left > .tab-favicon,
+.tab-group .tab .tab-left > img.tab-favicon {
+    align-self: center;
+}
+
+.tab-group .tab .tab-close {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    margin: 0;
+    padding: 0;
+}
+
+.tab-group .tab .tab-right {
+    opacity: 0;
+    pointer-events: none;
+    transform: none;
+    transition: none;
+    height: 28px;
+    width: 0;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .tab-group .tab.active {
@@ -12131,33 +13165,21 @@ body.light-theme .shortcut-desc {
     transform: none;
 }
 
-.tab-group .tab .tab-right {
-    opacity: 0;
-    pointer-events: none;
-    transform: translateX(8px);
-    transition: none;
-}
-
 /* Tabs inside tab groups show close button only on hover */
 .tab-group .tab:hover .tab-right,
 .tab-group .tab.pinned:hover .tab-right,
 .tab-group .tab.closed:hover .tab-right {
     opacity: 1 !important;
     pointer-events: auto !important;
-    transform: translateX(0) !important;
-    width: auto !important;
+    transform: none !important;
+    width: 28px !important;
 }
 
 /* Active tabs in groups don't show buttons unless hovered */
 .tab-group .tab.active .tab-right {
     opacity: 0;
     pointer-events: none;
-    transform: translateX(8px);
-}
-
-.tab-group-delete {
-    opacity: 1;
-    pointer-events: auto;
+    transform: none;
 }
 
 /* Smooth scrolling */
@@ -12274,7 +13296,7 @@ body.light-theme .settings-actions {
 /* Removed pulse animation that was causing freezing */
 
 /* Smooth transitions for specific interactive elements */
-button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .security-btn, #copy-link-btn {
+button, input, select, .tab, .nav-btn, .url-icon, .settings-btn, .security-btn, #copy-link-btn {
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -12354,7 +13376,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     transition: none !important;
 }
 
-/* Professional Loading Animation — do not override .webview-container border-radius. */
+/* Professional Loading Animation - do not override .webview-container border-radius. */
 .webview-container {
     position: relative;
     overflow: hidden;
@@ -12487,20 +13509,20 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 /* ===== REFINED MICRO-INTERACTIONS ===== */
 
 /* Refined Button Press Animations */
-.nav-btn, .tab-close, .url-icon, .settings-btn, .security-btn, #copy-link-btn, .nav-menu-btn, .download-btn, .close-settings, .refresh-btn, .clear-btn {
+.nav-btn, .url-icon, .settings-btn, .security-btn, #copy-link-btn, .nav-menu-btn, .download-btn, .close-settings, .refresh-btn, .clear-btn {
     transition: all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     position: relative;
     overflow: hidden;
 }
 
 /* Active styles - sidebar buttons have their own specific styles */
-.tab-close:active, .add-tab-btn:active, .settings-btn:active:not(.sidebar-footer .nav-btn), .security-btn:active, #copy-link-btn:active, .nav-menu-btn:active, .download-btn:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
+.add-tab-btn:active, .settings-btn:active:not(.sidebar-footer .nav-btn), .security-btn:active, #copy-link-btn:active, .nav-menu-btn:active, .download-btn:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
     transform: scale(0.95);
     transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Premium Ripple Effect for Buttons */
-.nav-btn::before, .tab-close::before, .url-icon::before, .settings-btn::before, .security-btn::before, #copy-link-btn::before, .nav-menu-btn::before, .download-btn::before, .close-settings::before, .refresh-btn::before, .clear-btn::before {
+.nav-btn::before, .url-icon::before, .settings-btn::before, .security-btn::before, #copy-link-btn::before, .nav-menu-btn::before, .download-btn::before, .close-settings::before, .refresh-btn::before, .clear-btn::before {
     content: '';
     position: absolute;
     top: 50%;
@@ -12517,7 +13539,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 }
 
 /* Ripple effect - removed for sidebar buttons to keep animations clean */
-.tab-close:active::before, .add-tab-btn:active::before, .settings-btn:active::before:not(.sidebar-footer .nav-btn::before), .security-btn:active::before, #copy-link-btn:active::before, .nav-menu-btn:active::before, .download-btn:active::before, .close-settings:active::before, .refresh-btn:active::before, .clear-btn:active::before {
+.add-tab-btn:active::before, .settings-btn:active::before:not(.sidebar-footer .nav-btn::before), .security-btn:active::before, #copy-link-btn:active::before, .nav-menu-btn:active::before, .download-btn:active::before, .close-settings:active::before, .refresh-btn:active::before, .clear-btn:active::before {
     width: 80px;
     height: 80px;
     opacity: 1;
@@ -12553,7 +13575,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 }
 
 /* Premium Click Animation - sidebar buttons have their own specific styles */
-.tab-close:active, .add-tab-btn:active, .settings-btn:active:not(.sidebar-footer .nav-btn), .security-btn:active, .nav-menu-btn:active, .download-btn:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
+.add-tab-btn:active, .settings-btn:active:not(.sidebar-footer .nav-btn), .security-btn:active, .nav-menu-btn:active, .download-btn:active, .close-settings:active, .refresh-btn:active, .clear-btn:active {
     transform: scale(0.95);
     transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -12600,12 +13622,26 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 /* Note: Tab styles are defined above - this section removed to avoid conflicts */
 
 .tab-close {
-    transition: all 0.15s ease;
+    transition: background 0.12s ease, color 0.12s ease !important;
+    transform: none !important;
 }
 
-.tab-close:hover {
-    background: rgba(255, 59, 48, 0.15);
-    transform: none;
+.tab-close:hover,
+.tab-close:active {
+    background: rgba(var(--shell-ink-rgb), 0.07);
+    transform: none !important;
+}
+
+.tab-close:active {
+    background: rgba(var(--shell-ink-rgb), 0.11);
+}
+
+/* Keep close-button hover polish even when tab hover nukes child transitions */
+.tab:hover .tab-close,
+.tab:hover .tab-close::before,
+.tab:hover .tab-close::after {
+    transition: background 0.12s ease, color 0.12s ease !important;
+    transform: none !important;
 }
 
 /* Refined URL Bar Enhancements */
@@ -12757,7 +13793,7 @@ input:focus, select:focus, button:focus {
 }
 
 /* Refined Transitions for Interactive Elements */
-button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .security-btn, #copy-link-btn, .nav-menu-btn, .download-btn, .close-settings, .refresh-btn, .clear-btn, .nav-menu-item {
+button, input, select, .tab, .nav-btn, .url-icon, .settings-btn, .security-btn, #copy-link-btn, .nav-menu-btn, .download-btn, .close-settings, .refresh-btn, .clear-btn, .nav-menu-item {
     transition: all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
@@ -12836,7 +13872,7 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
 }
 
 #webviews-container {
-    /* Layout + stacking — see also block at “Adjust webviews container” (~12559). */
+    /* Layout + stacking - see also block at “Adjust webviews container” (~12559). */
     z-index: 2;
 }
 
@@ -12852,9 +13888,12 @@ button, input, select, .tab, .nav-btn, .url-icon, .tab-close, .settings-btn, .se
     pointer-events: none;
     overflow: hidden;
     border-radius: 0;
+    transition:
+        top 0.3s ease,
+        right var(--axis-chat-slide-duration, 0.3s) var(--axis-chat-slide-ease, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
-/* Link preview — fixed corner hit zones so the chip can jump right without flicker. */
+/* Link preview - fixed corner hit zones so the chip can jump right without flicker. */
 .axis-link-status-layer {
     position: absolute;
     left: 0;
@@ -13022,13 +14061,22 @@ select:focus {
 }
 
 /* Quit confirmation modal */
+#quit-modal-backdrop.modal-backdrop {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+}
+
 .quit-modal-card {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) scale(0.9);
+    position: relative;
+    top: auto;
+    left: auto;
+    transform: scale(0.9);
     width: 420px;
-    max-width: 90vw;
+    max-width: min(420px, 100%);
+    margin: 0;
     background: rgba(15, 15, 15, 0.98) !important;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 20px;
@@ -13053,14 +14101,14 @@ select:focus {
 .modal-backdrop:not(.hidden) .quit-modal-card {
     opacity: 1;
     visibility: visible;
-    transform: translate(-50%, -50%) scale(1);
+    transform: scale(1);
     transition-delay: 0s;
 }
 
 .modal-backdrop.closing .quit-modal-card {
     opacity: 0;
     visibility: hidden;
-    transform: translate(-50%, -50%) scale(0.9);
+    transform: scale(0.9);
     transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
                 transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
                 visibility 0s linear 0.3s;
@@ -13116,15 +14164,20 @@ select:focus {
     font-weight: 700;
     letter-spacing: -0.2px;
     color: #ffffff !important;
-    margin-bottom: 8px;
+    margin: 0 auto 8px;
     line-height: 1.3;
+    width: 100%;
+    text-align: center;
 }
 
 .quit-modal-subtitle {
     font-size: 14px;
     color: #ffffff !important;
     line-height: 1.5;
-    max-width: 320px;
+    width: 100%;
+    max-width: min(320px, 100%);
+    margin: 0 auto;
+    text-align: center;
 }
 
 .quit-modal-actions {
@@ -13453,7 +14506,7 @@ body.light-theme .btn-primary {
     flex-shrink: 0;
 }
 
-/* Legacy styles for backwards compatibility — shell matches .search-modal (Cmd+F) */
+/* Legacy styles for backwards compatibility - shell matches .search-modal (Cmd+F) */
 .downloads-popup {
     position: fixed;
     background: rgba(10, 10, 12, 0.86);
@@ -13534,7 +14587,7 @@ body.light-theme .btn-primary {
     pointer-events: none;
 }
 
-/* URL bar extensions menu — same frosted shell, shadow, and motion as .downloads-popup */
+/* URL bar extensions menu - same frosted shell, shadow, and motion as .downloads-popup */
 .extensions-menu-panel {
     position: fixed;
     background: rgba(10, 10, 12, 0.86);
@@ -13784,7 +14837,7 @@ body.light-theme .btn-primary {
     }
 }
 
-/* URL bar ad blocker panel — compact shield popup */
+/* URL bar privacy protection panel - compact shield popup */
 .adblock-panel {
     position: fixed;
     background: rgba(14, 14, 16, 0.94);
@@ -13804,13 +14857,14 @@ body.light-theme .btn-primary {
                 transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
     overflow: hidden;
     will-change: opacity, transform;
-    padding: 14px;
+    padding: 0;
     box-sizing: border-box;
-    width: 300px;
+    width: 340px;
     max-width: calc(100vw - 16px);
+    max-height: min(78vh, 620px);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 0;
 }
 
 .adblock-panel:not(.hidden) {
@@ -13834,6 +14888,7 @@ body.light-theme .btn-primary {
     justify-content: space-between;
     gap: 8px;
     flex-shrink: 0;
+    padding: 14px 14px 0;
 }
 
 .adblock-panel-title {
@@ -13920,19 +14975,49 @@ body.light-theme .btn-primary {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 12px 14px 14px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.adblock-panel-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.adblock-panel-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+.adblock-panel-body::-webkit-scrollbar-track {
+    background: transparent;
 }
 
 .adblock-panel-stat-wrap {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.045);
+    flex-shrink: 0;
 }
 
 .adblock-panel-stat-wrap.hidden {
     display: none;
+}
+
+.adblock-panel-stat-hero {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
 }
 
 .adblock-panel-stat-num {
@@ -13954,6 +15039,47 @@ body.light-theme .btn-primary {
     color: rgba(255, 255, 255, 0.5);
 }
 
+.adblock-panel-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.adblock-panel-chips.hidden {
+    display: none;
+}
+
+.adblock-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.adblock-chip-num {
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.adblock-chip[data-cat="ads"] .adblock-chip-num {
+    color: #7ec8ff;
+}
+
+.adblock-chip[data-cat="trackers"] .adblock-chip-num {
+    color: #ffb340;
+}
+
+.adblock-chip[data-cat="other"] .adblock-chip-num {
+    color: #b8a6ff;
+}
+
 .adblock-panel-status {
     margin: 0;
     padding: 0 2px;
@@ -13961,6 +15087,222 @@ body.light-theme .btn-primary {
     line-height: 1.45;
     color: rgba(255, 255, 255, 0.68);
     word-break: break-word;
+    flex-shrink: 0;
+}
+
+.adblock-panel-details {
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    overflow: visible;
+    flex-shrink: 0;
+}
+
+.adblock-panel-details.hidden {
+    display: none;
+}
+
+.adblock-panel-details > summary {
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+    padding: 9px 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.78);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.adblock-panel-details > summary::-webkit-details-marker {
+    display: none;
+}
+
+.adblock-panel-details > summary::before {
+    content: '';
+    width: 0;
+    height: 0;
+    border-left: 5px solid rgba(255, 255, 255, 0.45);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform 0.15s ease;
+    flex-shrink: 0;
+}
+
+.adblock-panel-details[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.adblock-panel-details-body {
+    padding: 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.adblock-panel-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.adblock-panel-section.hidden {
+    display: none;
+}
+
+.adblock-panel-section-label {
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.adblock-panel-section-hint {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.adblock-panel-facts {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.adblock-fact-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 3px 0;
+}
+
+.adblock-fact-row dt {
+    margin: 0;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.72);
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.adblock-fact-row dd {
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.92);
+    flex-shrink: 0;
+}
+
+.adblock-fact-row--muted dt,
+.adblock-fact-row--muted dd {
+    color: rgba(255, 255, 255, 0.48);
+    font-weight: 500;
+}
+
+.adblock-cat-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.35);
+}
+
+.adblock-cat-dot--ads { background: #7ec8ff; }
+.adblock-cat-dot--trackers { background: #ffb340; }
+.adblock-cat-dot--other { background: #b8a6ff; }
+
+.adblock-panel-blocked {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.adblock-blocked-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    padding: 8px 9px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.adblock-blocked-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+}
+
+.adblock-blocked-host {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.adblock-blocked-count {
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.78);
+    flex-shrink: 0;
+}
+
+.adblock-blocked-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.adblock-blocked-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    border: 1px solid transparent;
+}
+
+.adblock-blocked-tag--ads {
+    background: rgba(126, 200, 255, 0.12);
+    border-color: rgba(126, 200, 255, 0.28);
+    color: #7ec8ff;
+}
+
+.adblock-blocked-tag--trackers {
+    background: rgba(255, 179, 64, 0.12);
+    border-color: rgba(255, 179, 64, 0.28);
+    color: #ffb340;
+}
+
+.adblock-blocked-tag--other {
+    background: rgba(184, 166, 255, 0.12);
+    border-color: rgba(184, 166, 255, 0.28);
+    color: #b8a6ff;
+}
+
+.adblock-blocked-type {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.48);
 }
 
 .adblock-panel-actions {
@@ -13968,6 +15310,7 @@ body.light-theme .btn-primary {
     flex-direction: column;
     gap: 6px;
     padding-top: 2px;
+    flex-shrink: 0;
 }
 
 .adblock-panel-btn {
@@ -13981,18 +15324,14 @@ body.light-theme .btn-primary {
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 
-.adblock-panel-btn:active {
-    transform: scale(0.98);
-}
+.adblock-panel-btn:active { transform: scale(0.98); }
 
 .adblock-panel-btn--primary {
     background: rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.94);
 }
 
-.adblock-panel-btn--primary:hover {
-    background: rgba(255, 255, 255, 0.14);
-}
+.adblock-panel-btn--primary:hover { background: rgba(255, 255, 255, 0.14); }
 
 .adblock-panel-btn--secondary {
     background: rgba(255, 255, 255, 0.04);
@@ -14005,9 +15344,7 @@ body.light-theme .btn-primary {
     border-color: rgba(255, 255, 255, 0.2);
 }
 
-.adblock-panel-btn.hidden {
-    display: none;
-}
+.adblock-panel-btn.hidden { display: none; }
 
 :root[data-ui-theme="light"] .adblock-panel {
     box-shadow: 0 14px 36px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.65) !important;
@@ -14031,32 +15368,70 @@ body.light-theme .btn-primary {
     color: rgba(0, 0, 0, 0.5) !important;
 }
 
-:root[data-ui-theme="light"] .adblock-panel-stat-num {
-    color: #248a3d !important;
-}
+:root[data-ui-theme="light"] .adblock-panel-stat-num { color: #248a3d !important; }
+:root[data-ui-theme="light"] .adblock-panel--off .adblock-panel-stat-num { color: rgba(0, 0, 0, 0.28) !important; }
+:root[data-ui-theme="light"] .adblock-panel-icon-wrap--on { background: rgba(36, 138, 61, 0.12) !important; }
+:root[data-ui-theme="light"] .adblock-panel-icon-wrap--on .adblock-panel-icon { color: #248a3d !important; }
+:root[data-ui-theme="light"] .adblock-panel-icon-wrap--warn { background: rgba(255, 149, 0, 0.12) !important; }
+:root[data-ui-theme="light"] .adblock-panel-icon-wrap--off { background: rgba(0, 0, 0, 0.05) !important; }
 
-:root[data-ui-theme="light"] .adblock-panel--off .adblock-panel-stat-num {
-    color: rgba(0, 0, 0, 0.28) !important;
-}
-
-:root[data-ui-theme="light"] .adblock-panel-icon-wrap--on {
-    background: rgba(36, 138, 61, 0.12) !important;
-}
-
-:root[data-ui-theme="light"] .adblock-panel-icon-wrap--on .adblock-panel-icon {
-    color: #248a3d !important;
-}
-
-:root[data-ui-theme="light"] .adblock-panel-icon-wrap--warn {
-    background: rgba(255, 149, 0, 0.12) !important;
-}
-
-:root[data-ui-theme="light"] .adblock-panel-icon-wrap--off {
-    background: rgba(0, 0, 0, 0.05) !important;
-}
-
-:root[data-ui-theme="light"] .adblock-panel-stat-wrap {
+:root[data-ui-theme="light"] .adblock-panel-stat-wrap,
+:root[data-ui-theme="light"] .adblock-panel-details,
+:root[data-ui-theme="light"] .adblock-blocked-row {
     background: rgba(0, 0, 0, 0.04) !important;
+}
+
+:root[data-ui-theme="light"] .adblock-panel-details,
+:root[data-ui-theme="light"] .adblock-blocked-row {
+    border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+:root[data-ui-theme="light"] .adblock-chip {
+    background: rgba(0, 0, 0, 0.04) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+    color: rgba(0, 0, 0, 0.55) !important;
+}
+
+:root[data-ui-theme="light"] .adblock-chip-num,
+:root[data-ui-theme="light"] .adblock-fact-row dd,
+:root[data-ui-theme="light"] .adblock-blocked-count,
+:root[data-ui-theme="light"] .adblock-blocked-host {
+    color: #1a1a1a !important;
+}
+
+:root[data-ui-theme="light"] .adblock-chip[data-cat="ads"] .adblock-chip-num,
+:root[data-ui-theme="light"] .adblock-blocked-tag--ads { color: #0071e3 !important; }
+:root[data-ui-theme="light"] .adblock-chip[data-cat="trackers"] .adblock-chip-num,
+:root[data-ui-theme="light"] .adblock-blocked-tag--trackers { color: #c77d00 !important; }
+:root[data-ui-theme="light"] .adblock-chip[data-cat="other"] .adblock-chip-num,
+:root[data-ui-theme="light"] .adblock-blocked-tag--other { color: #6e56cf !important; }
+
+:root[data-ui-theme="light"] .adblock-blocked-tag--ads {
+    background: rgba(0, 113, 227, 0.1) !important;
+    border-color: rgba(0, 113, 227, 0.22) !important;
+}
+:root[data-ui-theme="light"] .adblock-blocked-tag--trackers {
+    background: rgba(199, 125, 0, 0.1) !important;
+    border-color: rgba(199, 125, 0, 0.22) !important;
+}
+:root[data-ui-theme="light"] .adblock-blocked-tag--other {
+    background: rgba(110, 86, 207, 0.1) !important;
+    border-color: rgba(110, 86, 207, 0.22) !important;
+}
+
+:root[data-ui-theme="light"] .adblock-panel-details > summary,
+:root[data-ui-theme="light"] .adblock-fact-row dt { color: rgba(0, 0, 0, 0.72) !important; }
+
+:root[data-ui-theme="light"] .adblock-panel-section-label,
+:root[data-ui-theme="light"] .adblock-panel-section-hint,
+:root[data-ui-theme="light"] .adblock-fact-row--muted dt,
+:root[data-ui-theme="light"] .adblock-fact-row--muted dd,
+:root[data-ui-theme="light"] .adblock-blocked-type {
+    color: rgba(0, 0, 0, 0.42) !important;
+}
+
+:root[data-ui-theme="light"] .adblock-panel-details > summary::before {
+    border-left-color: rgba(0, 0, 0, 0.4);
 }
 
 :root[data-ui-theme="light"] .adblock-panel-btn--primary {
@@ -14068,6 +15443,15 @@ body.light-theme .btn-primary {
     background: rgba(0, 0, 0, 0.03) !important;
     border-color: rgba(0, 0, 0, 0.1) !important;
     color: rgba(0, 0, 0, 0.78) !important;
+}
+
+:root[data-ui-theme="light"] .adblock-panel-body {
+    scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+
+:root[data-ui-theme="light"] .adblock-panel-body::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    background-clip: padding-box;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -15139,70 +16523,60 @@ body.light-theme .color-option.selected {
     box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.2), 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 
-/* macOS-style Emoji + Icon picker popover */
+/* Icon picker — sidebar popover (matches Tab Ancestry) */
 .axis-icon-picker {
-    position: fixed;
-    z-index: 10050;
-    display: none;
-    pointer-events: auto;
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-    transition: opacity 0.14s ease, transform 0.14s ease;
+    z-index: 1005;
 }
 
-.axis-icon-picker:not(.hidden) {
-    display: block;
+.axis-icon-picker-card {
+    max-height: min(52vh, 360px);
 }
 
-.axis-icon-picker.is-open {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-}
-
-.axis-icon-picker-panel {
-    width: 320px;
-    max-height: 380px;
-    display: flex;
+.axis-icon-picker-header {
     flex-direction: column;
-    overflow: hidden;
-    border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    background: rgba(28, 28, 30, 0.92);
-    box-shadow:
-        0 18px 48px rgba(0, 0, 0, 0.45),
-        0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
-    backdrop-filter: blur(28px) saturate(180%);
-    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    gap: 8px;
+    padding-bottom: 6px;
 }
 
-.axis-icon-picker-segments {
+.axis-icon-picker-tabs {
     display: flex;
-    gap: 4px;
-    padding: 10px 12px 8px;
+    align-items: center;
     justify-content: center;
+    gap: 6px;
+    width: 100%;
 }
 
-.axis-icon-picker-segment {
-    min-width: 88px;
-    padding: 6px 14px;
-    border: none;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.72);
-    font-size: 13px;
+.axis-icon-picker-tab {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid var(--ta-pill-border);
+    border-radius: 999px;
+    background: var(--ta-pill-bg);
+    color: var(--ta-text-step);
+    font-size: 11px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.12s ease, color 0.12s ease;
+    transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease;
 }
 
-.axis-icon-picker-segment.is-active {
-    background: rgba(255, 255, 255, 0.18);
-    color: #fff;
+.axis-icon-picker-tab.is-active {
+    background: var(--ta-pill-current-bg);
+    border-color: var(--ta-pill-current-border);
+    color: var(--ta-text);
 }
 
-.axis-icon-picker-segment:hover:not(.is-active) {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.9);
+.axis-icon-picker-tab:hover:not(.is-active) {
+    background: var(--ta-pill-hover-bg);
+    border-color: var(--ta-pill-hover-border);
+    color: var(--ta-text);
+}
+
+.axis-icon-picker-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
 }
 
 .axis-icon-picker-emoji-pane,
@@ -15213,53 +16587,55 @@ body.light-theme .color-option.selected {
     flex: 1;
 }
 
-.axis-icon-picker-icon-pane {
-    padding: 4px 0 10px;
-}
-
 .axis-icon-picker-grid {
     display: grid;
-    grid-template-columns: repeat(8, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 2px;
-    padding: 4px 8px 0;
+    padding: 2px 10px 6px;
     overflow-y: auto;
     overflow-x: hidden;
-    max-height: 280px;
+    max-height: min(36vh, 220px);
+    overscroll-behavior: contain;
+    scroll-behavior: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     -webkit-overflow-scrolling: touch;
 }
 
-.axis-icon-picker-icon-pane .axis-icon-picker-grid {
-    max-height: 300px;
-    padding-top: 4px;
+.axis-icon-picker-grid::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
 }
 
 .axis-icon-picker-cell {
     appearance: none;
     border: none;
     background: transparent;
-    border-radius: 7px;
-    min-height: 34px;
+    border-radius: 8px;
+    min-height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
+    font-size: 18px;
     line-height: 1;
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.88);
+    color: var(--ta-text);
     transition: background 0.1s ease, transform 0.1s ease;
 }
 
 .axis-icon-picker-cell--fa {
-    font-size: 15px;
+    font-size: 13px;
+    color: var(--ta-text-step);
 }
 
 .axis-icon-picker-cell:hover {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--ta-pill-hover-bg);
 }
 
 .axis-icon-picker-cell:active {
     transform: scale(0.94);
-    background: rgba(255, 255, 255, 0.18);
+    background: var(--ta-pill-current-bg);
 }
 
 .axis-icon-picker-categories {
@@ -15268,69 +16644,43 @@ body.light-theme .color-option.selected {
     justify-content: space-between;
     gap: 2px;
     padding: 8px 10px 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid var(--ta-border);
+    flex-shrink: 0;
+}
+
+.axis-icon-picker-categories.hidden {
+    display: none;
 }
 
 .axis-icon-picker-category {
     flex: 1;
     min-width: 0;
-    height: 30px;
+    height: 28px;
     border: none;
-    border-radius: 7px;
+    border-radius: 8px;
     background: transparent;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--ta-text-muted);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 12px;
     transition: background 0.1s ease, color 0.1s ease;
 }
 
 .axis-icon-picker-category.is-active {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
+    background: var(--ta-pill-current-bg);
+    color: var(--ta-text);
 }
 
 .axis-icon-picker-category:hover:not(.is-active) {
-    color: rgba(255, 255, 255, 0.85);
+    color: var(--ta-text);
 }
 
-body.light-theme .axis-icon-picker-panel {
-    background: rgba(246, 246, 248, 0.94);
-    border-color: rgba(0, 0, 0, 0.1);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
-}
-
-body.light-theme .axis-icon-picker-segment {
-    background: rgba(0, 0, 0, 0.05);
-    color: rgba(0, 0, 0, 0.55);
-}
-
-body.light-theme .axis-icon-picker-segment.is-active {
-    background: rgba(0, 0, 0, 0.12);
-    color: rgba(0, 0, 0, 0.88);
-}
-
-body.light-theme .axis-icon-picker-cell {
-    color: rgba(0, 0, 0, 0.82);
-}
-
-body.light-theme .axis-icon-picker-cell:hover {
-    background: rgba(0, 0, 0, 0.06);
-}
-
-body.light-theme .axis-icon-picker-categories {
-    border-top-color: rgba(0, 0, 0, 0.08);
-}
-
-body.light-theme .axis-icon-picker-category {
-    color: rgba(0, 0, 0, 0.45);
-}
-
-body.light-theme .axis-icon-picker-category.is-active {
-    background: rgba(0, 0, 0, 0.08);
-    color: rgba(0, 0, 0, 0.85);
+@media (prefers-reduced-motion: reduce) {
+    .axis-icon-picker-cell:active {
+        transform: none;
+    }
 }
 
 /* AI Text Selection Button - Above Selected Text */
@@ -15675,7 +17025,8 @@ body.light-theme .axis-icon-picker-category.is-active {
     }
 }
 
-/* AI Chat Panel — frosted glass; ink from --chat-panel-* (JS sets per Appearance). */
+/* AI Chat Panel - frosted glass; ink from --chat-panel-* (JS sets per Appearance).
+ * Slide uses a real transform transition (not @property) so it never teleports. */
 .ai-chat-panel {
     position: absolute;
     right: 0;
@@ -15684,41 +17035,63 @@ body.light-theme .axis-icon-picker-category.is-active {
     width: var(--chat-panel-width, 400px);
     min-width: 280px;
     max-width: 90%;
-    --chat-panel-bg: rgba(9, 10, 13, 0.72);
-    --chat-panel-blur: 44px;
-    --chat-panel-sat: 155%;
+    --chat-panel-bg: #000000;
+    --chat-panel-blur: 0px;
+    --chat-panel-sat: 100%;
     background: var(--chat-panel-bg);
-    backdrop-filter: blur(var(--chat-panel-blur)) saturate(var(--chat-panel-sat));
-    -webkit-backdrop-filter: blur(var(--chat-panel-blur)) saturate(var(--chat-panel-sat));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     border-left: 1px solid var(--chat-panel-border, rgba(255, 255, 255, 0.06));
     z-index: 1000;
     display: flex;
     flex-direction: column;
     transform: translate3d(100%, 0, 0);
-    transition: transform 0.42s cubic-bezier(0.32, 0.72, 0, 1),
-                opacity 0.38s cubic-bezier(0.32, 0.72, 0, 1);
+    transition: transform var(--axis-chat-slide-duration, 0.3s) var(--axis-chat-slide-ease, cubic-bezier(0.22, 1, 0.36, 1));
     box-shadow: var(--chat-panel-shadow, -6px 0 24px rgba(0, 0, 0, 0.22));
-    opacity: 0;
+    opacity: 1;
     pointer-events: none;
     -webkit-app-region: no-drag;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
     border-radius: var(--axis-content-panel-radius);
     overflow: hidden;
+    will-change: transform;
+}
+.ai-chat-panel[data-chat-theme="light"] {
+    --chat-panel-bg: #ffffff;
 }
 
 /* Override global .hidden so panel can animate in/out (no display:none) */
 .ai-chat-panel.hidden {
     display: flex !important;
-    transform: translate3d(100%, 0, 0);
-    opacity: 0;
     pointer-events: none;
 }
 
-.ai-chat-panel:not(.hidden) {
+#content-area.chat-open .ai-chat-panel {
     transform: translate3d(0, 0, 0);
-    opacity: 1;
     pointer-events: auto;
+}
+
+.ai-chat-panel:not(.hidden) {
+    pointer-events: auto;
+}
+
+/* Tab / profile switch: apply remembered open state without the user open/close slide. */
+.ai-chat-panel.ai-chat-instant,
+#content-area.chat-switch-instant .ai-chat-panel,
+#content-area.chat-switch-instant .webview-container,
+.webview-container.axis-chat-instant {
+    transition: none !important;
+}
+
+#content-area.chat-switch-instant .webview-container .webview-url-bar,
+#content-area.chat-switch-instant .webview-container #webviews-container,
+#content-area.chat-switch-instant .webview-container #webview,
+#content-area.chat-switch-instant .webview-container #axis-nav-gesture-layer,
+#content-area.chat-switch-instant .webview-container #new-tab-page,
+#content-area.chat-switch-instant .webview-container #empty-state,
+#content-area.chat-switch-instant .webview-container .axis-store-install-host-bar {
+    transition: none !important;
 }
 
 /* Chat panel resize handle - matches sidebar resizer look and behavior */
@@ -15781,12 +17154,19 @@ body.light-theme .axis-icon-picker-category.is-active {
     align-items: center;
     justify-content: center;
     font-size: 11px;
+    line-height: 0;
     transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
     pointer-events: auto;
     -webkit-app-region: no-drag;
     position: relative;
     z-index: 1;
     outline: none;
+}
+
+.ai-chat-close-btn .tab-close-glyph {
+    width: 14px;
+    height: 14px;
+    opacity: 0.85;
 }
 
 .ai-chat-close-btn:hover {
@@ -15984,7 +17364,15 @@ body.light-theme .axis-icon-picker-category.is-active {
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+.ai-chat-message.ai-chat-message-enter {
     animation: messageSlideIn 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+}
+.ai-chat-panel.ai-chat-instant .ai-chat-message {
+    animation: none !important;
+}
+.ai-chat-messages.ai-chat-instant-scroll {
+    scroll-behavior: auto !important;
 }
 
 @keyframes messageSlideIn {
@@ -16115,7 +17503,7 @@ body.light-theme .axis-icon-picker-category.is-active {
     color: var(--chat-panel-text-muted, rgba(255, 255, 255, 0.5));
 }
 
-/* AI response Markdown — new tab Ask + sidebar chat */
+/* AI response Markdown - new tab Ask + sidebar chat */
 .axis-ai-md {
     display: block;
     width: 100%;
@@ -16582,18 +17970,22 @@ h4.axis-ai-md-h { font-size: 1em; }
     background: var(--chat-surface-bg, rgba(255, 255, 255, 0.04));
 }
 
-/* When chat is open, shrink web content area so chat doesn't overlap */
+/* Chat open: page chrome and guest layers slide in with the panel (same duration/ease). */
 #content-area.chat-open .webview-container {
     --chat-panel-width: 400px;
 }
+
 #content-area.chat-open .webview-container .webview-url-bar,
-#content-area.chat-open .webview-container #webviews-container,
-#content-area.chat-open .webview-container #webview,
-#content-area.chat-open .webview-container #axis-nav-gesture-layer,
 #content-area.chat-open .webview-container #new-tab-page,
 #content-area.chat-open .webview-container #empty-state,
-#content-area.chat-open .webview-container .axis-store-install-host-bar {
+#content-area.chat-open .webview-container #webviews-container,
+#content-area.chat-open .webview-container #webview,
+#content-area.chat-open .webview-container #axis-nav-gesture-layer {
     right: var(--chat-panel-width, 400px);
+}
+
+#content-area.chat-open .webview-container .axis-store-install-host-bar {
+    right: calc(var(--chat-panel-width, 400px) + 10px);
 }
 
 @media (max-width: 600px) {
@@ -16640,13 +18032,15 @@ h4.axis-ai-md-h { font-size: 1em; }
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     border-bottom: 1px solid var(--url-bar-border, transparent);
-    transition: opacity 0.3s ease, transform 0.3s ease,
-                right 0.42s cubic-bezier(0.32, 0.72, 0, 1);
+    transition:
+        opacity 0.3s ease,
+        transform 0.3s ease,
+        right var(--axis-chat-slide-duration, 0.3s) var(--axis-chat-slide-ease, cubic-bezier(0.22, 1, 0.36, 1));
     border-radius: var(--axis-content-panel-radius) var(--axis-content-panel-radius) 0 0;
     overflow: visible;
 }
 
-/* `switchToTab` adds this only for the hand-off to another tab — no cross-fade between tabs. */
+/* `switchToTab` adds this only for the hand-off to another tab - no cross-fade between tabs. */
 .webview-url-bar.url-bar--instant-theme {
     transition: none !important;
 }
@@ -16665,7 +18059,7 @@ h4.axis-ai-md-h { font-size: 1em; }
     display: none;
 }
 
-/* New tab + AI chat: transparent fill — same bar geometry as website tabs (padding, radius, borders). */
+/* New tab + AI chat: transparent fill - same bar geometry as website tabs (padding, radius, borders). */
 .webview-url-bar.url-bar-ntp-chrome {
     justify-content: flex-start;
     border-radius: var(--axis-content-panel-radius) var(--axis-content-panel-radius) 0 0;
@@ -16704,7 +18098,7 @@ h4.axis-ai-md-h { font-size: 1em; }
     display: none !important;
 }
 
-/* Internal pages (Settings): black top bar in dark uiTheme only — NTP uses frosted bar above. */
+/* Internal pages (Settings): black top bar in dark uiTheme only - NTP uses frosted bar above. */
 :root[data-ui-theme="dark"] body:not(.transparent-sites-mode) .webview-url-bar.url-bar-internal-shell:not(.url-bar-ntp-chrome) {
     --url-bar-bg: #000000;
     --url-bar-border: rgba(255, 255, 255, 0.1);
@@ -16741,7 +18135,7 @@ h4.axis-ai-md-h { font-size: 1em; }
     --url-bar-btn-hover: rgba(0, 0, 0, 0.06);
 }
 
-/* Transparent sites mode: see-through URL bar — frosted blur only, theme shows through */
+/* Transparent sites mode: see-through URL bar - frosted blur only, theme shows through */
 body.transparent-sites-mode .webview-url-bar:not(.url-bar-ntp-chrome) {
     --url-bar-bg: transparent !important;
     background: transparent !important;
@@ -16778,16 +18172,17 @@ body.transparent-sites-mode .webview-url-bar:not(.url-bar-ntp-chrome) .url-bar-c
     border-radius: 6px;
     color: var(--url-bar-text, rgba(0, 0, 0, 0.7));
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+    transition: background-color 140ms ease, transform 100ms ease, color 140ms ease, opacity 140ms ease;
     font-size: 13px;
 }
 
-.url-bar-btn:hover:not(:disabled) {
+.url-bar-btn:hover:not(:disabled),
+.url-bar-btn[aria-expanded="true"]:not(:disabled) {
     background: var(--url-bar-btn-hover, rgba(0, 0, 0, 0.06));
 }
 
 .url-bar-btn:active:not(:disabled) {
-    transform: scale(0.92);
+    transform: scale(0.97);
 }
 
 .url-bar-btn:disabled {
@@ -16796,13 +18191,14 @@ body.transparent-sites-mode .webview-url-bar:not(.url-bar-ntp-chrome) .url-bar-c
 }
 
 #downloads-btn-footer.url-bar-downloads-btn {
-    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+    transition: background-color 140ms ease, transform 100ms ease, color 140ms ease, opacity 140ms ease;
 }
-#downloads-btn-footer.url-bar-downloads-btn:hover:not(:disabled) {
+#downloads-btn-footer.url-bar-downloads-btn:hover:not(:disabled),
+#downloads-btn-footer.url-bar-downloads-btn[aria-expanded="true"]:not(:disabled) {
     background: var(--url-bar-btn-hover, rgba(0, 0, 0, 0.06));
 }
 #downloads-btn-footer.url-bar-downloads-btn:active:not(:disabled) {
-    transform: scale(0.92);
+    transform: scale(0.97);
 }
 #downloads-btn-footer.url-bar-downloads-btn .url-bar-downloads-icon {
     font-size: 13px;
@@ -16926,12 +18322,30 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
     border-color: rgba(0, 0, 0, 0.06);
 }
 
+/* Keep the URL field in its hover look while a bar menu / Chat is open so action buttons stay visible */
+body.downloads-popup-open .url-bar-center,
+body.extensions-menu-open .url-bar-center,
+body.security-panel-open .url-bar-center,
+body.adblock-panel-open .url-bar-center,
+#content-area.chat-open .url-bar-center {
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: none;
+}
+
+body.downloads-popup-open .webview-url-bar:not(.dark-mode) .url-bar-center,
+body.extensions-menu-open .webview-url-bar:not(.dark-mode) .url-bar-center,
+body.security-panel-open .webview-url-bar:not(.dark-mode) .url-bar-center,
+body.adblock-panel-open .webview-url-bar:not(.dark-mode) .url-bar-center,
+#content-area.chat-open .webview-url-bar:not(.dark-mode) .url-bar-center {
+    border-color: rgba(0, 0, 0, 0.06);
+}
+
 .webview-url-bar:not(.dark-mode) .loading-bar-fill {
     background: rgba(0, 0, 0, 0.32);
 }
 
 .url-bar-center:has(.url-bar-field:focus-within) {
-    background: var(--url-bar-bg, rgba(255, 255, 255, 0.95));
+    background: var(--url-bar-bg);
     border-color: rgba(255, 255, 255, 0.12);
     box-shadow: none;
 }
@@ -16940,18 +18354,24 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
     border-color: rgba(0, 0, 0, 0.08);
 }
 
-/* Action buttons container (Security + Copy) – now visually inside the bar outline */
+/* Action buttons container (Security + Copy) - now visually inside the bar outline */
 .url-bar-actions {
     display: flex;
     align-items: center;
     gap: 2px;
     flex-shrink: 0;
     opacity: 0;
-    transition: opacity 0.2s ease;
+    transition: opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1);
     pointer-events: none;
 }
 
-.url-bar-center:hover .url-bar-actions {
+.url-bar-center:hover .url-bar-actions,
+body.downloads-popup-open .url-bar-center .url-bar-actions,
+body.extensions-menu-open .url-bar-center .url-bar-actions,
+body.security-panel-open .url-bar-center .url-bar-actions,
+body.adblock-panel-open .url-bar-center .url-bar-actions,
+body.url-bar-copy-done .url-bar-center .url-bar-actions,
+#content-area.chat-open .url-bar-center .url-bar-actions {
     opacity: 1;
     pointer-events: auto;
 }
@@ -16961,6 +18381,13 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
 .url-bar-center:has(.url-bar-input:focus) .url-bar-actions {
     opacity: 0;
     pointer-events: none;
+}
+
+/* Keep copy feedback visible even if the address field was focused when the shortcut fired */
+body.url-bar-copy-done .url-bar-center .url-bar-actions,
+body.url-bar-copy-leaving .url-bar-center .url-bar-actions {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 /* Action buttons (Security and Copy) */
@@ -16975,18 +18402,19 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
     border-radius: 5px;
     color: var(--url-bar-text-muted, rgba(0, 0, 0, 0.5));
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+    transition: background-color 140ms ease, transform 100ms ease, color 140ms ease;
     font-size: 11px;
     flex-shrink: 0;
 }
 
-.url-bar-action-btn:hover {
+.url-bar-action-btn:hover,
+.url-bar-action-btn[aria-expanded="true"] {
     background: var(--url-bar-btn-hover, rgba(0, 0, 0, 0.06));
     color: var(--url-bar-text, rgba(0, 0, 0, 0.85));
 }
 
 .url-bar-action-btn:active {
-    transform: scale(0.9);
+    transform: scale(0.97);
 }
 
 /* Security button specific styles */
@@ -16999,8 +18427,53 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
 }
 
 /* Copy button checkmark */
-.url-bar-copy-btn .fa-check {
+.url-bar-copy-btn i {
+    display: inline-block;
+    transition: color 180ms ease;
+}
+
+.url-bar-copy-btn .fa-check,
+.url-bar-copy-btn.is-copied {
     color: #34C759;
+}
+
+.url-bar-copy-btn.is-copied-pop i {
+    animation: url-bar-copy-pop 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.url-bar-copy-btn.is-copied-out i {
+    animation: url-bar-copy-out 240ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.url-bar-copy-btn.is-copied-restore i {
+    animation: url-bar-copy-restore 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes url-bar-copy-pop {
+    0% { transform: scale(0.86); opacity: 0.4; }
+    60% { transform: scale(1.08); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes url-bar-copy-out {
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(0.86); opacity: 0; }
+}
+
+@keyframes url-bar-copy-restore {
+    0% { transform: scale(0.9); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .url-bar-actions {
+        transition-duration: 0.01ms;
+    }
+    .url-bar-copy-btn.is-copied-pop i,
+    .url-bar-copy-btn.is-copied-out i,
+    .url-bar-copy-btn.is-copied-restore i {
+        animation: none;
+    }
 }
 
 /* Ad blocker toggle (URL bar) */
@@ -17131,20 +18604,25 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
     transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease, border-color 0.2s ease;
 }
 
-.url-bar-chat-btn:hover {
+.url-bar-chat-btn:hover,
+.url-bar-chat-btn[aria-expanded="true"],
+#content-area.chat-open .url-bar-chat-btn {
     background: rgba(255, 255, 255, 0.14);
     color: var(--url-bar-text, rgba(255, 255, 255, 0.95));
     border-color: rgba(255, 255, 255, 0.45);
 }
 
-.webview-url-bar:not(.dark-mode) .url-bar-chat-btn:hover {
+.webview-url-bar:not(.dark-mode) .url-bar-chat-btn:hover,
+.webview-url-bar:not(.dark-mode) .url-bar-chat-btn[aria-expanded="true"],
+.webview-url-bar:not(.dark-mode) #content-area.chat-open .url-bar-chat-btn,
+#content-area.chat-open .webview-url-bar:not(.dark-mode) .url-bar-chat-btn {
     background: rgba(0, 0, 0, 0.08);
     color: var(--url-bar-text, rgba(0, 0, 0, 0.9));
     border-color: rgba(0, 0, 0, 0.35);
 }
 
 .url-bar-chat-btn:active {
-    transform: scale(0.96);
+    transform: scale(0.97);
 }
 
 .chat-indicator {
@@ -17162,11 +18640,12 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
     left: 0;
     right: 0;
     bottom: 0;
-    transition: top 0.3s ease,
-                right 0.42s cubic-bezier(0.32, 0.72, 0, 1); /* sync with chat panel slide */
+    transition:
+        top 0.3s ease,
+        right var(--axis-chat-slide-duration, 0.3s) var(--axis-chat-slide-ease, cubic-bezier(0.22, 1, 0.36, 1));
     overflow: hidden;
     border-radius: 0;
-    /* Webview area paints nothing when idle — no glass, no white. */
+    /* Webview area paints nothing when idle - no glass, no white. */
     background: transparent;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -17185,8 +18664,9 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
     left: 0;
     right: 0;
     bottom: 0;
-    transition: top 0.3s ease,
-                right 0.42s cubic-bezier(0.32, 0.72, 0, 1); /* sync with chat panel slide */
+    transition:
+        top 0.3s ease,
+        right var(--axis-chat-slide-duration, 0.3s) var(--axis-chat-slide-ease, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
 .webview-container:has(.webview-url-bar.hidden) #webview {
@@ -17195,7 +18675,7 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
 }
 
 /* --------------------------------------------------------------------------
-   Sidebar on the RIGHT (#main-area.sidebar-right) — mirror left layout (same
+   Sidebar on the RIGHT (#main-area.sidebar-right) - mirror left layout (same
    panel radius, seam overlap, and webview chrome; only flex order flips).
    -------------------------------------------------------------------------- */
 #main-area.sidebar-right #sidebar {
@@ -17212,75 +18692,200 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
     background: rgba(255, 255, 255, 0.05);
 }
 
-/* Vault autofill menu (fixed overlay above <webview>) */
+/* Vault autofill menu - shell overlay (site CSP cannot block favicons) */
+.vault-af-menu,
 .vault-autofill-panel {
     position: fixed;
     z-index: 200001;
     margin: 0;
-    padding: 0;
-    border-radius: 10px;
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    background: rgba(255, 255, 255, 0.98);
-    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
+    padding: 4px;
+    min-width: 160px;
+    max-width: min(520px, calc(100vw - 16px));
+    border-radius: 12px;
+    border: none;
+    background: rgba(255, 255, 255, 0.97);
     color: #1d1d1f;
-    max-height: 240px;
+    box-shadow:
+        0 0 0 0.5px rgba(0, 0, 0, 0.08),
+        0 10px 32px rgba(0, 0, 0, 0.14),
+        0 2px 6px rgba(0, 0, 0, 0.05);
+    backdrop-filter: saturate(1.35) blur(18px);
+    -webkit-backdrop-filter: saturate(1.35) blur(18px);
+    max-height: min(360px, calc(100vh - 24px));
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
 }
-.vault-autofill-panel.hidden {
-    display: none !important;
-}
-:root[data-ui-theme="dark"] .vault-autofill-panel {
-    background: rgba(44, 44, 46, 0.98);
-    border-color: rgba(255, 255, 255, 0.14);
+.vault-af-menu.hidden,
+.vault-autofill-panel.hidden { display: none !important; }
+:root[data-ui-theme="dark"] .vault-af-menu,
+:root[data-ui-theme="dark"] .vault-autofill-panel,
+.vault-af-menu[data-ui-theme="dark"],
+.vault-autofill-panel[data-ui-theme="dark"] {
+    background: rgba(44, 44, 46, 0.97);
     color: #f5f5f7;
+    box-shadow:
+        0 0 0 0.5px rgba(255, 255, 255, 0.12),
+        0 14px 48px rgba(0, 0, 0, 0.55),
+        0 2px 10px rgba(0, 0, 0, 0.35);
 }
+.vault-af-menu-list,
 .vault-autofill-list {
     list-style: none;
     margin: 0;
-    padding: 4px 0 6px;
-    overflow-y: auto;
-}
-.vault-autofill-list li {
-    margin: 0;
     padding: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-height: 320px;
+    flex: 1 1 auto;
 }
-.vault-autofill-item {
-    display: block;
+.vault-af-menu-list li,
+.vault-autofill-list li { margin: 0; padding: 0; }
+.vault-af-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     width: 100%;
-    text-align: left;
+    min-height: 44px;
+    margin: 0;
+    padding: 7px 9px;
     border: none;
+    border-radius: 8px;
     background: transparent;
-    padding: 9px 12px;
-    cursor: pointer;
     color: inherit;
+    text-align: left;
+    cursor: pointer;
+    box-sizing: border-box;
+    font: inherit;
+    transition: background 0.12s ease;
 }
-.vault-autofill-item:hover,
-.vault-autofill-item:focus {
+.vault-af-item:hover,
+.vault-af-item:focus {
     outline: none;
-}
-:root[data-ui-theme="light"] .vault-autofill-item:hover,
-:root[data-ui-theme="light"] .vault-autofill-item:focus {
     background: rgba(0, 0, 0, 0.06);
 }
-:root[data-ui-theme="dark"] .vault-autofill-item:hover,
-:root[data-ui-theme="dark"] .vault-autofill-item:focus {
-    background: rgba(255, 255, 255, 0.1);
+.vault-af-menu[data-ui-theme="dark"] .vault-af-item:hover,
+.vault-af-menu[data-ui-theme="dark"] .vault-af-item:focus,
+:root[data-ui-theme="dark"] .vault-af-item:hover,
+:root[data-ui-theme="dark"] .vault-af-item:focus {
+    background: rgba(255, 255, 255, 0.08);
 }
-.vault-autofill-item-title {
+.vault-af-avatar {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #f2f2f7;
+    box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+.vault-af-menu[data-ui-theme="dark"] .vault-af-avatar,
+:root[data-ui-theme="dark"] .vault-af-avatar {
+    background: #3a3a3c;
+    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+}
+.vault-af-avatar.is-favicon {
+    background: #fff;
+}
+.vault-af-menu[data-ui-theme="dark"] .vault-af-avatar.is-favicon,
+:root[data-ui-theme="dark"] .vault-af-avatar.is-favicon {
+    background: #2c2c2e;
+}
+.vault-af-avatar.is-favicon img {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
     display: block;
-    font-size: 13px;
+    border-radius: 4px;
+}
+.vault-af-avatar.is-initials {
+    background: linear-gradient(145deg, #5ac8fa, #007aff);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    box-shadow: none;
+}
+.vault-af-avatar.is-glyph {
+    color: #636366;
+    background: transparent;
+    box-shadow: none;
+}
+.vault-af-menu[data-ui-theme="dark"] .vault-af-avatar.is-glyph,
+:root[data-ui-theme="dark"] .vault-af-avatar.is-glyph { color: #aeaeb2; }
+.vault-af-avatar.is-brand {
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+}
+.vault-af-avatar svg { width: 18px; height: 18px; display: block; }
+.vault-af-mc { width: 26px; height: 24px; position: relative; display: inline-block; }
+.vault-af-mc::before,
+.vault-af-mc::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+}
+.vault-af-mc::before { left: 0; background: #eb001b; }
+.vault-af-mc::after { right: 0; background: #f79e1b; mix-blend-mode: multiply; }
+.vault-af-visa,
+.vault-af-amex {
+    width: 29px;
+    height: 19px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    line-height: 1;
+}
+.vault-af-visa { background: #1a1f71; color: #fff; }
+.vault-af-amex { background: #2e77bb; color: #fff; font-size: 7px; }
+.vault-af-copy {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    justify-content: center;
+}
+.vault-af-primary {
+    font-size: 13.5px;
     font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+    color: inherit;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
-.vault-autofill-item-sub {
-    display: block;
-    font-size: 11px;
-    opacity: 0.7;
-    margin-top: 2px;
+.vault-af-secondary {
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    color: #8e8e93;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
+.vault-af-menu[data-ui-theme="dark"] .vault-af-secondary,
+:root[data-ui-theme="dark"] .vault-af-secondary { color: #98989d; }
 
-/* Vault modals (pick credential, etc.) — direct children of body */
+/* Vault modals (pick credential, etc.) - direct children of body */
 .vault-modal {
     position: fixed;
     inset: 0;
@@ -17307,7 +18912,7 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
     display: flex;
 }
 
-/* Save password — no blur (fast), theme on #vault-save-modal, no blue */
+/* Save password - no blur (fast), theme on #vault-save-modal, no blue */
 #vault-save-modal.vault-save-modal:not(.hidden) {
     background: rgba(0, 0, 0, 0.42);
 }
@@ -17797,7 +19402,7 @@ body.axis-download-indeterminate .url-bar-downloads-ring {
 /* ========== App onboarding ========== */
 /*
  * Hide the whole browser shell while setup is open.
- * Do not rely on visibility:hidden alone — CSS allows descendants with
+ * Do not rely on visibility:hidden alone - CSS allows descendants with
  * visibility:visible (tabs, slide-out sidebar, webviews) to paint again,
  * which showed through the frosted onboarding backdrop.
  *
@@ -17848,7 +19453,7 @@ body.axis-onboarding-active #axis-onboarding .ob-drag {
 }
 .axis-onboarding {
     --ob-bg: #101010;
-    /* Soft glass veil — light comes through OS vibrancy; wash stays neutral (never theme color). */
+    /* Soft glass veil - light comes through OS vibrancy; wash stays neutral (never theme color). */
     --ob-veil: rgba(14, 14, 16, 0.36);
     --ob-theme-wash: #1a1a1a;
     --ob-wash-opacity: 0.28;
@@ -17877,7 +19482,7 @@ body.axis-onboarding-active #axis-onboarding .ob-drag {
     transition: opacity 0.34s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     -webkit-app-region: no-drag;
     color: var(--ob-fg);
-    font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: var(--axis-ui-font);
     background: transparent;
 }
 .axis-onboarding[data-ob-theme="light"] {
@@ -17919,7 +19524,7 @@ body.axis-onboarding-active #axis-onboarding .ob-drag {
 }
 /*
  * Soft glass via OS vibrancy + a flat veil only.
- * No blurred wash orbs / multi-stop CSS gradients — those posterize into visible lines
+ * No blurred wash orbs / multi-stop CSS gradients - those posterize into visible lines
  * when little light is coming through the window.
  */
 .ob-backdrop {
@@ -17957,7 +19562,7 @@ body.axis-onboarding-active #axis-onboarding .ob-drag {
     pointer-events: auto;
     transition: opacity 0.24s ease, visibility 0.24s ease;
 }
-/* Skip confirm replaces setup — hide steps immediately so they never show through. */
+/* Skip confirm replaces setup - hide steps immediately so they never show through. */
 .axis-onboarding.is-skip-confirm .ob-shell {
     opacity: 0;
     pointer-events: none;
@@ -17996,7 +19601,7 @@ body.axis-onboarding-active #axis-onboarding .ob-drag {
     pointer-events: none;
     transition: opacity 0.45s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
-/* Keep shell still — only the full overlay fades so exit stays clean */
+/* Keep shell still - only the full overlay fades so exit stays clean */
 .axis-onboarding.is-leaving .ob-shell {
     transform: none;
     opacity: 1;
@@ -18288,7 +19893,7 @@ body.axis-onboarding-leaving.axis-onboarding-revealing #app {
     border-top: 1px solid var(--ob-border);
 }
 
-/* Search / pick boards — wrapped cards, not a stacked list */
+/* Search / pick boards - wrapped cards, not a stacked list */
 .ob-choice-board {
     display: flex;
     flex-wrap: wrap;
@@ -18869,7 +20474,7 @@ body.axis-onboarding-leaving.axis-onboarding-revealing #app {
     font-weight: 500;
 }
 
-/* Features — selectable cards with On/Off label (no tick boxes) */
+/* Features - selectable cards with On/Off label (no tick boxes) */
 .ob-feature-board {
     display: flex;
     flex-direction: column;
@@ -19103,7 +20708,7 @@ body.axis-onboarding-leaving.axis-onboarding-revealing #app {
     gap: 8px;
 }
 
-/* Full-screen skip confirmation — replaces setup while open */
+/* Full-screen skip confirmation - replaces setup while open */
 .ob-skip-overlay {
     position: absolute;
     inset: 0;
@@ -19321,3 +20926,235 @@ body.axis-onboarding-leaving.axis-onboarding-revealing #app {
         margin-bottom: 22px;
     }
 }
+
+.axis-lang-picker {
+    position: relative;
+    width: min(420px, 100%);
+}
+.axis-lang-picker.is-disabled {
+    opacity: 0.45;
+    filter: grayscale(0.2);
+    pointer-events: none;
+}
+.axis-lang-picker.is-disabled .axis-lang-trigger {
+    cursor: not-allowed;
+}
+.axis-lang-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    text-align: left;
+    padding: 12px 14px;
+    border-radius: var(--ob-radius-control, 12px);
+    border: 1px solid var(--ob-border, rgba(255,255,255,0.14));
+    background: var(--ob-surface, rgba(255,255,255,0.04));
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    outline: none;
+    box-shadow: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.axis-lang-trigger:hover,
+.axis-lang-picker.is-open .axis-lang-trigger {
+    border-color: var(--ob-border-selected, var(--ob-border-strong, rgba(255,255,255,0.28)));
+    background: var(--ob-surface-2, rgba(255,255,255,0.06));
+}
+.axis-lang-trigger-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+}
+.axis-lang-trigger-name {
+    font-size: 14px;
+    font-weight: 750;
+}
+.axis-lang-trigger-sub {
+    font-size: 12px;
+    opacity: 0.62;
+}
+.axis-lang-trigger-chevron {
+    width: 8px;
+    height: 8px;
+    flex-shrink: 0;
+    border-right: 1.6px solid currentColor;
+    border-bottom: 1.6px solid currentColor;
+    transform: rotate(45deg) translateY(-2px);
+    opacity: 0.55;
+}
+.axis-lang-picker.is-open .axis-lang-trigger-chevron {
+    transform: rotate(225deg) translateY(-1px);
+}
+.axis-lang-pop {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 14px;
+    border: 1px solid var(--ob-border-strong, rgba(255,255,255,0.18));
+    background: #1c1c1e;
+    color: #f5f5f5;
+    box-shadow: 0 18px 48px rgba(0,0,0,0.42);
+    box-sizing: border-box;
+}
+html.axis-ui-light .axis-lang-pop,
+.axis-onboarding[data-ob-theme="light"] .axis-lang-pop {
+    background: #ffffff;
+    color: #1d1d1f;
+    border-color: rgba(0,0,0,0.12);
+    box-shadow: 0 18px 48px rgba(0,0,0,0.16);
+}
+.axis-lang-pop.axis-lang-pop--portal {
+    position: fixed;
+    right: auto;
+    margin: 0;
+}
+.axis-lang-pop[hidden] { display: none !important; }
+.axis-lang-search {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.06);
+    color: inherit;
+    font: inherit;
+    outline: none;
+}
+html.axis-ui-light .axis-lang-search,
+.axis-onboarding[data-ob-theme="light"] .axis-lang-search {
+    border-color: rgba(0,0,0,0.12);
+    background: rgba(0,0,0,0.04);
+}
+.axis-lang-search:focus {
+    border-color: rgba(255,255,255,0.4);
+}
+html.axis-ui-light .axis-lang-search:focus,
+.axis-onboarding[data-ob-theme="light"] .axis-lang-search:focus {
+    border-color: rgba(0,0,0,0.28);
+}
+.axis-lang-list {
+    max-height: 220px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    -webkit-overflow-scrolling: touch;
+}
+.axis-lang-empty {
+    padding: 14px 10px;
+    text-align: center;
+    font-size: 12px;
+    opacity: 0.6;
+}
+.axis-lang-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    outline: none;
+}
+.axis-lang-item:hover,
+.axis-lang-item.is-highlight {
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(255,255,255,0.08);
+}
+html.axis-ui-light .axis-lang-item:hover,
+html.axis-ui-light .axis-lang-item.is-highlight,
+.axis-onboarding[data-ob-theme="light"] .axis-lang-item:hover,
+.axis-onboarding[data-ob-theme="light"] .axis-lang-item.is-highlight {
+    background: rgba(0,0,0,0.05);
+    border-color: rgba(0,0,0,0.06);
+}
+.axis-lang-item.is-selected {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.22);
+}
+html.axis-ui-light .axis-lang-item.is-selected,
+.axis-onboarding[data-ob-theme="light"] .axis-lang-item.is-selected {
+    background: rgba(0,0,0,0.06);
+    border-color: rgba(0,0,0,0.16);
+}
+.axis-lang-item-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    min-width: 0;
+}
+.axis-lang-item-native {
+    font-size: 14px;
+    font-weight: 650;
+}
+.axis-lang-item-en {
+    font-size: 12px;
+    opacity: 0.58;
+}
+.axis-lang-item-check {
+    width: 7px;
+    height: 12px;
+    flex-shrink: 0;
+    border-right: 1.8px solid currentColor;
+    border-bottom: 1.8px solid currentColor;
+    transform: rotate(45deg) translateY(-2px);
+    opacity: 0;
+}
+.axis-lang-item.is-selected .axis-lang-item-check {
+    opacity: 0.85;
+}
+
+/* Onboarding language step — same picker + option cards as the rest of setup */
+.ob-lang-picker-host {
+    width: 100%;
+    margin: 0 0 12px;
+}
+.ob-lang-picker-host .axis-lang-picker {
+    width: 100%;
+}
+.ob-lang-picker-host .axis-lang-trigger {
+    border-radius: var(--ob-radius-control, 12px);
+    border: 1px solid var(--ob-border);
+    background: var(--ob-surface);
+    padding: 12px 14px;
+}
+.ob-lang-picker-host .axis-lang-trigger:hover,
+.ob-lang-picker-host .axis-lang-picker.is-open .axis-lang-trigger {
+    border-color: var(--ob-border-selected);
+    background: var(--ob-surface-2);
+}
+.ob-group--universal-lang {
+    margin: 0;
+    overflow: hidden;
+    border-radius: var(--ob-radius-card, 14px);
+    border: 1px solid var(--ob-border);
+    background: var(--ob-surface);
+}
+.ob-group--universal-lang .ob-option {
+    padding: 12px 14px;
+}
+.ob-group--universal-lang .ob-option:hover {
+    background: var(--ob-surface-2);
+}
+.ob-group--universal-lang .ob-option.is-checked {
+    background: var(--ob-surface-2);
+}
+
+/* Legacy native language select styles removed — use .ob-lang-picker-host */
