@@ -2,22 +2,89 @@
 
 /** Shared autofill popup styles (light/dark via `data-axis-theme` on the menu). */
 const AXIS_VAULT_AUTOFILL_STYLE_CSS =
-  '#axis-vault-autofill-menu{position:fixed;z-index:2147483647;margin:0;padding:4px 0;list-style:none;border-radius:10px;font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-height:280px;overflow-y:auto;min-width:260px;box-sizing:border-box}' +
-  '#axis-vault-autofill-menu[data-axis-theme="light"]{background:#fff;color:#1d1d1f;border:1px solid rgba(0,0,0,.12);box-shadow:0 8px 28px rgba(0,0,0,.16)}' +
-  '#axis-vault-autofill-menu[data-axis-theme="dark"]{background:#2c2c2e;color:#f5f5f7;border:1px solid rgba(255,255,255,.14);box-shadow:0 8px 28px rgba(0,0,0,.45)}' +
-  '#axis-vault-autofill-menu li{margin:0;padding:0}' +
-  '#axis-vault-autofill-menu button{display:block;width:100%;text-align:left;border:none;background:transparent;padding:10px 14px;cursor:pointer;color:inherit;border-radius:6px;margin:0 4px;width:calc(100% - 8px)}' +
-  '#axis-vault-autofill-menu[data-axis-theme="light"] button:hover,#axis-vault-autofill-menu[data-axis-theme="light"] button:focus{background:rgba(0,0,0,.06);outline:none}' +
-  '#axis-vault-autofill-menu[data-axis-theme="dark"] button:hover,#axis-vault-autofill-menu[data-axis-theme="dark"] button:focus{background:rgba(255,255,255,.1);outline:none}' +
-  '#axis-vault-autofill-menu .axis-af-title{display:block;font-weight:600;font-size:13px;line-height:1.3}' +
-  '#axis-vault-autofill-menu .axis-af-sub{display:block;font-size:12px;margin-top:2px;line-height:1.3}' +
-  '#axis-vault-autofill-menu[data-axis-theme="light"] .axis-af-sub{color:#86868b}' +
-  '#axis-vault-autofill-menu[data-axis-theme="dark"] .axis-af-sub{color:#98989d}';
+"#axis-vault-autofill-menu{position:fixed;z-index:2147483647;margin:0;padding:10px;list-style:none;border:none;border-rad" +
+  "ius:20px;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-x:hidden;overflow-y:" +
+  "auto;font:13.5px/1.3 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;letter-spacing:-0.015" +
+  "em;-webkit-font-smoothing:antialiased;backdrop-filter:saturate(1.4) blur(24px);-webkit-backdrop-filter:saturate(1.4) blu" +
+  "r(24px)}#axis-vault-autofill-menu[data-axis-theme=\"light\"]{background:rgba(250,250,252,.92);box-shadow:0 16px 48px rgba(" +
+  "0,0,0,.16),0 0 0 0.5px rgba(0,0,0,.06)}#axis-vault-autofill-menu[data-axis-theme=\"dark\"]{background:rgba(36,36,38,.92);b" +
+  "ox-shadow:0 16px 48px rgba(0,0,0,.5),0 0 0 0.5px rgba(255,255,255,.1)}#axis-vault-autofill-menu li{margin:0;padding:0;li" +
+  "st-style:none}#axis-vault-autofill-menu button.axis-af-pill{display:flex;align-items:center;gap:12px;width:100%;min-heig" +
+  "ht:44px;height:44px;padding:0 16px 0 12px;margin:0;border:none;border-radius:999px;cursor:pointer;text-align:left;box-si" +
+  "zing:border-box;font:inherit;color:inherit;transition:background .12s ease,transform .1s ease}#axis-vault-autofill-menu[" +
+  "data-axis-theme=\"light\"] button.axis-af-pill{background:#ebebef;color:#1d1d1f}#axis-vault-autofill-menu[data-axis-theme=" +
+  "\"dark\"] button.axis-af-pill{background:#3a3a3c;color:#f5f5f7}#axis-vault-autofill-menu[data-axis-theme=\"light\"] button.a" +
+  "xis-af-pill:hover,#axis-vault-autofill-menu[data-axis-theme=\"light\"] button.axis-af-pill:focus{background:#dedee3;outlin" +
+  "e:none;transform:translateY(-0.5px)}#axis-vault-autofill-menu[data-axis-theme=\"dark\"] button.axis-af-pill:hover,#axis-va" +
+  "ult-autofill-menu[data-axis-theme=\"dark\"] button.axis-af-pill:focus{background:#48484a;outline:none;transform:translateY" +
+  "(-0.5px)}#axis-vault-autofill-menu .axis-af-icon{flex:0 0 auto;width:26px;height:26px;border-radius:7px;display:inline-f" +
+  "lex;align-items:center;justify-content:center;font-size:10px;font-weight:800;line-height:1;overflow:hidden}#axis-vault-a" +
+  "utofill-menu .axis-af-icon.is-initials{background:linear-gradient(145deg,#ffb340,#ff9f0a);color:#1d1d1f}#axis-vault-auto" +
+  "fill-menu .axis-af-icon.is-glyph{background:transparent;color:inherit}#axis-vault-autofill-menu .axis-af-icon.is-favicon" +
+  "{background:#fff;box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.12)}#axis-vault-autofill-menu[data-axis-theme=\"dark\"] .axis-af" +
+  "-icon.is-favicon{background:#2c2c2e;box-shadow:inset 0 0 0 0.5px rgba(255,255,255,.14)}#axis-vault-autofill-menu .axis-a" +
+  "f-icon.is-favicon img{width:18px;height:18px;object-fit:contain;display:block;border-radius:4px}#axis-vault-autofill-men" +
+  "u .axis-af-icon.is-brand{background:transparent;overflow:visible}#axis-vault-autofill-menu .axis-af-icon svg{width:18px;" +
+  "height:18px;display:block}#axis-vault-autofill-menu .axis-af-mc{width:24px;height:24px;position:relative;display:inline-" +
+  "block}#axis-vault-autofill-menu .axis-af-mc:before,#axis-vault-autofill-menu .axis-af-mc:after{content:\"\";position:absol" +
+  "ute;top:4px;width:14px;height:14px;border-radius:50%}#axis-vault-autofill-menu .axis-af-mc:before{left:0;background:#eb0" +
+  "01b}#axis-vault-autofill-menu .axis-af-mc:after{right:0;background:#f79e1b;mix-blend-mode:multiply}#axis-vault-autofill-" +
+  "menu .axis-af-visa,#axis-vault-autofill-menu .axis-af-amex{width:26px;height:16px;border-radius:3px;display:inline-flex;" +
+  "align-items:center;justify-content:center;font-size:7px;font-weight:800;letter-spacing:.03em}#axis-vault-autofill-menu ." +
+  "axis-af-visa{background:#1a1f71;color:#fff}#axis-vault-autofill-menu .axis-af-amex{background:#2e77bb;color:#fff;font-si" +
+  "ze:6px}#axis-vault-autofill-menu .axis-af-row{flex:1 1 auto;min-width:0;display:flex;align-items:center;justify-content:" +
+  "space-between;gap:12px}#axis-vault-autofill-menu .axis-af-left,#axis-vault-autofill-menu .axis-af-right{min-width:0;over" +
+  "flow:hidden;text-overflow:ellipsis;white-space:nowrap}#axis-vault-autofill-menu .axis-af-left{flex:1 1 auto;display:flex" +
+  ";flex-direction:column;gap:1px;justify-content:center}#axis-vault-autofill-menu .axis-af-right{flex:0 1 auto;max-width:4" +
+  "0%;text-align:right}#axis-vault-autofill-menu .axis-af-user,#axis-vault-autofill-menu .axis-af-title{font-size:13.5px;fo" +
+  "nt-weight:600;letter-spacing:-0.015em;color:inherit}#axis-vault-autofill-menu .axis-af-sub,#axis-vault-autofill-menu .ax" +
+  "is-af-meta{font-size:11.5px;font-weight:500;letter-spacing:-0.01em}#axis-vault-autofill-menu[data-axis-theme=\"light\"] .a" +
+  "xis-af-sub,#axis-vault-autofill-menu[data-axis-theme=\"light\"] .axis-af-meta,#axis-vault-autofill-menu[data-axis-theme=\"l" +
+  "ight\"] .axis-af-muted{color:#6e6e73}#axis-vault-autofill-menu[data-axis-theme=\"dark\"] .axis-af-sub,#axis-vault-autofill-" +
+  "menu[data-axis-theme=\"dark\"] .axis-af-meta,#axis-vault-autofill-menu[data-axis-theme=\"dark\"] .axis-af-muted{color:#98989" +
+  "d}";
 
 const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap(){
   try {
-  if (window.__axisVault && window.__axisVault.ready) return true;
+  const UI_VER = 14;
+  if (window.__axisVault && window.__axisVault.ready && window.__axisVault.uiVer === UI_VER) return true;
+  try {
+    if (window.__axisVault && typeof window.__axisVault.hideMenu === 'function') window.__axisVault.hideMenu();
+  } catch (_) {}
   const MENU_ID = 'axis-vault-autofill-menu';
+  // Keep secrets in this closure — never put plaintext passwords on page window globals.
+  let pendingLogin = null;
+  let lastAutofillMeta = null;
+
+  function passwordFp(password) {
+    const s = String(password || '');
+    if (!s) return '';
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return s.length + ':' + (h >>> 0).toString(16);
+  }
+
+  function setLastAutofillLoginMeta(username, password) {
+    lastAutofillMeta = {
+      at: Date.now(),
+      kind: 'login',
+      origin: location.origin || '',
+      username: username || '',
+      passwordFp: passwordFp(password)
+    };
+    try {
+      window.__axisVaultLastAutofill = {
+        at: lastAutofillMeta.at,
+        kind: 'login',
+        origin: lastAutofillMeta.origin,
+        username: lastAutofillMeta.username,
+        passwordFp: lastAutofillMeta.passwordFp
+      };
+    } catch (_) {}
+  }
   const STYLE_ID = 'axis-vault-autofill-style';
   const STYLE_CSS = ${JSON.stringify(AXIS_VAULT_AUTOFILL_STYLE_CSS)};
 
@@ -108,7 +175,17 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
       if (document.querySelector('input[type="password"]')) return 'username';
       return 'addr-email';
     }
-    if (ac.includes('username') || name.includes('user') || name.includes('login') || id.includes('user') || id.includes('login')) return 'username';
+    if (
+      ac === 'username' ||
+      ac.includes('username') ||
+      name.includes('username') ||
+      name === 'login' ||
+      name.includes('login') ||
+      id.includes('username') ||
+      id.includes('login')
+    ) {
+      return 'username';
+    }
     return null;
   }
 
@@ -121,15 +198,54 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
   }
 
   function likelyUser(el) {
+    if (!el || el.tagName !== 'INPUT') return false;
     if (kind(el) === 'username') return true;
     const t = (el.type || 'text').toLowerCase();
-    if (t !== 'text' && t !== 'email' && t !== 'tel' && t !== 'search') return false;
+    // Never treat site search / generic search as a login field (caused top-bar autofill ghosts).
+    if (t === 'search' || t === 'hidden' || t === 'submit' || t === 'button' || t === 'checkbox' || t === 'radio') {
+      return false;
+    }
+    if (t !== 'text' && t !== 'email' && t !== 'tel') return false;
+    const name = (el.name || '').toLowerCase();
+    const id = (el.id || '').toLowerCase();
     const ph = (el.placeholder || '').toLowerCase();
     const aria = (el.getAttribute('aria-label') || '').toLowerCase();
-    if (ph.includes('user') || ph.includes('email') || ph.includes('login') || aria.includes('user') || aria.includes('email') || aria.includes('login')) return true;
+    const ac = (el.autocomplete || '').toLowerCase();
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if (
+      t === 'search' ||
+      role === 'searchbox' ||
+      ac === 'off' && (ph.includes('search') || aria.includes('search') || name.includes('search') || id.includes('search')) ||
+      ph.includes('search') ||
+      aria.includes('search') ||
+      name.includes('search') ||
+      id.includes('search') ||
+      name.includes('query') ||
+      id.includes('query')
+    ) {
+      return false;
+    }
+    if (
+      ac === 'username' ||
+      ac === 'email' ||
+      t === 'email' ||
+      ph.includes('user') ||
+      ph.includes('email') ||
+      ph.includes('login') ||
+      aria.includes('user') ||
+      aria.includes('email') ||
+      aria.includes('login') ||
+      name.includes('username') ||
+      name.includes('login') ||
+      id.includes('username') ||
+      id.includes('login')
+    ) {
+      return true;
+    }
+    // Only treat a plain text field as username when it shares a form with a password.
     const form = el.form;
     if (form && form.querySelector('input[type="password"]')) return true;
-    return !!document.querySelector('input[type="password"]');
+    return false;
   }
 
   function resolveKind(el) {
@@ -188,11 +304,13 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
   }
 
   function ensureStyles() {
-    if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
+    let style = document.getElementById(STYLE_ID);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = STYLE_ID;
+      (document.head || document.documentElement).appendChild(style);
+    }
     style.textContent = STYLE_CSS;
-    (document.head || document.documentElement).appendChild(style);
   }
 
   function hideMenu() {
@@ -201,34 +319,41 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     api.menuAnchor = null;
   }
 
+  function clearAutofillFocus() {
+    api.focusedField = null;
+    api.focusKey = '';
+    api.focusAnchor = null;
+    api.focusAt = 0;
+  }
+
   function shouldKeepAutofillMenu() {
-    const menu = document.getElementById(MENU_ID);
-    if (!menu) return false;
     const active = document.activeElement;
-    if (active && menu.contains(active)) return true;
-    // Only keep the menu while focus is still on a fillable field.
-    // Do not keep it merely because menuAnchor still points at the old input —
-    // that prevented dismiss when clicking away.
+    const menu = document.getElementById(MENU_ID);
+    if (menu && active && menu.contains(active)) return true;
+    // Shell overlay has no in-page menu - keep focus bookkeeping while still on a fill field.
     if (active && vis(active) && (fillKind(active) || likelyUser(active))) return true;
     return false;
   }
 
   function dismissAutofillMenuIfNeeded() {
-    if (!document.getElementById(MENU_ID)) return;
+    if (!document.getElementById(MENU_ID) && !api.focusedField) return;
     if (shouldKeepAutofillMenu()) return;
     hideMenu();
+    clearAutofillFocus();
   }
 
   function positionMenu(menu, anchor) {
     const rect = anchor.getBoundingClientRect();
-    const w = Math.max(260, rect.width);
+    const w = Math.max(160, Math.round(rect.width || 160));
     let left = rect.left;
-    let top = rect.bottom + 6;
+    let top = rect.bottom + 4;
     if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
-    if (top + 220 > window.innerHeight - 8) top = Math.max(8, rect.top - 8 - 180);
+    if (top + 168 > window.innerHeight - 8) top = Math.max(8, rect.top - 4 - 140);
     menu.style.left = left + 'px';
     menu.style.top = top + 'px';
+    menu.style.width = w + 'px';
     menu.style.minWidth = w + 'px';
+    menu.style.maxWidth = w + 'px';
   }
 
   function setVal(el, value) {
@@ -260,58 +385,94 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
 
   function fillLogin(cred, anchor) {
     anchor = anchor || api.menuAnchor || api.focusAnchor;
-    const fk = fieldKindForAnchor(anchor);
     const root = anchor && anchor.form ? anchor.form : document;
-
-    if (fk === 'username') {
-      let user = anchor;
-      if (!user || credKind(user) !== 'username') {
-        user = anchor && likelyUser(anchor) ? anchor : null;
-      }
-      if (!user) {
-        let pass = root.querySelector && root.querySelector('input[type="password"]');
-        if (!pass) pass = document.querySelector('input[type="password"]');
-        if (pass) user = findUserForPass(pass);
-      }
-      if (user && cred.username) setVal(user, cred.username);
-      window.__axisVaultLastAutofill = {
-        at: Date.now(),
-        origin: location.origin || '',
-        username: cred.username || '',
-        password: ''
-      };
-      return;
+    let pass =
+      (anchor && credKind(anchor) === 'password' ? anchor : null) ||
+      (root.querySelector && root.querySelector('input[type="password"]')) ||
+      null;
+    if (!pass || !vis(pass)) {
+      const all = Array.from(document.querySelectorAll('input')).filter(vis);
+      pass =
+        all.find((el) => credKind(el) === 'password') ||
+        document.querySelector('input[type="password"]') ||
+        document.querySelector('input[autocomplete*="password"]');
     }
-
-    if (fk === 'password') {
-      let pass =
-        anchor && credKind(anchor) === 'password'
-          ? anchor
-          : root.querySelector && root.querySelector('input[type="password"]');
-      if (!pass) pass = document.querySelector('input[type="password"]');
-      if (pass && cred.password) setVal(pass, cred.password);
-      window.__axisVaultLastAutofill = {
+    let user = null;
+    if (anchor && (credKind(anchor) === 'username' || likelyUser(anchor))) user = anchor;
+    else if (pass) user = findUserForPass(pass);
+    if (!user) {
+      const scoped = fillableFields(root);
+      user =
+        scoped.find((el) => resolveKind(el) === 'username') ||
+        scoped.find((el) => (el.type || '').toLowerCase() === 'email') ||
+        null;
+    }
+    if (!user) {
+      const all = Array.from(document.querySelectorAll('input')).filter(vis);
+      user =
+        all.find((el) => resolveKind(el) === 'username') ||
+        all.find((el) => likelyUser(el)) ||
+        document.querySelector('input[type="email"]') ||
+        document.querySelector('input[autocomplete="username"]') ||
+        null;
+    }
+    if (user && cred.username) setVal(user, cred.username);
+    if (pass && cred.password) setVal(pass, cred.password);
+    if (cred.password) {
+      pendingLogin = {
         at: Date.now(),
         origin: location.origin || '',
         username: cred.username || '',
         password: cred.password || ''
       };
-      return;
     }
+    if (cred.password && (!pass || !vis(pass))) {
+      setTimeout(function () {
+        const latePass =
+          Array.from(document.querySelectorAll('input')).filter(vis).find((el) => credKind(el) === 'password') ||
+          document.querySelector('input[type="password"]');
+        if (latePass && !String(latePass.value || '')) setVal(latePass, cred.password);
+        if (cred.username) {
+          const lateUser =
+            (latePass && findUserForPass(latePass)) ||
+            Array.from(document.querySelectorAll('input')).filter(vis).find((el) => resolveKind(el) === 'username') ||
+            document.querySelector('input[type="email"]');
+          if (lateUser && !String(lateUser.value || '').trim()) setVal(lateUser, cred.username);
+        }
+      }, 320);
+    }
+    setLastAutofillLoginMeta(cred.username || '', cred.password || '');
+  }
 
-    let pass = root.querySelector && root.querySelector('input[type="password"]');
-    if (!pass) pass = document.querySelector('input[type="password"]') || document.querySelector('input[autocomplete*="password"]');
-    let user = null;
-    if (anchor && credKind(anchor) === 'username') user = anchor;
-    else if (pass) user = findUserForPass(pass);
-    if (user && cred.username) setVal(user, cred.username);
-    if (pass && cred.password) setVal(pass, cred.password);
-    window.__axisVaultLastAutofill = {
-      at: Date.now(),
-      origin: location.origin || '',
-      username: cred.username || '',
-      password: cred.password || ''
-    };
+  function applyPendingLogin(el) {
+    const pending = pendingLogin;
+    if (!pending || !pending.password) return false;
+    if (Date.now() - (pending.at || 0) > 2 * 60 * 1000) {
+      pendingLogin = null;
+      return false;
+    }
+    if (pending.origin && pending.origin !== (location.origin || '')) {
+      pendingLogin = null;
+      return false;
+    }
+    const k = credKind(el);
+    if (k === 'password') {
+      setVal(el, pending.password);
+      if (pending.username) {
+        const userEl =
+          findUserForPass(el) ||
+          Array.from(document.querySelectorAll('input')).filter(vis).find((u) => resolveKind(u) === 'username') ||
+          document.querySelector('input[type="email"]');
+        if (userEl && !String(userEl.value || '').trim()) setVal(userEl, pending.username);
+      }
+      pendingLogin = null;
+      setLastAutofillLoginMeta(pending.username || '', pending.password || '');
+      return true;
+    }
+    if ((k === 'username' || likelyUser(el)) && pending.username && !String(el.value || '').trim()) {
+      setVal(el, pending.username);
+    }
+    return false;
   }
 
   function fillableFields(root) {
@@ -367,85 +528,254 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     }
   }
 
-  function showMenu(anchor, items, offerKind) {
-    hideMenu();
-    anchor = anchor || api.focusAnchor;
-    if (!anchor || !vis(anchor) || !items || !items.length) return;
-    ensureStyles();
-    const menu = document.createElement('ul');
-    menu.id = MENU_ID;
-    menu.setAttribute('role', 'listbox');
-    menu.setAttribute('data-axis-theme', uiTheme());
-    menu.setAttribute('data-axis-kind', offerKind || 'login');
-    for (const row of items) {
-      const li = document.createElement('li');
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('role', 'option');
+  function cardBrand(num) {
+    const n = String(num || '').replace(/\\D/g, '');
+    if (/^4/.test(n)) return 'visa';
+    if (/^5[1-5]/.test(n) || /^2(2[2-9]|[3-6]|7[01]|720)/.test(n)) return 'mastercard';
+    if (/^3[47]/.test(n)) return 'amex';
+    return 'card';
+  }
+
+  function initialsFrom(text) {
+    const s = String(text || '').trim();
+    if (!s) return '••';
+    const parts = s.replace(/@.*/, '').split(/[\\s._-]+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase().slice(0, 2);
+    return s.slice(0, 2).toUpperCase();
+  }
+
+  function hostFromOrigin(origin) {
+    try { return new URL(String(origin || '')).hostname.replace(/^www\\./, ''); } catch (_) { return ''; }
+  }
+
+  function cleanLoginSiteLabel(title, origin) {
+    const site = hostFromOrigin(origin);
+    // Always prefer the real site host for the bold label (never "Log in to …").
+    if (site) return site;
+    let t = String(title || '').trim();
+    t = t.replace(/^(log\\s*in\\s*to|sign\\s*in\\s*to|login\\s*to|sign\\s*into|log\\s*into)\\s+/i, '');
+    t = t.replace(/^https?:\\/\\//i, '').replace(/^www\\./i, '').replace(/\\/$/, '');
+    return t || 'Account';
+  }
+
+  function faviconCandidates(origin) {
+    const host = hostFromOrigin(origin);
+    const out = [];
+    try {
+      // Prefer the live page favicon when filling on the same site (works under CSP).
+      if (origin && location.origin === origin) {
+        const link = document.querySelector('link[rel="icon"],link[rel="shortcut icon"],link[rel*="icon"]');
+        if (link && link.href) out.push(link.href);
+        out.push(location.origin + '/favicon.ico');
+      }
+    } catch (_) {}
+    if (host) {
+      out.push('https://icons.duckduckgo.com/ip3/' + encodeURIComponent(host) + '.ico');
+      out.push('https://www.google.com/s2/favicons?domain=' + encodeURIComponent(host) + '&sz=64');
+      try {
+        const u = new URL(String(origin || ''));
+        if (out.indexOf(u.origin + '/favicon.ico') === -1) out.push(u.origin + '/favicon.ico');
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  function formatAfDate(ts) {
+    const n = Number(ts);
+    if (!n) return '';
+    try {
+      const d = new Date(n);
+      if (Number.isNaN(d.getTime())) return '';
+      return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+    } catch (_) { return ''; }
+  }
+
+  function iconSvg(kind) {
+    if (kind === 'house') {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1v-10.5Z"/></svg>';
+    }
+    if (kind === 'key') {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="15" r="4"/><path d="m12 13 8-8 2 2-2 2-2-2-4 4"/><path d="m16 7 2 2"/></svg>';
+    }
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>';
+  }
+
+  function buildPillButton(row, offerKind) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'axis-af-pill';
+    btn.setAttribute('role', 'option');
+    const ui = row && row._ui ? row._ui : null;
+    const isLoginKind =
+      offerKind === 'login' ||
+      offerKind === 'username' ||
+      offerKind === 'password' ||
+      (!offerKind && ui && (ui.iconKind === 'favicon' || ui.iconKind === 'initials'));
+
+    let iconKind = 'card';
+    let iconText = '';
+    let iconUrl = '';
+    let leftLabel = '';
+    let leftValue = '';
+    let rightLabel = '';
+    let rightValue = '';
+
+    function faviconForOrigin(origin) {
+      const list = faviconCandidates(origin);
+      return list[0] || '';
+    }
+
+    if (ui && !isLoginKind) {
+      iconKind = ui.iconKind || 'card';
+      iconText = ui.iconText || '';
+      iconUrl = ui.iconUrl || '';
+      leftLabel = ui.primaryLabel || '';
+      leftValue = ui.primaryValue || '';
+      rightLabel = ui.secondaryLabel || '';
+      rightValue = ui.secondaryValue || '';
+    } else if (!isLoginKind && offerKind === 'card') {
+      const brand = cardBrand(row.number);
+      iconKind = brand === 'mastercard' || brand === 'visa' || brand === 'amex' ? brand : 'card';
+      if (row.label) leftLabel = row.label;
+      else if (brand === 'mastercard') leftLabel = 'MasterCard';
+      else if (brand === 'visa') leftLabel = 'Visa';
+      else if (brand === 'amex') leftLabel = 'Amex';
+      else leftLabel = 'Card';
+      leftValue = row.masked || ('···· ' + String(row.number || '').slice(-4));
+      const em = String(row.expMonth || '').padStart(2, '0');
+      const ey = String(row.expYear || '');
+      if (em && ey && em !== '00') {
+        rightLabel = 'Expiry';
+        rightValue = em + '/' + (ey.length === 4 ? ey.slice(-2) : ey);
+      }
+    } else if (!isLoginKind && offerKind === 'address') {
+      iconKind = 'house';
+      leftLabel = '';
+      leftValue = row.summary || row.addressLine1 || row.fullName || '';
+      if (row.label && leftValue && row.label !== leftValue) {
+        rightLabel = 'Note';
+        rightValue = row.label;
+      }
+    } else {
+      const displayUser =
+        (row && row.username) ||
+        (ui && ui.primaryValue) ||
+        '';
+      const site = hostFromOrigin(row && row.origin);
+      iconUrl = (ui && ui.iconUrl) || faviconForOrigin(row && row.origin);
+      iconKind = iconUrl ? 'favicon' : 'initials';
+      iconText = (ui && ui.iconText) || initialsFrom(displayUser || site);
+      // Password pills: username only - favicon identifies the site.
+      leftLabel = '';
+      leftValue = displayUser || '••••';
+      rightLabel = (ui && ui.secondaryLabel) || '';
+      rightValue = (ui && ui.secondaryValue) || '';
+      if (!rightLabel || !rightValue) {
+        const when = formatAfDate(row && row.updatedAt);
+        if (when) {
+          rightLabel = 'Date Added';
+          rightValue = when;
+        }
+      }
+    }
+
+    const isLoginPill = isLoginKind || iconKind === 'favicon';
+
+    const icon = document.createElement('span');
+    icon.className = 'axis-af-icon';
+    if (iconKind === 'mastercard') {
+      icon.classList.add('is-brand');
+      icon.innerHTML = '<span class="axis-af-mc" aria-hidden="true"></span>';
+    } else if (iconKind === 'visa') {
+      icon.classList.add('is-brand');
+      icon.innerHTML = '<span class="axis-af-visa" aria-hidden="true">VISA</span>';
+    } else if (iconKind === 'amex') {
+      icon.classList.add('is-brand');
+      icon.innerHTML = '<span class="axis-af-amex" aria-hidden="true">AMEX</span>';
+    } else if (iconKind === 'house') {
+      icon.classList.add('is-glyph');
+      icon.innerHTML = iconSvg('house');
+    } else if (iconKind === 'favicon' || (isLoginPill && (iconUrl || faviconCandidates(row && row.origin).length))) {
+      const urls = [];
+      if (iconUrl) urls.push(iconUrl);
+      for (const u of faviconCandidates(row && row.origin)) {
+        if (urls.indexOf(u) === -1) urls.push(u);
+      }
+      icon.classList.add('is-favicon');
+      const img = document.createElement('img');
+      img.alt = '';
+      img.decoding = 'async';
+      img.referrerPolicy = 'no-referrer';
+      let idx = 0;
+      img.src = urls[0] || '';
+      img.addEventListener('error', () => {
+        idx += 1;
+        if (idx < urls.length) {
+          img.src = urls[idx];
+          return;
+        }
+        icon.classList.remove('is-favicon');
+        icon.classList.add('is-initials');
+        icon.textContent = iconText || initialsFrom(leftValue || leftLabel) || '••';
+      });
+      icon.appendChild(img);
+    } else if (iconKind === 'initials') {
+      icon.classList.add('is-initials');
+      icon.textContent = iconText || '••';
+    } else {
+      icon.classList.add('is-glyph');
+      icon.innerHTML = iconSvg('card');
+    }
+
+    const rowEl = document.createElement('span');
+    rowEl.className = 'axis-af-row';
+    const left = document.createElement('span');
+    left.className = 'axis-af-left';
+    if (isLoginPill) {
+      const userEl = document.createElement('span');
+      userEl.className = 'axis-af-user';
+      userEl.textContent = leftValue || leftLabel || '••••';
+      left.appendChild(userEl);
+    } else if (leftLabel && leftValue) {
       const title = document.createElement('span');
       title.className = 'axis-af-title';
+      title.textContent = leftValue;
+      left.appendChild(title);
       const sub = document.createElement('span');
       sub.className = 'axis-af-sub';
-      if (offerKind === 'card') {
-        title.textContent = row.label || row.cardholder || 'Card';
-        sub.textContent = row.masked || ('•••• ' + String(row.number || '').slice(-4));
-        btn.appendChild(title);
-        btn.appendChild(sub);
-        btn.addEventListener('mousedown', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          hideMenu();
-          if (row.number) fillCard(row, anchor);
-          else {
-            api.pendingPickId = row.id;
-            api.pendingPickKind = 'card';
-          }
-        });
-      } else if (offerKind === 'address') {
-        title.textContent = row.label || row.fullName || 'Address';
-        sub.textContent = row.summary || row.addressLine1 || '';
-        btn.appendChild(title);
-        if (sub.textContent) btn.appendChild(sub);
-        btn.addEventListener('mousedown', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          hideMenu();
-          if (row.addressLine1 || row.fullName) fillAddress(row, anchor);
-          else {
-            api.pendingPickId = row.id;
-            api.pendingPickKind = 'address';
-          }
-        });
-      } else {
-        const username = row.username || '';
-        title.textContent = username || row.title || 'Saved account';
-        btn.appendChild(title);
-        const subText = row.title && row.title !== username ? row.title : '';
-        if (subText) {
-          sub.textContent = subText;
-          btn.appendChild(sub);
-        }
-        btn.addEventListener('mousedown', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          hideMenu();
-          if (row.password) fillLogin(row, anchor);
-          else {
-            api.pendingPickId = row.id;
-            api.pendingPickKind = 'login';
-          }
-        });
-      }
-      li.appendChild(btn);
-      menu.appendChild(li);
+      sub.textContent = leftLabel;
+      left.appendChild(sub);
+    } else {
+      const title = document.createElement('span');
+      title.className = 'axis-af-title';
+      title.textContent = leftValue || leftLabel || '';
+      left.appendChild(title);
     }
-    document.documentElement.appendChild(menu);
-    positionMenu(menu, anchor);
-    api.menuAnchor = anchor;
+    rowEl.appendChild(left);
+
+    if (rightValue) {
+      const right = document.createElement('span');
+      right.className = 'axis-af-right';
+      const meta = document.createElement('span');
+      meta.className = 'axis-af-meta';
+      meta.textContent = rightValue;
+      right.appendChild(meta);
+      rowEl.appendChild(right);
+    }
+
+    btn.appendChild(icon);
+    btn.appendChild(rowEl);
+    return btn;
+  }
+
+  function showMenu(/* anchor, items, offerKind */) {
+    // Shell overlay owns autofill UI - never paint a guest-page menu (CSP kills icons).
+    hideMenu();
   }
 
   const api = {
     ready: true,
+    uiVer: UI_VER,
     focusedField: null,
     focusKey: '',
     focusAt: 0,
@@ -459,6 +789,7 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     fillCard,
     fillAddress,
     fillKind,
+    likelyUser,
     isCardKind,
     isAddressKind
   };
@@ -475,12 +806,18 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     api.focusAnchor = el;
     const offer = offerKindFromField(k) || 'login';
     const userEl = k === 'password' ? findUserForPass(el) : el;
+    let rect = null;
+    try {
+      const r = el.getBoundingClientRect();
+      rect = { left: r.left, top: r.top, bottom: r.bottom, right: r.right, width: r.width, height: r.height };
+    } catch (_) {}
     api.focusedField = {
       kind: offer,
       origin: location.origin || '',
       pageUrl: location.href,
       usernameHint: offer === 'login' && userEl ? String(userEl.value || '').trim() : '',
-      fieldKind: k
+      fieldKind: k,
+      rect: rect
     };
     api.focusKey = offer + ':' + k + ':' + (el.id || el.name || '') + ':' + location.href;
     api.focusAt = Date.now();
@@ -490,32 +827,39 @@ const AXIS_VAULT_AUTOFILL_BOOTSTRAP_JS = `(function axisVaultAutofillBootstrap()
     const el = inputFromEvent(e) || e.target;
     if (!vis(el) || (!fillKind(el) && !likelyUser(el))) {
       dismissAutofillMenuIfNeeded();
+      clearAutofillFocus();
       return;
     }
+    applyPendingLogin(el);
     noteFocus(el);
   }, true);
 
   document.addEventListener('click', (e) => {
     const el = inputFromEvent(e) || e.target;
-    if (!vis(el)) {
+    if (!vis(el) || (!fillKind(el) && !likelyUser(el))) {
       dismissAutofillMenuIfNeeded();
+      clearAutofillFocus();
       return;
     }
-    if (fillKind(el) || likelyUser(el)) noteFocus(el);
-    else dismissAutofillMenuIfNeeded();
+    noteFocus(el);
   }, true);
 
   document.addEventListener('mousedown', (e) => {
     const menu = document.getElementById(MENU_ID);
-    if (!menu) return;
-    if (menu.contains(e.target)) return;
+    if (menu && menu.contains(e.target)) return;
     const el = inputFromEvent(e);
     if (el && vis(el) && (fillKind(el) || likelyUser(el))) return;
-    setTimeout(dismissAutofillMenuIfNeeded, 0);
+    setTimeout(function () {
+      dismissAutofillMenuIfNeeded();
+      if (!shouldKeepAutofillMenu()) clearAutofillFocus();
+    }, 0);
   }, true);
 
   document.addEventListener('focusout', () => {
-    setTimeout(dismissAutofillMenuIfNeeded, 150);
+    setTimeout(function () {
+      dismissAutofillMenuIfNeeded();
+      if (!shouldKeepAutofillMenu()) clearAutofillFocus();
+    }, 150);
   }, true);
 
   window.addEventListener('scroll', () => {
@@ -539,40 +883,91 @@ const AXIS_VAULT_AUTOFILL_PROBE_JS = `(function(){
     v.pendingPickKind = null;
     return { pick: id, pickKind: kind };
   }
-  const f = v.focusedField;
+  const active = document.activeElement;
+  const onFillField = (function () {
+    if (!active || !v || active.tagName !== 'INPUT') return false;
+    try {
+      const t = (active.type || 'text').toLowerCase();
+      if (t === 'search' || t === 'hidden') return false;
+    } catch (_) {}
+    try {
+      if (typeof v.fillKind === 'function' && v.fillKind(active)) return true;
+    } catch (_) {}
+    try {
+      if (typeof v.likelyUser === 'function' && v.likelyUser(active)) return true;
+    } catch (_) {}
+    return false;
+  })();
   const menu = document.getElementById('axis-vault-autofill-menu');
   if (menu) {
-    const active = document.activeElement;
     const onMenu = active && menu.contains(active);
-    const onFillField = (function () {
-      if (!active || !v) return false;
-      if (active === v.focusAnchor || active === v.menuAnchor) return true;
-      try {
-        if (typeof v.fillKind === 'function' && v.fillKind(active)) return true;
-      } catch (_) {}
-      const t = (active.type || 'text').toLowerCase();
-      const ac = (active.autocomplete || '').toLowerCase();
-      const name = (active.name || '').toLowerCase();
-      const id = (active.id || '').toLowerCase();
-      const aria = String(active.getAttribute('aria-label') || '').toLowerCase();
-      if (t === 'password' || ac.includes('password')) return true;
-      if (t === 'email' || ac.includes('username') || ac === 'email') return true;
-      if (ac.includes('cc-') || name.includes('card') || id.includes('card') || name.includes('cvv') || name.includes('cvc') || aria.includes('card') || aria.includes('cvc') || aria.includes('expir')) return true;
-      if (ac.includes('address') || ac.includes('postal') || name.includes('address') || name.includes('zip') || name.includes('city') || name.includes('state')) return true;
-      return false;
-    })();
     if (!onMenu && !onFillField) {
       v.hideMenu && v.hideMenu();
-    } else {
+      v.focusedField = null;
+      v.focusKey = '';
+      v.focusAnchor = null;
+      v.focusAt = 0;
+      return null;
+    }
+    if (onMenu || onFillField) {
       return {
-        focus: f || { kind: menu.getAttribute('data-axis-kind') || 'login', origin: location.origin || '', pageUrl: location.href },
+        focus: v.focusedField || { kind: menu.getAttribute('data-axis-kind') || 'login', origin: location.origin || '', pageUrl: location.href },
         focusKey: v.focusKey || '',
         focusAt: v.focusAt || Date.now(),
         menuOpen: true
       };
     }
   }
+  if (!onFillField) {
+    v.focusedField = null;
+    v.focusKey = '';
+    v.focusAnchor = null;
+    v.focusAt = 0;
+    return null;
+  }
+  // Rebuild focus bookkeeping if hide/fill cleared it while the field is still focused.
+  if (!v.focusedField && typeof v.fillKind === 'function') {
+    try {
+      const k = v.fillKind(active) || (typeof v.likelyUser === 'function' && v.likelyUser(active) ? 'username' : null);
+      if (k) {
+        const offer = (v.isCardKind && v.isCardKind(k)) ? 'card' : (v.isAddressKind && v.isAddressKind(k)) ? 'address' : 'login';
+        let rect = null;
+        try {
+          const r = active.getBoundingClientRect();
+          rect = { left: r.left, top: r.top, bottom: r.bottom, right: r.right, width: r.width, height: r.height };
+        } catch (_) {}
+        v.focusAnchor = active;
+        v.focusedField = {
+          kind: offer,
+          origin: location.origin || '',
+          pageUrl: location.href,
+          usernameHint: '',
+          fieldKind: k,
+          rect: rect
+        };
+        v.focusKey = offer + ':' + k + ':' + (active.id || active.name || '') + ':' + location.href;
+        v.focusAt = Date.now();
+      }
+    } catch (_) {}
+  }
+  const f = v.focusedField;
   if (!f) return null;
+  // Only keep the offer while the live active element is still the fill field.
+  if (v.focusAnchor && active !== v.focusAnchor) {
+    v.focusedField = null;
+    v.focusKey = '';
+    v.focusAnchor = null;
+    v.focusAt = 0;
+    return null;
+  }
+  // Refresh rect while focused so the shell menu matches the field width.
+  try {
+    if (v.focusAnchor && v.focusAnchor.getBoundingClientRect) {
+      const r = v.focusAnchor.getBoundingClientRect();
+      f.rect = { left: r.left, top: r.top, bottom: r.bottom, right: r.right, width: r.width, height: r.height };
+    }
+  } catch (_) {}
+  if (!f.rect || !(f.rect.width >= 12) || !(f.rect.height >= 8)) return null;
   if (Date.now() - (v.focusAt || 0) > 8000) return null;
   return { focus: f, focusKey: v.focusKey || '', focusAt: v.focusAt || 0 };
   } catch (_) { return null; }
@@ -580,10 +975,9 @@ const AXIS_VAULT_AUTOFILL_PROBE_JS = `(function(){
 
 const AXIS_VAULT_AUTOFILL_HIDE_JS = `(function(){
   try {
-  if (window.__axisVault) {
-    window.__axisVault.focusedField = null;
-    window.__axisVault.hideMenu && window.__axisVault.hideMenu();
-  }
+  if (window.__axisVault && window.__axisVault.hideMenu) window.__axisVault.hideMenu();
+  var m = document.getElementById('axis-vault-autofill-menu');
+  if (m && m.parentNode) m.parentNode.removeChild(m);
   } catch (_) {}
 })()`;
 
@@ -629,7 +1023,11 @@ function buildVaultAutofillFillLoginJs(cred) {
 }
 
 function buildVaultAutofillFillCardJs(card) {
-  const json = JSON.stringify(card && typeof card === 'object' ? card : {});
+  const safe =
+    card && typeof card === 'object'
+      ? { ...card, cvv: '' }
+      : {};
+  const json = JSON.stringify(safe);
   return `(function(){
     var c=${json};
     var v=window.__axisVault;
