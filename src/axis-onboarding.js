@@ -1,19 +1,29 @@
 /**
- * First-run setup overlay — shown once until the user finishes or skips setup.
+ * First-run setup overlay - shown once until the user finishes or skips setup.
  */
 (function (global) {
     const AXIS_ONBOARDING_FORCE_EVERY_LAUNCH = false;
 
     const FLOW_STEPS = [
-        { id: 'default', label: 'Default', titleId: 'ob-default-title' },
-        { id: 'search', label: 'Search', titleId: 'ob-search-title' },
-        { id: 'data', label: 'Data', titleId: 'ob-data-title' },
-        { id: 'import', label: 'Import', titleId: 'ob-import-title', when: (s) => s.dataMode === 'import' },
-        { id: 'look', label: 'Look', titleId: 'ob-look-title' },
-        { id: 'you', label: 'You', titleId: 'ob-you-title' },
-        { id: 'features', label: 'Features', titleId: 'ob-features-title' },
-        { id: 'ready', label: 'Ready', titleId: 'ob-ready-title' }
+        { id: 'language', labelKey: 'onboarding.language.label', titleId: 'ob-language-title' },
+        { id: 'default', labelKey: 'onboarding.default.label', titleId: 'ob-default-title' },
+        { id: 'search', labelKey: 'onboarding.search.label', titleId: 'ob-search-title' },
+        { id: 'data', labelKey: 'onboarding.data.label', titleId: 'ob-data-title' },
+        { id: 'import', labelKey: 'onboarding.import.label', titleId: 'ob-import-title', when: (s) => s.dataMode === 'import' },
+        { id: 'look', labelKey: 'onboarding.look.label', titleId: 'ob-look-title' },
+        { id: 'you', labelKey: 'onboarding.you.label', titleId: 'ob-you-title' },
+        { id: 'features', labelKey: 'onboarding.features.label', titleId: 'ob-features-title' },
+        { id: 'ready', labelKey: 'onboarding.ready.label', titleId: 'ob-ready-title' }
     ];
+
+    function tr(key, vars) {
+        try {
+            if (global.AxisI18n && typeof global.AxisI18n.t === 'function') {
+                return global.AxisI18n.t(key, vars);
+            }
+        } catch (_) {}
+        return key;
+    }
 
     const UNPINNED_CLEAR_LABELS = {
         'app-close': 'When Axis closes',
@@ -40,16 +50,16 @@
     };
 
     const IMPORT_OPTION_DEFS = [
-        { key: 'importFavorites', label: 'Favorites & pinned tabs', desc: '→ Favorites in Axis' },
-        { key: 'importBookmarks', label: 'Bookmarks', desc: '→ Pinned tabs' },
-        { key: 'importFolders', label: 'Tab groups', desc: 'From bookmark folders' },
-        { key: 'importOpenTabs', label: 'Open tabs', desc: '→ Unpinned tabs (off by default)' },
-        { key: 'importHistory', label: 'History', desc: 'Sites you’ve visited' },
-        { key: 'importPasswords', label: 'Passwords', desc: 'Saved logins' },
-        { key: 'importCards', label: 'Payment cards', desc: 'Saved card details' },
-        { key: 'importAddresses', label: 'Addresses', desc: 'Autofill addresses' },
-        { key: 'importSitePermissions', label: 'Site permissions', desc: 'Camera, mic, location, notifications' },
-        { key: 'importExtensions', label: 'Extensions', desc: 'Re-download when possible' }
+        { key: 'importFavorites', labelKey: 'onboarding.import.opt.favorites', descKey: 'onboarding.import.opt.favoritesDesc' },
+        { key: 'importBookmarks', labelKey: 'onboarding.import.opt.bookmarks', descKey: 'onboarding.import.opt.bookmarksDesc' },
+        { key: 'importFolders', labelKey: 'onboarding.import.opt.folders', descKey: 'onboarding.import.opt.foldersDesc' },
+        { key: 'importOpenTabs', labelKey: 'onboarding.import.opt.tabs', descKey: 'onboarding.import.opt.tabsDesc' },
+        { key: 'importHistory', labelKey: 'onboarding.import.opt.history', descKey: 'onboarding.import.opt.historyDesc' },
+        { key: 'importPasswords', labelKey: 'onboarding.import.opt.passwords', descKey: 'onboarding.import.opt.passwordsDesc' },
+        { key: 'importCards', labelKey: 'onboarding.import.opt.cards', descKey: 'onboarding.import.opt.cardsDesc' },
+        { key: 'importAddresses', labelKey: 'onboarding.import.opt.addresses', descKey: 'onboarding.import.opt.addressesDesc' },
+        { key: 'importSitePermissions', labelKey: 'onboarding.import.opt.permissions', descKey: 'onboarding.import.opt.permissionsDesc' },
+        { key: 'importExtensions', labelKey: 'onboarding.import.opt.extensions', descKey: 'onboarding.import.opt.extensionsDesc' }
     ];
 
     /** Real app logos in `src/assets/brands/`. */
@@ -172,9 +182,12 @@
             uiTheme: 'dark',
             sidebarPosition: 'left',
             greetingName: '',
+            uiLanguage: 'en',
+            universalBrowserLanguage: false,
+            universalUiLanguage: 'en',
             adBlockerEnabled: true,
             aiFeaturesEnabled: true,
-            unpinnedClearMode: 'app-close',
+            unpinnedClearMode: 'never',
             unpinnedClearCustomMinutes: 60,
             importOpts: {
                 importFavorites: true,
@@ -192,7 +205,7 @@
 
         function setThemeColor(color, { syncInputs = true } = {}) {
             state.themeColor = normalizeHexColor(color);
-            /* Do not tint the setup backdrop with the chosen theme — that color
+            /* Do not tint the setup backdrop with the chosen theme - that color
              * bled through the frosted glass while onboarding was open. */
             if (syncInputs) {
                 if (themeColorInput) themeColorInput.value = state.themeColor;
@@ -247,9 +260,9 @@
                 el.classList.toggle('is-on', on);
                 el.setAttribute('aria-pressed', on ? 'true' : 'false');
                 const stateEl = el.querySelector('.ob-feature-state');
-                if (stateEl) stateEl.textContent = on ? 'On' : 'Off';
+                if (stateEl) stateEl.textContent = on ? tr('common.on') : tr('common.off');
             });
-            const mode = state.unpinnedClearMode || 'app-close';
+            const mode = state.unpinnedClearMode || 'never';
             setPressed('[data-ob-unpinned]', mode, 'data-ob-unpinned');
             if (unpinnedCustomRow) unpinnedCustomRow.hidden = mode !== 'custom';
             if (
@@ -269,8 +282,8 @@
             importOptionsList.innerHTML = IMPORT_OPTION_DEFS.map((opt) => {
                 const on = state.importOpts[opt.key] !== false;
                 return `<button type="button" class="ob-import-chip ${on ? 'is-selected' : ''}" data-ob-import-opt="${opt.key}" aria-pressed="${on ? 'true' : 'false'}">
-  <span class="ob-import-chip-title">${escapeHtml(opt.label)}</span>
-  <span class="ob-import-chip-desc">${escapeHtml(opt.desc)}</span>
+  <span class="ob-import-chip-title">${escapeHtml(tr(opt.labelKey))}</span>
+  <span class="ob-import-chip-desc">${escapeHtml(tr(opt.descKey))}</span>
 </button>`;
             }).join('');
         }
@@ -288,9 +301,9 @@
   ${browserIconHtml(state.browserId)}
   <div class="ob-browser-card-text">
     <span class="ob-browser-card-name">${name}</span>
-    <span class="ob-browser-card-meta">${count} profile${count === 1 ? '' : 's'}</span>
+    <span class="ob-browser-card-meta">${escapeHtml(tr(count === 1 ? 'onboarding.import.profileCount' : 'onboarding.import.profileCountPlural', { count, n: count }))}</span>
   </div>
-  <button type="button" class="ob-browser-change" data-ob-change-browser>Change</button>
+  <button type="button" class="ob-browser-change" data-ob-change-browser>${escapeHtml(tr('common.change'))}</button>
 </div>`;
                 } else {
                     browserSelected.innerHTML = '';
@@ -359,7 +372,7 @@
             if (progressFill) progressFill.style.width = `${pct}%`;
             if (stepCaption) {
                 const cur = steps[flowIndex];
-                stepCaption.textContent = cur ? `${flowIndex + 1} of ${total} · ${cur.label}` : '';
+                stepCaption.textContent = cur ? `${flowIndex + 1} / ${total} · ${tr(cur.labelKey)}` : '';
             }
             if (!stepper) return;
             stepper.innerHTML = steps
@@ -367,7 +380,7 @@
                     const st = i < flowIndex ? 'is-done' : i === flowIndex ? 'is-active' : '';
                     return `<button type="button" class="ob-step ${st}" data-ob-step-jump="${i}" ${i > flowIndex ? 'disabled' : ''} aria-current="${i === flowIndex ? 'step' : 'false'}">
   <span class="ob-step-num">${i < flowIndex ? '✓' : i + 1}</span>
-  <span class="ob-step-label">${escapeHtml(s.label)}</span>
+  <span class="ob-step-label">${escapeHtml(tr(s.labelKey))}</span>
 </button>`;
                 })
                 .join('<span class="ob-step-rule" aria-hidden="true"></span>');
@@ -396,7 +409,7 @@
             if (cur.id === 'look') return !!state.themeColor && !!state.uiTheme;
             if (cur.id === 'you') return true;
             if (cur.id === 'features') {
-                const mode = state.unpinnedClearMode || 'app-close';
+                const mode = state.unpinnedClearMode || 'never';
                 if (mode === 'custom') {
                     return (
                         state.unpinnedClearCustomMinutes >= 1 &&
@@ -470,7 +483,7 @@
             }
         }
 
-        /** Tear down skip confirm without flashing setup — used when leaving to the app. */
+        /** Tear down skip confirm without flashing setup - used when leaving to the app. */
         function clearSkipConfirmSilent() {
             if (skipConfirmCloseTimer) {
                 window.clearTimeout(skipConfirmCloseTimer);
@@ -496,7 +509,7 @@
                 const status = await window.electronAPI?.getDefaultBrowserStatus?.();
                 if (status?.isDefault) {
                     defaultHint.hidden = false;
-                    defaultHint.textContent = 'Axis is already your default browser.';
+                    defaultHint.textContent = tr('onboarding.default.already');
                     if (state.wantDefault === null) {
                         state.wantDefault = true;
                         syncChoiceUi();
@@ -531,7 +544,7 @@
             updateNextEnabled();
 
             if (nextLabel) {
-                nextLabel.textContent = current.id === 'ready' ? 'Open Axis' : 'Continue';
+                nextLabel.textContent = current.id === 'ready' ? tr('onboarding.openAxis') : tr('onboarding.continue');
             }
             root.setAttribute('aria-labelledby', current.titleId);
 
@@ -556,7 +569,7 @@
         async function loadBrowsers() {
             if (!browserList) return;
             if (!state.browserId) {
-                browserList.innerHTML = `<div class="ob-empty">Looking for browsers…</div>`;
+                browserList.innerHTML = `<div class="ob-empty">${escapeHtml(tr('onboarding.import.looking'))}</div>`;
                 browserList.hidden = false;
                 if (browserSelected) {
                     browserSelected.hidden = true;
@@ -575,7 +588,7 @@
                 // Keep an existing choice if a transient scan comes back empty.
                 if (!state.browserId) {
                     browserList.hidden = false;
-                    browserList.innerHTML = `<div class="ob-empty">No supported browsers with profiles were found. You can import later from Settings → Profiles, or go back and start fresh.</div>`;
+                    browserList.innerHTML = `<div class="ob-empty">${escapeHtml(tr('onboarding.import.none'))}</div>`;
                     if (browserSelected) {
                         browserSelected.hidden = true;
                         browserSelected.innerHTML = '';
@@ -595,7 +608,7 @@
   ${icon}
   <span class="ob-browser-card-text">
     <span class="ob-browser-card-name">${name}</span>
-    <span class="ob-browser-card-meta">${count} profile${count === 1 ? '' : 's'}</span>
+    <span class="ob-browser-card-meta">${escapeHtml(tr(count === 1 ? 'onboarding.import.profileCount' : 'onboarding.import.profileCountPlural', { count, n: count }))}</span>
   </span>
 </button>`;
                 })
@@ -623,7 +636,7 @@
                 updateNextEnabled();
                 return;
             }
-            profileList.innerHTML = `<div class="ob-empty">Loading profiles…</div>`;
+            profileList.innerHTML = `<div class="ob-empty">${escapeHtml(tr('onboarding.import.loadingProfiles'))}</div>`;
             if (state.profileMode === 'pick') profileList.hidden = false;
             let list = [];
             try {
@@ -634,7 +647,7 @@
             profilesCache = Array.isArray(list) ? list : [];
             updateBrowserSelectionUi();
             if (!profilesCache.length) {
-                profileList.innerHTML = `<div class="ob-empty">No profiles found in that browser.</div>`;
+                profileList.innerHTML = `<div class="ob-empty">${escapeHtml(tr('onboarding.import.noProfiles'))}</div>`;
                 updateNextEnabled();
                 return;
             }
@@ -655,12 +668,20 @@
 
         function prepareReady() {
             const rows = [];
+            const langName =
+                (global.AxisI18n && typeof global.AxisI18n.languageLabel === 'function'
+                    ? global.AxisI18n.languageLabel(state.uiLanguage)
+                    : '') || state.uiLanguage || 'English';
             rows.push({
-                label: 'Default browser',
-                value: state.wantDefault ? 'Set Axis as default' : 'Keep current default'
+                label: tr('onboarding.ready.language'),
+                value: langName
             });
             rows.push({
-                label: 'Search',
+                label: tr('onboarding.ready.defaultBrowser'),
+                value: state.wantDefault ? tr('onboarding.ready.setDefault') : tr('onboarding.ready.keepDefault')
+            });
+            rows.push({
+                label: tr('onboarding.ready.search'),
                 value: SEARCH_LABELS[state.searchEngine] || state.searchEngine
             });
             if (state.dataMode === 'import' && state.browserId) {
@@ -670,41 +691,51 @@
                         ? profilesCache.length
                         : state.selectedProfileIds.length;
                 rows.push({
-                    label: 'Import',
-                    value: `${browser?.name || state.browserId} · ${n} profile${n === 1 ? '' : 's'}`
+                    label: tr('onboarding.ready.import'),
+                    value: `${browser?.name || state.browserId} · ${tr(n === 1 ? 'onboarding.import.profileCount' : 'onboarding.import.profileCountPlural', { n })}`
                 });
             } else {
-                rows.push({ label: 'Data', value: 'Start fresh' });
+                rows.push({ label: tr('onboarding.ready.data'), value: tr('onboarding.ready.fresh') });
             }
             const look =
                 state.uiTheme === 'system'
-                    ? 'Match system'
+                    ? tr('onboarding.ready.matchSystem')
                     : state.uiTheme === 'light'
-                      ? 'Light'
-                      : 'Dark';
+                      ? tr('common.light')
+                      : tr('common.dark');
             rows.push({
-                label: 'Look',
-                value: `${look} · ${state.themeColor.toUpperCase()} · Sidebar ${state.sidebarPosition}`
+                label: tr('onboarding.ready.look'),
+                value: `${look} · ${state.themeColor.toUpperCase()} · ${tr('onboarding.ready.sidebar', {
+                    side: tr(state.sidebarPosition === 'right' ? 'common.right' : 'common.left')
+                })}`
             });
             const name = String(state.greetingName || '').trim();
             rows.push({
-                label: 'Name',
-                value: name || 'Not set'
+                label: tr('onboarding.ready.name'),
+                value: name || tr('onboarding.ready.notSet')
             });
             const featureBits = [];
-            if (state.adBlockerEnabled) featureBits.push('Ad blocker');
-            if (state.aiFeaturesEnabled) featureBits.push('AI');
+            if (state.adBlockerEnabled) featureBits.push(tr('onboarding.features.adblock'));
+            if (state.aiFeaturesEnabled) featureBits.push(tr('chrome.aiChat'));
             rows.push({
-                label: 'Features',
-                value: featureBits.length ? featureBits.join(' · ') : 'All off'
+                label: tr('onboarding.ready.features'),
+                value: featureBits.length ? featureBits.join(' · ') : tr('onboarding.ready.allOff')
             });
-            const unpinnedMode = state.unpinnedClearMode || 'app-close';
+            const unpinnedMode = state.unpinnedClearMode || 'never';
             const unpinnedValue =
                 unpinnedMode === 'custom'
-                    ? `Every ${state.unpinnedClearCustomMinutes} minutes`
-                    : UNPINNED_CLEAR_LABELS[unpinnedMode] || unpinnedMode;
+                    ? tr('onboarding.ready.everyMinutes', { n: state.unpinnedClearCustomMinutes })
+                    : tr(
+                          unpinnedMode === 'app-close'
+                              ? 'onboarding.features.appClose'
+                              : unpinnedMode === '24h'
+                                ? 'onboarding.features.daily'
+                                : unpinnedMode === 'never'
+                                  ? 'onboarding.features.never'
+                                  : 'onboarding.features.custom'
+                      );
             rows.push({
-                label: 'Clear tabs',
+                label: tr('onboarding.ready.clearTabs'),
                 value: unpinnedValue
             });
 
@@ -803,19 +834,37 @@
         async function persistSettings() {
             const name = String(state.greetingName || '').trim() || 'User';
             const pairs = [
+                ['uiLanguage', state.uiLanguage || 'en'],
+                [
+                    'universalBrowserLanguage',
+                    {
+                        enabled: !!state.universalBrowserLanguage,
+                        universalUiLanguage: state.universalUiLanguage || state.uiLanguage || 'en'
+                    }
+                ],
+                ['universalUiLanguage', state.universalUiLanguage || state.uiLanguage || 'en'],
                 ['searchEngine', state.searchEngine],
                 ['themeColor', state.themeColor],
                 ['uiTheme', state.uiTheme],
                 ['sidebarPosition', state.sidebarPosition],
                 ['ntpGreetingName', name],
-                ['unpinnedClearMode', state.unpinnedClearMode || 'app-close'],
+                ['unpinnedClearMode', state.unpinnedClearMode || 'never'],
                 ['unpinnedClearCustomMinutes', state.unpinnedClearCustomMinutes || 60],
                 ...FEATURE_KEYS.map((key) => [key, !!state[key]])
             ];
             for (const [key, value] of pairs) {
                 try {
                     await host.saveSetting?.(key, value);
-                    if (host.settings) host.settings[key] = value;
+                    if (host.settings) {
+                        if (key === 'universalBrowserLanguage' && value && typeof value === 'object') {
+                            host.settings.universalBrowserLanguage = !!value.enabled;
+                            if (value.universalUiLanguage) {
+                                host.settings.universalUiLanguage = value.universalUiLanguage;
+                            }
+                        } else {
+                            host.settings[key] = value;
+                        }
+                    }
                 } catch (_) {}
             }
         }
@@ -861,8 +910,8 @@
                         if (result.ok) {
                             let text =
                                 result.count > 0
-                                    ? `Imported ${result.count} profile${result.count === 1 ? '' : 's'}.`
-                                    : 'Import finished.';
+                                    ? tr(result.count === 1 ? 'onboarding.ready.imported' : 'onboarding.ready.importedPlural', { count: result.count })
+                                    : tr('onboarding.ready.importFinished');
                             if (Array.isArray(result.warnings) && result.warnings.length > 0) {
                                 text += ` ${result.warnings[0]}`;
                             }
@@ -871,7 +920,7 @@
                             readyStatus.textContent =
                                 result.error ||
                                 (result.errors && result.errors[0]) ||
-                                'Import had problems — you can retry in Settings → Profiles.';
+                                tr('onboarding.ready.importProblems');
                         }
                     }
                 }
@@ -895,6 +944,103 @@
             })();
         }
 
+        let langPickerBound = false;
+
+        function applyLanguage() {
+            // When setup is hidden, the shell owns ui language. Calling setLocale here
+            // from applyUiLanguage used to stomp every non-English switch back to the
+            // onboarding state's default ("en") until the next app restart.
+            if (!visible) return;
+            const I = global.AxisI18n;
+            const effective = state.universalBrowserLanguage
+                ? state.universalUiLanguage || state.uiLanguage || 'en'
+                : state.uiLanguage || 'en';
+            if (I) {
+                I.setLocale(effective);
+                I.applyToDom(document);
+            }
+            const pickerHost = document.getElementById('ob-ui-language-picker');
+            if (I && pickerHost && typeof I.mountPicker === 'function') {
+                const value = state.universalBrowserLanguage
+                    ? state.universalUiLanguage || state.uiLanguage
+                    : state.uiLanguage;
+                const onPick = (code) => {
+                    const next = I.sanitizeLocale(code) || 'en';
+                    if (state.universalBrowserLanguage) {
+                        if (next === state.universalUiLanguage) return;
+                        state.universalUiLanguage = next;
+                        state.uiLanguage = next;
+                        I.setLocale(next);
+                        I.applyToDom(document);
+                        void host.saveSetting?.('universalUiLanguage', next);
+                        if (host.settings) {
+                            host.settings.universalUiLanguage = next;
+                            host.settings.uiLanguage = next;
+                        }
+                        host.applyUiLanguage?.(next);
+                        applyLanguage();
+                        return;
+                    }
+                    if (next === state.uiLanguage) return;
+                    state.uiLanguage = next;
+                    state.universalUiLanguage = next;
+                    I.setLocale(next);
+                    I.applyToDom(document);
+                    void host.saveSetting?.('uiLanguage', next);
+                    if (host.settings) host.settings.uiLanguage = next;
+                    host.applyUiLanguage?.(next);
+                    applyLanguage();
+                };
+                I.mountPicker(pickerHost, {
+                    value,
+                    searchKey: 'onboarding.language.search',
+                    onChange: onPick,
+                    forceRemount: !langPickerBound
+                });
+                langPickerBound = true;
+                const trigger = pickerHost.querySelector('.axis-lang-trigger');
+                if (trigger) {
+                    trigger.setAttribute('aria-label', I.t('onboarding.language.title'));
+                }
+            }
+            const uni = document.getElementById('ob-universal-language');
+            const uniOpt = document.getElementById('ob-universal-language-option');
+            if (uni) {
+                uni.checked = !!state.universalBrowserLanguage;
+                uniOpt?.classList.toggle('is-checked', !!uni.checked);
+                if (!uni._axisBound) {
+                    uni._axisBound = true;
+                    uni.addEventListener('change', () => {
+                        state.universalBrowserLanguage = !!uni.checked;
+                        uniOpt?.classList.toggle('is-checked', !!uni.checked);
+                        if (state.universalBrowserLanguage) {
+                            state.universalUiLanguage = state.uiLanguage || 'en';
+                        }
+                        void host.saveSetting?.('universalBrowserLanguage', {
+                            enabled: state.universalBrowserLanguage,
+                            universalUiLanguage: state.universalUiLanguage || state.uiLanguage || 'en'
+                        });
+                        if (host.settings) {
+                            host.settings.universalBrowserLanguage = state.universalBrowserLanguage;
+                            host.settings.universalUiLanguage =
+                                state.universalUiLanguage || state.uiLanguage || 'en';
+                            if (state.universalBrowserLanguage) {
+                                host.settings.uiLanguage = host.settings.universalUiLanguage;
+                            } else {
+                                host.settings.uiLanguage = state.uiLanguage || 'en';
+                            }
+                            host.applyUiLanguage?.(host.settings.uiLanguage);
+                        }
+                        applyLanguage();
+                    });
+                }
+            }
+            renderImportOptions();
+            renderStepper();
+            syncFeatureChecks();
+            if (activeSteps()[flowIndex]?.id === 'ready') prepareReady();
+        }
+
         function show() {
             if (visible) return;
             try {
@@ -905,6 +1051,17 @@
                 profilesCache = [];
                 defaultStatusChecked = false;
                 state.wantDefault = null;
+                {
+                    const I = global.AxisI18n;
+                    const stored = I?.sanitizeLocale?.(host.settings?.uiLanguage) || '';
+                    state.uiLanguage = stored || I?.detectSystemLocale?.() || 'en';
+                    I?.setLocale?.(state.uiLanguage);
+                }
+                state.universalBrowserLanguage = host.settings?.universalBrowserLanguage === true;
+                state.universalUiLanguage =
+                    (global.AxisI18n?.sanitizeLocale?.(host.settings?.universalUiLanguage) ||
+                        state.uiLanguage ||
+                        'en');
                 state.searchEngine = host.settings?.searchEngine || 'google';
                 state.dataMode = null;
                 state.browserId = null;
@@ -922,7 +1079,7 @@
                 state.adBlockerEnabled = host.settings?.adBlockerEnabled !== false;
                 state.aiFeaturesEnabled = host.settings?.aiFeaturesEnabled !== false;
                 {
-                    const rawMode = host.settings?.unpinnedClearMode || 'app-close';
+                    const rawMode = host.settings?.unpinnedClearMode || 'never';
                     const rawCustomMins = Number(host.settings?.unpinnedClearCustomMinutes);
                     state.unpinnedClearCustomMinutes = clampUnpinnedCustomMinutes(
                         Number.isFinite(rawCustomMins) ? rawCustomMins : 60
@@ -935,7 +1092,7 @@
                         state.unpinnedClearMode = 'custom';
                         state.unpinnedClearCustomMinutes = UNPINNED_CLEAR_PRESET_MINUTES[rawMode];
                     } else {
-                        state.unpinnedClearMode = 'app-close';
+                        state.unpinnedClearMode = 'never';
                     }
                 }
                 state.importOpts = {
@@ -954,6 +1111,7 @@
                 renderImportOptions();
                 syncTheme();
                 syncChoiceUi();
+                applyLanguage();
                 showScreen('welcome', { animate: true });
                 root.classList.remove('hidden');
                 root.hidden = false;
@@ -1034,7 +1192,7 @@
                 finishHide();
                 return;
             }
-            // Keep axis-onboarding-active until fade ends — otherwise the shell
+            // Keep axis-onboarding-active until fade ends - otherwise the shell
             // pops under a translucent overlay and the leave looks glitchy.
             root.classList.add('is-leaving');
             if (exitingFromSkip) root.classList.add('is-skip-confirm');
@@ -1162,12 +1320,12 @@
             }
             const unpinnedBtn = e.target.closest('[data-ob-unpinned]');
             if (unpinnedBtn) {
-                const mode = unpinnedBtn.getAttribute('data-ob-unpinned') || 'app-close';
+                const mode = unpinnedBtn.getAttribute('data-ob-unpinned') || 'never';
                 if (mode === 'custom') {
                     state.unpinnedClearMode = 'custom';
                     state.unpinnedClearCustomMinutes = clampUnpinnedCustomMinutes(state.unpinnedClearCustomMinutes);
                 } else {
-                    state.unpinnedClearMode = UNPINNED_CLEAR_LABELS[mode] ? mode : 'app-close';
+                    state.unpinnedClearMode = UNPINNED_CLEAR_LABELS[mode] ? mode : 'never';
                 }
                 syncChoiceUi();
                 updateNextEnabled();
@@ -1275,6 +1433,12 @@
             hide,
             finish: finishSkip,
             syncTheme,
+            applyLanguage,
+            syncUiLanguage: (code) => {
+                const I = global.AxisI18n;
+                const next = I?.sanitizeLocale?.(code) || code || 'en';
+                state.uiLanguage = next;
+            },
             isVisible: () => visible
         };
     }
