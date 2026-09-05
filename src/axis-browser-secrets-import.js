@@ -189,7 +189,7 @@ function asCryptBuffer(encrypted) {
   if (encrypted instanceof Uint8Array) return Buffer.from(encrypted);
   if (Array.isArray(encrypted)) return Buffer.from(encrypted);
   if (typeof encrypted === 'string') {
-    // Preserve byte values 0–255 from SQLite TEXT/BLOB coercion.
+    // Preserve byte values 0-255 from SQLite TEXT/BLOB coercion.
     return Buffer.from(encrypted, 'latin1');
   }
   if (encrypted.type === 'Buffer' && Array.isArray(encrypted.data)) {
@@ -908,7 +908,7 @@ function extractBrowserSecrets(source, options = {}) {
       logins = readChromiumLogins(profilePath, userDataPath, browserId);
       if (logins.length === 0 && !resolveKeychainPassword(browserId) && process.platform === 'darwin') {
         warnings.push(
-          'Could not read saved passwords — allow Keychain access for the source browser or quit it and try again.'
+          'Could not read saved passwords - allow Keychain access for the source browser or quit it and try again.'
         );
       }
     }
@@ -921,13 +921,13 @@ function extractBrowserSecrets(source, options = {}) {
         process.platform === 'darwin'
       ) {
         warnings.push(
-          'Could not read payment cards — allow Keychain access for the source browser or quit it and try again.'
+          'Could not read payment cards - allow Keychain access for the source browser or quit it and try again.'
         );
       } else if (cards.length > 0) {
         const withCvv = cards.filter((c) => c.cvv).length;
         if (withCvv === 0) {
           warnings.push(
-            'Payment cards were imported, but no security codes (CVC/CVV) were found. The other browser only saves those when you chose to store them — Axis cannot invent missing codes.'
+            'Payment cards were imported, but no security codes (CVC/CVV) were found. The other browser only saves those when you chose to store them - Axis cannot invent missing codes.'
           );
         } else if (withCvv < cards.length) {
           warnings.push(
@@ -944,7 +944,7 @@ function extractBrowserSecrets(source, options = {}) {
       logins = readFirefoxLogins(profilePath);
       if (logins.length === 0 && pathExists(path.join(profilePath, 'logins.json'))) {
         warnings.push(
-          'Firefox passwords could not be decrypted — profiles protected with a master password are not supported yet.'
+          'Firefox passwords could not be decrypted - profiles protected with a master password are not supported yet.'
         );
       }
     }
