@@ -71,7 +71,7 @@ function querySqliteDb(dbPath, sql, params = []) {
 function sqliteReadWarning(label, error) {
   if (!error || error === 'missing') return null;
   if (error === 'sqlite_unavailable') {
-    return `Could not read ${label} — database support is unavailable in this build.`;
+    return `Could not read ${label} - database support is unavailable in this build.`;
   }
   return `Could not read ${label}. Quit the source browser and try again.`;
 }
