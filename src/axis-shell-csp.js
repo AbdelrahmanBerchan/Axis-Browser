@@ -27,12 +27,12 @@ const AXIS_MAIN_SHELL_CSP =
   "worker-src 'self' blob:; " +
   "manifest-src 'self'";
 
-/** Settings tab (`settings.html` in a guest webview). Local scripts only — no inline / external. */
+/** Settings tab (`settings.html` in a guest webview). Local scripts only - no inline / external. */
 const AXIS_SETTINGS_SHELL_CSP =
   "default-src 'none'; " +
   "script-src 'self'; " +
-  "style-src 'self' 'unsafe-inline'; " +
-  "font-src 'self' data:; " +
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+  "font-src 'self' https://fonts.gstatic.com data:; " +
   "img-src 'self' data: blob: https: http: file: chrome-extension:; " +
   "connect-src 'self' https://geocoding-api.open-meteo.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com; " +
   "object-src 'none'; " +
