@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Optional chrome.* gap-shims. Never invent a blank `chrome` object — that
+ * Optional chrome.* gap-shims. Never invent a blank `chrome` object - that
  * blocks Electron’s real extension API injection.
  */
 function axisEnsureExtensionChromeApiShims() {
