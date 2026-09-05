@@ -1,7 +1,7 @@
 /**
  * Chrome Web Store + Mozilla Add-ons use browser-specific install APIs; the primary
  * store button won't install into Electron. We inject an explicit Axis bar on listing
- * pages — install only runs when the user clicks it.
+ * pages - install only runs when the user clicks it.
  */
 (function axisExtensionStoresPreload() {
   'use strict';
@@ -306,7 +306,7 @@
           }
         } catch (_) {
           setInstallButtonState(btn, 'error');
-          setBarVisualState(bar, 'error', 'Could not reach Axis — try the Install in Axis bar above the page.');
+          setBarVisualState(bar, 'error', 'Could not reach Axis - try the Install in Axis bar above the page.');
         }
       });
 
@@ -385,7 +385,7 @@
         prog.style.animation = '';
       }
       setInstallButtonState(btn, 'success');
-      setBarVisualState(bar, 'success', 'Extension installed — open it from the puzzle icon in Axis’s URL bar.');
+      setBarVisualState(bar, 'success', 'Extension installed - open it from the puzzle icon in Axis’s URL bar.');
       setTimeout(() => {
         if (!bar.isConnected) return;
         setInstallButtonState(btn, 'installed');
