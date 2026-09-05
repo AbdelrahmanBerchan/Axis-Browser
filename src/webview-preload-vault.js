@@ -58,7 +58,8 @@
       try {
         const form = el && el.form;
         if (form && form.querySelector('input[type="password"]')) return true;
-        return !!document.querySelector('input[type="password"]');
+        // Do not treat "any password elsewhere on the page" as a login form signal.
+        return false;
       } catch (_) {
         return false;
       }
@@ -271,9 +272,9 @@
       }
       if (
         ac.includes('username') ||
-        name.includes('user') ||
+        name.includes('username') ||
         name.includes('login') ||
-        id.includes('user') ||
+        id.includes('username') ||
         id.includes('login')
       ) {
         return 'username';
@@ -350,29 +351,62 @@
     }
 
     function scanLoginCredentials() {
+      const origin = pageOrigin();
+      let username = '';
+      let password = '';
       const passwords = allVisibleInputs().filter((el) => inputKind(el) === 'password');
       for (const passEl of passwords) {
-        const password = String(passEl.value || '');
-        if (password.length < 1) continue;
+        const pw = String(passEl.value || '');
+        if (pw.length < 1) continue;
+        password = pw;
         const userEl = findUsernameForLogin(passEl);
-        let username = userEl ? String(userEl.value || '').trim() : '';
+        username = userEl ? String(userEl.value || '').trim() : '';
         if (!username) {
           const email = document.querySelector('input[type="email"]');
           if (email && isVisibleInput(email)) {
             username = String(email.value || '').trim();
           }
         }
-        if (!username) continue;
-        return {
-          type: 'login',
-          origin: pageOrigin(),
-          pageUrl: location.href,
-          username,
-          password,
-          title: document.title || ''
-        };
+        if (username) break;
       }
-      return null;
+      if (!password) {
+        for (const el of allVisibleInputs()) {
+          if (inputKind(el) === 'password' && String(el.value || '').length) {
+            password = String(el.value || '');
+            break;
+          }
+        }
+      }
+      if (!username) {
+        for (const el of allVisibleInputs()) {
+          if (inputKind(el) === 'username' || (el.type || '').toLowerCase() === 'email') {
+            const u = String(el.value || '').trim();
+            if (u) {
+              username = u;
+              break;
+            }
+          }
+        }
+      }
+      // Merge short-lived stash for form-clearing sites and two-step logins.
+      if (loginStash.origin === origin && Date.now() - loginStash.at < 10 * 60 * 1000) {
+        if (!username && loginStash.username) username = loginStash.username;
+        if (!password && loginStash.password) password = loginStash.password;
+        // Prefer the complete stashed pair when the page wiped one field after Sign in.
+        if (loginStash.username && loginStash.password) {
+          if (!username) username = loginStash.username;
+          if (!password) password = loginStash.password;
+        }
+      }
+      if (!username || !password) return null;
+      return {
+        type: 'login',
+        origin,
+        pageUrl: location.href,
+        username,
+        password,
+        title: document.title || ''
+      };
     }
 
     function parseExpValue(raw) {
@@ -390,12 +424,16 @@
       let numberEl = null;
       let cardholderEl = null;
       let expEl = null;
+      let expMonthEl = null;
+      let expYearEl = null;
       let cvvEl = null;
       for (const el of inputs) {
         const k = inputKind(el);
         if (k === 'cc-number' && !numberEl) numberEl = el;
         if (k === 'cc-name' && !cardholderEl) cardholderEl = el;
         if (k === 'cc-exp' && !expEl) expEl = el;
+        if (k === 'cc-exp-month' && !expMonthEl) expMonthEl = el;
+        if (k === 'cc-exp-year' && !expYearEl) expYearEl = el;
         if (k === 'cc-csc' && !cvvEl) cvvEl = el;
       }
       if (!numberEl) return null;
@@ -403,11 +441,23 @@
       if (number.length < 13) return null;
       const cardholder = cardholderEl ? String(cardholderEl.value || '').trim() : '';
       if (!cardholder) return null;
-      const { expMonth, expYear } = parseExpValue(expEl ? expEl.value : '');
-      if (!expMonth || !expYear) return null;
+      let expMonth = '';
+      let expYear = '';
+      if (expEl && String(expEl.value || '').trim()) {
+        ({ expMonth, expYear } = parseExpValue(expEl.value));
+      }
+      if ((!expMonth || !expYear) && (expMonthEl || expYearEl)) {
+        expMonth = String(expMonthEl?.value || '')
+          .replace(/\D/g, '')
+          .padStart(2, '0')
+          .slice(-2);
+        let y = String(expYearEl?.value || '').replace(/\D/g, '');
+        if (y.length === 2) y = '20' + y;
+        expYear = y;
+      }
+      if (!expMonth || !expYear || expMonth === '00') return null;
       return {
         type: 'card',
-        origin: pageOrigin(),
         label: '',
         cardholder,
         number,
@@ -429,52 +479,135 @@
         if (!val) continue;
         if (!fields[k]) fields[k] = val;
       }
-      if (!fields['addr-line1'] || !fields['addr-city'] || !fields['addr-postal'] || !fields['addr-name']) {
-        return null;
-      }
+      const fullName =
+        fields['addr-name'] ||
+        [fields['addr-name-given'], fields['addr-name-family']].filter(Boolean).join(' ').trim();
+      if (!fields['addr-line1'] || !fullName) return null;
+      if (!fields['addr-city'] && !fields['addr-postal']) return null;
       return {
         type: 'address',
-        origin: pageOrigin(),
         label: '',
-        fullName: fields['addr-name'],
+        fullName,
         organization: fields['addr-org'] || '',
         addressLine1: fields['addr-line1'],
         addressLine2: fields['addr-line2'] || '',
-        city: fields['addr-city'],
+        city: fields['addr-city'] || '',
         state: fields['addr-state'] || '',
-        postalCode: fields['addr-postal'],
+        postalCode: fields['addr-postal'] || '',
         country: fields['addr-country'] || '',
-        phone: '',
-        email: '',
-        summary: `${fields['addr-line1']}, ${fields['addr-city']}`
+        phone: fields['addr-phone'] || '',
+        email: fields['addr-email'] || '',
+        summary: [fields['addr-line1'], fields['addr-city'] || fields['addr-postal']]
+          .filter(Boolean)
+          .join(', ')
       };
     }
 
     function credentialsMatchRecentAutofill(creds) {
       const mark = window.__axisVaultLastAutofill;
       if (!mark || Date.now() - mark.at > 120000) return false;
+      const editedAt = Number(window.__axisVaultCredentialEditAt || 0);
+      if (editedAt > mark.at + 80) return false;
+      if (creds.type === 'card' || mark.kind === 'card') {
+        const last4 = String(creds.number || '').replace(/\D/g, '').slice(-4);
+        return mark.kind === 'card' && mark.last4 === last4 && last4.length === 4;
+      }
+      if (creds.type === 'address' || mark.kind === 'address') {
+        return (
+          mark.kind === 'address' &&
+          String(mark.line1 || '').toLowerCase() === String(creds.addressLine1 || '').toLowerCase() &&
+          String(mark.postal || '').toLowerCase() === String(creds.postalCode || '').toLowerCase()
+        );
+      }
+      const fp = passwordMatchFingerprint(creds.password || '');
       return (
         mark.origin === creds.origin &&
         mark.username === creds.username &&
-        mark.password === creds.password
+        !!fp &&
+        mark.passwordFp === fp
       );
+    }
+
+    function passwordMatchFingerprint(password) {
+      const s = String(password || '');
+      if (!s) return '';
+      let h = 2166136261;
+      for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return `${s.length}:${(h >>> 0).toString(16)}`;
     }
 
     function markAutofillUsed(cred) {
       if (!cred) return;
+      if (cred.type === 'card' || cred.number) {
+        window.__axisVaultLastAutofill = {
+          at: Date.now(),
+          kind: 'card',
+          last4: String(cred.number || '').replace(/\D/g, '').slice(-4)
+        };
+        return;
+      }
+      if (cred.type === 'address' || cred.addressLine1) {
+        window.__axisVaultLastAutofill = {
+          at: Date.now(),
+          kind: 'address',
+          line1: cred.addressLine1 || '',
+          postal: cred.postalCode || ''
+        };
+        return;
+      }
       window.__axisVaultLastAutofill = {
         at: Date.now(),
+        kind: 'login',
         origin: cred.origin || pageOrigin(),
         username: cred.username || '',
-        password: cred.password || ''
+        passwordFp: passwordMatchFingerprint(cred.password || '')
       };
     }
 
     const SAVE_OFFER_DEBOUNCE_MS = 1800;
     let saveOfferTimer = null;
     let saveOfferBlurTimer = null;
+    let saveOfferRetryTimer = null;
     let lastSaveOfferSentKey = '';
     let lastSaveOfferSentAt = 0;
+    const loginStash = { origin: '', username: '', password: '', at: 0 };
+    // Pending password for late-mounted fields — isolated-world only (never page window).
+    let pendingLoginFill = null;
+
+    function syncLoginStashToWindow() {
+      // Do not mirror passwords onto page-accessible globals.
+      try {
+        window.__axisVaultLoginStash = {
+          origin: loginStash.origin,
+          username: loginStash.username,
+          at: loginStash.at
+        };
+      } catch (_) {}
+    }
+
+    function updateLoginStashFromField(el) {
+      if (!el) return;
+      const k = resolveFieldKind(el) || inputKind(el);
+      if (k !== 'username' && k !== 'password') return;
+      const origin = pageOrigin();
+      if (loginStash.origin && loginStash.origin !== origin) {
+        loginStash.username = '';
+        loginStash.password = '';
+      }
+      loginStash.origin = origin;
+      loginStash.at = Date.now();
+      if (k === 'username') {
+        const v = String(el.value || '').trim();
+        if (v) loginStash.username = v;
+      } else if (k === 'password') {
+        const v = String(el.value || '');
+        if (v) loginStash.password = v;
+      }
+      syncLoginStashToWindow();
+    }
 
     function touchCredentialEdit() {
       window.__axisVaultCredentialEditAt = Date.now();
@@ -502,11 +635,13 @@
     }
 
     function saveOfferKeyForCard(creds) {
-      return `card:${creds.origin || pageOrigin()}:${creds.number.slice(-4)}`;
+      // Cards are global - never key by page origin.
+      return `card:${String(creds.number || '').replace(/\D/g, '').slice(-4)}:${creds.expMonth}:${creds.expYear}`;
     }
 
     function saveOfferKeyForAddress(creds) {
-      return `address:${creds.origin || pageOrigin()}:${creds.postalCode}:${creds.addressLine1}`;
+      // Addresses are global - never key by page origin.
+      return `address:${String(creds.postalCode || '').toLowerCase()}:${String(creds.addressLine1 || '').toLowerCase()}`;
     }
 
     async function offerLoginSave(creds) {
@@ -526,16 +661,26 @@
       notifyHost('axis-vault-save-offer', { ...creds, vaultSavePrechecked: true });
     }
 
-    function offerCardSave(creds) {
+    async function offerCardSave(creds) {
       if (!creds || !creds.number || !creds.cardholder) return;
+      if (credentialsMatchRecentAutofill(creds)) return;
       const key = saveOfferKeyForCard(creds);
       if (shouldSkipDuplicateSaveOffer(key)) return;
+      let offer = true;
+      try {
+        const gate = await ipcRenderer.invoke('axis-vault-should-offer-card-save', creds);
+        offer = gate?.offer !== false;
+      } catch (_) {
+        offer = true;
+      }
+      if (!offer) return;
       markSaveOfferSent(key);
       notifyHost('axis-vault-save-offer', { ...creds, vaultSavePrechecked: true });
     }
 
     async function offerAddressSave(creds) {
       if (!creds || !creds.fullName || !creds.addressLine1) return;
+      if (credentialsMatchRecentAutofill(creds)) return;
       const key = saveOfferKeyForAddress(creds);
       if (shouldSkipDuplicateSaveOffer(key)) return;
       let offer = true;
@@ -554,11 +699,12 @@
       const login = scanLoginCredentials();
       if (login) void offerLoginSave(login);
       const card = scanCardCredentials();
-      if (card) offerCardSave(card);
+      if (card) void offerCardSave(card);
       const address = scanAddressCredentials();
       if (address) void offerAddressSave(address);
     }
 
+    /** Card/address only - login saves wait for blur / Enter / Sign in / navigation. */
     function scheduleSaveOfferAfterTyping() {
       touchCredentialEdit();
       if (saveOfferBlurTimer) {
@@ -568,7 +714,10 @@
       if (saveOfferTimer) clearTimeout(saveOfferTimer);
       saveOfferTimer = setTimeout(() => {
         saveOfferTimer = null;
-        tryOfferSaves();
+        const card = scanCardCredentials();
+        if (card) offerCardSave(card);
+        const address = scanAddressCredentials();
+        if (address) void offerAddressSave(address);
       }, SAVE_OFFER_DEBOUNCE_MS);
     }
 
@@ -577,18 +726,30 @@
       saveOfferBlurTimer = setTimeout(() => {
         saveOfferBlurTimer = null;
         const active = document.activeElement;
+        // Still in username/password - wait until they leave the login fields.
         if (isCredentialInput(active)) {
-          return;
+          const k = resolveFieldKind(active) || inputKind(active);
+          if (k === 'username' || k === 'password') return;
         }
         if (saveOfferTimer) {
           clearTimeout(saveOfferTimer);
           saveOfferTimer = null;
         }
+        captureAllLoginFieldsToStash();
         tryOfferSaves();
-      }, 450);
+      }, 350);
     }
 
-    function flushSaveOfferCheck() {
+    function captureAllLoginFieldsToStash() {
+      try {
+        for (const el of allVisibleInputs()) {
+          const k = resolveFieldKind(el) || inputKind(el);
+          if (k === 'username' || k === 'password') updateLoginStashFromField(el);
+        }
+      } catch (_) {}
+    }
+
+    function flushSaveOfferCheck(opts = {}) {
       if (saveOfferBlurTimer) {
         clearTimeout(saveOfferBlurTimer);
         saveOfferBlurTimer = null;
@@ -597,11 +758,28 @@
         clearTimeout(saveOfferTimer);
         saveOfferTimer = null;
       }
+      // Capture whatever is still in the fields before SPAs clear the form.
+      try {
+        const active = document.activeElement;
+        if (isCredentialInput(active)) updateLoginStashFromField(active);
+      } catch (_) {}
+      captureAllLoginFieldsToStash();
       tryOfferSaves();
+      // Sign-in / navigation often clears the form a beat later - stash still has the pair.
+      if (opts.andAgain !== false) {
+        if (saveOfferRetryTimer) clearTimeout(saveOfferRetryTimer);
+        saveOfferRetryTimer = setTimeout(() => {
+          saveOfferRetryTimer = null;
+          captureAllLoginFieldsToStash();
+          tryOfferSaves();
+        }, 500);
+      }
     }
 
     function onCredentialFieldInput(el) {
       const k = resolveFieldKind(el) || inputKind(el);
+      updateLoginStashFromField(el);
+      touchCredentialEdit();
       if (k === 'password') {
         if (!(el.value || '').length) {
           if (saveOfferTimer) {
@@ -610,10 +788,21 @@
           }
           return;
         }
-        scheduleSaveOfferAfterTyping();
+        // Keep stash warm while typing; do not offer save until commit (blur/Enter/submit).
         return;
       }
-      if (k === 'username' || k === 'cc-number' || k === 'cc-csc' || isAddressFieldKind(k)) {
+      if (k === 'username') {
+        return;
+      }
+      if (
+        k === 'cc-number' ||
+        k === 'cc-csc' ||
+        k === 'cc-name' ||
+        k === 'cc-exp' ||
+        k === 'cc-exp-month' ||
+        k === 'cc-exp-year' ||
+        isAddressFieldKind(k)
+      ) {
         scheduleSaveOfferAfterTyping();
       }
     }
@@ -639,7 +828,9 @@
     function setFieldValue(el, value) {
       if (!el || value == null) return;
       const str = String(value);
-      el.focus();
+      try {
+        el.focus();
+      } catch (_) {}
       if (el.tagName === 'SELECT') {
         const options = Array.from(el.options || []);
         let match = options.find((o) => String(o.value).toLowerCase() === str.toLowerCase());
@@ -652,47 +843,82 @@
         if (match) el.value = match.value;
         else el.value = str;
       } else {
-        el.value = str;
+        try {
+          const proto = Object.getPrototypeOf(el);
+          const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+          if (desc && desc.set) desc.set.call(el, str);
+          else el.value = str;
+        } catch (_) {
+          el.value = str;
+        }
       }
       el.setAttribute(FILLED_FLAG, '1');
-      dispatchInputEvents(el);
+      try {
+        el.dispatchEvent(
+          new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: str })
+        );
+      } catch (_) {
+        dispatchInputEvents(el);
+        return;
+      }
+      el.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
     function fillLogin(cred, anchorEl) {
-      const fk = anchorEl ? resolveFieldKind(anchorEl) : null;
-
-      if (fk === 'username') {
-        if (anchorEl && cred.username) setFieldValue(anchorEl, cred.username);
-        markAutofillUsed({
-          origin: pageOrigin(),
-          username: cred.username,
-          password: ''
-        });
-        return;
+      const root = anchorEl && anchorEl.form ? anchorEl.form : document;
+      let pass =
+        (anchorEl && resolveFieldKind(anchorEl) === 'password' ? anchorEl : null) ||
+        (root.querySelector && root.querySelector('input[type="password"]')) ||
+        null;
+      // Always also search the whole page - username/password often live in different forms.
+      if (!pass || !isVisibleInput(pass)) {
+        pass =
+          allVisibleInputs().find((el) => (resolveFieldKind(el) || inputKind(el)) === 'password') ||
+          document.querySelector('input[type="password"]') ||
+          document.querySelector('input[autocomplete*="password"]');
       }
-
-      if (fk === 'password') {
-        const pass = anchorEl || document.querySelector('input[type="password"]');
-        if (pass && cred.password) setFieldValue(pass, cred.password);
-        markAutofillUsed({
-          origin: pageOrigin(),
-          username: cred.username,
-          password: cred.password
-        });
-        return;
+      let userEl = null;
+      if (anchorEl && (resolveFieldKind(anchorEl) === 'username' || isLikelyUsernameField(anchorEl))) {
+        userEl = anchorEl;
+      } else if (pass) {
+        userEl = findUsernameForPassword(pass) || findUsernameForLogin(pass);
       }
-
-      const pass = anchorEl && resolveFieldKind(anchorEl) === 'password'
-        ? anchorEl
-        : document.querySelector('input[type="password"]');
-      const userEl =
-        anchorEl && resolveFieldKind(anchorEl) === 'username'
-          ? anchorEl
-          : pass
-            ? findUsernameForPassword(pass)
-            : null;
+      if (!userEl) {
+        const scoped = fillableFields(root);
+        userEl =
+          scoped.find((el) => inputKind(el) === 'username') ||
+          scoped.find((el) => (el.type || '').toLowerCase() === 'email') ||
+          allVisibleInputs().find((el) => inputKind(el) === 'username') ||
+          allVisibleInputs().find((el) => isLikelyUsernameField(el)) ||
+          document.querySelector('input[type="email"]') ||
+          document.querySelector('input[autocomplete="username"]');
+      }
       if (userEl && cred.username) setFieldValue(userEl, cred.username);
       if (pass && cred.password) setFieldValue(pass, cred.password);
+      // Keep pending so a two-step password field (or late-mounted input) still fills.
+      if (cred.password) {
+        pendingLoginFill = {
+          at: Date.now(),
+          origin: pageOrigin(),
+          username: cred.username || '',
+          password: cred.password || ''
+        };
+      }
+      if (cred.password && (!pass || !isVisibleInput(pass))) {
+        setTimeout(() => {
+          const latePass =
+            allVisibleInputs().find((el) => (resolveFieldKind(el) || inputKind(el)) === 'password') ||
+            document.querySelector('input[type="password"]');
+          if (latePass && !String(latePass.value || '')) setFieldValue(latePass, cred.password);
+          if (cred.username) {
+            const lateUser =
+              (latePass && (findUsernameForPassword(latePass) || findUsernameForLogin(latePass))) ||
+              allVisibleInputs().find((el) => inputKind(el) === 'username') ||
+              document.querySelector('input[type="email"]');
+            if (lateUser && !String(lateUser.value || '').trim()) setFieldValue(lateUser, cred.username);
+          }
+        }, 320);
+      }
       markAutofillUsed({
         origin: pageOrigin(),
         username: cred.username,
@@ -735,6 +961,13 @@
         } else if (k === 'cc-csc') setFieldValue(el, card.cvv);
         else if (k === 'addr-postal' && card.billingZip) setFieldValue(el, card.billingZip);
       }
+      markAutofillUsed({
+        type: 'card',
+        number: card.number,
+        cardholder: card.cardholder,
+        expMonth: card.expMonth,
+        expYear: card.expYear
+      });
     }
 
     function fillAddress(address, anchorEl) {
@@ -755,27 +988,54 @@
         else if (k === 'addr-phone') setFieldValue(el, address.phone);
         else if (k === 'addr-email') setFieldValue(el, address.email);
       }
+      markAutofillUsed({
+        type: 'address',
+        addressLine1: address.addressLine1,
+        postalCode: address.postalCode,
+        fullName: address.fullName
+      });
     }
 
     function isLikelyUsernameField(el) {
       if (inputKind(el) === 'username') return true;
       const t = (el.type || 'text').toLowerCase();
-      if (t !== 'text' && t !== 'email' && t !== 'tel' && t !== 'search') return false;
+      if (t === 'search' || t === 'hidden') return false;
+      if (t !== 'text' && t !== 'email' && t !== 'tel') return false;
+      const name = (el.name || '').toLowerCase();
+      const id = (el.id || '').toLowerCase();
       const ph = (el.placeholder || '').toLowerCase();
       const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+      const ac = (el.autocomplete || '').toLowerCase();
       if (
+        ph.includes('search') ||
+        aria.includes('search') ||
+        name.includes('search') ||
+        id.includes('search') ||
+        name.includes('query') ||
+        id.includes('query')
+      ) {
+        return false;
+      }
+      if (
+        ac === 'username' ||
+        ac === 'email' ||
+        t === 'email' ||
         ph.includes('user') ||
         ph.includes('email') ||
         ph.includes('login') ||
         aria.includes('user') ||
         aria.includes('email') ||
-        aria.includes('login')
+        aria.includes('login') ||
+        name.includes('username') ||
+        name.includes('login') ||
+        id.includes('username') ||
+        id.includes('login')
       ) {
         return true;
       }
       const form = el.form;
       if (form && form.querySelector('input[type="password"]')) return true;
-      return !!document.querySelector('input[type="password"]');
+      return false;
     }
 
     function resolveFieldKind(el) {
@@ -823,25 +1083,15 @@
     let autofillHideTimer = null;
 
     function ensureVaultAutofillStyles() {
-      if (document.getElementById('axis-vault-autofill-style')) return;
       try {
-        // Keep CSS inline so sandboxed guest preloads do not need a sibling require().
-        const AXIS_VAULT_AUTOFILL_STYLE_CSS =
-          '#axis-vault-autofill-menu{position:fixed;z-index:2147483647;margin:0;padding:4px 0;list-style:none;border-radius:10px;font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-height:280px;overflow-y:auto;min-width:260px;box-sizing:border-box}' +
-          '#axis-vault-autofill-menu[data-axis-theme="light"]{background:#fff;color:#1d1d1f;border:1px solid rgba(0,0,0,.12);box-shadow:0 8px 28px rgba(0,0,0,.16)}' +
-          '#axis-vault-autofill-menu[data-axis-theme="dark"]{background:#2c2c2e;color:#f5f5f7;border:1px solid rgba(255,255,255,.14);box-shadow:0 8px 28px rgba(0,0,0,.45)}' +
-          '#axis-vault-autofill-menu li{margin:0;padding:0}' +
-          '#axis-vault-autofill-menu button{display:block;width:100%;text-align:left;border:none;background:transparent;padding:10px 14px;cursor:pointer;color:inherit;border-radius:6px;margin:0 4px;width:calc(100% - 8px)}' +
-          '#axis-vault-autofill-menu[data-axis-theme="light"] button:hover,#axis-vault-autofill-menu[data-axis-theme="light"] button:focus{background:rgba(0,0,0,.06);outline:none}' +
-          '#axis-vault-autofill-menu[data-axis-theme="dark"] button:hover,#axis-vault-autofill-menu[data-axis-theme="dark"] button:focus{background:rgba(255,255,255,.1);outline:none}' +
-          '#axis-vault-autofill-menu .axis-af-title{display:block;font-weight:600;font-size:13px;line-height:1.3}' +
-          '#axis-vault-autofill-menu .axis-af-sub{display:block;font-size:12px;margin-top:2px;line-height:1.3}' +
-          '#axis-vault-autofill-menu[data-axis-theme="light"] .axis-af-sub{color:#86868b}' +
-          '#axis-vault-autofill-menu[data-axis-theme="dark"] .axis-af-sub{color:#98989d}';
-        const style = document.createElement('style');
-        style.id = 'axis-vault-autofill-style';
+        const AXIS_VAULT_AUTOFILL_STYLE_CSS = "#axis-vault-autofill-menu{position:fixed;z-index:2147483647;margin:0;padding:10px;list-style:none;border:none;border-radius:20px;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-x:hidden;overflow-y:auto;font:13.5px/1.3 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;letter-spacing:-0.015em;-webkit-font-smoothing:antialiased;backdrop-filter:saturate(1.4) blur(24px);-webkit-backdrop-filter:saturate(1.4) blur(24px)}#axis-vault-autofill-menu[data-axis-theme=\"light\"]{background:rgba(250,250,252,.92);box-shadow:0 16px 48px rgba(0,0,0,.16),0 0 0 0.5px rgba(0,0,0,.06)}#axis-vault-autofill-menu[data-axis-theme=\"dark\"]{background:rgba(36,36,38,.92);box-shadow:0 16px 48px rgba(0,0,0,.5),0 0 0 0.5px rgba(255,255,255,.1)}#axis-vault-autofill-menu li{margin:0;padding:0;list-style:none}#axis-vault-autofill-menu button.axis-af-pill{display:flex;align-items:center;gap:12px;width:100%;min-height:44px;height:44px;padding:0 16px 0 12px;margin:0;border:none;border-radius:999px;cursor:pointer;text-align:left;box-sizing:border-box;font:inherit;color:inherit;transition:background .12s ease,transform .1s ease}#axis-vault-autofill-menu[data-axis-theme=\"light\"] button.axis-af-pill{background:#ebebef;color:#1d1d1f}#axis-vault-autofill-menu[data-axis-theme=\"dark\"] button.axis-af-pill{background:#3a3a3c;color:#f5f5f7}#axis-vault-autofill-menu[data-axis-theme=\"light\"] button.axis-af-pill:hover,#axis-vault-autofill-menu[data-axis-theme=\"light\"] button.axis-af-pill:focus{background:#dedee3;outline:none;transform:translateY(-0.5px)}#axis-vault-autofill-menu[data-axis-theme=\"dark\"] button.axis-af-pill:hover,#axis-vault-autofill-menu[data-axis-theme=\"dark\"] button.axis-af-pill:focus{background:#48484a;outline:none;transform:translateY(-0.5px)}#axis-vault-autofill-menu .axis-af-icon{flex:0 0 auto;width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;line-height:1;overflow:hidden}#axis-vault-autofill-menu .axis-af-icon.is-initials{background:linear-gradient(145deg,#ffb340,#ff9f0a);color:#1d1d1f}#axis-vault-autofill-menu .axis-af-icon.is-glyph{background:transparent;color:inherit}#axis-vault-autofill-menu .axis-af-icon.is-favicon{background:#fff;box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.12)}#axis-vault-autofill-menu[data-axis-theme=\"dark\"] .axis-af-icon.is-favicon{background:#2c2c2e;box-shadow:inset 0 0 0 0.5px rgba(255,255,255,.14)}#axis-vault-autofill-menu .axis-af-icon.is-favicon img{width:18px;height:18px;object-fit:contain;display:block;border-radius:4px}#axis-vault-autofill-menu .axis-af-icon.is-brand{background:transparent;overflow:visible}#axis-vault-autofill-menu .axis-af-icon svg{width:18px;height:18px;display:block}#axis-vault-autofill-menu .axis-af-mc{width:24px;height:24px;position:relative;display:inline-block}#axis-vault-autofill-menu .axis-af-mc:before,#axis-vault-autofill-menu .axis-af-mc:after{content:\"\";position:absolute;top:4px;width:14px;height:14px;border-radius:50%}#axis-vault-autofill-menu .axis-af-mc:before{left:0;background:#eb001b}#axis-vault-autofill-menu .axis-af-mc:after{right:0;background:#f79e1b;mix-blend-mode:multiply}#axis-vault-autofill-menu .axis-af-visa,#axis-vault-autofill-menu .axis-af-amex{width:26px;height:16px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:7px;font-weight:800;letter-spacing:.03em}#axis-vault-autofill-menu .axis-af-visa{background:#1a1f71;color:#fff}#axis-vault-autofill-menu .axis-af-amex{background:#2e77bb;color:#fff;font-size:6px}#axis-vault-autofill-menu .axis-af-row{flex:1 1 auto;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:12px}#axis-vault-autofill-menu .axis-af-left,#axis-vault-autofill-menu .axis-af-right{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#axis-vault-autofill-menu .axis-af-left{flex:1 1 auto;display:flex;flex-direction:column;gap:1px;justify-content:center}#axis-vault-autofill-menu .axis-af-right{flex:0 1 auto;max-width:40%;text-align:right}#axis-vault-autofill-menu .axis-af-user,#axis-vault-autofill-menu .axis-af-title{font-size:13.5px;font-weight:600;letter-spacing:-0.015em;color:inherit}#axis-vault-autofill-menu .axis-af-sub,#axis-vault-autofill-menu .axis-af-meta{font-size:11.5px;font-weight:500;letter-spacing:-0.01em}#axis-vault-autofill-menu[data-axis-theme=\"light\"] .axis-af-sub,#axis-vault-autofill-menu[data-axis-theme=\"light\"] .axis-af-meta,#axis-vault-autofill-menu[data-axis-theme=\"light\"] .axis-af-muted{color:#6e6e73}#axis-vault-autofill-menu[data-axis-theme=\"dark\"] .axis-af-sub,#axis-vault-autofill-menu[data-axis-theme=\"dark\"] .axis-af-meta,#axis-vault-autofill-menu[data-axis-theme=\"dark\"] .axis-af-muted{color:#98989d}";
+        let style = document.getElementById('axis-vault-autofill-style');
+        if (!style) {
+          style = document.createElement('style');
+          style.id = 'axis-vault-autofill-style';
+          (document.head || document.documentElement).appendChild(style);
+        }
         style.textContent = AXIS_VAULT_AUTOFILL_STYLE_CSS;
-        (document.head || document.documentElement).appendChild(style);
       } catch (_) {}
     }
 
@@ -850,11 +1100,18 @@
         clearTimeout(autofillHideTimer);
         autofillHideTimer = null;
       }
-      if (window.__axisVault && typeof window.__axisVault.hideMenu === 'function') {
-        window.__axisVault.hideMenu();
-      } else if (autofillMenuEl && autofillMenuEl.parentNode) {
+      // Remove leftover in-page nodes only - never clear focusedField while the user
+      // is still in a username/password box (shell menu needs that state to re-show).
+      try {
+        if (window.__axisVault && typeof window.__axisVault.hideMenu === 'function') {
+          window.__axisVault.hideMenu();
+        }
+      } catch (_) {}
+      if (autofillMenuEl && autofillMenuEl.parentNode) {
         autofillMenuEl.parentNode.removeChild(autofillMenuEl);
       }
+      const leftover = document.getElementById('axis-vault-autofill-menu');
+      if (leftover && leftover.parentNode) leftover.parentNode.removeChild(leftover);
       autofillMenuEl = null;
       autofillAnchor = null;
     }
@@ -875,27 +1132,29 @@
       const vw = window.innerWidth;
       const vh = window.innerHeight;
       let left = rect.left;
-      let top = rect.bottom + 6;
-      const width = Math.max(240, rect.width);
+      let top = rect.bottom + 4;
+      const width = Math.max(160, Math.round(rect.width || 160));
       if (left + width > vw - 8) left = Math.max(8, vw - width - 8);
-      if (top + 200 > vh - 8) top = Math.max(8, rect.top - 8 - 120);
+      if (top + 168 > vh - 8) top = Math.max(8, rect.top - 4 - 140);
       menu.style.left = `${left}px`;
       menu.style.top = `${top}px`;
+      menu.style.width = `${width}px`;
       menu.style.minWidth = `${width}px`;
+      menu.style.maxWidth = `${width}px`;
     }
 
     function showLoginAutofillMenu(anchorEl, logins) {
       if (window.__axisVault && typeof window.__axisVault.showMenu === 'function') {
-        window.__axisVault.showMenu(anchorEl, logins);
+        window.__axisVault.showMenu(anchorEl, logins, 'login');
         autofillMenuEl = document.getElementById('axis-vault-autofill-menu');
         autofillAnchor = anchorEl;
         return;
       }
       hideAutofillMenu();
-      if (!logins.length) return;
+      if (!logins || !logins.length) return;
       ensureVaultAutofillStyles();
+      // Minimal fallback if inject bootstrap is unavailable.
       const menu = document.createElement('ul');
-      menu.className = 'axis-vault-autofill-menu';
       menu.id = 'axis-vault-autofill-menu';
       menu.setAttribute('role', 'listbox');
       menu.setAttribute('data-axis-theme', vaultUiTheme());
@@ -903,11 +1162,9 @@
         const li = document.createElement('li');
         const btn = document.createElement('button');
         btn.type = 'button';
+        btn.className = 'axis-af-pill';
         btn.setAttribute('role', 'option');
-        const title = document.createElement('span');
-        title.className = 'axis-af-title';
-        title.textContent = cred.username || cred.title || 'Saved account';
-        btn.appendChild(title);
+        btn.textContent = cred.username || cred.title || 'Saved account';
         btn.addEventListener('mousedown', (e) => {
           e.preventDefault();
           hideAutofillMenu();
@@ -928,26 +1185,24 @@
     }
 
     function showCardAutofillMenu(anchorEl, cards) {
+      if (window.__axisVault && typeof window.__axisVault.showMenu === 'function') {
+        window.__axisVault.showMenu(anchorEl, cards, 'card');
+        autofillMenuEl = document.getElementById('axis-vault-autofill-menu');
+        autofillAnchor = anchorEl;
+        return;
+      }
       hideAutofillMenu();
-      if (!cards.length) return;
+      if (!cards || !cards.length) return;
       ensureVaultAutofillStyles();
       const menu = document.createElement('ul');
-      menu.className = 'axis-vault-autofill-menu';
       menu.id = 'axis-vault-autofill-menu';
       menu.setAttribute('data-axis-theme', vaultUiTheme());
       for (const card of cards) {
         const li = document.createElement('li');
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'axis-vault-autofill-item';
-        const title = document.createElement('span');
-        title.className = 'axis-af-title';
-        title.textContent = card.label || card.cardholder || 'Card';
-        const sub = document.createElement('span');
-        sub.className = 'axis-af-sub';
-        sub.textContent = card.masked || '••••';
-        btn.appendChild(title);
-        btn.appendChild(sub);
+        btn.className = 'axis-af-pill';
+        btn.textContent = (card.label || card.cardholder || 'Card') + ' ' + (card.masked || '');
         btn.addEventListener('mousedown', (e) => {
           e.preventDefault();
           hideAutofillMenu();
@@ -968,30 +1223,33 @@
     }
 
     function showAddressAutofillMenu(anchorEl, addresses) {
+      if (window.__axisVault && typeof window.__axisVault.showMenu === 'function') {
+        window.__axisVault.showMenu(anchorEl, addresses, 'address');
+        autofillMenuEl = document.getElementById('axis-vault-autofill-menu');
+        autofillAnchor = anchorEl;
+        return;
+      }
       hideAutofillMenu();
-      if (!addresses.length) return;
+      if (!addresses || !addresses.length) return;
       ensureVaultAutofillStyles();
       const menu = document.createElement('ul');
-      menu.className = 'axis-vault-autofill-menu';
       menu.id = 'axis-vault-autofill-menu';
       menu.setAttribute('data-axis-theme', vaultUiTheme());
       for (const addr of addresses) {
         const li = document.createElement('li');
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'axis-vault-autofill-item';
-        const title = document.createElement('span');
-        title.className = 'axis-af-title';
-        title.textContent = addr.label || addr.fullName || 'Address';
-        const sub = document.createElement('span');
-        sub.className = 'axis-af-sub';
-        sub.textContent = addr.summary || addr.addressLine1 || '';
-        btn.appendChild(title);
-        btn.appendChild(sub);
+        btn.className = 'axis-af-pill';
+        btn.textContent = addr.summary || addr.addressLine1 || addr.label || 'Address';
         btn.addEventListener('mousedown', (e) => {
           e.preventDefault();
           hideAutofillMenu();
-          fillAddress(addr, anchorEl);
+          void (async () => {
+            try {
+              const full = await ipcRenderer.invoke('axis-vault-get-address-for-fill', addr.id);
+              if (full) fillAddress(full, anchorEl);
+            } catch (_) {}
+          })();
         });
         li.appendChild(btn);
         menu.appendChild(li);
@@ -1003,8 +1261,17 @@
     }
 
     async function requestAutofillMenu(el) {
+      if (!el || document.activeElement !== el) {
+        hideAutofillMenu();
+        return;
+      }
       const kind = resolveFieldKind(el);
       if (!kind) {
+        hideAutofillMenu();
+        return;
+      }
+      const t = String(el.type || 'text').toLowerCase();
+      if (t === 'search') {
         hideAutofillMenu();
         return;
       }
@@ -1013,37 +1280,29 @@
       lastFillOfferMs = now;
       const reqId = ++autofillRequestGen;
 
+      const r = el.getBoundingClientRect();
+      if (!(r.width >= 12) || !(r.height >= 8)) {
+        hideAutofillMenu();
+        return;
+      }
       const query = {
         origin: pageOrigin(),
-        pageUrl: location.href
+        pageUrl: location.href,
+        rect: {
+          left: r.left,
+          top: r.top,
+          bottom: r.bottom,
+          right: r.right,
+          width: r.width,
+          height: r.height
+        }
       };
 
       if (kind === 'username' || kind === 'password') {
         const userEl = kind === 'password' ? findUsernameForPassword(el) : el;
         query.kind = 'login';
         query.usernameHint = userEl ? String(userEl.value || '').trim() : '';
-        notifyHost('axis-vault-autofill-request', query);
-        let res;
-        try {
-          res = await ipcRenderer.invoke('axis-vault-autofill-query', query);
-        } catch (_) {
-          hideAutofillMenu();
-          return;
-        }
-        if (reqId !== autofillRequestGen) return;
-        if (!res || !res.ok || !res.items || !res.items.length) {
-          hideAutofillMenu();
-          return;
-        }
-        if (autofillHideTimer) {
-          clearTimeout(autofillHideTimer);
-          autofillHideTimer = null;
-        }
-        showLoginAutofillMenu(el, res.items);
-        return;
-      }
-
-      if (
+      } else if (
         kind === 'cc-number' ||
         kind === 'cc-name' ||
         kind === 'cc-exp' ||
@@ -1052,57 +1311,75 @@
         kind === 'cc-csc'
       ) {
         query.kind = 'card';
-        notifyHost('axis-vault-autofill-request', query);
-        let res;
-        try {
-          res = await ipcRenderer.invoke('axis-vault-autofill-query', query);
-        } catch (_) {
-          hideAutofillMenu();
-          return;
-        }
-        if (reqId !== autofillRequestGen) return;
-        if (!res || !res.ok || !res.items || !res.items.length) {
-          hideAutofillMenu();
-          return;
-        }
-        if (autofillHideTimer) {
-          clearTimeout(autofillHideTimer);
-          autofillHideTimer = null;
-        }
-        showCardAutofillMenu(el, res.items);
+      } else if (isAddressFieldKind(kind)) {
+        query.kind = 'address';
+      } else {
+        hideAutofillMenu();
         return;
       }
 
-      if (isAddressFieldKind(kind)) {
-        query.kind = 'address';
-        notifyHost('axis-vault-autofill-request', query);
-        let res;
-        try {
-          res = await ipcRenderer.invoke('axis-vault-autofill-query', query);
-        } catch (_) {
-          hideAutofillMenu();
-          return;
-        }
-        if (reqId !== autofillRequestGen) return;
-        if (!res || !res.ok || !res.items || !res.items.length) {
-          hideAutofillMenu();
-          return;
-        }
-        if (autofillHideTimer) {
-          clearTimeout(autofillHideTimer);
-          autofillHideTimer = null;
-        }
-        showAddressAutofillMenu(el, res.items);
-      }
+      // Shell owns the menu (favicons + design). Never paint an in-page fallback.
+      hideAutofillMenu();
+      try {
+        await ipcRenderer.invoke('axis-vault-autofill-present', query);
+      } catch (_) {}
+      void reqId;
     }
 
     function tryAutofillOnFocus(el) {
+      applyPendingLoginIfNeeded(el);
       void requestAutofillMenu(el);
+    }
+
+    function applyPendingLoginIfNeeded(el) {
+      const pending = pendingLoginFill;
+      if (!pending || !pending.password) return;
+      if (Date.now() - (pending.at || 0) > 2 * 60 * 1000) {
+        pendingLoginFill = null;
+        return;
+      }
+      if (pending.origin && pending.origin !== pageOrigin()) {
+        pendingLoginFill = null;
+        return;
+      }
+      const k = resolveFieldKind(el) || inputKind(el);
+      if (k === 'password') {
+        setFieldValue(el, pending.password);
+        if (pending.username) {
+          const userEl =
+            findUsernameForPassword(el) ||
+            findUsernameForLogin(el) ||
+            allVisibleInputs().find((u) => inputKind(u) === 'username') ||
+            document.querySelector('input[type="email"]');
+          if (userEl && !String(userEl.value || '').trim()) setFieldValue(userEl, pending.username);
+        }
+        pendingLoginFill = null;
+        markAutofillUsed({
+          origin: pageOrigin(),
+          username: pending.username,
+          password: pending.password
+        });
+        return;
+      }
+      if ((k === 'username' || isLikelyUsernameField(el)) && pending.username) {
+        if (!String(el.value || '').trim()) setFieldValue(el, pending.username);
+      }
     }
 
     let autofillRequestGen = 0;
 
     let autofillInputTimer = null;
+
+    document.addEventListener(
+      'change',
+      (e) => {
+        const el = e.target;
+        if (!isVisibleFillable(el)) return;
+        const k = resolveFieldKind(el) || inputKind(el);
+        if (k === 'username' || k === 'password') updateLoginStashFromField(el);
+      },
+      true
+    );
 
     document.addEventListener(
       'input',
@@ -1201,7 +1478,17 @@
           dismissAutofillIfNotNeeded();
         }, 150);
         const k = inputKind(el);
-        if (k === 'password' || k === 'cc-csc' || k === 'cc-number' || isAddressFieldKind(k)) {
+        if (
+          k === 'password' ||
+          k === 'username' ||
+          k === 'cc-csc' ||
+          k === 'cc-number' ||
+          k === 'cc-name' ||
+          k === 'cc-exp' ||
+          k === 'cc-exp-month' ||
+          k === 'cc-exp-year' ||
+          isAddressFieldKind(k)
+        ) {
           scheduleSaveOfferAfterLeavingFields();
         }
       },
@@ -1218,6 +1505,38 @@
 
     document.addEventListener('submit', () => flushSaveOfferCheck(), true);
 
+    function isLikelyLoginSubmitControl(el) {
+      if (!el || !el.tagName) return false;
+      const node =
+        typeof el.closest === 'function'
+          ? el.closest('button, input[type="submit"], input[type="button"], input[type="image"], [role="button"], a')
+          : el;
+      if (!node || !node.tagName) return false;
+      const tag = node.tagName.toUpperCase();
+      const type = String(node.type || '').toLowerCase();
+      if (tag === 'INPUT' && (type === 'submit' || type === 'image')) return true;
+      if (tag === 'BUTTON' && (type === 'submit' || !type || type === 'button')) {
+        /* fall through to label check */
+      } else if (tag !== 'A' && node.getAttribute?.('role') !== 'button' && !(tag === 'INPUT' && type === 'button')) {
+        if (!(tag === 'BUTTON')) return false;
+      }
+      const label = `${node.textContent || ''} ${node.value || ''} ${node.getAttribute?.('aria-label') || ''} ${node.getAttribute?.('name') || ''}`.toLowerCase();
+      return /sign\s*in|log\s*in|logon|log\s*on|submit|continue|next|verify|authent|create\s*account|register|join|done|confirm|unlock|get\s*started/.test(label);
+    }
+
+    document.addEventListener(
+      'click',
+      (e) => {
+        if (isLikelyLoginSubmitControl(e.target)) flushSaveOfferCheck();
+      },
+      true
+    );
+
+    window.addEventListener('pagehide', () => flushSaveOfferCheck());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushSaveOfferCheck();
+    });
+
     document.addEventListener(
       'keydown',
       (e) => {
@@ -1233,10 +1552,14 @@
           k === 'password' ||
           k === 'cc-csc' ||
           k === 'cc-number' ||
+          k === 'cc-name' ||
+          k === 'cc-exp' ||
+          k === 'cc-exp-month' ||
+          k === 'cc-exp-year' ||
           k === 'username' ||
           isAddressFieldKind(k)
         ) {
-          scheduleSaveOfferAfterLeavingFields();
+          flushSaveOfferCheck();
         }
       },
       true
@@ -1280,13 +1603,7 @@
     });
 
     ipcRenderer.on('axis-vault-scan-now', () => {
-      const editAt = Number(
-        document.documentElement.getAttribute('data-axis-vault-cred-edit-at') ||
-          window.__axisVaultCredentialEditAt ||
-          0
-      );
-      if (Date.now() - editAt < SAVE_OFFER_DEBOUNCE_MS + 200) return;
-      tryOfferSaves();
+      flushSaveOfferCheck();
     });
   } catch (_) {
     /* guest preload unavailable */
