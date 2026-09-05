@@ -440,7 +440,7 @@ function findChromiumSessionFiles(profilePath) {
     if (bestSession) {
       session = bestSession;
       warnings.push(
-        'Used a saved session snapshot because “Current Session” was missing — quit the source browser before importing for best results.'
+        'Used a saved session snapshot because “Current Session” was missing - quit the source browser before importing for best results.'
       );
     }
   }
@@ -462,7 +462,7 @@ function findChromiumSessionFiles(profilePath) {
 
   if (!session && !tabs) {
     warnings.push(
-      'No session files were found in this profile — pinned tabs, tab groups, and open tabs may be missing.'
+      'No session files were found in this profile - pinned tabs, tab groups, and open tabs may be missing.'
     );
   }
 
@@ -492,7 +492,7 @@ function extractChromiumSession(profilePath) {
   }
   if (sessionReadFailed || tabsReadFailed) {
     warnings.push(
-      'Could not fully read the last session — quit the source browser, then try importing again.'
+      'Could not fully read the last session - quit the source browser, then try importing again.'
     );
   }
   if (!session && !tabs) return { tabs: [], groups: new Map(), warnings };
@@ -553,7 +553,7 @@ function extractFirefoxSession(profilePath) {
   const sessionPath = findFirefoxSessionFile(profilePath);
   if (!sessionPath) {
     warnings.push(
-      'No Firefox session file was found — pinned tabs, tab groups, and open tabs may be missing.'
+      'No Firefox session file was found - pinned tabs, tab groups, and open tabs may be missing.'
     );
     return { tabs: [], groups: new Map(), warnings };
   }
@@ -562,7 +562,7 @@ function extractFirefoxSession(profilePath) {
     raw = fs.readFileSync(sessionPath);
   } catch (_) {
     warnings.push(
-      'Could not read the Firefox session — quit Firefox, then try importing again.'
+      'Could not read the Firefox session - quit Firefox, then try importing again.'
     );
     return { tabs: [], groups: new Map(), warnings };
   }
