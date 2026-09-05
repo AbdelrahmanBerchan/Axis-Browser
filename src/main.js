@@ -6574,12 +6574,6 @@ app.whenReady().then(async () => {
 
   configureSession();
   // First paint path: open the window immediately; defer non-critical warmups.
-  try {
-    if (store.get('__axisOnboardingPreviewV10') !== true) {
-      store.set('__axisOnboardingPreviewV10', true);
-      getProfileStore(AXIS_DEFAULT_PROFILE_ID).set('onboardingCompleted', false);
-    }
-  } catch (_) {}
   createWindow();
   updateDockMenu();
 
