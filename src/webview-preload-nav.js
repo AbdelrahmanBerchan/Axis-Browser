@@ -13,7 +13,7 @@
 
         const COALESCE_MS = 90;
         const COOLDOWN_MS = 260;
-        /** Accumulated |deltaX| (CSS px) before history nav — higher = less sensitive vs horizontal page scroll */
+        /** Accumulated |deltaX| (CSS px) before history nav - higher = less sensitive vs horizontal page scroll */
         const THRESH_AXIAL = 175;
         const MAX_DOMINANT_VERTICAL = 28;
         /** Require |dx| ≥ this × |dy| so diagonal scroll doesn’t read as “horizontal swipe” */
