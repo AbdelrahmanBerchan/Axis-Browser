@@ -10,9 +10,9 @@
   const COMMIT_RATIO = 0.5;
   const FLICK_VELOCITY = 0.42;
   const FLICK_MIN_PROGRESS = 0.26;
-  /* Wrong-way give — soft Arc-like resistance. */
+  /* Wrong-way give - soft Arc-like resistance. */
   const EDGE_GIVE_RATIO = 0.1;
-  /* List-end rubber — only at first/last profile in the list. */
+  /* List-end rubber - only at first/last profile in the list. */
   const EDGE_BOUNDARY_GIVE_RATIO = 0.16;
   const EDGE_BOUNDARY_STIFFNESS = 2.85;
   /* Finger → pane travel (< 1 = more friction; closer to 1 = tracks the finger better). */
@@ -45,7 +45,7 @@
   const PREVIEW_MAX_UNPINNED_ROWS = 24;
   /* How many neighbor panes get real tab DOM at engage; rest fill in as you approach. */
   const PREVIEW_EAGER_PANES = 1;
-  /* Spring settle — snappy enough that the sidebar is interactive right after release. */
+  /* Spring settle - snappy enough that the sidebar is interactive right after release. */
   const SPRING_STIFFNESS_COMMIT = 380;
   const SPRING_DAMPING_COMMIT = 40;
   const SPRING_STIFFNESS_SNAP = 420;
@@ -53,7 +53,7 @@
   const SPRING_SETTLE_PX = 0.55;
   const SPRING_SETTLE_VEL = 0.08;
   const SPRING_MAX_MS = 300;
-  /* Theme dissolve — skip tiny progress ticks that burn main-thread during drag. */
+  /* Theme dissolve - skip tiny progress ticks that burn main-thread during drag. */
   const THEME_MIX_STEP = 0.035;
 
   function easeOutCubic(t) {
@@ -356,7 +356,7 @@
       const nodes = [];
       for (const child of container.children) {
         if (!child.classList?.contains('tab') && !child.classList?.contains('tab-group')) continue;
-        // Hidden favorite hosts are recreated per profile — do not carry across pools.
+        // Hidden favorite hosts are recreated per profile - do not carry across pools.
         if (child.classList?.contains('tab-favorite-host')) {
           try {
             child.remove();
@@ -380,7 +380,7 @@
       return Math.max(96, Math.round(w * SLIDE_WIDTH_RATIO));
     },
 
-    /** Full pane width — coupled slide travels exactly this so the neighbor lands centered. */
+    /** Full pane width - coupled slide travels exactly this so the neighbor lands centered. */
     _stageWidthPx() {
       const stage = this._sidebarProfileStage || document.getElementById('sidebar-profile-swipe-stage');
       return stage?.clientWidth || 0;
@@ -569,7 +569,7 @@
       if (typeof finishWheel !== 'function') return;
       if (state.endTimer) clearTimeout(state.endTimer);
       const vel = state.vel || 0;
-      /* Slow swipes leave wider gaps between trackpad ticks — wait longer before settling. */
+      /* Slow swipes leave wider gaps between trackpad ticks - wait longer before settling. */
       const idleMs =
         vel >= 0.35 ? WHEEL_IDLE_FAST_MS : vel >= 0.12 ? WHEEL_IDLE_MS : WHEEL_IDLE_SLOW_MS;
       state.endTimer = setTimeout(finishWheel, idleMs);
@@ -689,7 +689,7 @@
         return;
       }
       this._unpinWebPanelRingForProfileSwipe?.();
-      /* Cancelled swipe — restore outgoing theme without a second paint if chrome already matches. */
+      /* Cancelled swipe - restore outgoing theme without a second paint if chrome already matches. */
       if (this.settings?.themeColor || this.settings?.gradientColor) {
         this.applyCustomThemeFromSettings?.();
       } else {
@@ -758,7 +758,7 @@
       const current = this._trackOffsetPx || 0;
       const remaining = Math.abs(fullOffset - current);
       const W = this._stageWidthPx() || 320;
-      /* Already covering the target — snap and unlock; don't coast for hundreds of ms. */
+      /* Already covering the target - snap and unlock; don't coast for hundreds of ms. */
       if (remaining < Math.max(6, W * 0.08)) {
         this._setTrackTransform(fullOffset, { immediate: true });
         return Promise.resolve();
@@ -779,7 +779,7 @@
     },
 
     /**
-     * Velocity spring settle — feels closer to Arc Spaces than a fixed ease curve.
+     * Velocity spring settle - feels closer to Arc Spaces than a fixed ease curve.
      * releaseVelocityPxPerSec is signed in track-offset space.
      */
     _animateTrackSpring(toPx, releaseVelocityPxPerSec = 0, mode = 'commit') {
@@ -896,6 +896,10 @@
       this._profileSwipeFinalizing = false;
       this._cancelTrackMotion();
       document.getElementById('sidebar')?.classList.remove('axis-sidebar-profile-switching');
+      // Isolation must never stick after an aborted swipe - that froze widgets/saves.
+      try {
+        this._endProfileNtpIsolation?.();
+      } catch (_) {}
     },
 
     _sidebarPreviewTabEligible(tab) {
@@ -953,7 +957,7 @@
       }
     },
 
-    /** Prefer runtime snapshot for persist — avoids live DOM clears mid-swipe. */
+    /** Prefer runtime snapshot for persist - avoids live DOM clears mid-swipe. */
     _captureOutgoingPersistPayloadForSwitch(outgoingId) {
       const pid = sanitizeProfileId(outgoingId || this.profileId);
       const state = this._profileRuntime?.get(pid);
@@ -995,7 +999,7 @@
             }
             return;
           }
-          console.error('persistOutgoingProfile IPC unavailable — outgoing profile not saved');
+          console.error('persistOutgoingProfile IPC unavailable - outgoing profile not saved');
         } catch (e) {
           console.error('persist outgoing profile', e);
         }
@@ -1020,7 +1024,7 @@
       return c * Math.tanh(Math.max(0, x) / c);
     },
 
-    /** List-end rubber-band — progressive resistance, more give than a wall but heavier than a normal swipe. */
+    /** List-end rubber-band - progressive resistance, more give than a wall but heavier than a normal swipe. */
     _rubberEdge(natural, W) {
       const cap = W * EDGE_BOUNDARY_GIVE_RATIO;
       const x = Math.max(0, natural);
@@ -1055,7 +1059,7 @@
       return 1 + BORDER_BOOST * bump;
     },
 
-    /** Map raw pointer dx to track offset — linear across every profile; rubber only at list ends. */
+    /** Map raw pointer dx to track offset - linear across every profile; rubber only at list ends. */
     _coupledOffsetFor(rawPointerDx, direction, hasNeighbor, swipeTargetId = null) {
       const W = this._stageWidthPx() || 1;
       const natural = direction > 0 ? -rawPointerDx : rawPointerDx;
@@ -1067,7 +1071,7 @@
       if (natural <= 0) {
         prog = -this._rubber(-natural, W * EDGE_GIVE_RATIO);
       } else if (atListEdge) {
-        /* First or last profile — resistance only here, not at the pane midpoint. */
+        /* First or last profile - resistance only here, not at the pane midpoint. */
         prog = this._rubberEdge(natural, W);
       } else if (hasNeighbor) {
         /* Follow continuously across all available profile panes. */
@@ -1094,10 +1098,13 @@
         return this.tabFaviconIconHtml(tabData);
       }
       if (tabData?.customIcon) {
-        if (tabData.customIconType === 'emoji') {
-          return `<span class="tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;">${this._escapePreviewText(tabData.customIcon)}</span>`;
+        if (typeof this.customTabIconHtml === 'function') {
+          return this.customTabIconHtml(tabData.customIcon, tabData.customIconType);
         }
-        return `<i class="fas ${this._escapePreviewText(tabData.customIcon)} tab-favicon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;color:rgba(255,255,255,0.7);"></i>`;
+        if (tabData.customIconType === 'emoji') {
+          return `<span class="tab-favicon tab-favicon-custom tab-favicon-custom--emoji" aria-hidden="true">${this._escapePreviewText(tabData.customIcon)}</span>`;
+        }
+        return `<span class="tab-favicon tab-favicon-custom tab-favicon-custom--fa" aria-hidden="true"><i class="fas ${this._escapePreviewText(this.normalizeFaIconClass?.(tabData.customIcon) || tabData.customIcon)}" aria-hidden="true"></i></span>`;
       }
       const favicon = tabData?.favicon ? this._escapePreviewText(tabData.favicon) : '';
       if (favicon) {
@@ -1145,17 +1152,18 @@
       tabGroupElement.dataset.color = color;
       if (groupData?.id != null) tabGroupElement.dataset.tabGroupId = String(groupData.id);
       const iconHtml =
-        groupData?.iconType === 'emoji'
-          ? `<span class="tab-favicon tab-group-icon" style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;">${this._escapePreviewText(groupData.icon || '📁')}</span>`
-          : `<i class="fas ${this._escapePreviewText(groupData.icon || 'fa-layer-group')} tab-favicon tab-group-icon"></i>`;
+        typeof this.tabGroupIconHtml === 'function'
+          ? this.tabGroupIconHtml(groupData)
+          : groupData?.icon
+            ? groupData.iconType === 'emoji'
+              ? `<span class="tab-favicon tab-group-icon tab-favicon-custom tab-favicon-custom--emoji" aria-hidden="true">${this._escapePreviewText(groupData.icon)}</span>`
+              : `<span class="tab-favicon tab-group-icon tab-favicon-custom tab-favicon-custom--fa" aria-hidden="true"><i class="fas ${this._escapePreviewText(groupData.icon)}" aria-hidden="true"></i></span>`
+            : `<i class="fas fa-layer-group tab-group-icon" aria-hidden="true"></i>`;
       tabGroupElement.innerHTML = `
         <div class="tab-content">
           <div class="tab-left">
             ${iconHtml}
             <span class="tab-title">${this._escapePreviewText(groupData?.name || 'Tab Group')}</span>
-          </div>
-          <div class="tab-right">
-            <button class="tab-group-delete tab-close" tabindex="-1"><i class="fas fa-times"></i></button>
           </div>
         </div>
         <div class="tab-group-content"></div>
@@ -1325,7 +1333,7 @@
               if (pinnedTabIds.has(String(id))) {
                 orderItems.push({ type: 'tab', id });
               } else if (unpinnedById.has(String(id))) {
-                /* Parked DOM order — same order the live sidebar will restore. */
+                /* Parked DOM order - same order the live sidebar will restore. */
                 orderedUnpinned.push(unpinnedById.get(String(id)));
                 unpinnedById.delete(String(id));
               }
@@ -1567,7 +1575,7 @@
           preview.appendChild(section);
           preview.dataset.needsHydration = ready ? '0' : '1';
         } else {
-          /* Cheap empty shell — tab DOM fills in as travel approaches this pane. */
+          /* Cheap empty shell - tab DOM fills in as travel approaches this pane. */
           preview.dataset.deferredContent = '1';
           preview.dataset.needsHydration = '0';
         }
@@ -1668,7 +1676,7 @@
 
     /**
      * After a committed swipe the live pane already holds the target profile.
-     * Pin the theme, collapse the carousel in one turn, peel the overlay, apply chrome — all
+     * Pin the theme, collapse the carousel in one turn, peel the overlay, apply chrome - all
      * synchronously so tabs never blank out.
      */
     _finalizeCoupledTransition(activated) {
@@ -1679,7 +1687,7 @@
 
       /*
        * Keep the live pane hidden until the track is snapped and the preview is gone.
-       * Paint live chrome while the overlay still covers, then peel — avoids an opaque flash.
+       * Paint live chrome while the overlay still covers, then peel - avoids an opaque flash.
        */
       this._resetProfileSwipeCompositorLayers();
       this.updatePinnedSeparatorVisibility?.();
@@ -1756,7 +1764,7 @@
       }
     },
 
-    /** Reattach pooled tab/group nodes in preserved DOM order — no full sidebar rebuild. */
+    /** Reattach pooled tab/group nodes in preserved DOM order - no full sidebar rebuild. */
     _restorePooledSidebar(profileId) {
       const pool = this.getProfileDomPool(profileId);
       const container = document.getElementById('tabs-container');
@@ -1885,7 +1893,7 @@
 
       if (parkOutgoing) {
         this._parkSidebarTabDom(fromPid);
-        /* Stamp + hide outgoing guests before this.tabs swaps — otherwise profile-switch
+        /* Stamp + hide outgoing guests before this.tabs swaps - otherwise profile-switch
          * purge treats them as orphans and destroys the pages (broken when you swipe back). */
         for (const tab of this.tabs?.values?.() || []) {
           const wv = tab?.webview;
@@ -1901,6 +1909,23 @@
       this.tabs = state.tabs || new Map();
       this.tabGroups = state.tabGroups || new Map();
       this.currentTab = state.currentTab ?? null;
+      /* Per-profile chat-open map - avoids leaving AI chat open on another profile's tab id. */
+      this.aiChatPanelOpenByTabId =
+        state.aiChatPanelOpenByTabId instanceof Map
+          ? new Map(state.aiChatPanelOpenByTabId)
+          : new Map();
+      this.aiChatMessagesByTabId =
+        state.aiChatMessagesByTabId instanceof Map
+          ? new Map(
+              Array.from(state.aiChatMessagesByTabId.entries()).map(([k, v]) => [
+                k,
+                Array.isArray(v) ? v.map((m) => ({ ...m })) : []
+              ])
+            )
+          : new Map();
+      this.aiChatMessages = Array.isArray(state.aiChatMessages)
+        ? state.aiChatMessages.map((m) => ({ ...m }))
+        : [];
       this._recentTabStack = Array.isArray(state.recentTabStack)
         ? state.recentTabStack
             .map((id) => this._normalizeTabMapKey(id))
@@ -1911,7 +1936,12 @@
         this._recentTabStack.push(curKey);
       }
       this._setProfileFavoritesFromState(state);
-      this.settings = state.settings ? { ...state.settings } : {};
+      this.settings = this._cloneSettingsForProfileRuntime?.(state.settings) || {};
+      this._ntpWidgetStructureKeyCached = '';
+      this._ntpWidgetLayout = null;
+      try {
+        this._ntpFetchCache?.clear?.();
+      } catch (_) {}
       if (Array.isArray(state.pinnedSidebarOrder) && state.pinnedSidebarOrder.length) {
         this.settings.pinnedSidebarOrder = state.pinnedSidebarOrder.map((item) => ({
           type: item.type,
@@ -1934,13 +1964,31 @@
         this._sidebarMediaDock = state.sidebarMediaDock;
       }
       this.applySidebarPosition?.();
+      // Profiles can store different UI languages; apply immediately so chrome
+      // and AxisI18n do not stay on the previous profile's locale.
+      // Skip heavy New Tab widget rebuild here - _endProfileNtpIsolation does one clean pass.
+      try {
+        const s = this.settings || {};
+        if (s.universalBrowserLanguage && s.universalUiLanguage) {
+          s.uiLanguage = s.universalUiLanguage;
+        } else if (!s.universalBrowserLanguage && s.profileUiLanguage) {
+          s.uiLanguage = s.profileUiLanguage;
+        }
+        this.applyUiLanguage?.(s.uiLanguage, { skipNtpWidgets: true });
+        if (s.universalBrowserFont && s.universalUiFont) {
+          s.uiFont = s.universalUiFont;
+        } else if (!s.universalBrowserFont && s.profileUiFont) {
+          s.uiFont = s.profileUiFont;
+        }
+        this.applyUiFont?.(s.uiFont);
+      } catch (_) {}
 
       const restored = fast && this._restorePooledSidebar(pid);
       this._clearDetachedTabElementPool?.();
       this._purgeOrphanSidebarNodes?.();
       this._relinkFavoriteRuntimeTabs?.();
       /*
-       * After a successful pool restore, do not rebuild the sidebar — that redraw is what
+       * After a successful pool restore, do not rebuild the sidebar - that redraw is what
        * made order look wrong for a frame after the swipe preview. Only refresh chrome and
        * keep settings aligned with the parked DOM the user already saw.
        */
@@ -1960,7 +2008,7 @@
           this._rememberPinnedSidebarOrder?.();
           const runtime = this._profileRuntime?.get(pid);
           if (runtime) {
-            runtime.settings = this.settings ? { ...this.settings } : runtime.settings;
+            runtime.settings = this._cloneSettingsForProfileRuntime?.(this.settings) || runtime.settings;
             if (Array.isArray(this.settings?.pinnedSidebarOrder)) {
               runtime.pinnedSidebarOrder = this.settings.pinnedSidebarOrder.map((item) => ({
                 ...item
@@ -2064,11 +2112,134 @@
       };
     },
 
+    /**
+     * Deep-ish clone of profile settings for the runtime cache so New Tab widgets
+     * (and similar nested objects) cannot leak across profiles by shared reference.
+     */
+    _cloneSettingsForProfileRuntime(settings) {
+      if (!settings || typeof settings !== 'object') return {};
+      const out = { ...settings };
+      if (Array.isArray(settings.ntpWidgetLayout)) {
+        out.ntpWidgetLayout = settings.ntpWidgetLayout.map((w) =>
+          w && typeof w === 'object'
+            ? {
+                ...w,
+                config:
+                  w.config && typeof w.config === 'object' && !Array.isArray(w.config)
+                    ? { ...w.config }
+                    : {}
+              }
+            : w
+        );
+      }
+      if (Array.isArray(settings.unpinnedTabs)) {
+        out.unpinnedTabs = settings.unpinnedTabs.map((t) =>
+          t && typeof t === 'object' ? { ...t } : t
+        );
+      }
+      if (Array.isArray(settings.pinnedSidebarOrder)) {
+        out.pinnedSidebarOrder = settings.pinnedSidebarOrder.map((item) =>
+          item && typeof item === 'object' ? { ...item } : item
+        );
+      }
+      if (Array.isArray(settings.pinnedTabs)) {
+        out.pinnedTabs = settings.pinnedTabs.map((t) =>
+          t && typeof t === 'object' ? { ...t } : t
+        );
+      }
+      if (Array.isArray(settings.favorites)) {
+        out.favorites = settings.favorites.map((f) =>
+          f && typeof f === 'object' ? { ...f } : f
+        );
+      }
+      if (Array.isArray(settings.tabGroups)) {
+        out.tabGroups = settings.tabGroups.map((g) =>
+          g && typeof g === 'object'
+            ? {
+                ...g,
+                tabIds: Array.isArray(g.tabIds) ? [...g.tabIds] : []
+              }
+            : g
+        );
+      }
+      return out;
+    },
+
+    _beginProfileNtpIsolation() {
+      this._suppressNtpWidgetPersist = true;
+      this._profileNtpIsolating = true;
+      this._uiLanguageApplyGen = (this._uiLanguageApplyGen || 0) + 1;
+      this._ntpWidgetStructureKeyCached = '';
+      this._ntpWidgetLayout = null;
+      try {
+        this._ntpFetchCache?.clear?.();
+      } catch (_) {}
+      try {
+        const grid = document.getElementById('ntp-widgets-grid');
+        if (grid) grid.innerHTML = '';
+      } catch (_) {}
+    },
+
+    _endProfileNtpIsolation() {
+      this._profileNtpIsolating = false;
+      this._suppressNtpWidgetPersist = false;
+      this._ntpWidgetStructureKeyCached = '';
+      try {
+        this._ntpFetchCache?.clear?.();
+      } catch (_) {}
+      try {
+        // Drop stale localized city labels from the previous profile's language.
+        const layout = this.settings?.ntpWidgetLayout;
+        if (Array.isArray(layout)) {
+          for (const w of layout) {
+            if (w?.config && typeof w.config === 'object' && w.config._localizedCity) {
+              const next = { ...w.config };
+              delete next._localizedCity;
+              w.config = next;
+            }
+          }
+        }
+      } catch (_) {}
+      try {
+        this._ntpWidgetLayout = this.getNtpWidgetLayout?.() || [];
+      } catch (_) {
+        this._ntpWidgetLayout = [];
+      }
+      try {
+        const catalog = document.getElementById('ntp-widget-catalog');
+        if (catalog) delete catalog.dataset.built;
+        this._buildNtpWidgetCatalog?.();
+      } catch (_) {}
+      try {
+        // One clean language + New Tab pass for the profile we landed on.
+        this.applyUiLanguage?.(this.settings?.uiLanguage, { skipNtpWidgets: false });
+      } catch (_) {
+        try {
+          const ntpTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+          if (ntpTab?.url === this.NEWTAB_URL) {
+            this.applyNewTabCustomization?.();
+          } else {
+            this.syncNtpWidgetsVisibility?.();
+            const grid = document.getElementById('ntp-widgets-grid');
+            if (grid && this.settings?.ntpWidgetsEnabled !== true) {
+              grid.innerHTML = '';
+            }
+          }
+        } catch (_) {}
+      }
+      try {
+        this.applyUiFont?.(this.settings?.uiFont);
+      } catch (_) {}
+    },
+
     _snapshotRunningProfile() {
       const pid = sanitizeProfileId(this.profileId);
 
+      this._beginProfileNtpIsolation?.();
+
       if (this.currentTab != null) {
         this._persistUrlBarChromeToTab?.(this.currentTab);
+        this._persistSidebarChatForTab?.(this.currentTab);
         const curTab = this.tabs.get(this.currentTab);
         if (curTab?.url === this.NEWTAB_URL) {
           this.saveNewTabPageStateToTab?.(this.currentTab);
@@ -2077,7 +2248,7 @@
 
       /*
        * Capture the live sidebar organization before parking. Runtime Maps do not
-       * preserve visual order — without this, switch-away/back reshuffles tabs.
+       * preserve visual order - without this, switch-away/back reshuffles tabs.
        */
       try {
         if (!this.settings || typeof this.settings !== 'object') this.settings = {};
@@ -2115,21 +2286,24 @@
         ),
         currentTab: this.currentTab,
         recentTabStack: Array.isArray(this._recentTabStack) ? [...this._recentTabStack] : [],
+        aiChatPanelOpenByTabId:
+          this.aiChatPanelOpenByTabId instanceof Map
+            ? new Map(this.aiChatPanelOpenByTabId)
+            : new Map(),
+        aiChatMessagesByTabId:
+          this.aiChatMessagesByTabId instanceof Map
+            ? new Map(
+                Array.from(this.aiChatMessagesByTabId.entries()).map(([k, v]) => [
+                  k,
+                  Array.isArray(v) ? v.map((m) => ({ ...m })) : []
+                ])
+              )
+            : new Map(),
+        aiChatMessages: Array.isArray(this.aiChatMessages)
+          ? this.aiChatMessages.map((m) => ({ ...m }))
+          : [],
         favorites: Array.isArray(this.favorites) ? this.favorites.map((f) => ({ ...f })) : [],
-        settings: this.settings
-          ? {
-              ...this.settings,
-              unpinnedTabs: Array.isArray(this.settings.unpinnedTabs)
-                ? this.settings.unpinnedTabs.map((t) =>
-                    t && typeof t === 'object' ? { ...t } : t
-                  )
-                : [],
-              pinnedSidebarOrder: pinnedSidebarOrder.map((item) => ({
-                type: item.type,
-                id: item.id
-              }))
-            }
-          : {},
+        settings: this._cloneSettingsForProfileRuntime?.(this.settings) || {},
         pinnedSidebarOrder: pinnedSidebarOrder.map((item) => ({
           type: item.type,
           id: item.id
@@ -2217,7 +2391,7 @@
           pinnedTabs.push(payload);
         });
 
-      /* Prefer captured sidebar order — never Map insertion order. */
+      /* Prefer captured sidebar order - never Map insertion order. */
       const unpinnedOrderById = new Map();
       const savedUnpinned =
         (Array.isArray(state.unpinnedSidebarOrder) && state.unpinnedSidebarOrder.length
@@ -2363,13 +2537,15 @@
       this.elements?.vaultAutofillPanel?.classList?.add('hidden');
       this.elements?.vaultSaveModal?.classList?.add('hidden');
       this.elements?.vaultPickModal?.classList?.add('hidden');
+      /* Instantly clear chat chrome - switchToTab restores per-tab state without a close slide. */
+      this.syncAIChatPanelForCurrentTab?.({ animate: false });
     },
 
     _commitProfileWebview(profileId = this.profileId) {
       const pid = sanitizeProfileId(profileId);
       /*
        * Show this profile’s pages; keep foreign PiP / mini-player guests process-alive but
-       * hidden. Never re-hide a guest that belongs to the profile we just entered — that
+       * hidden. Never re-hide a guest that belongs to the profile we just entered - that
        * left the site blank when switching away and back.
        */
       this._showWebviewsForProfile(pid);
@@ -2438,7 +2614,7 @@
       this.currentTab = null;
       this.favorites = [];
 
-      /* Always prefer a fresh store read — cached bootstrap can predate tabs added later. */
+      /* Always prefer a fresh store read - cached bootstrap can predate tabs added later. */
       let boot = null;
       try {
         boot = await window.electronAPI?.getProfileBootstrap?.(pid);
@@ -2448,7 +2624,12 @@
         boot = this._profileBootstrapCache?.get(pid) || null;
       }
       if (boot?.settings) {
-        this.settings = { ...boot.settings };
+        this.settings = this._cloneSettingsForProfileRuntime?.(boot.settings) || { ...boot.settings };
+        this._ntpWidgetStructureKeyCached = '';
+        this._ntpWidgetLayout = null;
+        try {
+          this._ntpFetchCache?.clear?.();
+        } catch (_) {}
         if (Array.isArray(boot.pinnedTabs)) this.settings.pinnedTabs = boot.pinnedTabs;
         if (Array.isArray(boot.tabGroups)) this.settings.tabGroups = boot.tabGroups;
         if (Array.isArray(boot.unpinnedTabs)) this.settings.unpinnedTabs = boot.unpinnedTabs;
@@ -2468,6 +2649,9 @@
         await this.loadSettings?.();
       }
       this.applySidebarPosition?.();
+      try {
+        this.applyUiLanguage?.(this.settings?.uiLanguage, { skipNtpWidgets: true });
+      } catch (_) {}
       if (!opts.deferHeavy) {
         await this.refreshShortcutCache?.();
       }
@@ -2508,7 +2692,7 @@
       }
     },
 
-    /** Shell + URL bar tint — sync, before webview commit or sidebar slide. */
+    /** Shell + URL bar tint - sync, before webview commit or sidebar slide. */
     _applyProfileChromeImmediate(cached = null, opts = {}) {
       try {
         this.applySidebarPosition?.();
@@ -2555,6 +2739,9 @@
         await this.refreshShortcutCache?.();
         this.syncAdBlockerUrlBarState?.();
         this.applySidebarPosition?.();
+        try {
+          this.applyUiLanguage?.(this.settings?.uiLanguage, { skipNtpWidgets: true });
+        } catch (_) {}
         if (this.settings?.transparentSites) {
           this.applyTransparentSitesToAllWebviews?.();
         } else {
@@ -2579,14 +2766,12 @@
         this._profileUrlBarRestoredFromCache = false;
         this._profileShellThemeFromSnapshot = false;
         void this.populateExtensionsMenu?.();
-        const ntpTab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
-        if (ntpTab?.url === this.NEWTAB_URL) {
-          this.applyNewTabCustomization?.();
-        } else {
-          this._syncNtpNewTabChrome?.();
-        }
+        this._endProfileNtpIsolation?.();
       } catch (e) {
         console.error('profile chrome apply failed', e);
+        try {
+          this._endProfileNtpIsolation?.();
+        } catch (_) {}
       }
     },
 
@@ -2665,7 +2850,7 @@
       pane.style.removeProperty('transform');
     },
 
-    /** Slide the outgoing tab list off-screen — runs immediately, even on first switch (no runtime cache). */
+    /** Slide the outgoing tab list off-screen - runs immediately, even on first switch (no runtime cache). */
     async _runExitProfileSlide(direction) {
       this._ensureSidebarProfileStage();
       const pane = this._slidePane();
@@ -2772,7 +2957,7 @@
         if (!target || !(target instanceof Element)) return true;
         if (
           target.closest(
-            '#clear-unpinned-floating, .sidebar-tabs-topbar, #profile-switcher-menu, #profile-switch-row-menu, .profile-switch-more-btn, #sidebar-profile-footer, .sidebar-footer, .sidebar-media-dock'
+            '#clear-unpinned-floating, .sidebar-tabs-topbar, #profile-switcher-menu, #profile-switch-row-menu, .profile-switch-more-btn, #sidebar-profile-footer, .sidebar-footer, .sidebar-media-dock, #sidebar-update-banner'
           )
         ) {
           return true;
@@ -2786,7 +2971,29 @@
         return this._adjacentProfileIdFrom(this.profileId, direction);
       };
 
-      /** Tab reorder uses mouse drag — profile switch is trackpad wheel only. */
+      const liveTabsContainer = () =>
+        document.querySelector(
+          '#sidebar-profile-swipe-track .sidebar-profile-pane--live .tabs-container'
+        ) || document.getElementById('tabs-container');
+
+      /** True when the tab list can still move further in this wheel's vertical direction. */
+      const tabsCanScrollWithDeltaY = (deltaY) => {
+        const el = liveTabsContainer();
+        if (!el || !Number.isFinite(deltaY) || deltaY === 0) return false;
+        const max = el.scrollHeight - el.clientHeight;
+        if (max <= 1) return false;
+        if (deltaY > 0) return el.scrollTop < max - 0.5;
+        return el.scrollTop > 0.5;
+      };
+
+      const abortUnengagedWheelSwipe = () => {
+        const ws = this._wheelSwipe;
+        if (!ws || ws.engaged || ws.settling) return;
+        this._clearProfileWheelFinishTimers(ws);
+        this._wheelSwipe = null;
+      };
+
+      /** Tab reorder uses mouse drag - profile switch is trackpad wheel only. */
       this._cancelProfilePointerSwipe = () => {};
 
       /* ---- Trackpad: continuous 1:1 carousel across all profiles ---- */
@@ -2842,12 +3049,21 @@
         if (this.isIncognitoWindow) return;
         const absX = Math.abs(e.deltaX);
         const absY = Math.abs(e.deltaY);
-        const horizontal = absX > absY * 1.05;
+        /*
+         * Fast vertical trackpad flicks often carry a little deltaX. Require a clear
+         * horizontal bias before stealing the gesture from the tab list scroller.
+         */
+        const clearlyHorizontal = absX > absY * 1.35 && absX >= WHEEL_START_DELTA_PX;
+        const clearlyVertical = absY > absX * 1.15;
 
         let s = this._wheelSwipe;
         if (!s) {
-          if (!horizontal) return;
+          if (!clearlyHorizontal) return;
           if (shouldIgnoreSwipeTarget(e.target)) return;
+          /* Prefer scrolling tabs when the list can still move and this isn't a hard sideways swipe. */
+          if (absY > 0.45 && tabsCanScrollWithDeltaY(e.deltaY) && absX < absY * 2.5) {
+            return;
+          }
           /* Ignore isolated tiny tail ticks; real finger input starts above this floor. */
           if (absX < WHEEL_START_DELTA_PX) return;
           /* Let a new swipe take over a snap-back spring immediately. */
@@ -2869,6 +3085,22 @@
           };
         }
         if (s.settling) return;
+
+        /*
+         * Before a profile switch is engaged, never block vertical scrolling. Abort weak
+         * / mistaken horizontal sessions so fast tab-list flicks keep working.
+         */
+        if (!s.engaged) {
+          if (clearlyVertical || (absY >= absX && tabsCanScrollWithDeltaY(e.deltaY))) {
+            abortUnengagedWheelSwipe();
+            return;
+          }
+          if (!clearlyHorizontal && absX < WHEEL_ENGAGE_PX) {
+            abortUnengagedWheelSwipe();
+            return;
+          }
+        }
+
         e.preventDefault();
 
         const now = performance.now();
@@ -2900,7 +3132,7 @@
           }
           if (s.engaged) {
             const offset = this._coupledOffsetFor(-s.accumX, s.direction, !!s.targetId, s.targetId);
-            /* Batch to the next frame — sync transforms every wheel tick felt laggy. */
+            /* Batch to the next frame - sync transforms every wheel tick felt laggy. */
             this._setTrackTransform(offset);
           }
 
@@ -2916,7 +3148,7 @@
         s.lastTs = now;
 
         if (absX >= 0.12) {
-          /* The gesture is still moving — settle only after the stream really stops. */
+          /* The gesture is still moving - settle only after the stream really stops. */
           this._armProfileWheelIdle(s);
         } else if (s.engaged && !s.endTimer) {
           this._armProfileWheelIdle(s);
@@ -2957,6 +3189,7 @@
 
       if (this.currentTab != null) {
         this._persistUrlBarChromeToTab?.(this.currentTab);
+        this._persistSidebarChatForTab?.(this.currentTab);
       }
 
       this._profileRuntime.set(pid, {
@@ -2969,8 +3202,25 @@
         ),
         currentTab: this.currentTab,
         recentTabStack: Array.isArray(this._recentTabStack) ? [...this._recentTabStack] : [],
+        aiChatPanelOpenByTabId:
+          this.aiChatPanelOpenByTabId instanceof Map
+            ? new Map(this.aiChatPanelOpenByTabId)
+            : new Map(),
+        aiChatMessagesByTabId:
+          this.aiChatMessagesByTabId instanceof Map
+            ? new Map(
+                Array.from(this.aiChatMessagesByTabId.entries()).map(([k, v]) => [
+                  k,
+                  Array.isArray(v) ? v.map((m) => ({ ...m })) : []
+                ])
+              )
+            : new Map(),
+        aiChatMessages: Array.isArray(this.aiChatMessages)
+          ? this.aiChatMessages.map((m) => ({ ...m }))
+          : [],
         favorites: Array.isArray(this.favorites) ? this.favorites.map((f) => ({ ...f })) : [],
-        settings: this.settings ? { ...this.settings } : {},
+        settings: this._cloneSettingsForProfileRuntime?.(this.settings) ||
+          (this.settings ? { ...this.settings } : {}),
         windowProfileIcon: this.windowProfileIcon,
         sidebarMediaDock: this._sidebarMediaDock ? { ...this._sidebarMediaDock } : null,
         shellChromeSnapshot: this._shellSnapshotForProfile(pid),
@@ -3093,7 +3343,7 @@
         : [];
       for (const t of unpinnedTabs) addTabFromPayload(t, { pinned: false });
 
-      const settings = { ...boot.settings };
+      const settings = this._cloneSettingsForProfileRuntime?.(boot.settings) || { ...boot.settings };
       if (Array.isArray(boot.pinnedTabs)) settings.pinnedTabs = boot.pinnedTabs;
       if (Array.isArray(boot.tabGroups)) settings.tabGroups = boot.tabGroups;
       if (Array.isArray(boot.unpinnedTabs)) settings.unpinnedTabs = boot.unpinnedTabs;
@@ -3127,6 +3377,9 @@
         tabGroups,
         currentTab: null,
         recentTabStack: [],
+        aiChatPanelOpenByTabId: new Map(),
+        aiChatMessagesByTabId: new Map(),
+        aiChatMessages: [],
         favorites,
         settings,
         pinnedSidebarOrder: pinnedSidebarOrder.map((item) => ({ type: item.type, id: item.id })),
@@ -3186,7 +3439,7 @@
     async _prepareProfileRuntimeForSwitch(targetId) {
       const pid = sanitizeProfileId(targetId);
       if (!pid || this._profileRuntime?.has(pid)) return;
-      /* Never block a swipe on a background persist — warm from bootstrap instead. */
+      /* Never block a swipe on a background persist - warm from bootstrap instead. */
       await this._warmProfileSwipeTarget(pid);
     },
 
@@ -3366,7 +3619,7 @@
       this._armPictureInPictureForProfileSwitch();
 
       const prepPromise = this._beginProfileSwitchPrep(outgoingId, { immediate: true });
-      /* Warm cache during the spring — mount only once the preview fully covers. */
+      /* Warm cache during the spring - mount only once the preview fully covers. */
       const runtimePrepPromise = this._prepareProfileRuntimeForSwitch(id);
 
       return (async () => {
@@ -3379,7 +3632,7 @@
           await Promise.all([slidePromise, runtimePrepPromise]);
           if (!this._isProfileSwitchEpochCurrent(epoch)) return;
 
-          /* Live pane is off-screen — swap + peel in one turn so the sidebar unlocks now. */
+          /* Live pane is off-screen - swap + peel in one turn so the sidebar unlocks now. */
           const activated = await this._loadTargetProfileState(
             id,
             this._profileRuntime?.get(id) || cached
@@ -3424,6 +3677,9 @@
           if (!this._isProfileSwitchEpochCurrent(epoch)) return;
           console.error('switchToProfileId failed', e);
           this._profileSwipeFinalizing = false;
+          try {
+            this._endProfileNtpIsolation?.();
+          } catch (_) {}
           this._clearProfileSwipeShellThemeState(true);
           document.getElementById('sidebar')?.classList.remove('axis-sidebar-profile-switching');
           this._resetProfileSwipeCompositorLayers();
@@ -3436,6 +3692,9 @@
             this._profileSwipeFinalizing = false;
             document.getElementById('sidebar')?.classList.remove('axis-sidebar-profile-switching');
             this._resetProfileSwipeCompositorLayers();
+            try {
+              this._endProfileNtpIsolation?.();
+            } catch (_) {}
           }
         }
       })();
@@ -3490,7 +3749,7 @@
       const cached = this._profileRuntime.get(id);
       let completed = false;
 
-      /* Wheel release: never hold the swipe lock — chain gestures freely; epoch cancels stale commits. */
+      /* Wheel release: never hold the swipe lock - chain gestures freely; epoch cancels stale commits. */
       if (options.interactive) {
         const epoch = this._bumpProfileSwitchEpoch();
         return this._commitInteractiveProfileSwitch(id, cur, {
@@ -3505,7 +3764,7 @@
       if (this._profileSwipeLock || this._profileSwipeFinalizing) return;
 
       /*
-       * Claim the lock synchronously — keyboard shortcuts and duplicate IPC must not
+       * Claim the lock synchronously - keyboard shortcuts and duplicate IPC must not
        * both start a switch before either reaches async work (that skipped two profiles).
        */
       this._profileSwipeLock = true;
@@ -3604,6 +3863,9 @@
       } catch (e) {
         console.error('switchToProfileId failed', e);
         this._profileSwipeFinalizing = false;
+        try {
+          this._endProfileNtpIsolation?.();
+        } catch (_) {}
         document.getElementById('sidebar')?.classList.remove('axis-sidebar-profile-switching');
         this._resetProfileSwipeCompositorLayers();
         this.unwrapProfileSwipeChrome?.();
@@ -3615,6 +3877,9 @@
           this._profileSwipeFinalizing = false;
           this._resetProfileSwipeCompositorLayers();
           this._releaseProfileSwipeUi();
+          try {
+            this._endProfileNtpIsolation?.();
+          } catch (_) {}
         }
       }
     },
