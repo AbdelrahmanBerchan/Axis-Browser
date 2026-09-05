@@ -1,6 +1,6 @@
 'use strict';
 
-/** Low-cost navigation warmup — dns-prefetch / preconnect on link hover only. */
+/** Low-cost navigation warmup - dns-prefetch / preconnect on link hover only. */
 (function axisWebviewPerfHints() {
     try {
         const warmed = new Set();
