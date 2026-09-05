@@ -17,8 +17,98 @@
       } catch (_) {}
     },
 
+    _isNativeUndoField(el) {
+      if (!el || el.nodeType !== 1) return false;
+      if (el.closest?.('#url-bar-input, #url-bar-display, .url-bar-field, .url-bar-center')) {
+        return false;
+      }
+      if (el.tagName === 'INPUT') {
+        if (el.readOnly || el.disabled) return false;
+        const type = String(el.type || 'text').toLowerCase();
+        if (
+          [
+            'button',
+            'checkbox',
+            'radio',
+            'file',
+            'submit',
+            'reset',
+            'hidden',
+            'range',
+            'color',
+            'image'
+          ].includes(type)
+        ) {
+          return false;
+        }
+        return true;
+      }
+      if (el.tagName === 'TEXTAREA') return !el.readOnly && !el.disabled;
+      if (el.tagName === 'SELECT') return false;
+      return !!el.isContentEditable;
+    },
+
+    _forgetClosedTabMatch(oldTabId, snapshot) {
+      if (!Array.isArray(this.closedTabs) || this.closedTabs.length === 0) return;
+      let idx = -1;
+      if (oldTabId != null) {
+        const want = this._normalizeTabMapKey(oldTabId);
+        idx = this.closedTabs.findIndex((t) => {
+          const id = this._normalizeTabMapKey(t.id ?? t.oldTabId);
+          return want != null && id === want;
+        });
+      }
+      if (idx < 0 && snapshot?.url) {
+        const title = snapshot.customTitle || snapshot.title;
+        idx = this.closedTabs.findIndex(
+          (t) => t.url === snapshot.url && (t.customTitle || t.title) === title
+        );
+      }
+      if (idx >= 0) this.closedTabs.splice(idx, 1);
+    },
+
+    _forgetUndoCloseForTab(oldTabId, snapshot) {
+      if (!Array.isArray(this.tabUndoStack) || this.tabUndoStack.length === 0) return;
+      const want = this._normalizeTabMapKey(oldTabId);
+      const title = snapshot?.customTitle || snapshot?.title;
+      for (let i = this.tabUndoStack.length - 1; i >= 0; i--) {
+        const action = this.tabUndoStack[i];
+        if (action?.type !== 'close_tab') continue;
+        const data = action.data || action.snapshot;
+        const actionId = this._normalizeTabMapKey(action.oldTabId);
+        const sameId = want != null && actionId === want;
+        const samePage =
+          !!snapshot?.url &&
+          data?.url === snapshot.url &&
+          (data?.customTitle || data?.title) === title;
+        if (sameId || samePage) {
+          this.tabUndoStack.splice(i, 1);
+          break;
+        }
+      }
+      this._syncUndoShortcutState();
+    },
+
+    _ensureGroupFromUndoSnapshot(groupSnapshot, tabGroupId) {
+      const existingKey = this.findTabGroupKey(tabGroupId ?? groupSnapshot?.id);
+      if (existingKey != null && this.tabGroups.has(existingKey)) return existingKey;
+      if (!groupSnapshot?.id) return null;
+      this.tabGroups.set(groupSnapshot.id, {
+        id: groupSnapshot.id,
+        name: groupSnapshot.name,
+        icon: groupSnapshot.icon,
+        iconType: groupSnapshot.iconType,
+        color: groupSnapshot.color,
+        pinned: groupSnapshot.pinned === true,
+        open: groupSnapshot.open !== false,
+        hadTabs: true,
+        tabIds: []
+      });
+      return groupSnapshot.id;
+    },
+
     _pushUndo(action) {
-      if (this._suppressUndo || this.isIncognitoWindow || !action?.type) return;
+      if (this._suppressUndo || !action?.type) return;
       if (!Array.isArray(this.tabUndoStack)) this.tabUndoStack = [];
       this.tabUndoStack.push(action);
       if (this.tabUndoStack.length > UNDO_MAX) {
@@ -82,6 +172,7 @@
         }
       }
 
+      const tabGroupId = tab.tabGroupId ?? null;
       return {
         url,
         title: tab.title || 'Untitled',
@@ -91,7 +182,8 @@
         favicon: tab.favicon || null,
         pinned: !!tab.pinned,
         savedLinkUrl: tab.savedLinkUrl || null,
-        tabGroupId: tab.tabGroupId ?? null,
+        tabGroupId,
+        groupSnapshot: tabGroupId != null ? this._snapshotTabGroupForUndo(tabGroupId) : null,
         newTabPageState,
         sidebarIndex: this._getUndoTabSidebarIndex(tid),
         wasActive: isCurrent
@@ -170,9 +262,11 @@
       if (!snapshot?.url) return null;
 
       const urlToLoad = this.sanitizeUrl(snapshot.url) || snapshot.url;
+      const shouldActivate = options.activate === true || snapshot.wasActive !== false;
       const newTabId = this.createNewTab(urlToLoad, {
-        skipActivate: true,
-        preserveNewTabState: !!snapshot.newTabPageState
+        skipActivate: !shouldActivate,
+        preserveNewTabState: !!snapshot.newTabPageState,
+        animateEnter: true
       });
       const tab = this.tabs.get(newTabId);
       if (!tab) return null;
@@ -193,7 +287,7 @@
       }
 
       if (!options.skipGroupAssign && snapshot.tabGroupId != null) {
-        const gKey = this.findTabGroupKey(snapshot.tabGroupId);
+        const gKey = this._ensureGroupFromUndoSnapshot(snapshot.groupSnapshot, snapshot.tabGroupId);
         if (gKey != null && this.tabGroups.has(gKey)) {
           const idx = snapshot.sidebarIndex?.inGroup ? snapshot.sidebarIndex.indexInGroup : undefined;
           this.addTabToTabGroup(newTabId, gKey, true, idx);
@@ -202,10 +296,21 @@
         this._insertTabElementAtUndoIndex(newTabId, snapshot.sidebarIndex);
       }
 
-      this.savePinnedTabs();
+      if (!this.isIncognitoWindow) this.savePinnedTabs();
 
-      if (options.activate || snapshot.wasActive) {
-        this.switchToTab(newTabId);
+      if (shouldActivate) {
+        const cur = this._normalizeTabMapKey(this.currentTab);
+        if (cur !== newTabId) this.switchToTab(newTabId);
+        const live = this.tabs.get(newTabId);
+        if (live && urlToLoad && urlToLoad !== this.NEWTAB_URL && urlToLoad !== 'axis://settings') {
+          if (!live.webview) {
+            live.webview = this.createTabWebview(newTabId, this._settingsWebviewOptionsForTab(live));
+            this.tabs.set(newTabId, live);
+          }
+          if (live.webview && !live.webview.src) {
+            live.webview.src = urlToLoad;
+          }
+        }
       }
 
       return newTabId;
@@ -271,7 +376,15 @@
             .filter((id) => id != null);
           group.open = g.open;
           group.hadTabs = group.tabIds.length > 0;
+          group.pinned = g.pinned === true;
           this.tabGroups.set(g.id, group);
+          for (const newId of group.tabIds) {
+            const tab = this.tabs.get(newId);
+            if (!tab) continue;
+            tab.tabGroupId = group.id;
+            tab.pinned = true;
+            this.tabs.set(newId, tab);
+          }
         }
 
         this.syncSidebarFromTabGroups();
@@ -288,9 +401,11 @@
 
         this.updatePinnedSeparatorVisibility?.();
         this.updateEmptyState?.();
+        this._refreshTabsScrollEdges?.();
         void this.savePinnedTabs();
         void this.saveTabGroups();
         void this.saveUnpinnedTabs();
+        this._scheduleUnpinnedTabsRecoverySave?.();
       } finally {
         this._suppressUndo = false;
       }
@@ -423,32 +538,48 @@
     },
 
     performUndo() {
+      if (!Array.isArray(this.tabUndoStack)) this.tabUndoStack = [];
+      if (!Array.isArray(this.closedTabs)) this.closedTabs = [];
+
+      const hasAxisUndo = this.tabUndoStack.length > 0 || this.closedTabs.length > 0;
       const active = document.activeElement;
-      if (
-        active &&
-        (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
-      ) {
-        return;
+      if (!hasAxisUndo && this._isNativeUndoField(active)) {
+        const before = active.value ?? active.innerHTML;
+        try {
+          document.execCommand('undo');
+        } catch (_) {}
+        const after = active.value ?? active.innerHTML;
+        if (before !== after) return true;
       }
 
-      if (!Array.isArray(this.tabUndoStack) || this.tabUndoStack.length === 0) {
-        this.recoverClosedTab();
-        return;
+      if (this.tabUndoStack.length === 0) {
+        if (this.closedTabs.length > 0) {
+          this.recoverClosedTab();
+          this._syncUndoShortcutState();
+          return true;
+        }
+        return false;
       }
 
       const action = this.tabUndoStack.pop();
       this._suppressUndo = true;
       try {
+        if (!action?.type) {
+          if (this.closedTabs.length > 0) {
+            this.recoverClosedTab();
+            return true;
+          }
+          return false;
+        }
         switch (action.type) {
           case 'close_tab': {
             const data = action.data || action.snapshot;
-            const newTabId = this._restoreTabFromSnapshot(data, { activate: data?.wasActive });
+            const newTabId = this._restoreTabFromSnapshot(data, { activate: data?.wasActive !== false });
+            this._forgetClosedTabMatch(action.oldTabId, data);
             if (newTabId != null) {
-              const idx = this.closedTabs.findIndex(
-                (t) => t.url === data.url && (t.customTitle || t.title) === (data.customTitle || data.title)
-              );
-              if (idx >= 0) this.closedTabs.splice(idx, 1);
               this.showNotification(`Undo: Restored ${data.customTitle || data.title}`, 'success');
+            } else if (this.closedTabs.length > 0) {
+              this.recoverClosedTab();
             }
             break;
           }
@@ -514,11 +645,13 @@
           default:
             break;
         }
+        return true;
       } finally {
         this._suppressUndo = false;
         this._syncUndoShortcutState();
+        this._refreshTabsScrollEdges?.();
       }
-    }
+    },
   };
 
   function attach(AxisBrowserPrototype) {
