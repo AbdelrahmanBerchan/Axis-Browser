@@ -164,7 +164,7 @@ function registrableDomain(hostname) {
 /**
  * Site match for password autofill.
  * Same host (www-normalized), or page is a subdomain of the saved host /
- * same registrable domain with related host relationship — never sibling
+ * same registrable domain with related host relationship - never sibling
  * hosts under a shared public suffix (e.g. a.github.io vs b.github.io).
  */
 function originsMatch(pageOrigin, savedOrigin) {
@@ -186,6 +186,19 @@ function originsMatch(pageOrigin, savedOrigin) {
     return ph.endsWith('.' + sh) || sh.endsWith('.' + ph);
   } catch (_) {}
   return false;
+}
+
+function maskCardNumber(num) {
+  const digits = String(num || '').replace(/\D/g, '');
+  if (digits.length < 4) return '••••';
+  return `•••• ${digits.slice(-4)}`;
+}
+
+/** Short non-secret hint for suggestion lists (never reveals password characters). */
+function passwordHint(password) {
+  const p = String(password || '');
+  if (!p) return '';
+  return '•'.repeat(Math.min(12, Math.max(4, p.length)));
 }
 
 function newId() {
@@ -395,14 +408,24 @@ function createAxisVault(app, _store, profileId = 'personal') {
     if (!cvv && row) cvv = openSecret(row.cvv);
     const sealedNumber = sealSecret(number);
     const sealedCvv = sealSecret(cvv);
+    if (!row) {
+      // Upsert by PAN so "Save card" never creates duplicates of the same number.
+      row = data.cards.find((c) => {
+        try {
+          return openSecret(c.number) === number;
+        } catch (_) {
+          return false;
+        }
+      });
+    }
     if (row) {
-      row.label = String(entry.label || '').trim();
+      row.label = String(entry.label || row.label || '').trim();
       row.cardholder = cardholder;
       row.number = sealedNumber;
       row.expMonth = expMonth;
       row.expYear = expYear;
       row.cvv = sealedCvv;
-      row.billingZip = String(entry.billingZip || '').trim();
+      row.billingZip = String(entry.billingZip || row.billingZip || '').trim();
       row.updatedAt = now;
     } else {
       row = {
@@ -490,6 +513,9 @@ function createAxisVault(app, _store, profileId = 'personal') {
     const now = Date.now();
     let row = entry.id ? data.addresses.find((a) => a.id === entry.id) : null;
     const normalized = normalizeAddressEntry(entry, row);
+    if (!row) {
+      row = data.addresses.find((a) => addressesMatch(a, normalized)) || null;
+    }
     if (row) {
       Object.assign(row, normalized, { updatedAt: now });
     } else {
@@ -547,39 +573,38 @@ function createAxisVault(app, _store, profileId = 'personal') {
   function matchLogins(pageOrigin, usernameHint, pageUrl) {
     const data = ensureLoaded();
     const hint = usernameHint ? String(usernameHint).trim().toLowerCase() : '';
-    let pageHost = '';
-    let pageDomain = '';
-    try {
-      if (pageUrl) {
-        const u = new URL(pageUrl);
-        pageHost = hostKey(u.hostname);
-        pageDomain = domainKey(u.hostname);
-      }
-    } catch (_) {}
-    const forSite = data.logins.filter((e) => {
-      if (originsMatch(pageOrigin, e.origin)) return true;
-      if (!e.origin || !pageHost) return false;
-      try {
-        const saved = new URL(e.origin);
-        const sh = hostKey(saved.hostname);
-        const sd = domainKey(saved.hostname);
-        if (sh === pageHost || sd === pageDomain) return true;
-        if (pageHost.endsWith('.' + sh) || sh.endsWith('.' + pageHost)) return true;
-      } catch (_) {}
-      return false;
-    });
-    let filtered = hint
-      ? forSite.filter((e) => String(e.username || '').toLowerCase().includes(hint))
-      : forSite;
-    if (!filtered.length) filtered = forSite;
-    const list = filtered;
-    return list.map((e) => ({
-        id: e.id,
-        origin: e.origin,
-        username: e.username,
-        password: openSecret(e.password),
-        title: e.title || ''
-      }));
+    void pageUrl;
+    const forSite = data.logins.filter((e) => originsMatch(pageOrigin, e.origin));
+    // Always return every login for the site. A typed username only ranks matches
+    // higher - it must not hide other accounts for the same site.
+    const ranked = forSite
+      .map((e) => {
+        const username = String(e.username || '');
+        const lower = username.toLowerCase();
+        let score = 0;
+        if (hint) {
+          if (lower === hint) score = 3;
+          else if (lower.startsWith(hint)) score = 2;
+          else if (lower.includes(hint)) score = 1;
+        }
+        return {
+          entry: e,
+          score,
+          updatedAt: Number(e.updatedAt || e.createdAt || 0)
+        };
+      })
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.updatedAt - a.updatedAt;
+      });
+    return ranked.map(({ entry: e }) => ({
+      id: e.id,
+      origin: e.origin,
+      username: e.username,
+      password: openSecret(e.password),
+      title: e.title || '',
+      updatedAt: e.updatedAt || e.createdAt || 0
+    }));
   }
 
   function matchCards() {
@@ -595,6 +620,25 @@ function createAxisVault(app, _store, profileId = 'personal') {
       billingZip: c.billingZip || '',
       masked: maskCardNumber(openSecret(c.number))
     }));
+  }
+
+  function shouldOfferCardSave(entry) {
+    const data = ensureLoaded();
+    const number = String(entry.number || '').replace(/\D/g, '');
+    if (!/^\d{13,19}$/.test(number)) return false;
+    const expMonth = String(entry.expMonth || '').padStart(2, '0');
+    const expYear = String(entry.expYear || '').trim();
+    return !data.cards.some((c) => {
+      try {
+        return (
+          openSecret(c.number) === number &&
+          String(c.expMonth || '').padStart(2, '0') === expMonth &&
+          String(c.expYear || '').trim() === expYear
+        );
+      } catch (_) {
+        return false;
+      }
+    });
   }
 
   function shouldOfferLoginSave({ origin, username, password }) {
@@ -671,6 +715,7 @@ function createAxisVault(app, _store, profileId = 'personal') {
     deleteAddress,
     matchAddresses,
     shouldOfferAddressSave,
+    shouldOfferCardSave,
     matchLogins,
     matchCards,
     shouldOfferLoginSave,
@@ -678,7 +723,9 @@ function createAxisVault(app, _store, profileId = 'personal') {
     flushUnlocked,
     secretsEncryptedAtRest,
     normalizeVaultOrigin,
-    originsMatch
+    originsMatch,
+    passwordHint,
+    maskCardNumber
   };
 }
 
@@ -687,5 +734,11 @@ module.exports = {
   formatAddressSummary,
   originsMatch,
   hostKey,
-  registrableDomain
+  registrableDomain,
+  passwordHint,
+  sealSecret,
+  openSecret,
+  isSealedSecret,
+  encryptionAvailable,
+  SECRET_PREFIX
 };
