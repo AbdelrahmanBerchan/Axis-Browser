@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: http: file: chrome-extension:; connect-src 'self' https://geocoding-api.open-meteo.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https: http: file: chrome-extension:; connect-src 'self' https://geocoding-api.open-meteo.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark" id="axis-settings-color-scheme">
     <title>Settings</title>
@@ -15,13 +15,14 @@
         /* Match Chromium window backgroundColor; default dark until sync `uiTheme` runs (store default). */
         html {
             background-color: #1e1e1e;
+            --axis-ui-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
         }
         html:not(.axis-dark) {
             background-color: #f5f5f7;
         }
         html.axis-dark { background-color: #1e1e1e; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+            font-family: var(--axis-ui-font, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif);
             font-size: 13px;
             color: #f5f5f7;
             background: #1e1e1e;
@@ -74,7 +75,7 @@
         html:not(.macos) .settings-window-chrome {
             display: none;
         }
-        /* In-tab Settings: no separate window title strip — the shell URL bar is the chrome. */
+        /* In-tab Settings: no separate window title strip - the shell URL bar is the chrome. */
         html.settings-embedded .settings-window-chrome {
             display: none !important;
         }
@@ -314,6 +315,42 @@
                 html.axis-dark .sidebar-item.active { background: #ffffff; color: #000000; }
         .sidebar-item svg { width: 16px; height: 16px; opacity: 0.8; }
         .sidebar-item.active svg { opacity: 1; }
+        .sidebar-incognito-divider,
+        .sidebar-incognito-divider.settings-nav-hidden {
+            display: none !important;
+        }
+        .sidebar-item.settings-nav-hidden {
+            display: none !important;
+        }
+        html.settings-editing-incognito [data-hide-when-incognito] {
+            display: none !important;
+        }
+        html:not(.settings-editing-incognito) #incognito-settings-banner {
+            display: none !important;
+        }
+        .incognito-settings-banner {
+            margin: 0 0 16px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: rgba(128, 128, 128, 0.12);
+            font-size: 12px;
+            line-height: 1.45;
+            opacity: 0.88;
+        }
+        .sidebar-item--incognito svg { opacity: 0.9; }
+        .settings-profile-divider {
+            margin: 6px 0 4px;
+            padding: 8px 8px 2px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: rgba(128, 128, 128, 0.85);
+            pointer-events: none;
+        }
+        .settings-profile-row--incognito .settings-profile-name {
+            font-weight: 500;
+        }
         
         /* Main content */
         .main {
@@ -510,7 +547,8 @@
         html.axis-dark .ai-settings-subpanel {
             border-top-color: rgba(255, 255, 255, 0.06);
         }
-        #ai-features-details.hidden { display: none !important; }
+        #ai-features-details.hidden,
+        #incognito-ai-details.hidden { display: none !important; }
         .ai-settings-intro {
             padding: 14px 20px;
             font-size: 12px;
@@ -775,8 +813,12 @@
             font-family: 'SF Mono', Monaco, monospace;
             font-size: 12px;
             padding: 4px 10px;
-            min-width: 100px;
+            width: 9.5rem;
+            min-width: 9.5rem;
+            max-width: 9.5rem;
+            min-height: 28px;
             text-align: center;
+            box-sizing: border-box;
         }
         .theme-preview {
             width: 80px;
@@ -881,7 +923,7 @@
         .vault-table-head,
         .vault-table-row {
             display: grid;
-            grid-template-columns: 1fr 108px;
+            grid-template-columns: 1fr 132px;
             gap: 10px;
             align-items: center;
             padding: 10px 12px;
@@ -1364,32 +1406,99 @@
             color: #86868b;
         }
                 html.axis-dark .extensions-empty { color: #98989d; }
-        .shortcuts-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .shortcuts-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .shortcuts-header .group-title {
+            margin-bottom: 0;
+            flex: 1;
+            min-width: 0;
+        }
+        .shortcuts-header #reset-shortcuts {
+            flex-shrink: 0;
+            align-self: center;
+            margin: 0;
+        }
+        .shortcuts-list {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .shortcuts-list .shortcuts-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .shortcuts-list .shortcuts-subheading {
+            margin: 0;
+            padding: 0 8px;
+            font-size: 10.5px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.075em;
+            color: var(--settings-muted, #86868b);
+        }
+        html.axis-dark .shortcuts-list .shortcuts-subheading {
+            color: var(--settings-muted, #98989d);
+        }
+        .shortcuts-list .group-content {
+            margin: 0;
+        }
         .shortcut-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 16px;
             padding: 8px 16px;
             border-bottom: 1px solid rgba(0,0,0,0.06);
         }
                 html.axis-dark .shortcut-row { border-bottom-color: rgba(255,255,255,0.06); }
         .shortcut-row:last-child { border-bottom: none; }
-        .shortcut-row .shortcut-row-main { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
-        .shortcut-row .shortcut-row-main span { font-size: 13px; }
-        .shortcut-row-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .shortcut-row .shortcut-row-main {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 0;
+        }
+        .shortcut-row .shortcut-row-main span {
+            font-size: 13px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .shortcut-row-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            flex-shrink: 0;
+        }
         .shortcut-action-btn {
             font-size: 11px;
             padding: 4px 10px;
+            min-width: 4.75rem;
+            min-height: 28px;
             border-radius: 6px;
             border: 1px solid rgba(0,0,0,0.12);
             background: rgba(0,0,0,0.04);
             cursor: pointer;
             white-space: nowrap;
+            text-align: center;
+            box-sizing: border-box;
         }
                 html.axis-dark .shortcut-action-btn { border-color: rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); }
-        .shortcuts-subheading { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #86868b; margin: 16px 0 8px; padding: 0 16px; }
-                html.axis-dark .shortcuts-subheading { color: #98989d; }
         .shortcut-row.shortcut-row-disabled .shortcut-input { opacity: 0.55; pointer-events: none; }
+        .shortcut-row-empty {
+            padding: 12px 18px;
+            font-size: 12px;
+            color: #86868b;
+        }
+        html.axis-dark .shortcut-row-empty { color: #98989d; }
         .gradient-rows { display: none !important; }
         .gradient-rows.visible { display: flex !important; }
         .unpinned-custom-row { display: none !important; }
@@ -1413,7 +1522,7 @@
             width: 180px;
             max-width: min(220px, 42vw);
         }
-        /* Widget options use the same nested panel as Welcome — keep list cards indented with the rows */
+        /* Widget options use the same nested panel as Welcome - keep list cards indented with the rows */
         #ntp-widgets-subgroup .ntp-widgets-settings-list {
             padding: 8px 18px 12px 34px;
         }
@@ -1639,7 +1748,7 @@
         .ntp-ticker-results.hidden {
             display: none;
         }
-        /* One clean line per hit — same idea as city search (no nested/clipped rows). */
+        /* One clean line per hit - same idea as city search (no nested/clipped rows). */
         #ntp-widgets-active-list .ntp-ticker-option {
             display: block;
             width: 100%;
@@ -1767,6 +1876,28 @@
             padding: 18px 10px;
             color: #86868b;
             font-size: 12px;
+        }
+        .axis-lang-row {
+            align-items: center;
+        }
+        #ui-language,
+        #universal-ui-language,
+        #ui-font,
+        #universal-ui-font {
+            min-width: 200px;
+            max-width: 280px;
+        }
+        #ui-language:disabled,
+        #universal-ui-language:disabled,
+        #ui-font:disabled,
+        #universal-ui-font:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            filter: grayscale(0.35);
+        }
+        .axis-lang-row.is-disabled .row-title,
+        .axis-lang-row.is-disabled .row-desc {
+            opacity: 0.55;
         }
         .perm-intro {
             font-size: 12px;
@@ -1959,7 +2090,7 @@
             background: rgba(255, 255, 255, 0.02);
         }
 
-        /* —— Light `uiTheme` only: Chromium was still using dark *native* form chrome (black
+        /* -- Light `uiTheme` only: Chromium was still using dark *native* form chrome (black
            select rings, checkboxes, scrollbars) when the OS is dark, because `light dark`
            + `prefers-color-scheme` overrode our pale page background. */
         html:not(.axis-dark) {
@@ -2167,8 +2298,7 @@
             margin-bottom: 28px;
         }
         .group-title,
-        .extensions-section-label,
-        .shortcuts-subheading {
+        .extensions-section-label {
             color: var(--settings-muted);
             letter-spacing: 0.075em;
             font-size: 10.5px;
@@ -2337,7 +2467,7 @@
             box-shadow: none;
         }
         .shortcuts-header {
-            margin-bottom: 0;
+            margin-bottom: 10px;
         }
         #history-pane .history-toolbar {
             margin-bottom: 0;
@@ -2387,6 +2517,7 @@
         .shortcut-input,
         .shortcut-action-btn {
             border-radius: 8px;
+            min-height: 30px;
         }
         .perm-add-row {
             padding: 14px 18px 16px;
@@ -2431,7 +2562,7 @@
             }
         }
 
-        /* —— Native Settings popup (frosted glass BrowserWindow, not in-tab) —— */
+        /* -- Native Settings popup (frosted glass BrowserWindow, not in-tab) -- */
         html.settings-native-window {
             background: transparent !important;
             background-color: transparent !important;
@@ -2651,7 +2782,7 @@
             background: rgba(255, 255, 255, 0.85);
             border-color: rgba(0, 0, 0, 0.12);
         }
-        /* Native Settings at window transparency 0 — solid shell (vibrancy/acrylic is off). */
+        /* Native Settings at window transparency 0 - solid shell (vibrancy/acrylic is off). */
         html.settings-native-window.settings-opaque-shell {
             background: #000000 !important;
             background-color: #000000 !important;
@@ -2696,17 +2827,17 @@
 <body>
   <div class="settings-wrap">
     <div class="settings-native-win-controls" aria-hidden="false">
-      <button type="button" id="settings-native-close" class="settings-native-close" aria-label="Close Settings">&#10005;</button>
+      <button type="button" id="settings-native-close" class="settings-native-close" aria-label="Close Settings" data-i18n-aria="settings.closeAria">&#10005;</button>
     </div>
-    <header class="settings-window-chrome" translate="no">Settings</header>
+    <header class="settings-window-chrome" translate="no" data-i18n="settings.title">Settings</header>
     <div class="settings-content-row">
     <nav class="sidebar">
-        <h1 class="native-sidebar-title">Settings</h1>
+        <h1 class="native-sidebar-title" data-i18n="settings.title">Settings</h1>
         <div class="settings-profile-switch is-hidden" id="settings-profile-switch">
             <button type="button" id="settings-profile-trigger" class="settings-profile-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="settings-profile-menu">
                 <span id="settings-profile-trigger-avatar" class="settings-profile-avatar" aria-hidden="true"></span>
                 <span class="settings-profile-trigger-text">
-                    <span class="settings-profile-trigger-label">Editing profile</span>
+                    <span class="settings-profile-trigger-label" data-i18n="profile.label">Editing profile</span>
                     <span id="settings-profile-trigger-name" class="settings-profile-trigger-name">Personal</span>
                 </span>
                 <svg class="settings-profile-chevron" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -2717,67 +2848,123 @@
         </div>
         <div class="sidebar-item active" data-section="customization">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
-            <span>General</span>
+            <span data-i18n="settings.nav.general">General</span>
         </div>
         <div class="sidebar-item" data-section="newtab">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7v-7zm4-3h2v10h-2V7zm4 6h2v4h-2v-4z"/></svg>
-            <span>New Tab</span>
+            <span data-i18n="settings.nav.newtab">New Tab</span>
         </div>
         <div class="sidebar-item" data-section="ai">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12zM7 9h2v2H7V9zm4 0h2v2h-2V9zm4 0h2v2h-2V9z"/></svg>
-            <span>AI Chat</span>
+            <span data-i18n="settings.nav.ai">AI Chat</span>
         </div>
         <div class="sidebar-item" data-section="history">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7.1-7 7-7v2c4.97 0 9 4.03 9 9s-4.03 9-9 9-9-4.03-9-9H4l3.89-3.89.07-.14L11 12h3c0 3.87-3.13 7-7 7s-7-3.13-7-7 3.13-7 7-7V3z"/></svg>
-            <span>History</span>
+            <span data-i18n="settings.nav.history">History</span>
         </div>
         <div class="sidebar-item" data-section="shortcuts">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 20H7v-2h10v2zm2-4H5V6h14v10zm-2-8H7V4h10v4z"/></svg>
-            <span>Shortcuts</span>
+            <span data-i18n="settings.nav.shortcuts">Shortcuts</span>
         </div>
         <div class="sidebar-item" data-section="permissions">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
-            <span>Site permissions</span>
+            <span data-i18n="settings.nav.permissions">Site permissions</span>
         </div>
         <div class="sidebar-item" data-section="extensions">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-2 .9-2 2v3.8h1.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"/></svg>
-            <span>Extensions</span>
+            <span data-i18n="settings.nav.extensions">Extensions</span>
         </div>
         <div class="sidebar-item" data-section="profiles">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.87 0-7 2.13-7 4.75V21h14v-2.25C19 16.13 15.87 14 12 14z"/></svg>
-            <span>Profiles</span>
+            <span data-i18n="settings.nav.profiles">Profiles</span>
         </div>
         <div class="sidebar-item" data-section="vault">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
-            <span>Passwords, cards &amp; addresses</span>
+            <span data-i18n="settings.nav.vault">Passwords, cards &amp; addresses</span>
+        </div>
+        <div class="sidebar-incognito-divider settings-nav-hidden" id="settings-incognito-divider" hidden data-i18n="chrome.privateBrowsing">Private browsing</div>
+        <div class="sidebar-item sidebar-item--incognito settings-nav-hidden" data-section="incognito">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+            <span data-i18n="settings.nav.incognito">Incognito</span>
         </div>
     </nav>
     
     <main class="main">
         <div class="main-inner">
-        <h1 class="native-settings-title">Settings</h1>
+        <h1 class="native-settings-title" data-i18n="settings.title">Settings</h1>
         <div class="settings-search-wrap">
-            <input type="search" id="settings-search" class="settings-search" placeholder="Search settings...">
+            <input type="search" id="settings-search" class="settings-search" placeholder="Search settings..." data-i18n-placeholder="settings.search">
         </div>
-        <div class="settings-search-empty" id="settings-search-empty">No matching settings</div>
+        <div class="settings-search-empty" id="settings-search-empty" data-i18n="settings.searchEmpty">No matching settings</div>
         <div class="pane active" id="customization-pane">
+            <div class="incognito-settings-banner" id="incognito-settings-banner" data-i18n="settings.incognitoBanner">
+                These options apply only to private windows. History, site permissions, extensions, and saved passwords stay off.
+            </div>
             <div class="group">
-                <div class="group-title">Appearance</div>
+                <div class="group-title" data-i18n="settings.group.appearance">Appearance</div>
                 <div class="group-content">
+                    <div class="row axis-lang-row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.language.title">Language</div>
+                            <div class="row-desc" data-i18n="settings.language.desc">Menus, Settings, setup, and the rest of Axis for this profile. Websites keep their own language. The layout does not flip.</div>
+                        </div>
+                        <select id="ui-language" aria-label="Language" data-i18n-aria="settings.language.title"></select>
+                    </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Sidebar Position</div>
-                            <div class="row-desc">Choose where the sidebar appears — the same side is used for every profile in this window.</div>
+                            <div class="row-title" data-i18n="settings.language.universalTitle">Universal language</div>
+                            <div class="row-desc" data-i18n="settings.language.universalDesc">Use one Axis language for every profile and Incognito. When this is off, each profile can pick its own language again.</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="universal-browser-language">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="row axis-lang-row" id="universal-ui-language-row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.language.universalPickerTitle">Universal language choice</div>
+                            <div class="row-desc" data-i18n="settings.language.universalPickerDesc">Used for all profiles and Incognito while Universal language is on.</div>
+                        </div>
+                        <select id="universal-ui-language" aria-label="Universal language" data-i18n-aria="settings.language.universalPickerTitle"></select>
+                    </div>
+                    <div class="row axis-lang-row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.font.title">UI font</div>
+                            <div class="row-desc" data-i18n="settings.font.desc">Typeface for Axis menus, Settings, and the rest of the browser chrome for this profile. Websites keep their own fonts.</div>
+                        </div>
+                        <select id="ui-font" aria-label="UI font" data-i18n-aria="settings.font.title"></select>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.font.universalTitle">Universal font</div>
+                            <div class="row-desc" data-i18n="settings.font.universalDesc">Use one Axis font for every profile and Incognito. When this is off, each profile can pick its own font again.</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="universal-browser-font">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="row axis-lang-row" id="universal-ui-font-row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.font.universalPickerTitle">Universal font choice</div>
+                            <div class="row-desc" data-i18n="settings.font.universalPickerDesc">Used for all profiles and Incognito while Universal font is on.</div>
+                        </div>
+                        <select id="universal-ui-font" aria-label="Universal font" data-i18n-aria="settings.font.universalPickerTitle"></select>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.sidebarPosition.title">Sidebar Position</div>
+                            <div class="row-desc" data-i18n="settings.sidebarPosition.desc">Choose where the sidebar appears - the same side is used for every profile in this window.</div>
                         </div>
                         <select id="sidebar-position">
-                            <option value="left">Left</option>
-                            <option value="right">Right</option>
+                            <option value="left" data-i18n="common.left">Left</option>
+                            <option value="right" data-i18n="common.right">Right</option>
                         </select>
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Sidebar zoom</div>
-                            <div class="row-desc">How large tabs, icons, and controls look in the sidebar. 100% matches the current default size.</div>
+                            <div class="row-title" data-i18n="settings.sidebarZoom.title">Sidebar zoom</div>
+                            <div class="row-desc" data-i18n="settings.sidebarZoom.desc">How large tabs, icons, and controls look in the sidebar. 100% matches the current default size.</div>
                         </div>
                         <div class="window-chrome-light-stack">
                             <span class="window-chrome-light-value" id="sidebar-zoom-label">100%</span>
@@ -2786,8 +2973,8 @@
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Search Engine</div>
-                            <div class="row-desc">Default search engine</div>
+                            <div class="row-title" data-i18n="settings.searchEngine.title">Search Engine</div>
+                            <div class="row-desc" data-i18n="settings.searchEngine.desc">Default search engine</div>
                         </div>
                         <select id="search-engine">
                             <option value="google">Google</option>
@@ -2799,66 +2986,66 @@
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Always show full URL</div>
-                            <div class="row-desc">Show the complete address in the URL bar instead of a shortened version</div>
+                            <div class="row-title" data-i18n="settings.fullUrl.title">Always show full URL</div>
+                            <div class="row-desc" data-i18n="settings.fullUrl.desc">Show the complete address in the URL bar instead of a shortened version</div>
                         </div>
                         <input type="checkbox" id="always-show-full-url">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Link preview</div>
-                            <div class="row-desc">Shows the destination URL at the bottom of the page when you hover a link.</div>
+                            <div class="row-title" data-i18n="settings.linkPreview.title">Link preview</div>
+                            <div class="row-desc" data-i18n="settings.linkPreview.desc">Shows the destination URL at the bottom of the page when you hover a link.</div>
                         </div>
                         <input type="checkbox" id="link-preview">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">HTTPS-only mode</div>
-                            <div class="row-desc">Ask before loading sites that use HTTP (not HTTPS). Localhost is always allowed.</div>
+                            <div class="row-title" data-i18n="settings.httpsOnly.title">HTTPS-only mode</div>
+                            <div class="row-desc" data-i18n="settings.httpsOnly.desc">Ask before loading sites that use HTTP (not HTTPS). Localhost is always allowed.</div>
                         </div>
                         <input type="checkbox" id="https-only-mode">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Ad blocker</div>
-                            <div class="row-desc">Block ads and trackers. Use the shield in the URL bar to turn blocking off everywhere or on just the current site.</div>
+                            <div class="row-title" data-i18n="settings.adblock.title">Privacy protection</div>
+                            <div class="row-desc" data-i18n="settings.adblock.desc">Blocks ads, trackers, and common fingerprinting tricks. Use the shield in the URL bar to turn it off everywhere or just for the current site.</div>
                         </div>
                         <input type="checkbox" id="ad-blocker-enabled">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">JavaScript</div>
-                            <div class="row-desc">Allow sites to run JavaScript. Turn off for minimal, mostly static pages (many sites will break).</div>
+                            <div class="row-title" data-i18n="settings.js.title">JavaScript</div>
+                            <div class="row-desc" data-i18n="settings.js.desc">Allow sites to run JavaScript. Turn off for minimal, mostly static pages (many sites will break).</div>
                         </div>
                         <input type="checkbox" id="javascript-enabled">
                     </div>
                 </div>
             </div>
-            <div class="group">
-                <div class="group-title">Tabs</div>
+            <div class="group" data-hide-when-incognito>
+                <div class="group-title" data-i18n="settings.group.tabs">Tabs</div>
                 <div class="group-content">
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Clear unpinned tabs</div>
-                            <div class="row-desc">When unpinned tabs and tab groups are removed automatically. Pinned tabs and groups are never cleared.</div>
+                            <div class="row-title" data-i18n="settings.unpinned.title">Clear unpinned tabs</div>
+                            <div class="row-desc" data-i18n="settings.unpinned.desc">When unpinned tabs and tab groups are removed automatically. Pinned tabs and groups are never cleared.</div>
                         </div>
                         <select id="unpinned-clear-mode">
-                            <option value="app-close">When the app closes</option>
-                            <option value="profile-switch">When switching profiles</option>
-                            <option value="30m">Every 30 minutes</option>
-                            <option value="1h">Every hour</option>
-                            <option value="6h">Every 6 hours</option>
-                            <option value="12h">Every 12 hours</option>
-                            <option value="24h">Every day</option>
-                            <option value="7d">Every week</option>
-                            <option value="custom">Custom interval</option>
-                            <option value="never">Never</option>
+                            <option value="app-close" data-i18n="settings.unpinned.appClose">When the app closes</option>
+                            <option value="profile-switch" data-i18n="settings.unpinned.profileSwitch">When switching profiles</option>
+                            <option value="30m" data-i18n="settings.unpinned.30m">Every 30 minutes</option>
+                            <option value="1h" data-i18n="settings.unpinned.1h">Every hour</option>
+                            <option value="6h" data-i18n="settings.unpinned.6h">Every 6 hours</option>
+                            <option value="12h" data-i18n="settings.unpinned.12h">Every 12 hours</option>
+                            <option value="24h" data-i18n="settings.unpinned.24h">Every day</option>
+                            <option value="7d" data-i18n="settings.unpinned.7d">Every week</option>
+                            <option value="custom" data-i18n="settings.unpinned.custom">Custom interval</option>
+                            <option value="never" data-i18n="settings.unpinned.never">Never</option>
                         </select>
                     </div>
                     <div class="row unpinned-custom-row" id="unpinned-clear-custom-row">
                         <div class="row-label">
-                            <div class="row-title">Custom interval</div>
-                            <div class="row-desc">How long to keep unpinned tabs before clearing (1 minute to 7 days)</div>
+                            <div class="row-title" data-i18n="settings.unpinned.custom">Custom interval</div>
+                            <div class="row-desc" data-i18n="settings.unpinned.customDesc">How long to keep unpinned tabs before clearing (1 minute to 7 days)</div>
                         </div>
                         <div class="row-controls">
                             <input type="number" id="unpinned-clear-custom-minutes" min="1" max="10080" step="1" value="60">
@@ -2868,23 +3055,23 @@
                 </div>
             </div>
             <div class="group">
-                <div class="group-title">Theme</div>
+                <div class="group-title" data-i18n="settings.group.theme">Theme</div>
                 <div class="group-content">
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Appearance</div>
-                            <div class="row-desc">Light, dark, or match your Mac or PC system setting for the Axis UI (tabs, sidebar, popups). Does not change this Settings window, the new tab page, or AI chat — those stay dark.</div>
+                            <div class="row-title" data-i18n="settings.appearance.title">Appearance</div>
+                            <div class="row-desc" data-i18n="settings.appearance.desc">Light, dark, or match your Mac or PC system setting for the Axis UI (tabs, sidebar, popups). Does not change this Settings window, the new tab page, or AI chat - those stay dark.</div>
                         </div>
                         <select id="ui-theme">
-                            <option value="system">System</option>
-                            <option value="dark">Dark</option>
-                            <option value="light">Light</option>
+                            <option value="system" data-i18n="common.system">System</option>
+                            <option value="dark" data-i18n="common.dark">Dark</option>
+                            <option value="light" data-i18n="common.light">Light</option>
                         </select>
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Theme Color</div>
-                            <div class="row-desc">Primary accent color</div>
+                            <div class="row-title" data-i18n="settings.themeColor.title">Theme Color</div>
+                            <div class="row-desc" data-i18n="settings.themeColor.desc">Primary accent color</div>
                         </div>
                         <div class="row-controls">
                             <input type="color" id="theme-color" value="#1a1a1a">
@@ -2893,48 +3080,48 @@
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Enable Gradient</div>
-                            <div class="row-desc">Use gradient instead of solid color</div>
+                            <div class="row-title" data-i18n="settings.gradient.title">Enable Gradient</div>
+                            <div class="row-desc" data-i18n="settings.gradient.desc">Use gradient instead of solid color</div>
                         </div>
                         <input type="checkbox" id="gradient-enabled">
                     </div>
                     <div class="row gradient-rows" id="gradient-color-row">
                         <div class="row-label">
-                            <div class="row-title">Gradient Color</div>
-                            <div class="row-desc">Second color for gradient</div>
+                            <div class="row-title" data-i18n="settings.gradientColor.title">Gradient Color</div>
+                            <div class="row-desc" data-i18n="settings.gradientColor.desc">Second color for gradient</div>
                         </div>
                         <input type="color" id="gradient-color" value="#2a2a2a">
                     </div>
                     <div class="row gradient-rows" id="gradient-direction-row">
                         <div class="row-label">
-                            <div class="row-title">Gradient Direction</div>
+                            <div class="row-title" data-i18n="settings.gradientDir.title">Gradient Direction</div>
                         </div>
                         <select id="gradient-direction">
-                            <option value="to right">Right</option>
-                            <option value="to left">Left</option>
-                            <option value="to bottom">Bottom</option>
-                            <option value="to top">Top</option>
-                            <option value="135deg">Diagonal</option>
+                            <option value="to right" data-i18n="common.right">Right</option>
+                            <option value="to left" data-i18n="common.left">Left</option>
+                            <option value="to bottom" data-i18n="settings.gradient.bottom">Bottom</option>
+                            <option value="to top" data-i18n="settings.gradient.top">Top</option>
+                            <option value="135deg" data-i18n="settings.gradient.diagonal">Diagonal</option>
                         </select>
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Transparent sites (glass mode) <span class="axis-beta-label">BETA</span></div>
-                            <div class="row-desc">Clears common page shell backgrounds so the browser glass shows through; other tabs stay fully hidden so they do not bleed into the active page.</div>
+                            <div class="row-title"><span data-i18n="settings.glass.title">Transparent sites (glass mode)</span> <span class="axis-beta-label">BETA</span></div>
+                            <div class="row-desc" data-i18n="settings.glass.desc">Clears common page shell backgrounds so the browser glass shows through; other tabs stay fully hidden so they do not bleed into the active page.</div>
                         </div>
                         <input type="checkbox" id="transparent-sites">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Site theme color <span class="axis-beta-label">BETA</span></div>
-                            <div class="row-desc">Lets Axis adapt the browser theme color to the current website. Turn it off anytime to use your saved theme color again.</div>
+                            <div class="row-title"><span data-i18n="settings.siteTheme.title">Site theme color</span> <span class="axis-beta-label">BETA</span></div>
+                            <div class="row-desc" data-i18n="settings.siteTheme.desc">Lets Axis adapt the browser theme color to the current website. Turn it off anytime to use your saved theme color again.</div>
                         </div>
                         <input type="checkbox" id="site-theme-color">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Window transparency</div>
-                            <div class="row-desc">How much your wallpaper or desktop shows through the browser frame (tab strip, sidebar, blur). Left: fully opaque. Right: most transparent. The middle is the default.</div>
+                            <div class="row-title" data-i18n="settings.windowChrome.title">Window transparency</div>
+                            <div class="row-desc" data-i18n="settings.windowChrome.desc">How much your wallpaper or desktop shows through the browser frame (tab strip, sidebar, blur). Left: fully opaque. Right: most transparent. The middle is the default.</div>
                         </div>
                         <div class="window-chrome-light-stack">
                             <span class="window-chrome-light-value" id="window-chrome-light-label">50</span>
@@ -2944,26 +3131,26 @@
                 </div>
             </div>
             <div class="group">
-                <div class="group-title">Speech</div>
+                <div class="group-title" data-i18n="settings.group.speech">Speech</div>
                 <div class="group-content">
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Enable Speech Menu</div>
-                            <div class="row-desc">Show Start/Stop Speaking options when text is selected</div>
+                            <div class="row-title" data-i18n="settings.speechEnable.title">Enable Speech Menu</div>
+                            <div class="row-desc" data-i18n="settings.speechEnable.desc">Show Start/Stop Speaking options when text is selected</div>
                         </div>
                         <input type="checkbox" id="speech-enabled">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Voice</div>
-                            <div class="row-desc">System text-to-speech voice (from macOS / Windows / Linux)</div>
+                            <div class="row-title" data-i18n="settings.speechVoice.title">Voice</div>
+                            <div class="row-desc" data-i18n="settings.speechVoice.desc">System text-to-speech voice (from macOS / Windows / Linux)</div>
                         </div>
                         <select id="speech-voice"></select>
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Speech Rate</div>
-                            <div class="row-desc">How fast highlighted text is spoken</div>
+                            <div class="row-title" data-i18n="settings.speechRate.title">Speech Rate</div>
+                            <div class="row-desc" data-i18n="settings.speechRate.desc">How fast highlighted text is spoken</div>
                         </div>
                         <select id="speech-rate">
                             <option value="0.8">Slow</option>
@@ -2974,8 +3161,8 @@
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Speech Pitch</div>
-                            <div class="row-desc">Voice tone for spoken text</div>
+                            <div class="row-title" data-i18n="settings.speechPitch.title">Speech Pitch</div>
+                            <div class="row-desc" data-i18n="settings.speechPitch.desc">Voice tone for spoken text</div>
                         </div>
                         <select id="speech-pitch">
                             <option value="0.8">Lower</option>
@@ -2986,40 +3173,40 @@
                 </div>
             </div>
             <div class="group">
-                <div class="group-title">Ambient audio</div>
+                <div class="group-title" data-i18n="settings.group.ambient">Ambient audio</div>
                 <div class="group-content">
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Enable ambient audio</div>
-                            <div class="row-desc">Optional subtle background sound while browsing (generated locally, no files downloaded)</div>
+                            <div class="row-title" data-i18n="settings.ambientEnable.title">Enable ambient audio</div>
+                            <div class="row-desc" data-i18n="settings.ambientEnable.desc">Optional subtle background sound while browsing (generated locally, no files downloaded)</div>
                         </div>
                         <input type="checkbox" id="ambient-audio-enabled">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Mute ambient when tab audio is playing</div>
-                            <div class="row-desc">Lowers ambient to silence while any tab outputs audible page audio (not when the tab is muted)</div>
+                            <div class="row-title" data-i18n="settings.ambientMute.title">Mute ambient when tab audio is playing</div>
+                            <div class="row-desc" data-i18n="settings.ambientMute.desc">Lowers ambient to silence while any tab outputs audible page audio (not when the tab is muted)</div>
                         </div>
                         <input type="checkbox" id="ambient-mute-when-tab-audio">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Sound</div>
-                            <div class="row-desc">Soft background bed generated on your device — no downloads</div>
+                            <div class="row-title" data-i18n="settings.ambientSound.title">Sound</div>
+                            <div class="row-desc" data-i18n="settings.ambientSound.desc">Soft background bed generated on your device - no downloads</div>
                         </div>
                         <select id="ambient-audio-preset">
                             <option value="rain">Rain</option>
                             <option value="warm">Warm room</option>
-                            <option value="focus">Deep focus</option>
-                            <option value="ocean">Ocean breeze</option>
+                            <option value="focus" data-i18n="settings.ambient.focus">Deep focus</option>
+                            <option value="ocean" data-i18n="settings.ambient.ocean">Ocean breeze</option>
                             <option value="wind">Wind</option>
-                            <option value="still">Night still</option>
+                            <option value="still" data-i18n="settings.ambient.still">Night still</option>
                         </select>
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Volume</div>
-                            <div class="row-desc">Background level — changes apply right away</div>
+                            <div class="row-title" data-i18n="settings.ambientVolume.title">Volume</div>
+                            <div class="row-desc" data-i18n="settings.ambientVolume.desc">Background level - changes apply right away</div>
                         </div>
                         <div class="ambient-volume-wrap">
                             <input type="range" id="ambient-audio-volume" min="0" max="100" step="1" value="48">
@@ -3032,60 +3219,59 @@
         
         <div class="pane" id="permissions-pane">
             <div class="group">
-                <div class="group-title">Site permission overrides</div>
+                <div class="group-title" data-i18n="settings.group.permissions">Site permission overrides</div>
                 <div class="group-content perm-panel">
-                    <p class="perm-intro">
-                        Choose <strong>Allow</strong>, <strong>Block</strong>, or <strong>Default</strong> (no override) for each site.
-                        Camera and Microphone both apply when a page requests media (e.g. video calls). Saved per origin (scheme + host + port).
+                    <p class="perm-intro" data-i18n="settings.permissions.lead">
+                        Choose Allow, Block, or Default (no override) for each site. Camera and Microphone both apply when a page requests media (e.g. video calls). Saved per origin (scheme + host + port).
                     </p>
                     <div class="perm-add-row">
-                        <input type="text" id="site-perm-add-input" placeholder="example.com or https://site.org/…" autocomplete="off">
-                        <button type="button" id="site-perm-add-btn">Add site</button>
+                        <input type="text" id="site-perm-add-input" placeholder="example.com or https://site.org/…" data-i18n-placeholder="settings.permissions.urlPh" autocomplete="off">
+                        <button type="button" id="site-perm-add-btn" data-i18n="settings.permissions.addSite">Add site</button>
                         <span class="perm-add-error" id="site-perm-add-error"></span>
                     </div>
-                    <div class="perm-list" id="site-perm-list" aria-label="Per-site permissions"></div>
+                    <div class="perm-list" id="site-perm-list" aria-label="Per-site permissions" data-i18n-aria="settings.permissions.listAria"></div>
                 </div>
             </div>
         </div>
 
         <div class="pane" id="extensions-pane">
             <div class="group">
-                <div class="group-title">Extensions</div>
-                <p class="extensions-pane-lead">
-                    Browse a store below, open an add-on’s page, then use the blue <strong>Install in Axis</strong> bar (or the URL bar install icon). You can also paste a link or ID here, use a <strong>.crx</strong> file, or an unpacked folder. Axis is Chromium-based — some Firefox-only add-ons won’t run; Electron supports a <strong>subset</strong> of extension APIs.
+                <div class="group-title" data-i18n="settings.group.extensions">Extensions</div>
+                <p class="extensions-pane-lead" data-i18n="settings.extensions.lead">
+                    Browse a store below, open an add-on’s page, then use the blue Install in Axis bar (or the URL bar install icon). You can also paste a link or ID here, use a .crx file, or an unpacked folder. Axis is Chromium-based - some Firefox-only add-ons won’t run; Electron supports a subset of extension APIs.
                 </p>
 
                 <div class="extensions-section">
-                    <h3 class="extensions-section-label">Browse stores</h3>
+                    <h3 class="extensions-section-label" data-i18n="settings.extensions.browse">Browse stores</h3>
                     <div class="extensions-store-buttons">
-                        <button type="button" id="extensions-open-chrome-webstore" title="Open Chrome Web Store in Axis">Chrome Web Store</button>
-                        <button type="button" id="extensions-open-firefox-addons" title="Open Mozilla add-ons for Firefox in Axis">Firefox add-ons</button>
+                        <button type="button" id="extensions-open-chrome-webstore" title="Open Chrome Web Store in Axis" data-i18n="settings.extensions.chromeStore">Chrome Web Store</button>
+                        <button type="button" id="extensions-open-firefox-addons" title="Open Mozilla add-ons for Firefox in Axis" data-i18n="settings.extensions.firefoxAddons">Firefox add-ons</button>
                     </div>
                 </div>
 
                 <div class="extensions-section">
-                    <h3 class="extensions-section-label">Install from URL or ID</h3>
+                    <h3 class="extensions-section-label" data-i18n="settings.extensions.installUrl">Install from URL or ID</h3>
                     <div class="extensions-webstore-row">
-                        <input type="text" class="extensions-webstore-input" id="extension-webstore-input" placeholder="Store URL, Chrome extension ID, or Firefox slug (e.g. ublock-origin)…" autocomplete="off" spellcheck="false">
-                        <button type="button" id="install-extension-webstore">Install</button>
+                        <input type="text" class="extensions-webstore-input" id="extension-webstore-input" placeholder="Store URL, Chrome extension ID, or Firefox slug (e.g. ublock-origin)…" data-i18n-placeholder="settings.extensions.urlPlaceholder" autocomplete="off" spellcheck="false">
+                        <button type="button" id="install-extension-webstore" data-i18n="common.install">Install</button>
                     </div>
-                    <p class="extensions-hint">Works with Chrome Web Store and Mozilla Add-ons listings. IDs and slugs are fetched inside Axis (no stray package downloads).</p>
+                    <p class="extensions-hint" data-i18n="settings.extensions.hint">Works with Chrome Web Store and Mozilla Add-ons listings. IDs and slugs are fetched inside Axis (no stray package downloads).</p>
                 </div>
 
                 <div class="extensions-section">
-                    <h3 class="extensions-section-label">Install from disk</h3>
+                    <h3 class="extensions-section-label" data-i18n="settings.extensions.installDisk">Install from disk</h3>
                     <div class="extensions-file-actions">
-                        <button type="button" id="install-extension-crx">Choose .crx file…</button>
-                        <button type="button" id="install-extension">Choose unpacked folder…</button>
+                        <button type="button" id="install-extension-crx" data-i18n="settings.extensions.chooseCrx">Choose .crx file…</button>
+                        <button type="button" id="install-extension" data-i18n="settings.extensions.chooseFolder">Choose unpacked folder…</button>
                     </div>
                 </div>
             </div>
 
             <div class="group">
-                <div class="group-title">Installed</div>
+                <div class="group-title" data-i18n="settings.group.installed">Installed</div>
                 <div class="group-content">
                     <div class="extensions-list" id="extensions-list">
-                        <div class="extensions-empty">No extensions installed</div>
+                        <div class="extensions-empty" data-i18n="ext.emptyInstalled">No extensions installed</div>
                     </div>
                 </div>
             </div>
@@ -3093,78 +3279,78 @@
         
         <div class="pane" id="profiles-pane">
             <div class="group">
-                <div class="group-title">Startup</div>
+                <div class="group-title" data-i18n="settings.group.startup">Startup</div>
                 <div class="group-content">
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">When Axis opens</div>
-                            <div class="row-desc">Which profile loads when you launch the app</div>
+                            <div class="row-title" data-i18n="settings.startupWhen.title">When Axis opens</div>
+                            <div class="row-desc" data-i18n="settings.startupWhen.desc">Which profile loads when you launch the app</div>
                 </div>
                         <select id="profiles-startup-mode">
-                            <option value="resume">Resume last profile</option>
-                            <option value="personal">Always Personal</option>
-                            <option value="fixed">Always a specific profile</option>
+                            <option value="resume" data-i18n="settings.startup.resume">Resume last profile</option>
+                            <option value="personal" data-i18n="settings.startup.alwaysPersonal">Always Personal</option>
+                            <option value="fixed" data-i18n="settings.startup.alwaysSpecific">Always a specific profile</option>
                         </select>
                     </div>
                     <div class="row hidden" id="profiles-startup-profile-row">
                         <div class="row-label">
-                            <div class="row-title">Startup profile</div>
-                            <div class="row-desc">Used when Axis opens with the option above</div>
+                            <div class="row-title" data-i18n="settings.startupProfile.title">Startup profile</div>
+                            <div class="row-desc" data-i18n="settings.startupProfile.desc">Used when Axis opens with the option above</div>
                         </div>
                         <select id="profiles-startup-profile"></select>
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">New windows</div>
-                            <div class="row-desc">Which profile opens when you choose New Window from the menu</div>
+                            <div class="row-title" data-i18n="settings.newWindows.title">New windows</div>
+                            <div class="row-desc" data-i18n="settings.newWindows.desc">Which profile opens when you choose New Window from the menu</div>
                         </div>
                         <select id="profiles-new-window-mode">
-                            <option value="same">Same profile as the current window</option>
-                            <option value="personal">Always Personal</option>
+                            <option value="same" data-i18n="settings.startup.sameWindow">Same profile as the current window</option>
+                            <option value="personal" data-i18n="settings.startup.alwaysPersonal">Always Personal</option>
                         </select>
                     </div>
             </div>
         </div>
         
             <div class="group">
-                <div class="group-title">Overview</div>
-                <p class="profiles-pane-lead">
+                <div class="group-title" data-i18n="settings.group.overview">Overview</div>
+                <p class="profiles-pane-lead" data-i18n="settings.profiles.overviewLead">
                     Each profile keeps its own tabs, favorites, history, extensions, and passwords. Switch profiles, add new ones, rename, or delete from the profile menu at the bottom of the sidebar.
                 </p>
                 <div class="profiles-overview-wrap">
                     <table class="profiles-overview-table" id="profiles-overview-table">
                         <thead>
                             <tr>
-                                <th>Profile</th>
-                                <th>Favorites</th>
-                                <th>History</th>
-                                <th>Pinned</th>
-                                <th>Extensions</th>
-                                <th>Storage</th>
+                                <th data-i18n="profile.label">Profile</th>
+                                <th data-i18n="settings.profiles.colFavorites">Favorites</th>
+                                <th data-i18n="settings.profiles.colHistory">History</th>
+                                <th data-i18n="settings.profiles.colPinned">Pinned</th>
+                                <th data-i18n="settings.profiles.colExtensions">Extensions</th>
+                                <th data-i18n="settings.profiles.colStorage">Storage</th>
                             </tr>
                         </thead>
                         <tbody id="profiles-overview-body">
-                            <tr><td colspan="6">Loading…</td></tr>
+                            <tr><td colspan="6" data-i18n="common.loading">Loading…</td></tr>
                         </tbody>
                     </table>
                 </div>
                 <div class="profiles-backup-row">
                     <div>
-                        <label for="profiles-export-select">Export backup</label>
+                        <label for="profiles-export-select" data-i18n="settings.profiles.exportBackup">Export backup</label>
                         <select id="profiles-export-select"></select>
             </div>
                     <div class="profiles-backup-actions">
-                        <button type="button" id="profiles-export-btn">Export…</button>
-                        <button type="button" id="profiles-import-backup-btn">Import backup…</button>
+                        <button type="button" id="profiles-export-btn" data-i18n="settings.profiles.exportBtn">Export…</button>
+                        <button type="button" id="profiles-import-backup-btn" data-i18n="settings.profiles.importBackup">Import backup…</button>
         </div>
         </div>
                 <div class="profiles-status" id="profiles-backup-status"></div>
   </div>
 
             <div class="group">
-                <div class="group-title">Profile trash</div>
-                <p class="profiles-pane-lead">
-                    Deleted profiles stay here until you restore them or remove them permanently. You can also press <strong>⌘Z</strong> right after deleting to bring a profile back.
+                <div class="group-title" data-i18n="settings.group.trash">Profile trash</div>
+                <p class="profiles-pane-lead" data-i18n="settings.profiles.trashLead">
+                    Deleted profiles stay here until you restore them or remove them permanently. You can also press ⌘Z right after deleting to bring a profile back.
                 </p>
                 <div class="profiles-trash-list" id="profiles-trash-list">
                     <p class="profiles-trash-empty">No deleted profiles.</p>
@@ -3173,7 +3359,7 @@
   </div>
     
             <div class="group">
-                <div class="group-title">Import from another browser</div>
+                <div class="group-title" data-i18n="settings.group.import">Import from another browser</div>
                 <p class="profiles-pane-lead">
                     Bring favorites, pinned tabs, bookmarks, folders, saved passwords, payment cards, addresses, extensions, site permissions, and recent history into a new Axis profile. Chrome, Edge, Brave, Firefox, Arc, and other Chromium browsers are detected automatically when installed on this computer. Quit the source browser before importing for the most reliable results.
                 </p>
@@ -3222,31 +3408,31 @@
             <div class="group">
                 <div class="vault-pane-header">
                     <div>
-                        <h2>Passwords, cards &amp; addresses</h2>
-                        <p>Saved locally on this Mac. Not synced.</p>
+                        <h2 data-i18n="settings.vault.heading">Passwords, cards &amp; addresses</h2>
+                        <p data-i18n="settings.vault.savedLocal">Saved locally on this Mac. Not synced.</p>
                     </div>
                     <label class="vault-autofill-row">
                         <input type="checkbox" id="vault-autofill-enabled" checked>
-                        <span>Autofill on sites</span>
+                        <span data-i18n="settings.vault.autofill">Autofill on sites</span>
                     </label>
                 </div>
                 <p id="vault-encryption-warning" class="vault-settings-error hidden" role="status"></p>
                 <p id="vault-toast" aria-live="polite"></p>
                 <div class="vault-segmented" role="tablist">
-                    <button type="button" class="vault-segment active" data-vault-subtab="passwords" role="tab" aria-selected="true">Passwords</button>
-                    <button type="button" class="vault-segment" data-vault-subtab="cards" role="tab" aria-selected="false">Cards</button>
-                    <button type="button" class="vault-segment" data-vault-subtab="addresses" role="tab" aria-selected="false">Addresses</button>
+                    <button type="button" class="vault-segment active" data-vault-subtab="passwords" role="tab" aria-selected="true" data-i18n="settings.vault.passwords">Passwords</button>
+                    <button type="button" class="vault-segment" data-vault-subtab="cards" role="tab" aria-selected="false" data-i18n="settings.vault.cards">Cards</button>
+                    <button type="button" class="vault-segment" data-vault-subtab="addresses" role="tab" aria-selected="false" data-i18n="settings.vault.addresses">Addresses</button>
                 </div>
                 <div id="vault-passwords-panel" class="vault-subpanel">
                     <div class="vault-list-toolbar">
                         <span class="vault-list-count" id="vault-login-count">0 passwords</span>
-                        <button type="button" id="vault-add-login-btn">+ Add password</button>
+                        <button type="button" id="vault-add-login-btn" data-i18n="settings.vault.addPasswordBtn">+ Add password</button>
                     </div>
                     <div class="vault-editor-home" data-vault-editor-home="login"></div>
                     <div class="vault-table">
                         <div class="vault-table-head">
-                            <span>Website</span>
-                            <span>Actions</span>
+                            <span data-i18n="settings.vault.website">Website</span>
+                            <span data-i18n="settings.vault.actions">Actions</span>
                         </div>
                         <div id="vault-logins-list"></div>
                     </div>
@@ -3254,13 +3440,13 @@
                 <div id="vault-cards-panel" class="vault-subpanel hidden">
                     <div class="vault-list-toolbar">
                         <span class="vault-list-count" id="vault-card-count">0 cards</span>
-                        <button type="button" id="vault-add-card-btn">+ Add card</button>
+                        <button type="button" id="vault-add-card-btn" data-i18n="settings.vault.addCardBtn">+ Add card</button>
                     </div>
                     <div class="vault-editor-home" data-vault-editor-home="card"></div>
                     <div class="vault-table">
                         <div class="vault-table-head">
-                            <span>Card</span>
-                            <span>Actions</span>
+                            <span data-i18n="settings.vault.cards">Cards</span>
+                            <span data-i18n="settings.vault.actions">Actions</span>
                         </div>
                         <div id="vault-cards-list"></div>
                     </div>
@@ -3268,13 +3454,13 @@
                 <div id="vault-addresses-panel" class="vault-subpanel hidden">
                     <div class="vault-list-toolbar">
                         <span class="vault-list-count" id="vault-address-count">0 addresses</span>
-                        <button type="button" id="vault-add-address-btn">+ Add address</button>
+                        <button type="button" id="vault-add-address-btn" data-i18n="settings.vault.addAddressBtn">+ Add address</button>
                     </div>
                     <div class="vault-editor-home" data-vault-editor-home="address"></div>
                     <div class="vault-table">
                         <div class="vault-table-head">
-                            <span>Address</span>
-                            <span>Actions</span>
+                            <span data-i18n="settings.vault.addresses">Addresses</span>
+                            <span data-i18n="settings.vault.actions">Actions</span>
                         </div>
                         <div id="vault-addresses-list"></div>
                     </div>
@@ -3282,89 +3468,89 @@
                 <div id="vault-editor" class="vault-editor hidden">
                     <h3 id="vault-editor-title">Edit</h3>
                         <div id="vault-editor-login-fields">
-                            <label class="vault-field-label" for="vault-edit-origin">Website</label>
+                            <label class="vault-field-label" for="vault-edit-origin" data-i18n="settings.vault.website">Website</label>
                             <input type="url" id="vault-edit-origin" placeholder="https://example.com" autocomplete="off">
-                            <label class="vault-field-label" for="vault-edit-username">Username or email</label>
+                            <label class="vault-field-label" for="vault-edit-username" data-i18n="settings.vault.username">Username or email</label>
                             <input type="text" id="vault-edit-username" placeholder="you@example.com" autocomplete="username">
-                            <label class="vault-field-label" for="vault-edit-password">Password</label>
+                            <label class="vault-field-label" for="vault-edit-password" data-i18n="settings.vault.password">Password</label>
                             <div class="vault-field-with-eye">
-                                <input type="password" id="vault-edit-password" placeholder="Leave blank to keep current" autocomplete="new-password">
-                                <button type="button" class="vault-icon-btn" id="vault-edit-password-eye" title="View password" aria-label="View password" aria-pressed="false"></button>
+                                <input type="password" id="vault-edit-password" placeholder="Leave blank to keep current" data-i18n-placeholder="settings.vault.keepBlank" autocomplete="new-password">
+                                <button type="button" class="vault-icon-btn" id="vault-edit-password-eye" title="View password" aria-label="View password" data-i18n-title="settings.vault.viewPassword" data-i18n-aria="settings.vault.viewPassword" aria-pressed="false"></button>
                             </div>
-                            <label class="vault-field-label" for="vault-edit-notes">Notes (optional)</label>
+                            <label class="vault-field-label" for="vault-edit-notes" data-i18n="settings.vault.notesOptional">Notes (optional)</label>
                             <input type="text" id="vault-edit-notes" placeholder="Security questions, PIN, etc." autocomplete="off">
                         </div>
                         <div id="vault-editor-card-fields" class="hidden">
-                            <label class="vault-field-label" for="vault-edit-card-label">Label (optional)</label>
+                            <label class="vault-field-label" for="vault-edit-card-label" data-i18n="settings.vault.labelOptional">Label (optional)</label>
                             <input type="text" id="vault-edit-card-label" placeholder="e.g. Personal Visa" autocomplete="off">
-                            <label class="vault-field-label" for="vault-edit-cardholder">Name on card</label>
+                            <label class="vault-field-label" for="vault-edit-cardholder" data-i18n="settings.vault.cardholder">Name on card</label>
                             <input type="text" id="vault-edit-cardholder" placeholder="Full name" autocomplete="cc-name">
-                            <label class="vault-field-label" for="vault-edit-card-number">Card number</label>
+                            <label class="vault-field-label" for="vault-edit-card-number" data-i18n="settings.vault.cardNumber">Card number</label>
                             <div class="vault-field-with-eye">
                                 <input type="password" id="vault-edit-card-number" placeholder="Leave blank to keep current" inputmode="numeric" autocomplete="cc-number">
                                 <button type="button" class="vault-icon-btn" id="vault-edit-card-number-eye" title="View card number" aria-label="View card number" aria-pressed="false"></button>
                             </div>
                             <div class="vault-form-row">
                                 <div class="vault-field-stack">
-                                    <label class="vault-field-label" for="vault-edit-exp-month">Exp.</label>
+                                    <label class="vault-field-label" for="vault-edit-exp-month" data-i18n="settings.vault.exp">Exp.</label>
                                     <input type="text" id="vault-edit-exp-month" placeholder="MM" maxlength="2" autocomplete="cc-exp">
                                 </div>
                                 <div class="vault-field-stack">
-                                    <label class="vault-field-label" for="vault-edit-exp-year">Year</label>
+                                    <label class="vault-field-label" for="vault-edit-exp-year" data-i18n="settings.vault.year">Year</label>
                                     <input type="text" id="vault-edit-exp-year" placeholder="YYYY" maxlength="4" autocomplete="off">
                                 </div>
                                 <div class="vault-field-stack">
-                                    <label class="vault-field-label" for="vault-edit-cvv">CVV</label>
+                                    <label class="vault-field-label" for="vault-edit-cvv" data-i18n="settings.vault.cvv">CVV</label>
                                     <div class="vault-field-with-eye">
                                         <input type="password" id="vault-edit-cvv" placeholder="•••" maxlength="4" autocomplete="cc-csc">
                                         <button type="button" class="vault-icon-btn" id="vault-edit-cvv-eye" title="View CVV" aria-label="View CVV" aria-pressed="false"></button>
                                     </div>
                                 </div>
                             </div>
-                            <label class="vault-field-label" for="vault-edit-billing-zip">Billing ZIP (optional)</label>
+                            <label class="vault-field-label" for="vault-edit-billing-zip" data-i18n="settings.vault.billingZip">Billing ZIP (optional)</label>
                             <input type="text" id="vault-edit-billing-zip" placeholder="ZIP / postal code" autocomplete="postal-code">
                         </div>
                         <div id="vault-editor-address-fields" class="hidden">
-                            <label class="vault-field-label" for="vault-edit-address-label">Label (optional)</label>
+                            <label class="vault-field-label" for="vault-edit-address-label" data-i18n="settings.vault.labelOptional">Label (optional)</label>
                             <input type="text" id="vault-edit-address-label" placeholder="e.g. Home, Work" autocomplete="off">
-                            <label class="vault-field-label" for="vault-edit-address-name">Full name</label>
+                            <label class="vault-field-label" for="vault-edit-address-name" data-i18n="settings.vault.fullName">Full name</label>
                             <input type="text" id="vault-edit-address-name" placeholder="Full name" autocomplete="name">
-                            <label class="vault-field-label" for="vault-edit-address-org">Company (optional)</label>
+                            <label class="vault-field-label" for="vault-edit-address-org" data-i18n="settings.vault.organization">Company (optional)</label>
                             <input type="text" id="vault-edit-address-org" placeholder="Company or organization" autocomplete="organization">
-                            <label class="vault-field-label" for="vault-edit-address-line1">Street address</label>
+                            <label class="vault-field-label" for="vault-edit-address-line1" data-i18n="settings.vault.street">Street address</label>
                             <input type="text" id="vault-edit-address-line1" placeholder="Street address" autocomplete="street-address">
-                            <label class="vault-field-label" for="vault-edit-address-line2">Apt, suite, etc. (optional)</label>
+                            <label class="vault-field-label" for="vault-edit-address-line2" data-i18n="settings.vault.street2">Apt, suite, etc. (optional)</label>
                             <input type="text" id="vault-edit-address-line2" placeholder="Apartment, suite, unit" autocomplete="address-line2">
                             <div class="vault-form-row">
                                 <div class="vault-field-stack">
-                                    <label class="vault-field-label" for="vault-edit-address-city">City</label>
+                                    <label class="vault-field-label" for="vault-edit-address-city" data-i18n="settings.vault.city">City</label>
                                     <input type="text" id="vault-edit-address-city" placeholder="City" autocomplete="address-level2">
                                 </div>
                                 <div class="vault-field-stack">
-                                    <label class="vault-field-label" for="vault-edit-address-state">State / province</label>
+                                    <label class="vault-field-label" for="vault-edit-address-state" data-i18n="settings.vault.state">State / province</label>
                                     <input type="text" id="vault-edit-address-state" placeholder="State" autocomplete="address-level1">
                                 </div>
                                 <div class="vault-field-stack">
-                                    <label class="vault-field-label" for="vault-edit-address-postal">ZIP / postal</label>
+                                    <label class="vault-field-label" for="vault-edit-address-postal" data-i18n="settings.vault.postal">ZIP / postal</label>
                                     <input type="text" id="vault-edit-address-postal" placeholder="ZIP" autocomplete="postal-code">
                                 </div>
                             </div>
-                            <label class="vault-field-label" for="vault-edit-address-country">Country (optional)</label>
+                            <label class="vault-field-label" for="vault-edit-address-country" data-i18n="settings.vault.country">Country (optional)</label>
                             <input type="text" id="vault-edit-address-country" placeholder="Country" autocomplete="country-name">
                             <div class="vault-form-row">
                                 <div class="vault-field-stack">
-                                    <label class="vault-field-label" for="vault-edit-address-phone">Phone (optional)</label>
+                                    <label class="vault-field-label" for="vault-edit-address-phone" data-i18n="settings.vault.phone">Phone (optional)</label>
                                     <input type="tel" id="vault-edit-address-phone" placeholder="Phone" autocomplete="tel">
                                 </div>
                                 <div class="vault-field-stack">
-                                    <label class="vault-field-label" for="vault-edit-address-email">Email (optional)</label>
+                                    <label class="vault-field-label" for="vault-edit-address-email" data-i18n="settings.vault.email">Email (optional)</label>
                                     <input type="email" id="vault-edit-address-email" placeholder="Email" autocomplete="email">
                                 </div>
                             </div>
                         </div>
                         <div class="vault-form-row">
-                            <button type="button" id="vault-editor-save">Save</button>
-                            <button type="button" id="vault-editor-cancel">Cancel</button>
+                            <button type="button" id="vault-editor-save"><span data-i18n="common.save">Save</span></button>
+                            <button type="button" id="vault-editor-cancel"><span data-i18n="common.cancel">Cancel</span></button>
                         </div>
                         <p id="vault-editor-error" class="vault-settings-error"></p>
                 </div>
@@ -3374,30 +3560,30 @@
 
         <div class="pane" id="newtab-pane">
             <div class="group">
-                <div class="group-title">New Tab</div>
+                <div class="group-title" data-i18n="settings.group.newtab">New Tab</div>
                 <div class="group-content">
                     <div class="ntp-settings-intro">
                         <p>Customize the start page greeting and suggestions. Changes apply to this profile and show up the next time you open a new tab.</p>
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Show welcome</div>
-                            <div class="row-desc">Greeting above the search box</div>
+                            <div class="row-title" data-i18n="settings.ntpWelcome.title">Show welcome</div>
+                            <div class="row-desc" data-i18n="settings.ntpWelcome.desc">Greeting above the search box</div>
                         </div>
                         <input type="checkbox" id="ntp-welcome-enabled">
                     </div>
                     <div class="ntp-welcome-subgroup" id="ntp-welcome-subgroup">
                         <div class="row">
                             <div class="row-label">
-                                <div class="row-title">Greeting</div>
-                                <div class="row-desc">Time-of-day line above the search box — changes through the day</div>
+                                <div class="row-title" data-i18n="settings.ntpGreeting.title">Greeting</div>
+                                <div class="row-desc" data-i18n="settings.ntpGreeting.desc">Time-of-day line above the search box - changes through the day</div>
                             </div>
                             <input type="checkbox" id="ntp-welcome-greeting">
                         </div>
                         <div class="row">
                             <div class="row-label">
-                                <div class="row-title">Your name</div>
-                                <div class="row-desc">Used in the greeting — defaults to User until you change it</div>
+                                <div class="row-title" data-i18n="settings.ntpName.title">Your name</div>
+                                <div class="row-desc" data-i18n="settings.ntpName.desc">Used in the greeting - defaults to User until you change it</div>
                             </div>
                             <div class="row-controls">
                                 <input type="text" id="ntp-greeting-name" placeholder="User" autocomplete="name" spellcheck="false" maxlength="64">
@@ -3406,41 +3592,41 @@
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Ask AI in suggestions</div>
-                            <div class="row-desc">Shows Search and Ask AI rows at the top when you type in the search box</div>
+                            <div class="row-title" data-i18n="settings.ntpAsk.title">Ask AI in suggestions</div>
+                            <div class="row-desc" data-i18n="settings.ntpAsk.desc">Shows Search and Ask AI rows at the top when you type in the search box</div>
                         </div>
                         <input type="checkbox" id="ntp-ai-search">
                     </div>
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Settings shortcut</div>
-                            <div class="row-desc">Gear in the bottom-left corner of New Tab — opens this New Tab section</div>
+                            <div class="row-title" data-i18n="settings.ntpGear.title">Settings shortcut</div>
+                            <div class="row-desc" data-i18n="settings.ntpGear.desc">Gear in the bottom-left corner of New Tab - opens this New Tab section</div>
                         </div>
                         <input type="checkbox" id="ntp-show-settings-shortcut">
                     </div>
                 </div>
             </div>
             <div class="group">
-                <div class="group-title">Widgets</div>
+                <div class="group-title" data-i18n="settings.group.widgets">Widgets</div>
                 <div class="group-content">
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Show widgets</div>
-                            <div class="row-desc">Tiles below search — use <strong>Edit</strong> on a New Tab to add or arrange them, or right-click the widgets area</div>
+                            <div class="row-title" data-i18n="settings.widgetsShow.title">Show widgets</div>
+                            <div class="row-desc">Tiles below search - use <strong>Edit</strong> on a New Tab to add or arrange them, or right-click the widgets area</div>
                         </div>
                         <input type="checkbox" id="ntp-widgets-enabled">
                     </div>
                     <div class="ntp-welcome-subgroup" id="ntp-widgets-subgroup">
                         <div class="row">
                             <div class="row-label">
-                                <div class="row-title">Widget backgrounds</div>
-                                <div class="row-desc">Faint tile backgrounds behind each widget</div>
+                                <div class="row-title" data-i18n="settings.widgetsBg.title">Widget backgrounds</div>
+                                <div class="row-desc" data-i18n="settings.widgetsBg.desc">Faint tile backgrounds behind each widget</div>
                             </div>
                             <input type="checkbox" id="ntp-widget-backgrounds">
                         </div>
                         <div class="row">
                             <div class="row-label">
-                                <div class="row-title">Edit button</div>
+                                <div class="row-title" data-i18n="settings.widgetsEdit.title">Edit button</div>
                                 <div class="row-desc">Shows <strong>Edit</strong> under your tiles. If off, right-click the widgets area to edit (or press Escape to finish)</div>
                             </div>
                             <input type="checkbox" id="ntp-show-widgets-edit-button">
@@ -3448,8 +3634,8 @@
                         <div id="ntp-widgets-active-list" class="ntp-widgets-settings-list"></div>
                         <div class="row">
                             <div class="row-label">
-                                <div class="row-title">Clear all widgets</div>
-                                <div class="row-desc">Remove every tile from your layout</div>
+                                <div class="row-title" data-i18n="settings.widgetsClear.title">Clear all widgets</div>
+                                <div class="row-desc" data-i18n="settings.widgetsClear.desc">Remove every tile from your layout</div>
                             </div>
                             <button type="button" id="ntp-widgets-reset-layout">Clear</button>
                         </div>
@@ -3460,50 +3646,50 @@
 
         <div class="pane" id="ai-pane">
             <div class="group">
-                <div class="group-title">AI Chat</div>
+                <div class="group-title" data-i18n="settings.group.ai">AI Chat</div>
                 <div class="group-content">
                     <div class="row">
                         <div class="row-label">
-                            <div class="row-title">Show AI features</div>
-                            <div class="row-desc">Turn off to hide Ask on selected text, the chat sidebar, and Ask AI in the new tab search box</div>
+                            <div class="row-title" data-i18n="settings.aiShow.title">Show AI features</div>
+                            <div class="row-desc" data-i18n="settings.aiShow.desc">Turn off to hide Ask on selected text, the chat sidebar, and Ask AI in the new tab search box</div>
                                 </div>
                         <input type="checkbox" id="ai-features-enabled">
                             </div>
                     <div id="ai-features-details">
                     <div class="ai-settings-subpanel">
                         <div class="ai-settings-intro">
-                            <p>Connect an AI provider for sidebar chat and new tab <strong>Ask</strong>. Keys stay on this profile on your device only.</p>
+                            <p data-i18n="settings.ai.intro">Connect an AI provider for sidebar chat and new tab Ask. Keys stay on this profile on your device only.</p>
                             </div>
                         <div class="ai-key-block">
-                            <div id="ai-providers-empty" class="ai-providers-empty hidden">No API keys saved yet. Add one below to use chat and Ask.</div>
+                            <div id="ai-providers-empty" class="ai-providers-empty hidden" data-i18n="settings.ai.empty">No API keys saved yet. Add one below to use chat and Ask.</div>
                             <div id="ai-providers-list" class="ai-providers-list"></div>
                             <div class="ai-key-toolbar" id="ai-key-toolbar">
-                                <button type="button" id="ai-provider-open-add-btn">Add API key</button>
+                                <button type="button" id="ai-provider-open-add-btn" data-i18n="settings.aiKey.title">Add API key</button>
                                 <p id="ai-providers-toast" class="ai-key-toast" aria-live="polite"></p>
                         </div>
                             <div class="ai-key-add-block hidden" id="ai-key-add-block">
                                 <div class="ai-key-form-head">
-                                    <div class="row-title" id="ai-key-form-title">Add API key</div>
-                                    <div class="row-desc">Groq, OpenAI, Gemini, OpenRouter, and Mistral are supported.</div>
+                                    <div class="row-title" id="ai-key-form-title" data-i18n="settings.aiKey.title">Add API key</div>
+                                    <div class="row-desc" data-i18n="settings.aiKey.desc">Groq, OpenAI, Gemini, OpenRouter, and Mistral are supported.</div>
                                 </div>
                                 <div class="ai-key-form-fields">
                                     <label class="ai-key-field">
-                                        <span class="ai-key-field-label">Provider</span>
+                                        <span class="ai-key-field-label" data-i18n="settings.ai.provider">Provider</span>
                                         <select id="ai-provider-type" class="ai-provider-type-select" aria-label="Provider"></select>
                                     </label>
                                     <label class="ai-key-field">
-                                        <span class="ai-key-field-label">Label</span>
-                                        <input type="text" id="ai-provider-label" class="ai-provider-label-input" placeholder="Optional, e.g. Work" autocomplete="off" spellcheck="false">
+                                        <span class="ai-key-field-label" data-i18n="settings.aiLabel">Label</span>
+                                        <input type="text" id="ai-provider-label" class="ai-provider-label-input" placeholder="Optional, e.g. Work" data-i18n-placeholder="settings.ai.labelPlaceholder" autocomplete="off" spellcheck="false">
                                     </label>
                                     <label class="ai-key-field">
-                                        <span class="ai-key-field-label">API key</span>
-                                        <input type="password" id="ai-provider-key" class="ai-provider-key-input" placeholder="Paste API key" autocomplete="off" spellcheck="false">
+                                        <span class="ai-key-field-label" data-i18n="settings.aiApiKey">API key</span>
+                                        <input type="password" id="ai-provider-key" class="ai-provider-key-input" placeholder="Paste API key" data-i18n-placeholder="settings.aiPasteKey" autocomplete="off" spellcheck="false">
                                     </label>
                                 </div>
                                 <div class="ai-key-actions">
-                                    <button type="button" id="ai-provider-add-btn">Save key</button>
-                                    <button type="button" id="ai-provider-cancel-btn" class="secondary hidden">Cancel</button>
-                                    <button type="button" id="ai-provider-get-key-btn" class="ai-key-link-btn">Get a key</button>
+                                    <button type="button" id="ai-provider-add-btn" data-i18n="settings.aiSaveKey">Save key</button>
+                                    <button type="button" id="ai-provider-cancel-btn" class="secondary hidden" data-i18n="common.cancel">Cancel</button>
+                                    <button type="button" id="ai-provider-get-key-btn" class="ai-key-link-btn" data-i18n="settings.ai.getKey">Get a key</button>
                                 </div>
                             </div>
                         </div>
@@ -3515,12 +3701,12 @@
         
         <div class="pane" id="history-pane">
             <div class="group">
-                <div class="group-title">Browsing History</div>
+                <div class="group-title" data-i18n="settings.group.history">Browsing History</div>
                 <div class="group-content">
                 <div class="history-toolbar">
-                    <input type="search" id="history-search" placeholder="Search history...">
+                    <input type="search" id="history-search" placeholder="Search history..." data-i18n-placeholder="history.search">
                     <span class="history-count" id="history-count"></span>
-                    <button id="clear-history" class="destructive">Clear All</button>
+                    <button id="clear-history" class="destructive" data-i18n="history.clearAllShort">Clear All</button>
                             </div>
                     <div class="history-list" id="history-list"></div>
                         </div>
@@ -3530,17 +3716,127 @@
         <div class="pane" id="shortcuts-pane">
             <div class="group">
                 <div class="shortcuts-header">
-                    <div class="group-title">Keyboard Shortcuts</div>
-                    <button id="reset-shortcuts">Reset to Defaults</button>
+                    <div class="group-title" data-i18n="settings.group.shortcuts">Keyboard Shortcuts</div>
+                    <button type="button" id="reset-shortcuts" data-i18n="settings.shortcuts.resetBtn">Reset to Defaults</button>
+                </div>
+                <div id="shortcuts-list" class="shortcuts-list"></div>
+            </div>
+        </div>
+
+        <div class="pane" id="incognito-pane">
+            <div class="group">
+                <div class="group-title" data-i18n="settings.group.search">Search</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.incogSearch.title">Search engine</div>
+                            <div class="row-desc" data-i18n="settings.incogSearch.desc">Used when you search from the Incognito address bar.</div>
                         </div>
-                <div class="group-content" id="shortcuts-list"></div>
+                        <select id="incognito-search-engine">
+                            <option value="google">Google</option>
+                            <option value="duckduckgo">DuckDuckGo</option>
+                            <option value="bing">Bing</option>
+                            <option value="yahoo">Yahoo</option>
+                            <option value="ecosia">Ecosia</option>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.httpsOnly.title">HTTPS-only mode</div>
+                            <div class="row-desc" data-i18n="settings.incogHttps.desc">Ask before loading insecure http:// pages.</div>
                         </div>
+                        <input type="checkbox" id="incognito-https-only-mode">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.linkPreview.title">Link preview</div>
+                            <div class="row-desc" data-i18n="settings.incogPreview.desc">Show the destination when you hover a link.</div>
+                        </div>
+                        <input type="checkbox" id="incognito-link-preview">
+                    </div>
+                </div>
+            </div>
+            <div class="group">
+                <div class="group-title" data-i18n="settings.group.privacy">Privacy</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.incogAdblock.title">Privacy protection</div>
+                            <div class="row-desc" data-i18n="settings.incogAdblock.desc">Block ads, trackers, and fingerprinting in private windows.</div>
+                        </div>
+                        <input type="checkbox" id="incognito-ad-blocker-enabled">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.js.title">JavaScript</div>
+                            <div class="row-desc" data-i18n="settings.incogJs.desc">Allow sites to run JavaScript in Incognito.</div>
+                        </div>
+                        <input type="checkbox" id="incognito-javascript-enabled">
+                    </div>
+                </div>
+            </div>
+            <div class="group">
+                <div class="group-title" data-i18n="settings.group.ai">AI Chat</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.incogAi.title">Show AI chat</div>
+                            <div class="row-desc" data-i18n="settings.incogAi.desc">Turn on Chat in private windows. Keys stay separate from your other profiles.</div>
+                        </div>
+                        <input type="checkbox" id="incognito-ai-features-enabled">
+                    </div>
+                    <div id="incognito-ai-details" class="hidden">
+                        <div class="row">
+                            <div class="row-label">
+                                <div class="row-title" data-i18n="settings.incogProvider.title">Active provider</div>
+                                <div class="row-desc" data-i18n="settings.incogProvider.desc">Which saved key to use for private chat.</div>
+                            </div>
+                            <select id="incognito-active-ai-provider" aria-label="Incognito AI provider"></select>
+                        </div>
+                        <div class="ai-settings-subpanel">
+                            <div id="incognito-ai-providers-empty" class="ai-providers-empty hidden" data-i18n="settings.ai.empty">No API keys saved yet. Add one below to use chat and Ask.</div>
+                            <div id="incognito-ai-providers-list" class="ai-providers-list"></div>
+                            <div class="ai-key-toolbar">
+                                <button type="button" id="incognito-ai-open-add-btn" data-i18n="settings.aiKey.title">Add API key</button>
+                                <p id="incognito-ai-toast" class="ai-key-toast" aria-live="polite"></p>
+                            </div>
+                            <div class="ai-key-add-block hidden" id="incognito-ai-add-block">
+                                <div class="ai-key-form-fields">
+                                    <label class="ai-key-field">
+                                        <span class="ai-key-field-label" data-i18n="settings.ai.provider">Provider</span>
+                                        <select id="incognito-ai-provider-type" class="ai-provider-type-select" aria-label="Provider"></select>
+                                    </label>
+                                    <label class="ai-key-field">
+                                        <span class="ai-key-field-label" data-i18n="settings.aiLabel">Label</span>
+                                        <input type="text" id="incognito-ai-provider-label" class="ai-provider-label-input" placeholder="Optional" data-i18n-placeholder="common.optional" autocomplete="off" spellcheck="false">
+                                    </label>
+                                    <label class="ai-key-field">
+                                        <span class="ai-key-field-label" data-i18n="settings.aiApiKey">API key</span>
+                                        <input type="password" id="incognito-ai-provider-key" class="ai-provider-key-input" placeholder="Paste API key" data-i18n-placeholder="settings.aiPasteKey" autocomplete="off" spellcheck="false">
+                                    </label>
+                                </div>
+                                <div class="ai-key-actions">
+                                    <button type="button" id="incognito-ai-save-key-btn" data-i18n="settings.aiSaveKey">Save key</button>
+                                    <button type="button" id="incognito-ai-cancel-key-btn" class="secondary hidden" data-i18n="common.cancel">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         </div>
     </main>
   </div>
   </div>
     
+    <script src="axis-i18n.js"></script>
+    <script src="axis-ui-fonts.js"></script>
+    <script src="axis-locale-packs.js"></script>
+    <script src="axis-locale-packs-more.js"></script>
+    <script src="axis-locale-packs-fix.js"></script>
+    <script src="axis-locale-quality.js"></script>
+    <script src="axis-locale-auto.js"></script>
     <script src="axis-profile-icons.js"></script>
     <script src="settings-inline-mid.js"></script>
     <script src="axis-ntp-widgets.js"></script>
