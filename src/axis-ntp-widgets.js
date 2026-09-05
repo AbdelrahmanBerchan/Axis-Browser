@@ -1,10 +1,39 @@
 /**
- * New Tab widgets — weather, clocks, air quality, markets, and calendar.
+ * New Tab widgets - weather, clocks, air quality, markets, and calendar.
  */
 (function (global) {
     const COLS = 4;
     const ROW_H = 80;
     const GAP = 12;
+
+    function wt(key, fallback) {
+        try {
+            if (global.AxisI18n && typeof global.AxisI18n.t === 'function') {
+                const s = global.AxisI18n.t(key);
+                if (s && s !== key) return s;
+            }
+        } catch (_) {}
+        return fallback;
+    }
+
+    function uiLocale() {
+        try {
+            const loc = global.AxisI18n?.getResolvedLocale?.();
+            if (loc) return loc;
+        } catch (_) {}
+        return undefined;
+    }
+
+    /** Open-Meteo geocoding language (ISO 639-1). */
+    function geoLanguage() {
+        const loc = String(uiLocale() || 'en');
+        const base = loc.split('-')[0].toLowerCase();
+        if (!base || base === 'zh') {
+            if (/zh-tw|zh-hk|hant/i.test(loc)) return 'zh_tw';
+            return 'zh';
+        }
+        return base;
+    }
 
     /** Older widget types are dropped on normalize. */
     const LEGACY_TYPES = {
@@ -39,7 +68,9 @@
         weather: {
             id: 'weather',
             label: 'Weather',
+            labelKey: 'ntp.widget.weather',
             desc: 'Current conditions for any city',
+            descKey: 'ntp.widget.weatherDesc',
             icon: 'fa-cloud-sun',
             colSpan: 3,
             rowSpan: 1,
@@ -51,7 +82,9 @@
         clock: {
             id: 'clock',
             label: 'Clock',
+            labelKey: 'ntp.widget.clock',
             desc: 'Local time that stays up to date',
+            descKey: 'ntp.widget.clockDesc',
             icon: 'fa-clock',
             colSpan: 2,
             rowSpan: 1,
@@ -63,7 +96,9 @@
         worldclock: {
             id: 'worldclock',
             label: 'World Clock',
+            labelKey: 'ntp.widget.worldclock',
             desc: 'Time in any city worldwide',
+            descKey: 'ntp.widget.worldclockDesc',
             icon: 'fa-globe',
             colSpan: 2,
             rowSpan: 1,
@@ -75,7 +110,9 @@
         airquality: {
             id: 'airquality',
             label: 'Air Quality',
+            labelKey: 'ntp.widget.airquality',
             desc: 'AQI and particles for any city',
+            descKey: 'ntp.widget.airqualityDesc',
             icon: 'fa-wind',
             colSpan: 2,
             rowSpan: 1,
@@ -87,7 +124,9 @@
         markets: {
             id: 'markets',
             label: 'Markets',
+            labelKey: 'ntp.widget.markets',
             desc: 'Stocks and crypto you choose',
+            descKey: 'ntp.widget.marketsDesc',
             icon: 'fa-chart-line',
             colSpan: 2,
             rowSpan: 2,
@@ -99,7 +138,9 @@
         calendar: {
             id: 'calendar',
             label: 'Calendar',
+            labelKey: 'ntp.widget.calendar',
             desc: 'Today, this week, or the full month',
+            descKey: 'ntp.widget.calendarDesc',
             icon: 'fa-calendar-days',
             colSpan: 2,
             rowSpan: 3,
@@ -133,6 +174,13 @@
         96: 'Storm',
         99: 'Storm'
     };
+
+    function wmoLabel(code) {
+        const c = Number(code);
+        const fb = WMO[c] || '';
+        if (!fb && (code == null || code === '')) return '-';
+        return wt(`ntp.wmo.${Number.isFinite(c) ? c : 'unknown'}`, fb || '-');
+    }
 
     function uid() {
         return 'w-' + Math.random().toString(36).slice(2, 10);
@@ -307,6 +355,8 @@
                 config.symbols = normalizeMarketSymbols(config.symbols);
             } else if (type === 'calendar') {
                 config.weekStartsOn = Number(config.weekStartsOn) === 1 ? 1 : 0;
+                config.calendarSystem = normalizeCalendarSystem(config.calendarSystem);
+                config.viewMode = normalizeCalendarViewMode(config.viewMode);
             }
             out.push({
                 id: String(item.id || uid()),
@@ -397,8 +447,8 @@
         const shape = widgetShape(widget);
         return `<article class="ntp-widget ntp-widget--${escapeHtml(widget.type)} ${sizeCls}" data-widget-id="${escapeHtml(widget.id)}" data-widget-type="${escapeHtml(widget.type)}" data-cspan="${widget.colSpan}" data-rspan="${widget.rowSpan}" data-cols="${shape.cols}" data-rows="${shape.rows}" style="--ntp-w-col:${widget.col};--ntp-w-row:${widget.row};--ntp-w-cspan:${widget.colSpan};--ntp-w-rspan:${widget.rowSpan};">
   <div class="ntp-widget-body">${bodyHtml}</div>
-  <button type="button" class="ntp-widget-remove" title="Remove" aria-label="Remove widget"><i class="fas fa-xmark"></i></button>
-  <div class="ntp-widget-resize" title="Drag to resize" aria-hidden="true"></div>
+  <button type="button" class="ntp-widget-remove" title="${escapeHtml(wt('ntp.widget.remove', 'Remove widget'))}" aria-label="${escapeHtml(wt('ntp.widget.remove', 'Remove widget'))}"><i class="fas fa-xmark"></i></button>
+  <div class="ntp-widget-resize" title="${escapeHtml(wt('ntp.widget.resize', 'Drag to resize'))}" aria-hidden="true"></div>
 </article>`;
     }
 
@@ -422,8 +472,8 @@
   <div class="ntp-w-weather-cluster">
     <div class="ntp-w-weather-icon">${weatherSvg('cloud')}</div>
     <div class="ntp-w-weather-copy">
-      <span class="ntp-w-weather-primary">Loading…</span>
-      <span class="ntp-w-weather-secondary">Fetching forecast</span>
+      <span class="ntp-w-weather-primary">${escapeHtml(wt('ntp.widget.loading', 'Loading…'))}</span>
+      <span class="ntp-w-weather-secondary">${escapeHtml(wt('ntp.widget.fetchingForecast', 'Fetching forecast'))}</span>
     </div>
   </div>
 </div>`
@@ -437,7 +487,7 @@
 
     function formatTzOffset(timeZone) {
         try {
-            const fmt = new Intl.DateTimeFormat('en-US', {
+            const fmt = new Intl.DateTimeFormat(uiLocale() || undefined, {
                 timeZone: timeZone || undefined,
                 timeZoneName: 'shortOffset'
             });
@@ -453,22 +503,23 @@
         const shapeHint = config._shape || {};
         const withSeconds = !!shapeHint.tall || shapeHint.density === 'lg' || shapeHint.density === 'md';
         try {
-            const time = now.toLocaleTimeString([], {
+            const loc = uiLocale();
+            const time = now.toLocaleTimeString(loc, {
                 hour: 'numeric',
                 minute: '2-digit',
                 second: withSeconds ? '2-digit' : undefined,
                 hour12
             });
-            const weekday = now.toLocaleDateString([], { weekday: 'short' });
-            const date = now.toLocaleDateString([], { month: 'short', day: 'numeric' });
-            const fullDate = now.toLocaleDateString([], {
+            const weekday = now.toLocaleDateString(loc, { weekday: 'short' });
+            const date = now.toLocaleDateString(loc, { month: 'short', day: 'numeric' });
+            const fullDate = now.toLocaleDateString(loc, {
                 weekday: 'long',
                 month: 'short',
                 day: 'numeric'
             });
             return { time, weekday, date, fullDate, ok: true };
         } catch (_) {
-            return { time: '—', weekday: '', date: '', fullDate: '', ok: false };
+            return { time: '-', weekday: '', date: '', fullDate: '', ok: false };
         }
     }
 
@@ -478,20 +529,21 @@
         const shapeHint = config._shape || {};
         const withSeconds = !!shapeHint.tall || shapeHint.density === 'lg';
         try {
+            const loc = uiLocale();
             const opts = tz ? { timeZone: tz } : {};
-            const time = now.toLocaleTimeString([], {
+            const time = now.toLocaleTimeString(loc, {
                 ...opts,
                 hour: 'numeric',
                 minute: '2-digit',
                 second: withSeconds ? '2-digit' : undefined,
                 hour12
             });
-            const weekday = now.toLocaleDateString([], { ...opts, weekday: 'short' });
-            const date = now.toLocaleDateString([], { ...opts, month: 'short', day: 'numeric' });
+            const weekday = now.toLocaleDateString(loc, { ...opts, weekday: 'short' });
+            const date = now.toLocaleDateString(loc, { ...opts, month: 'short', day: 'numeric' });
             const offset = formatTzOffset(tz || undefined);
             return { time, weekday, date, offset, ok: true };
         } catch (_) {
-            return { time: '—', weekday: '', date: '', offset: '', ok: false };
+            return { time: '-', weekday: '', date: '', offset: '', ok: false };
         }
     }
 
@@ -526,7 +578,7 @@
   <div class="ntp-w-clockface-cluster">
     <div class="ntp-w-clockface-icon">${clockfaceSvg('clock')}</div>
     <div class="ntp-w-clockface-copy">
-      <span class="ntp-w-clockface-place">Local</span>
+      <span class="ntp-w-clockface-place">${escapeHtml(wt('ntp.widget.local', 'Local'))}</span>
       <span class="ntp-w-clockface-time ntp-w-clock-time">${escapeHtml(parts.time)}</span>
       <span class="ntp-w-clockface-meta ntp-w-clock-date">${escapeHtml(dateText)}</span>
     </div>
@@ -539,7 +591,9 @@
         const shape = widgetShape(widget);
         const d = shape.density;
         const sizeCls = ` ntp-w-clockface--${escapeHtml(d)}${shape.tall ? ' ntp-w-clockface--tall' : ''}${shape.wide ? ' ntp-w-clockface--wide' : ''}`;
-        const city = displayCityName(widget.config, null) || String(widget.config?.city || '').trim();
+        const city = displayCityName(widget.config, {
+            localizedName: widget.config?._localizedCity || widget.config?.localizedName || ''
+        }) || String(widget.config?.city || '').trim();
         const tz = String(widget.config?.timezone || '').trim();
 
         if (!city || !tz) {
@@ -549,9 +603,9 @@
   <div class="ntp-w-clockface-cluster">
     <div class="ntp-w-clockface-icon">${clockfaceSvg('globe')}</div>
     <div class="ntp-w-clockface-copy">
-      <span class="ntp-w-clockface-place">World Clock</span>
-      <span class="ntp-w-clockface-time">—</span>
-      <span class="ntp-w-clockface-meta">Pick a city in Settings</span>
+      <span class="ntp-w-clockface-place">${escapeHtml(wt('ntp.widget.worldclock', 'World Clock'))}</span>
+      <span class="ntp-w-clockface-time">-</span>
+      <span class="ntp-w-clockface-meta">${escapeHtml(wt('ntp.widget.pickCity', 'Pick a city in Settings'))}</span>
     </div>
   </div>
 </div>`
@@ -709,7 +763,7 @@
 
         try {
             const geo = await fetchJson(
-                `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=${limit}&language=en&format=json`
+                `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=${limit}&language=${encodeURIComponent(geoLanguage())}&format=json`
             );
             const results = Array.isArray(geo?.results) ? geo.results : [];
             return results.map((hit) => {
@@ -736,29 +790,48 @@
         return unit === 'F' ? (Number(celsius) * 9) / 5 + 32 : Number(celsius);
     }
 
+    function precipSoonLabel(label) {
+        return wt('ntp.widget.precipSoon', '{label} possible soon').replace(/\{label\}/g, label);
+    }
+
+    function precipInMinutesLabel(label, mins) {
+        return wt('ntp.widget.precipInMin', '{label} possible in {mins}m')
+            .replace(/\{label\}/g, label)
+            .replace(/\{mins\}/g, String(mins));
+    }
+
+    function precipInHoursLabel(label, hours) {
+        return wt('ntp.widget.precipInHour', '{label} possible in {hours}h')
+            .replace(/\{label\}/g, label)
+            .replace(/\{hours\}/g, String(hours));
+    }
+
     function formatPrecipHint(hourly, code) {
         const probs = hourly?.precipitation_probability || [];
         const times = hourly?.time || [];
         const now = Date.now();
         const wet = Number(code) >= 51 && Number(code) <= 82;
-        const label = Number(code) >= 71 && Number(code) <= 77 ? 'Snow' : 'Rain';
+        const label =
+            Number(code) >= 71 && Number(code) <= 77
+                ? wt('ntp.widget.precipSnow', 'Snow')
+                : wt('ntp.widget.precipRain', 'Rain');
 
         for (let i = 0; i < Math.min(probs.length, 12); i++) {
             if (Number(probs[i]) < 40) continue;
             const t = new Date(times[i]).getTime();
             if (Number.isNaN(t)) continue;
             const mins = Math.round((t - now) / 60000);
-            if (mins <= 5) return `${label} possible soon`;
-            if (mins < 60) return `${label} possible in ${mins}m`;
+            if (mins <= 5) return precipSoonLabel(label);
+            if (mins < 60) return precipInMinutesLabel(label, mins);
             const hours = Math.round(mins / 60);
-            if (hours <= 6) return `${label} possible in ${hours}h`;
+            if (hours <= 6) return precipInHoursLabel(label, hours);
             break;
         }
 
-        if (wet) return 'Wet conditions ahead';
-        if (Number(code) === 0 || Number(code) === 1) return 'Clear skies ahead';
-        if (Number(code) === 2 || Number(code) === 3) return 'Clouds through the day';
-        if (Number(code) === 45 || Number(code) === 48) return 'Low visibility';
+        if (wet) return wt('ntp.widget.wetAhead', 'Wet conditions ahead');
+        if (Number(code) === 0 || Number(code) === 1) return wt('ntp.widget.clearAhead', 'Clear skies ahead');
+        if (Number(code) === 2 || Number(code) === 3) return wt('ntp.widget.cloudsAhead', 'Clouds through the day');
+        if (Number(code) === 45 || Number(code) === 48) return wt('ntp.widget.lowVis', 'Low visibility');
         return '';
     }
 
@@ -768,7 +841,11 @@
         if (hint) return hint;
         const hi = toDisplayTemp(data?.high, unit);
         const lo = toDisplayTemp(data?.low, unit);
-        if (hi != null && lo != null) return `H ${Math.round(hi)}° · L ${Math.round(lo)}°`;
+        if (hi != null && lo != null) {
+            return wt('ntp.widget.hiLo', 'H {hi}° · L {lo}°')
+                .replace(/\{hi\}/g, String(Math.round(hi)))
+                .replace(/\{lo\}/g, String(Math.round(lo)));
+        }
         return data?.city || '';
     }
 
@@ -857,7 +934,7 @@
         const country = area?.country?.[0]?.value;
         const forecast = data?.weather?.[0];
         return {
-            summary: WMO[code] || desc.split(',')[0] || '—',
+            summary: WMO[code] || desc.split(',')[0] || '-',
             temp: Number(cur.temp_C),
             high: forecast?.maxtempC != null ? Number(forecast.maxtempC) : null,
             low: forecast?.mintempC != null ? Number(forecast.mintempC) : null,
@@ -869,51 +946,29 @@
     }
 
     async function fetchOpenMeteo(config, city) {
-        let lat = Number(config?.latitude);
-        let lon = Number(config?.longitude);
-        let placeName = String(config?.placeLabel || city).trim() || city;
-
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-            const geo = await fetchJson(
-                `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=5&language=en&format=json`
-            );
-            const results = Array.isArray(geo?.results) ? geo.results : [];
-            const needle = city.toLowerCase();
-            const hit =
-                results.find((r) => String(r?.name || '').toLowerCase() === needle) ||
-                results.find((r) => String(r?.name || '').toLowerCase().startsWith(needle)) ||
-                results[0];
-            if (!hit) throw new Error('notfound');
-            lat = hit.latitude;
-            lon = hit.longitude;
-            placeName = hit.country_code
-                ? `${hit.name}, ${String(hit.country_code).toUpperCase()}`
-                : hit.name;
-        }
+        const resolved = await resolveLocalizedPlace(config, city);
+        const { lat, lon, placeName, localizedName } = resolved;
 
         const wx = await fetchJson(
             `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&hourly=precipitation_probability&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`
         );
         const cur = wx?.current;
         const code = cur?.weather_code ?? 3;
+        const hourly = {
+            time: wx?.hourly?.time || [],
+            precipitation_probability: wx?.hourly?.precipitation_probability || []
+        };
         return {
-            summary: WMO[code] || '—',
+            summary: WMO[code] || '-',
             temp: cur?.temperature_2m,
             high: wx?.daily?.temperature_2m_max?.[0],
             low: wx?.daily?.temperature_2m_min?.[0],
             city: placeName,
+            placeLabel: placeName,
+            localizedName: localizedName || placeName,
             code,
-            hourly: {
-                time: wx?.hourly?.time || [],
-                precipitation_probability: wx?.hourly?.precipitation_probability || []
-            },
-            detail: formatPrecipHint(
-                {
-                    time: wx?.hourly?.time || [],
-                    precipitation_probability: wx?.hourly?.precipitation_probability || []
-                },
-                code
-            )
+            hourly,
+            detail: formatPrecipHint(hourly, code)
         };
     }
 
@@ -938,7 +993,7 @@
                 ? ((Number(data.main.temp) - 32) * 5) / 9
                 : data?.main?.temp;
         return {
-            summary: WMO[code] || main || '—',
+            summary: WMO[code] || main || '-',
             temp: tempC,
             high:
                 data?.main?.temp_max != null
@@ -975,7 +1030,7 @@
         const code = weatherCodeFromText(desc);
         const day = data?.forecast?.forecastday?.[0]?.day;
         return {
-            summary: WMO[code] || desc || '—',
+            summary: WMO[code] || desc || '-',
             temp: cur.temp_c,
             high: day?.maxtemp_c ?? null,
             low: day?.mintemp_c ?? null,
@@ -1000,7 +1055,7 @@
             const code = mapWttrCode(cur.weatherCode) || weatherCodeFromText(desc);
             const place = area?.areaName?.[0]?.value || city;
             return {
-                summary: WMO[code] || desc || '—',
+                summary: WMO[code] || desc || '-',
                 temp: Number(cur.temp_C),
                 city: place,
                 code,
@@ -1012,7 +1067,7 @@
             const desc = cur.condition?.text || '';
             const code = weatherCodeFromText(desc);
             return {
-                summary: WMO[code] || desc || '—',
+                summary: WMO[code] || desc || '-',
                 temp: cur.temp_c ?? cur.temp_C,
                 city: data.location?.name || city,
                 code,
@@ -1025,7 +1080,7 @@
             const metric = !/imperial|units=imperial/i.test(template);
             const tempC = metric ? data.main.temp : ((Number(data.main.temp) - 32) * 5) / 9;
             return {
-                summary: WMO[code] || data.weather?.[0]?.main || '—',
+                summary: WMO[code] || data.weather?.[0]?.main || '-',
                 temp: tempC,
                 city: data.name || city,
                 code,
@@ -1035,14 +1090,14 @@
         if (data?.current?.temperature_2m != null) {
             const code = data.current.weather_code ?? 3;
             return {
-                summary: WMO[code] || '—',
+                summary: WMO[code] || '-',
                 temp: data.current.temperature_2m,
                 city,
                 code
             };
         }
         const temp = data.temp ?? data.temperature ?? data.temp_c ?? data.tempC ?? data?.data?.temp;
-        const summary = data.summary ?? data.condition ?? data.description ?? data.weather ?? '—';
+        const summary = data.summary ?? data.condition ?? data.description ?? data.weather ?? '-';
         if (temp == null) throw new Error('parse');
         return {
             summary: String(summary),
@@ -1053,11 +1108,15 @@
     }
 
     function displayCityName(config, data) {
-        const fromConfig = String(config?.city || '').trim();
-        if (fromConfig) return fromConfig;
-        const labeled = String(config?.placeLabel || data?.placeLabel || data?.city || '').trim();
-        if (!labeled) return '';
-        return labeled.split(',')[0].trim() || labeled;
+        // Prefer the localized name from the latest fetch (UI language), not the
+        // English string the user typed when adding the city.
+        const fromData = String(
+            data?.localizedName || data?.placeLabel || data?.city || ''
+        ).trim();
+        if (fromData) return fromData.split(',')[0].trim() || fromData;
+        const fromConfig = String(config?.placeLabel || config?.city || '').trim();
+        if (!fromConfig) return '';
+        return fromConfig.split(',')[0].trim() || fromConfig;
     }
 
     function renderWeather(widget, data) {
@@ -1081,9 +1140,9 @@
         if (!configuredCity || data?.needsSetup) {
             return wrap(
                 'cloud',
-                `<span class="ntp-w-weather-place">Weather</span>
-    <span class="ntp-w-weather-primary">No city yet</span>
-    <span class="ntp-w-weather-secondary">Pick a city in Settings</span>`
+                `<span class="ntp-w-weather-place">${escapeHtml(wt('ntp.widget.weather', 'Weather'))}</span>
+    <span class="ntp-w-weather-primary">${escapeHtml(wt('ntp.widget.noCity', 'No city yet'))}</span>
+    <span class="ntp-w-weather-secondary">${escapeHtml(wt('ntp.widget.pickCity', 'Pick a city in Settings'))}</span>`
             );
         }
 
@@ -1092,23 +1151,26 @@
             return wrap(
                 'cloud',
                 `<span class="ntp-w-weather-place">${escapeHtml(failCity)}</span>
-    <span class="ntp-w-weather-primary">${escapeHtml(data?.summary || 'Unavailable')}</span>
-    <span class="ntp-w-weather-secondary">${escapeHtml(data?.detail || 'Pick a city in Settings')}</span>`
+    <span class="ntp-w-weather-primary">${escapeHtml(data?.summary || wt('ntp.widget.unavailable', 'Unavailable'))}</span>
+    <span class="ntp-w-weather-secondary">${escapeHtml(data?.detail || wt('ntp.widget.pickCity', 'Pick a city in Settings'))}</span>`
             );
         }
 
         const tempVal = toDisplayTemp(data?.temp, unit);
-        const temp = tempVal != null ? `${Math.round(tempVal)}°` : '—';
-        const summary = data?.summary || '—';
-        const kind = weatherKind(data?.code ?? 3, data?.summary || data?.detail);
+        const temp = tempVal != null ? `${Math.round(tempVal)}°` : '-';
+        const summary =
+            data?.code != null && data.code !== ''
+                ? wmoLabel(data.code)
+                : data?.summary || '-';
+        const kind = weatherKind(data?.code ?? 3, summary || data?.detail);
         const cityName = displayCityName(widget.config, data) || configuredCity;
         const hiVal = toDisplayTemp(data?.high, unit);
         const loVal = toDisplayTemp(data?.low, unit);
         const detail = formatPrecipHint(data?.hourly, data?.code);
         const hasHilo = hiVal != null && loVal != null;
         const hiloText = hasHilo ? `H ${Math.round(hiVal)}° · L ${Math.round(loVal)}°` : '';
-        // Mid / compact tiles: prefer high–low over soft status lines like “Clear skies ahead”.
-        // Tall / wide / large: can show the status line and keep high–low too.
+        // Mid / compact tiles: prefer high-low over soft status lines like “Clear skies ahead”.
+        // Tall / wide / large: can show the status line and keep high-low too.
         const roomy = shape.tall || shape.wide || d === 'lg';
 
         let secondary = '';
@@ -1147,8 +1209,8 @@
             if (msg === 'notfound') {
                 return {
                     notFound: true,
-                    summary: 'City not found',
-                    detail: 'Pick another city in Settings',
+                    summary: wt('ntp.widget.cityNotFound', 'City not found'),
+                    detail: wt('ntp.widget.pickAnotherCity', 'Pick another city in Settings'),
                     temp: null,
                     city,
                     code: 3
@@ -1156,8 +1218,8 @@
             }
             return {
                 error: true,
-                summary: 'Unavailable',
-                detail: 'Check your connection',
+                summary: wt('ntp.widget.unavailable', 'Unavailable'),
+                detail: wt('ntp.widget.checkConnection', 'Check your connection'),
                 temp: null,
                 city,
                 code: 3
@@ -1205,24 +1267,24 @@
 
     function aqiLabelUS(n) {
         const v = Number(n);
-        if (!Number.isFinite(v)) return { label: '—', kind: 'unknown' };
-        if (v <= 50) return { label: 'Good', kind: 'good' };
-        if (v <= 100) return { label: 'Moderate', kind: 'moderate' };
-        if (v <= 150) return { label: 'Unhealthy (sensitive)', kind: 'usg' };
-        if (v <= 200) return { label: 'Unhealthy', kind: 'unhealthy' };
-        if (v <= 300) return { label: 'Very unhealthy', kind: 'very' };
-        return { label: 'Hazardous', kind: 'hazard' };
+        if (!Number.isFinite(v)) return { label: '-', kind: 'unknown' };
+        if (v <= 50) return { label: wt('ntp.widget.aqGood', 'Good'), kind: 'good' };
+        if (v <= 100) return { label: wt('ntp.widget.aqModerate', 'Moderate'), kind: 'moderate' };
+        if (v <= 150) return { label: wt('ntp.widget.aqSensitive', 'Unhealthy (sensitive)'), kind: 'usg' };
+        if (v <= 200) return { label: wt('ntp.widget.aqUnhealthy', 'Unhealthy'), kind: 'unhealthy' };
+        if (v <= 300) return { label: wt('ntp.widget.aqVery', 'Very unhealthy'), kind: 'very' };
+        return { label: wt('ntp.widget.aqHazard', 'Hazardous'), kind: 'hazard' };
     }
 
     function aqiLabelEU(n) {
         const v = Number(n);
-        if (!Number.isFinite(v)) return { label: '—', kind: 'unknown' };
-        if (v <= 20) return { label: 'Good', kind: 'good' };
-        if (v <= 40) return { label: 'Fair', kind: 'moderate' };
-        if (v <= 60) return { label: 'Moderate', kind: 'usg' };
-        if (v <= 80) return { label: 'Poor', kind: 'unhealthy' };
-        if (v <= 100) return { label: 'Very poor', kind: 'very' };
-        return { label: 'Extremely poor', kind: 'hazard' };
+        if (!Number.isFinite(v)) return { label: '-', kind: 'unknown' };
+        if (v <= 20) return { label: wt('ntp.widget.aqGood', 'Good'), kind: 'good' };
+        if (v <= 40) return { label: wt('ntp.widget.aqFair', 'Fair'), kind: 'moderate' };
+        if (v <= 60) return { label: wt('ntp.widget.aqModerate', 'Moderate'), kind: 'usg' };
+        if (v <= 80) return { label: wt('ntp.widget.aqPoor', 'Poor'), kind: 'unhealthy' };
+        if (v <= 100) return { label: wt('ntp.widget.aqVeryPoor', 'Very poor'), kind: 'very' };
+        return { label: wt('ntp.widget.aqExtreme', 'Extremely poor'), kind: 'hazard' };
     }
 
     function airSvg(kind) {
@@ -1232,37 +1294,128 @@
 </svg>`;
     }
 
-    async function resolveCityCoords(config, city) {
+    async function resolveLocalizedPlace(config, city) {
+        const lang = geoLanguage();
+        const q = String(city || '').trim();
         let lat = Number(config?.latitude);
         let lon = Number(config?.longitude);
-        let placeName = String(config?.placeLabel || city).trim() || city;
-        if (Number.isFinite(lat) && Number.isFinite(lon)) {
-            return { lat, lon, placeName };
-        }
-        const geo = await fetchJson(
-            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=5&language=en&format=json`
-        );
-        const results = Array.isArray(geo?.results) ? geo.results : [];
-        const needle = city.toLowerCase();
-        const hit =
-            results.find((r) => String(r?.name || '').toLowerCase() === needle) ||
-            results.find((r) => String(r?.name || '').toLowerCase().startsWith(needle)) ||
-            results[0];
-        if (!hit) throw new Error('notfound');
-        return {
-            lat: hit.latitude,
-            lon: hit.longitude,
-            placeName: hit.country_code
-                ? `${hit.name}, ${String(hit.country_code).toUpperCase()}`
-                : hit.name
+        let placeName = '';
+
+        const dist2 = (aLat, aLon, bLat, bLon) => {
+            const dy = Number(aLat) - Number(bLat);
+            const dx = Number(aLon) - Number(bLon);
+            return dy * dy + dx * dx;
         };
+
+        const pickHit = (results) => {
+            const list = Array.isArray(results) ? results : [];
+            if (!list.length) return null;
+            // When we already know coordinates, pick the nearest localized hit -
+            // never require the English typed name to equal the localized label.
+            if (Number.isFinite(lat) && Number.isFinite(lon)) {
+                let best = list[0];
+                let bestD = Infinity;
+                for (const r of list) {
+                    if (!Number.isFinite(r?.latitude) || !Number.isFinite(r?.longitude)) continue;
+                    const d = dist2(lat, lon, r.latitude, r.longitude);
+                    if (d < bestD) {
+                        bestD = d;
+                        best = r;
+                    }
+                }
+                return best;
+            }
+            const needle = q.toLowerCase();
+            return (
+                list.find((r) => String(r?.ascii_name || '').toLowerCase() === needle) ||
+                list.find((r) => String(r?.name || '').toLowerCase() === needle) ||
+                list[0]
+            );
+        };
+
+        // 1) Geocode in the UI language (Open-Meteo returns localized `name`).
+        if (q) {
+            try {
+                const geo = await fetchJson(
+                    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=10&language=${encodeURIComponent(lang)}&format=json`
+                );
+                const hit = pickHit(geo?.results);
+                if (hit) {
+                    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+                        lat = hit.latitude;
+                        lon = hit.longitude;
+                    }
+                    placeName = String(hit.name || '').trim();
+                }
+            } catch (_) {}
+        }
+
+        // 2) English resolve for coords, then re-query in UI language by that English name.
+        if ((!placeName || placeName === q) && q && lang !== 'en') {
+            try {
+                const enGeo = await fetchJson(
+                    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=8&language=en&format=json`
+                );
+                const enHit = pickHit(enGeo?.results) || (enGeo?.results || [])[0];
+                if (enHit) {
+                    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+                        lat = enHit.latitude;
+                        lon = enHit.longitude;
+                    }
+                    const locGeo = await fetchJson(
+                        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(enHit.name || q)}&count=10&language=${encodeURIComponent(lang)}&format=json`
+                    );
+                    const locHit = pickHit(locGeo?.results) || (locGeo?.results || [])[0];
+                    if (locHit?.name) placeName = String(locHit.name).trim();
+                }
+            } catch (_) {}
+        }
+
+        // 3) Reverse-geocode via Nominatim when we have coords (most reliable for “London” → “لندن”).
+        if (Number.isFinite(lat) && Number.isFinite(lon) && lang !== 'en') {
+            const stillEnglish =
+                !placeName ||
+                placeName === q ||
+                /^[\x00-\x7F]+$/.test(placeName); // ASCII-only → likely not localized
+            if (stillEnglish || !placeName) {
+                try {
+                    const rev = await fetchJson(
+                        `https://nominatim.openstreetmap.org/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&format=json&accept-language=${encodeURIComponent(lang)}&zoom=10&addressdetails=1`
+                    );
+                    const addr = rev?.address || {};
+                    const local =
+                        addr.city ||
+                        addr.town ||
+                        addr.village ||
+                        addr.municipality ||
+                        addr.county ||
+                        addr.state ||
+                        '';
+                    // Prefer a non-ASCII / different label from the typed English city.
+                    if (local && String(local).trim() && String(local).trim() !== q) {
+                        placeName = String(local).trim();
+                    } else if (rev?.name && String(rev.name).trim() !== q) {
+                        placeName = String(rev.name).trim();
+                    }
+                } catch (_) {}
+            }
+        }
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            throw new Error('notfound');
+        }
+
+        const short = String(placeName || q)
+            .split(',')[0]
+            .trim() || q;
+        return { lat, lon, placeName: short, localizedName: short };
     }
 
     async function fetchAirQuality(config) {
         const city = String(config?.city || '').trim();
         if (!city) return { needsSetup: true };
         try {
-            const { lat, lon, placeName } = await resolveCityCoords(config, city);
+            const { lat, lon, placeName, localizedName } = await resolveLocalizedPlace(config, city);
             const aq = await fetchJson(
                 `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=european_aqi,us_aqi,pm2_5,pm10`
             );
@@ -1273,6 +1426,7 @@
             return {
                 city: placeName,
                 placeLabel: placeName,
+                localizedName: localizedName || placeName,
                 aqi: aqi != null ? Math.round(Number(aqi)) : null,
                 scale,
                 label: meta.label,
@@ -1283,9 +1437,9 @@
         } catch (err) {
             const msg = String(err?.message || err || '');
             if (msg === 'notfound') {
-                return { notFound: true, summary: 'City not found', detail: 'Pick another city in Settings' };
+                return { notFound: true, summary: wt('ntp.widget.cityNotFound', 'City not found'), detail: wt('ntp.widget.pickAnotherCity', 'Pick another city in Settings') };
             }
-            return { error: true, summary: 'Unavailable', detail: 'Check your connection' };
+            return { error: true, summary: wt('ntp.widget.unavailable', 'Unavailable'), detail: wt('ntp.widget.checkConnection', 'Check your connection') };
         }
     }
 
@@ -1303,9 +1457,9 @@
   <div class="ntp-w-aq-cluster">
     <div class="ntp-w-aq-icon">${airSvg()}</div>
     <div class="ntp-w-aq-copy">
-      <span class="ntp-w-aq-place">Air Quality</span>
-      <span class="ntp-w-aq-primary">Loading…</span>
-      <span class="ntp-w-aq-secondary">Fetching AQI</span>
+      <span class="ntp-w-aq-place">${escapeHtml(wt('ntp.widget.airquality', 'Air Quality'))}</span>
+      <span class="ntp-w-aq-primary">${escapeHtml(wt('ntp.widget.loading', 'Loading…'))}</span>
+      <span class="ntp-w-aq-secondary">${escapeHtml(wt('ntp.widget.fetchingAqi', 'Fetching AQI'))}</span>
     </div>
   </div>
 </div>`
@@ -1319,9 +1473,9 @@
   <div class="ntp-w-aq-cluster">
     <div class="ntp-w-aq-icon">${airSvg()}</div>
     <div class="ntp-w-aq-copy">
-      <span class="ntp-w-aq-place">Air Quality</span>
-      <span class="ntp-w-aq-primary">No city yet</span>
-      <span class="ntp-w-aq-secondary">Pick a city in Settings</span>
+      <span class="ntp-w-aq-place">${escapeHtml(wt('ntp.widget.airquality', 'Air Quality'))}</span>
+      <span class="ntp-w-aq-primary">${escapeHtml(wt('ntp.widget.noCity', 'No city yet'))}</span>
+      <span class="ntp-w-aq-secondary">${escapeHtml(wt('ntp.widget.pickCity', 'Pick a city in Settings'))}</span>
     </div>
   </div>
 </div>`
@@ -1336,7 +1490,7 @@
     <div class="ntp-w-aq-icon">${airSvg()}</div>
     <div class="ntp-w-aq-copy">
       <span class="ntp-w-aq-place">${escapeHtml(displayCityName(widget.config, data) || configuredCity)}</span>
-      <span class="ntp-w-aq-primary">${escapeHtml(data?.summary || 'Unavailable')}</span>
+      <span class="ntp-w-aq-primary">${escapeHtml(data?.summary || wt('ntp.widget.unavailable', 'Unavailable'))}</span>
       <span class="ntp-w-aq-secondary">${escapeHtml(data?.detail || '')}</span>
     </div>
   </div>
@@ -1345,9 +1499,9 @@
         }
 
         const cityName = displayCityName(widget.config, data) || configuredCity;
-        const aqi = data?.aqi != null ? String(data.aqi) : '—';
-        const label = data?.label || '—';
-        const scaleTag = data?.scale === 'eu' ? 'EU AQI' : 'US AQI';
+        const aqi = data?.aqi != null ? String(data.aqi) : '-';
+        const label = data?.label || '-';
+        const scaleTag = data?.scale === 'eu' ? wt('ntp.widget.euAqi', 'EU AQI') : wt('ntp.widget.usAqi', 'US AQI');
         const bits = [];
         if (data?.pm25 != null) bits.push(`PM2.5 ${data.pm25}`);
         if ((shape.tall || shape.wide || d === 'lg' || d === 'md') && data?.pm10 != null) {
@@ -1375,7 +1529,7 @@
 
     function formatMarketPrice(n) {
         const v = Number(n);
-        if (!Number.isFinite(v)) return '—';
+        if (!Number.isFinite(v)) return '-';
         if (Math.abs(v) >= 1000) {
             return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
         }
@@ -1455,8 +1609,8 @@
             return shellHtml(
                 widget,
                 `<div class="ntp-w-markets${sizeCls}" aria-busy="true">
-  <div class="ntp-w-markets-head">Markets</div>
-  <div class="ntp-w-markets-empty">Loading quotes…</div>
+  <div class="ntp-w-markets-head">${escapeHtml(wt('ntp.widget.marketsHead', 'Markets'))}</div>
+  <div class="ntp-w-markets-empty">${escapeHtml(wt('ntp.widget.loadingQuotes', 'Loading quotes…'))}</div>
 </div>`
             );
         }
@@ -1465,8 +1619,8 @@
             return shellHtml(
                 widget,
                 `<div class="ntp-w-markets${sizeCls}">
-  <div class="ntp-w-markets-head">Markets</div>
-  <div class="ntp-w-markets-empty">Add symbols in Settings<br><span class="ntp-w-markets-hint">e.g. AAPL, BTC, ETH</span></div>
+  <div class="ntp-w-markets-head">${escapeHtml(wt('ntp.widget.marketsHead', 'Markets'))}</div>
+  <div class="ntp-w-markets-empty">${escapeHtml(wt('ntp.widget.addSymbols', 'Add symbols in Settings'))}<br><span class="ntp-w-markets-hint">${escapeHtml(wt('ntp.widget.symbolsHint', 'e.g. AAPL, BTC, ETH'))}</span></div>
 </div>`
             );
         }
@@ -1480,11 +1634,11 @@
                 const down = Number(q.changePct) < 0;
                 const dir = up ? 'up' : down ? 'down' : 'flat';
                 const ch = formatMarketChange(q.changePct);
-                const price = q.error ? '—' : formatMarketPrice(q.price);
+                const price = q.error ? '-' : formatMarketPrice(q.price);
                 return `<div class="ntp-w-markets-row" data-dir="${dir}">
   <span class="ntp-w-markets-sym">${escapeHtml(q.short || displayMarketSymbol(q.symbol))}</span>
   <span class="ntp-w-markets-price">${escapeHtml(price)}</span>
-  <span class="ntp-w-markets-chg">${escapeHtml(ch || '—')}</span>
+  <span class="ntp-w-markets-chg">${escapeHtml(ch || '-')}</span>
 </div>`;
             })
             .join('');
@@ -1492,10 +1646,113 @@
         return shellHtml(
             widget,
             `<div class="ntp-w-markets${sizeCls}">
-  <div class="ntp-w-markets-head">Markets</div>
+  <div class="ntp-w-markets-head">${escapeHtml(wt('ntp.widget.marketsHead', 'Markets'))}</div>
   <div class="ntp-w-markets-list">${rows}</div>
 </div>`
         );
+    }
+
+    const CALENDAR_SYSTEMS = [
+        { id: 'gregory', label: 'Gregorian' },
+        { id: 'islamic-umalqura', label: 'Islamic' },
+        { id: 'hebrew', label: 'Hebrew' },
+        { id: 'persian', label: 'Persian' },
+        { id: 'chinese', label: 'Chinese' },
+        { id: 'indian', label: 'Indian' },
+        { id: 'buddhist', label: 'Buddhist' },
+        { id: 'japanese', label: 'Japanese' },
+        { id: 'ethiopic', label: 'Ethiopic' },
+        { id: 'coptic', label: 'Coptic' }
+    ];
+
+    const CALENDAR_SYSTEM_IDS = new Set(CALENDAR_SYSTEMS.map((s) => s.id));
+
+    function normalizeCalendarSystem(raw) {
+        const s = String(raw || 'gregory')
+            .trim()
+            .toLowerCase();
+        if (s === 'gregorian' || s === 'gregory') return 'gregory';
+        if (s === 'islamic' || s === 'hijri') return 'islamic-umalqura';
+        if (CALENDAR_SYSTEM_IDS.has(s)) return s;
+        return 'gregory';
+    }
+
+    function normalizeCalendarViewMode(raw) {
+        const s = String(raw || 'auto')
+            .trim()
+            .toLowerCase();
+        if (s === 'day' || s === 'week' || s === 'month' || s === 'auto') return s;
+        return 'auto';
+    }
+
+    function calendarParts(date, calendar) {
+        const cal = normalizeCalendarSystem(calendar);
+        try {
+            const fmt = new Intl.DateTimeFormat('en-US', {
+                calendar: cal,
+                year: 'numeric',
+                month: 'numeric',
+                day: 'numeric'
+            });
+            const parts = fmt.formatToParts(date);
+            const get = (type) => {
+                const hit = parts.find((p) => p.type === type);
+                return hit ? hit.value : '';
+            };
+            const year = get('year') || get('relatedYear') || String(date.getFullYear());
+            const month = Number(get('month')) || date.getMonth() + 1;
+            const day = Number(get('day')) || date.getDate();
+            return { year: String(year), month, day, calendar: cal };
+        } catch (_) {
+            return {
+                year: String(date.getFullYear()),
+                month: date.getMonth() + 1,
+                day: date.getDate(),
+                calendar: 'gregory'
+            };
+        }
+    }
+
+    function formatCalendarDate(date, calendar, opts = {}) {
+        const cal = normalizeCalendarSystem(calendar);
+        try {
+            return new Intl.DateTimeFormat(uiLocale(), { calendar: cal, ...opts }).format(date);
+        } catch (_) {
+            return date.toLocaleDateString(uiLocale(), opts);
+        }
+    }
+
+    function startOfCalendarMonth(date, calendar) {
+        const cal = normalizeCalendarSystem(calendar);
+        const target = calendarParts(date, cal);
+        let d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        for (let i = 0; i < 46; i++) {
+            const prev = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1);
+            const p = calendarParts(prev, cal);
+            if (p.year !== target.year || p.month !== target.month) break;
+            d = prev;
+        }
+        return d;
+    }
+
+    function shiftCalendarMonth(date, calendar, deltaMonths) {
+        const cal = normalizeCalendarSystem(calendar);
+        const steps = Math.abs(Number(deltaMonths) || 0);
+        const dir = (Number(deltaMonths) || 0) > 0 ? 1 : -1;
+        let d = startOfCalendarMonth(date, cal);
+        for (let i = 0; i < steps; i++) {
+            const cur = calendarParts(d, cal);
+            let probe = new Date(d.getFullYear(), d.getMonth(), d.getDate() + dir * 20);
+            let next = startOfCalendarMonth(probe, cal);
+            let parts = calendarParts(next, cal);
+            if (parts.year === cur.year && parts.month === cur.month) {
+                probe = new Date(d.getFullYear(), d.getMonth(), d.getDate() + dir * 40);
+                next = startOfCalendarMonth(probe, cal);
+                parts = calendarParts(next, cal);
+            }
+            d = next;
+        }
+        return d;
     }
 
     function calendarMonthMatrix(year, month, weekStartsOn) {
@@ -1514,11 +1771,57 @@
         return cells;
     }
 
+    function calendarMonthCellsForSystem(anchorDate, calendar, weekStartsOn, todayDate = new Date()) {
+        const cal = normalizeCalendarSystem(calendar);
+        if (cal === 'gregory') {
+            const year = anchorDate.getFullYear();
+            const month = anchorDate.getMonth();
+            const today = todayDate.getDate();
+            const isCurrentMonth =
+                year === todayDate.getFullYear() && month === todayDate.getMonth();
+            return calendarMonthMatrix(year, month, weekStartsOn).map((day) => {
+                if (day == null) return null;
+                return { day, isToday: isCurrentMonth && day === today };
+            });
+        }
+        const monthStart = startOfCalendarMonth(anchorDate, cal);
+        const target = calendarParts(monthStart, cal);
+        const todayParts = calendarParts(todayDate, cal);
+        const start = weekStartsOn === 1 ? 1 : 0;
+        const lead = (monthStart.getDay() - start + 7) % 7;
+        const cells = [];
+        for (let i = 0; i < lead; i++) cells.push(null);
+        let cur = new Date(monthStart.getFullYear(), monthStart.getMonth(), monthStart.getDate());
+        for (let i = 0; i < 42; i++) {
+            const p = calendarParts(cur, cal);
+            if (p.year !== target.year || p.month !== target.month) break;
+            cells.push({
+                day: p.day,
+                isToday:
+                    p.year === todayParts.year &&
+                    p.month === todayParts.month &&
+                    p.day === todayParts.day
+            });
+            cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+        }
+        while (cells.length % 7 !== 0) cells.push(null);
+        if (cells.length > 35) {
+            while (cells.length < 42) cells.push(null);
+        }
+        return cells;
+    }
+
     function calendarViewMode(shape) {
-        // Full month needs real height — small tiles get a clean day / week card instead.
+        // Full month needs real height - small tiles get a clean day / week card instead.
         if (shape.rows >= 2 && shape.cols >= 2) return 'month';
         if (shape.cols >= 2 && shape.rows === 1) return 'week';
         return 'day';
+    }
+
+    function resolveCalendarViewMode(widget, shape) {
+        const forced = normalizeCalendarViewMode(widget?.config?.viewMode);
+        if (forced !== 'auto') return forced;
+        return calendarViewMode(shape);
     }
 
     function currentWeekDays(weekStartsOn, now = new Date()) {
@@ -1534,18 +1837,28 @@
         return out;
     }
 
+    function resolveCalendarAnchor(view, now = new Date()) {
+        if (view?.anchorMs != null && Number.isFinite(Number(view.anchorMs))) {
+            return new Date(Number(view.anchorMs));
+        }
+        if (view?.year != null && view?.month != null) {
+            return new Date(Number(view.year), Number(view.month), 1);
+        }
+        return now;
+    }
+
     function renderCalendar(widget, view = null) {
         const shape = widgetShape(widget);
         const d = shape.density;
-        const mode = calendarViewMode(shape);
+        const mode = resolveCalendarViewMode(widget, shape);
         const sizeCls = ` ntp-w-cal--${escapeHtml(d)} ntp-w-cal--mode-${mode}${shape.tall ? ' ntp-w-cal--tall' : ''}${shape.wide ? ' ntp-w-cal--wide' : ''}`;
         const weekStartsOn = Number(widget.config?.weekStartsOn) === 1 ? 1 : 0;
+        const calendar = normalizeCalendarSystem(widget.config?.calendarSystem);
         const now = new Date();
-        const year = view?.year != null ? Number(view.year) : now.getFullYear();
-        const month = view?.month != null ? Number(view.month) : now.getMonth();
-        const title = new Date(year, month, 1).toLocaleDateString([], { month: 'long', year: 'numeric' });
-        const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
-        const today = now.getDate();
+        const anchor = resolveCalendarAnchor(view, now);
+        const monthStart = startOfCalendarMonth(anchor, calendar);
+        const title = formatCalendarDate(monthStart, calendar, { month: 'long', year: 'numeric' });
+        const todayParts = calendarParts(now, calendar);
         const wid = escapeHtml(widget.id);
 
         if (mode === 'day') {
@@ -1553,9 +1866,9 @@
                 widget,
                 `<div class="ntp-w-cal${sizeCls}">
   <div class="ntp-w-cal-daycard">
-    <span class="ntp-w-cal-weekday">${escapeHtml(now.toLocaleDateString([], { weekday: 'long' }))}</span>
-    <span class="ntp-w-cal-daynum">${escapeHtml(String(today))}</span>
-    <span class="ntp-w-cal-month">${escapeHtml(now.toLocaleDateString([], { month: 'long', year: 'numeric' }))}</span>
+    <span class="ntp-w-cal-weekday">${escapeHtml(formatCalendarDate(now, calendar, { weekday: 'long' }))}</span>
+    <span class="ntp-w-cal-daynum">${escapeHtml(String(todayParts.day))}</span>
+    <span class="ntp-w-cal-month">${escapeHtml(formatCalendarDate(now, calendar, { month: 'long', year: 'numeric' }))}</span>
   </div>
 </div>`
             );
@@ -1570,17 +1883,18 @@
             const head = labels.map((l) => `<span class="ntp-w-cal-dow">${l}</span>`).join('');
             const cells = days
                 .map((dt) => {
+                    const p = calendarParts(dt, calendar);
                     const isToday =
-                        dt.getFullYear() === now.getFullYear() &&
-                        dt.getMonth() === now.getMonth() &&
-                        dt.getDate() === now.getDate();
-                    return `<span class="ntp-w-cal-cell${isToday ? ' is-today' : ''}">${dt.getDate()}</span>`;
+                        p.year === todayParts.year &&
+                        p.month === todayParts.month &&
+                        p.day === todayParts.day;
+                    return `<span class="ntp-w-cal-cell${isToday ? ' is-today' : ''}">${escapeHtml(String(p.day))}</span>`;
                 })
                 .join('');
             return shellHtml(
                 widget,
                 `<div class="ntp-w-cal${sizeCls}">
-  <div class="ntp-w-cal-weekhead">${escapeHtml(now.toLocaleDateString([], { month: 'long', year: 'numeric' }))}</div>
+  <div class="ntp-w-cal-weekhead">${escapeHtml(formatCalendarDate(now, calendar, { month: 'long', year: 'numeric' }))}</div>
   <div class="ntp-w-cal-grid ntp-w-cal-grid--week">
     ${head}
     ${cells}
@@ -1593,23 +1907,22 @@
             weekStartsOn === 1
                 ? ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
                 : ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-        const cells = calendarMonthMatrix(year, month, weekStartsOn);
+        const cells = calendarMonthCellsForSystem(monthStart, calendar, weekStartsOn, now);
         const headCells = labels.map((l) => `<span class="ntp-w-cal-dow">${l}</span>`).join('');
         const dayCells = cells
-            .map((day) => {
-                if (day == null) return `<span class="ntp-w-cal-cell is-empty" aria-hidden="true"></span>`;
-                const isToday = isCurrentMonth && day === today;
-                return `<span class="ntp-w-cal-cell${isToday ? ' is-today' : ''}">${day}</span>`;
+            .map((cell) => {
+                if (cell == null) return `<span class="ntp-w-cal-cell is-empty" aria-hidden="true"></span>`;
+                return `<span class="ntp-w-cal-cell${cell.isToday ? ' is-today' : ''}">${escapeHtml(String(cell.day))}</span>`;
             })
             .join('');
 
         return shellHtml(
             widget,
-            `<div class="ntp-w-cal${sizeCls}" data-cal-year="${year}" data-cal-month="${month}">
+            `<div class="ntp-w-cal${sizeCls}" data-cal-anchor="${escapeHtml(String(monthStart.getTime()))}">
   <div class="ntp-w-cal-toolbar">
-    <button type="button" class="ntp-w-cal-nav" data-ntp-cal-nav="prev" data-widget-id="${wid}" aria-label="Previous month">‹</button>
-    <button type="button" class="ntp-w-cal-title" data-ntp-cal-today data-widget-id="${wid}" title="Jump to today">${escapeHtml(title)}</button>
-    <button type="button" class="ntp-w-cal-nav" data-ntp-cal-nav="next" data-widget-id="${wid}" aria-label="Next month">›</button>
+    <button type="button" class="ntp-w-cal-nav" data-ntp-cal-nav="prev" data-widget-id="${wid}" aria-label="${escapeHtml(wt('ntp.widget.prevMonth', 'Previous month'))}">‹</button>
+    <button type="button" class="ntp-w-cal-title" data-ntp-cal-today data-widget-id="${wid}" title="${escapeHtml(wt('ntp.widget.jumpToday', 'Jump to today'))}">${escapeHtml(title)}</button>
+    <button type="button" class="ntp-w-cal-nav" data-ntp-cal-nav="next" data-widget-id="${wid}" aria-label="${escapeHtml(wt('ntp.widget.nextMonth', 'Next month'))}">›</button>
   </div>
   <div class="ntp-w-cal-grid ntp-w-cal-grid--month">
     ${headCells}
@@ -1687,6 +2000,8 @@
             );
         } else if (type === 'calendar') {
             config.weekStartsOn = Number(prefs.weekStartsOn) === 1 ? 1 : 0;
+            config.calendarSystem = normalizeCalendarSystem(prefs.calendarSystem);
+            config.viewMode = normalizeCalendarViewMode(prefs.viewMode);
         }
         return config;
     }
@@ -1738,15 +2053,15 @@
     function getPickerItems() {
         return Object.values(TYPES).map((t) => ({
             id: t.id,
-            label: t.label,
-            desc: t.desc,
+            label: wt(t.labelKey, t.label),
+            desc: wt(t.descKey, t.desc),
             icon: t.icon
         }));
     }
 
     function widgetLabel(widget) {
         const def = typeDef(widget?.type);
-        return def?.label || String(widget?.type || 'Widget');
+        return wt(def?.labelKey, def?.label) || String(widget?.type || wt('chrome.widgets', 'Widget'));
     }
 
     function widgetHasConfig(type) {
@@ -1821,6 +2136,11 @@
         renderAirQuality,
         renderMarkets,
         renderCalendar,
+        calendarSystems: CALENDAR_SYSTEMS,
+        normalizeCalendarSystem,
+        normalizeCalendarViewMode,
+        startOfCalendarMonth,
+        shiftCalendarMonth,
         clockParts,
         worldClockParts,
         fetchWeather,
@@ -1832,6 +2152,8 @@
         searchTickers,
         normalizeProvider,
         formatCityLabel,
+        geoLanguage,
+        resolveLocalizedPlace,
         escapeHtml,
         isAsyncType,
         isLiveType,
