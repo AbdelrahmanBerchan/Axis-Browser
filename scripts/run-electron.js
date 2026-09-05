@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Spawns the Electron binary with stderr piped so native NSLog (e.g. menu teardown on quit)
- * is filtered — those messages do not go through Node's process.stderr in the child.
+ * is filtered - those messages do not go through Node's process.stderr in the child.
  */
 const path = require('path');
 const { spawn } = require('child_process');
@@ -15,6 +15,18 @@ function matchesSuppressed(text) {
 const appRoot = path.resolve(__dirname, '..');
 const electronPath = require('electron');
 const extraArgs = process.argv.slice(2).filter((a) => a !== '--');
+
+// Keep locale auto-fill current when English / curated packs change (offline, skip if fresh).
+if (process.env.AXIS_SKIP_I18N_SYNC !== '1') {
+  try {
+    require('child_process').execFileSync(process.execPath, [path.join(__dirname, 'i18n-sync-offline.js')], {
+      cwd: appRoot,
+      stdio: 'inherit'
+    });
+  } catch (err) {
+    process.stderr.write(`i18n sync failed: ${err && err.message ? err.message : err}\n`);
+  }
+}
 
 const child = spawn(electronPath, [appRoot, ...extraArgs], {
   cwd: appRoot,
