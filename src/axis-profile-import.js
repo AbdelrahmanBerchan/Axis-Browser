@@ -760,7 +760,7 @@ function resolveImportSource(payload = {}) {
 }
 
 function importFaviconUrl(_url) {
-  // Don't bake a proxy favicon at import — display falls back, then the live
+  // Don't bake a proxy favicon at import - display falls back, then the live
   // page favicon replaces it when the favorite is opened.
   return null;
 }
@@ -926,7 +926,7 @@ function buildAxisImportLayout({
     for (const item of bookmarkUrls || []) {
       if (pinnedFromBookmarks >= PINNED_TABS_IMPORT_LIMIT) {
         layoutWarnings.push(
-          `Only the first ${PINNED_TABS_IMPORT_LIMIT} bookmarks were added as pinned tabs so Axis stays fast. Extra bookmarks were skipped — pin the ones you need, or use Favorites.`
+          `Only the first ${PINNED_TABS_IMPORT_LIMIT} bookmarks were added as pinned tabs so Axis stays fast. Extra bookmarks were skipped - pin the ones you need, or use Favorites.`
         );
         break;
       }
@@ -1027,7 +1027,7 @@ function extractImportData(source, options = {}) {
       }
     } else if (importBookmarks || importFolders) {
       importWarnings.push(
-        'For Arc, Dia, and Sidekick, favorites and tab groups come from the sidebar — not the separate bookmarks file.'
+        'For Arc, Dia, and Sidekick, favorites and tab groups come from the sidebar - not the separate bookmarks file.'
       );
     }
 
