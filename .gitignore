@@ -62,3 +62,14 @@ jspm_packages/
 # Electron specific
 app/
 release/
+
+# Local i18n rebuild scratch (generated quality pack lives in src/)
+scripts/__pycache__/
+scripts/_quality-parts/
+scripts/_missing-keys.json
+scripts/_quality-still-missing.json
+scripts/_gen-batch-a.js
+scripts/_qwrite.py
+scripts/_quality_expand.py
+scripts/_quality_write_helper.py
+
