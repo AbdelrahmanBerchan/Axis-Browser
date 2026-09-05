@@ -1,5 +1,5 @@
 /**
- * macOS-style Emoji + Icon picker popover (tabs, tab groups, favorites).
+ * Sidebar icon picker — same popover language as Tab Ancestry.
  */
 (function (global) {
   const EMOJI_CATEGORIES = [
@@ -71,6 +71,14 @@
       .filter(Boolean);
   }
 
+  function t(key, fallback) {
+    try {
+      const v = global.AxisI18n?.t?.(key);
+      if (v && v !== key) return v;
+    } catch (_) {}
+    return fallback || key;
+  }
+
   const CATEGORY_LOOKUP = Object.fromEntries(
     EMOJI_CATEGORIES.map((c) => [c.id, { ...c, list: splitEmojis(c.emojis) }])
   );
@@ -78,33 +86,50 @@
   class AxisIconPicker {
     constructor() {
       this.el = null;
+      this.backdrop = null;
       this.onSelect = null;
       this.activeTab = 'emoji';
       this.activeCategory = EMOJI_CATEGORIES[0].id;
       this._outsideHandler = null;
       this._keyHandler = null;
+      this._closeTimer = null;
+      this._scrollFadeBound = false;
     }
 
     ensure() {
       if (this.el) return this.el;
 
+      const backdrop = document.createElement('div');
+      backdrop.id = 'axis-icon-picker-backdrop';
+      backdrop.className = 'tab-ancestry-backdrop hidden';
+      backdrop.setAttribute('aria-hidden', 'true');
+      backdrop.addEventListener('click', () => this.close());
+      document.body.appendChild(backdrop);
+      this.backdrop = backdrop;
+
       const root = document.createElement('div');
       root.id = 'axis-icon-picker';
-      root.className = 'axis-icon-picker hidden';
+      root.className = 'axis-icon-picker tab-ancestry-panel hidden';
       root.setAttribute('role', 'dialog');
-      root.setAttribute('aria-label', 'Choose icon');
+      root.setAttribute('aria-label', t('iconPicker.title', 'Choose icon'));
       root.innerHTML = `
-        <div class="axis-icon-picker-panel">
-          <div class="axis-icon-picker-segments" role="tablist">
-            <button type="button" class="axis-icon-picker-segment is-active" data-tab="emoji" role="tab" aria-selected="true">Emoji</button>
-            <button type="button" class="axis-icon-picker-segment" data-tab="icon" role="tab" aria-selected="false">Icon</button>
+        <div class="tab-ancestry-arrow axis-icon-picker-arrow" aria-hidden="true"></div>
+        <div class="tab-ancestry-card axis-icon-picker-card">
+          <div class="tab-ancestry-header axis-icon-picker-header">
+            <h3 class="tab-ancestry-heading axis-icon-picker-heading" data-i18n="iconPicker.title">Choose icon</h3>
+            <div class="axis-icon-picker-tabs" role="tablist">
+              <button type="button" class="axis-icon-picker-tab is-active" data-tab="emoji" role="tab" aria-selected="true" data-i18n="iconPicker.emoji">Emoji</button>
+              <button type="button" class="axis-icon-picker-tab" data-tab="icon" role="tab" aria-selected="false" data-i18n="iconPicker.icon">Icon</button>
+            </div>
           </div>
-          <div class="axis-icon-picker-emoji-pane">
-            <div class="axis-icon-picker-grid axis-icon-picker-emoji-grid"></div>
+          <div class="axis-icon-picker-body">
+            <div class="axis-icon-picker-emoji-pane">
+              <div class="axis-icon-picker-grid axis-icon-picker-emoji-grid"></div>
+            </div>
+            <div class="axis-icon-picker-icon-pane hidden">
+              <div class="axis-icon-picker-grid axis-icon-picker-fa-grid"></div>
+            </div>
             <div class="axis-icon-picker-categories"></div>
-          </div>
-          <div class="axis-icon-picker-icon-pane hidden">
-            <div class="axis-icon-picker-grid axis-icon-picker-fa-grid"></div>
           </div>
         </div>
       `;
@@ -116,7 +141,7 @@
     }
 
     bind() {
-      this.el.querySelectorAll('.axis-icon-picker-segment').forEach((btn) => {
+      this.el.querySelectorAll('.axis-icon-picker-tab').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           this.setTab(btn.dataset.tab || 'emoji');
@@ -138,15 +163,73 @@
       });
     }
 
+    syncTheme() {
+      if (!this.el) return;
+      const light =
+        document.documentElement.getAttribute('data-ui-theme') === 'light' ||
+        document.body.classList.contains('light-theme');
+      const theme = light ? 'light' : 'dark';
+      this.el.setAttribute('data-ui-theme', theme);
+    }
+
+    applyLabels() {
+      if (!this.el) return;
+      const heading = this.el.querySelector('.axis-icon-picker-heading');
+      if (heading) heading.textContent = t('iconPicker.title', 'Choose icon');
+      this.el.querySelectorAll('.axis-icon-picker-tab').forEach((btn) => {
+        const key = btn.dataset.tab === 'icon' ? 'iconPicker.icon' : 'iconPicker.emoji';
+        btn.textContent = t(key, btn.dataset.tab === 'icon' ? 'Icon' : 'Emoji');
+      });
+      this.el.setAttribute('aria-label', t('iconPicker.title', 'Choose icon'));
+      try {
+        global.AxisI18n?.applyToDom?.(this.el);
+      } catch (_) {}
+    }
+
     setTab(tab) {
       this.activeTab = tab === 'icon' ? 'icon' : 'emoji';
-      this.el.querySelectorAll('.axis-icon-picker-segment').forEach((btn) => {
+      this.el.querySelectorAll('.axis-icon-picker-tab').forEach((btn) => {
         const on = btn.dataset.tab === this.activeTab;
         btn.classList.toggle('is-active', on);
         btn.setAttribute('aria-selected', on ? 'true' : 'false');
       });
       this.el.querySelector('.axis-icon-picker-emoji-pane')?.classList.toggle('hidden', this.activeTab !== 'emoji');
       this.el.querySelector('.axis-icon-picker-icon-pane')?.classList.toggle('hidden', this.activeTab !== 'icon');
+      const cats = this.el.querySelector('.axis-icon-picker-categories');
+      if (cats) cats.classList.toggle('hidden', this.activeTab !== 'emoji');
+      this._updateScrollFade();
+    }
+
+    _getActiveScrollEl() {
+      if (!this.el) return null;
+      if (this.activeTab === 'icon') {
+        return this.el.querySelector('.axis-icon-picker-fa-grid');
+      }
+      return this.el.querySelector('.axis-icon-picker-emoji-grid');
+    }
+
+    _updateScrollFade() {
+      const scrollEl = this._getActiveScrollEl();
+      if (!this.el || !scrollEl) return;
+      this.el.classList.toggle('is-scrolled', scrollEl.scrollTop > 1);
+    }
+
+    _bindScrollFade() {
+      if (this._scrollFadeBound) return;
+      const handler = () => this._updateScrollFade();
+      this.el?.querySelector('.axis-icon-picker-emoji-grid')?.addEventListener('scroll', handler, {
+        passive: true
+      });
+      this.el?.querySelector('.axis-icon-picker-fa-grid')?.addEventListener('scroll', handler, {
+        passive: true
+      });
+      this._scrollFadeBound = true;
+    }
+
+    _resetScroll() {
+      this.el?.querySelector('.axis-icon-picker-emoji-grid')?.scrollTo?.(0, 0);
+      this.el?.querySelector('.axis-icon-picker-fa-grid')?.scrollTo?.(0, 0);
+      this.el?.classList.remove('is-scrolled');
     }
 
     renderCategories() {
@@ -171,7 +254,6 @@
     renderEmojiGrid() {
       const grid = this.el.querySelector('.axis-icon-picker-emoji-grid');
       if (!grid) return;
-
       const items = CATEGORY_LOOKUP[this.activeCategory]?.list || [];
       grid.innerHTML = items
         .map((em) => `<button type="button" class="axis-icon-picker-cell" data-emoji="${em}" aria-label="Emoji">${em}</button>`)
@@ -190,49 +272,63 @@
     }
 
     position(anchorRect) {
-      const panel = this.el.querySelector('.axis-icon-picker-panel');
+      const panel = this.el;
+      const arrow = panel?.querySelector('.axis-icon-picker-arrow');
       if (!panel) return;
 
-      const w = panel.offsetWidth || 320;
-      const h = panel.offsetHeight || 360;
-      const pad = 10;
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
+      const inset = 8;
+      const viewportH = window.innerHeight || document.documentElement.clientHeight;
+      const sidebar = document.getElementById('sidebar');
+      const sideRect = sidebar?.getBoundingClientRect?.();
+      const sideLeft = sideRect ? sideRect.left + inset : inset;
+      const sideRight = sideRect ? sideRect.right - inset : (window.innerWidth || 320) - inset;
+      const maxW = Math.max(180, sideRight - sideLeft);
+      const panelW = Math.min(248, maxW);
 
-      let left = anchorRect ? anchorRect.left : (vw - w) / 2;
-      let top = anchorRect ? anchorRect.bottom + 8 : (vh - h) / 2;
-
-      if (left + w + pad > vw) left = vw - w - pad;
-      if (left < pad) left = pad;
-      if (top + h + pad > vh) {
-        top = anchorRect ? anchorRect.top - h - 8 : vh - h - pad;
+      let anchorX;
+      let top;
+      if (anchorRect && anchorRect.width > 0) {
+        anchorX = anchorRect.left + anchorRect.width / 2;
+        top = anchorRect.bottom + 2;
+      } else if (anchorRect && Number.isFinite(anchorRect.left)) {
+        anchorX = anchorRect.left;
+        top = (anchorRect.bottom || anchorRect.top || 80) + 6;
+      } else if (sideRect) {
+        anchorX = sideRect.left + sideRect.width / 2;
+        top = Math.max(inset, sideRect.top + 80);
+      } else {
+        anchorX = panelW / 2 + inset;
+        top = 80;
       }
-      if (top < pad) top = pad;
 
-      this.el.style.left = `${Math.round(left)}px`;
-      this.el.style.top = `${Math.round(top)}px`;
+      let left = anchorX - panelW / 2;
+      left = Math.max(sideLeft, Math.min(left, sideRight - panelW));
+      const maxTop = Math.max(inset, viewportH - 140);
+      top = Math.max(inset, Math.min(top, maxTop));
+
+      panel.style.width = `${panelW}px`;
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+      if (arrow) {
+        const arrowX = Math.max(14, Math.min(anchorX - left, panelW - 14));
+        arrow.style.left = `${arrowX}px`;
+        arrow.style.marginLeft = '-7px';
+        panel.style.transformOrigin = `${arrowX}px 0`;
+        panel.style.setProperty('--ta-arrow-x', `${arrowX}px`);
+      }
     }
 
     attachDismissHandlers() {
       this.detachDismissHandlers();
-      this._outsideHandler = (e) => {
-        if (this.el?.contains(e.target)) return;
-        this.close();
-      };
       this._keyHandler = (e) => {
         if (e.key === 'Escape') this.close();
       };
       setTimeout(() => {
-        document.addEventListener('mousedown', this._outsideHandler, true);
         document.addEventListener('keydown', this._keyHandler, true);
       }, 0);
     }
 
     detachDismissHandlers() {
-      if (this._outsideHandler) {
-        document.removeEventListener('mousedown', this._outsideHandler, true);
-        this._outsideHandler = null;
-      }
       if (this._keyHandler) {
         document.removeEventListener('keydown', this._keyHandler, true);
         this._keyHandler = null;
@@ -241,30 +337,75 @@
 
     open({ anchorRect, onSelect } = {}) {
       this.ensure();
+      this._bindScrollFade();
+      if (this._closeTimer) {
+        clearTimeout(this._closeTimer);
+        this._closeTimer = null;
+      }
       this.onSelect = typeof onSelect === 'function' ? onSelect : null;
       this.activeTab = 'emoji';
       this.activeCategory = EMOJI_CATEGORIES[0].id;
 
+      this.syncTheme();
+      this.applyLabels();
       this.setTab('emoji');
       this.renderCategories();
       this.renderEmojiGrid();
+      this._resetScroll();
 
-      this.el.classList.remove('hidden');
-      this.el.style.display = 'block';
+      this.el.classList.remove('hidden', 'is-closing', 'is-open', 'is-scrolled');
+      this.backdrop?.classList.remove('hidden');
+      this.backdrop?.setAttribute('aria-hidden', 'false');
       this.position(anchorRect);
+      void this.el.offsetWidth;
       requestAnimationFrame(() => {
-        this.el.classList.add('is-open');
+        requestAnimationFrame(() => {
+          this.el.classList.add('is-open');
+        });
       });
       this.attachDismissHandlers();
     }
 
     close() {
       if (!this.el) return;
-      this.el.classList.remove('is-open');
-      this.el.classList.add('hidden');
-      this.el.style.display = 'none';
-      this.onSelect = null;
+      if (this.el.classList.contains('hidden')) {
+        this.backdrop?.classList.add('hidden');
+        this.backdrop?.setAttribute('aria-hidden', 'true');
+        this.onSelect = null;
+        return;
+      }
+      if (this.el.classList.contains('is-closing')) return;
+
+      if (this._closeTimer) {
+        clearTimeout(this._closeTimer);
+        this._closeTimer = null;
+      }
+
       this.detachDismissHandlers();
+      this.el.classList.remove('is-open');
+      this.el.classList.add('is-closing');
+      this.backdrop?.classList.add('hidden');
+      this.backdrop?.setAttribute('aria-hidden', 'true');
+
+      const finish = () => {
+        this.el.classList.remove('is-closing', 'is-open', 'is-scrolled');
+        this.el.classList.add('hidden');
+        this.onSelect = null;
+        this._closeTimer = null;
+      };
+
+      const onEnd = (e) => {
+        if (e.target !== this.el || (e.propertyName !== 'opacity' && e.propertyName !== 'transform')) {
+          return;
+        }
+        this.el.removeEventListener('transitionend', onEnd);
+        finish();
+      };
+      this.el.addEventListener('transitionend', onEnd);
+      this._closeTimer = setTimeout(() => {
+        this.el.removeEventListener('transitionend', onEnd);
+        finish();
+      }, 160);
     }
 
     pick(value, type) {
