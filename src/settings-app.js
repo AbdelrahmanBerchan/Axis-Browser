@@ -1,9 +1,10 @@
         (async function() {
             async function waitForElectronAPI(timeoutMs = 5000) {
+                if (typeof window.electronAPI !== 'undefined') return true;
                 const start = Date.now();
                 while (typeof window.electronAPI === 'undefined') {
                     if (Date.now() - start > timeoutMs) return false;
-                    await new Promise((resolve) => setTimeout(resolve, 16));
+                    await new Promise((resolve) => setTimeout(resolve, 0));
                 }
                 return typeof window.electronAPI !== 'undefined';
             }
@@ -11,8 +12,10 @@
             if (!(await waitForElectronAPI())) {
                 const mainInner = document.querySelector('.main-inner');
                 if (mainInner) {
+                    const msg = window.AxisI18n?.t?.('app.settingsCouldNotConnect') ||
+                        'Settings could not connect to Axis. Close this tab and open Settings again.';
                     mainInner.innerHTML =
-                        '<div class="empty-state" style="padding:24px;text-align:center;">Settings could not connect to Axis. Close this tab and open Settings again.</div>';
+                        '<div class="empty-state" style="padding:24px;text-align:center;">' + msg + '</div>';
                 }
                 return;
             }
@@ -52,17 +55,25 @@
                 else openSettingsProfileMenu();
             }
 
-            function updateSettingsProfileTrigger(profiles, activeId) {
+            function updateSettingsProfileTrigger(profiles, activeId, incognitoProfile) {
                 const wrap = document.getElementById('settings-profile-switch');
                 const rows = Array.isArray(profiles) ? profiles : [];
+                const incog =
+                    incognitoProfile && incognitoProfile.id
+                        ? incognitoProfile
+                        : { id: 'incognito', name: 'Incognito', icon: 'mask' };
                 if (!wrap) return;
-                if (rows.length < 2) {
+                const totalChoices = rows.length + 1;
+                if (totalChoices < 2) {
                     wrap.classList.add('is-hidden');
                     closeSettingsProfileMenu();
                     return;
                 }
                 wrap.classList.remove('is-hidden');
-                const active = rows.find((p) => p.id === activeId) || rows[0];
+                const active =
+                    activeId === 'incognito'
+                        ? incog
+                        : rows.find((p) => p.id === activeId) || rows[0];
                 const nameEl = document.getElementById('settings-profile-trigger-name');
                 const avatarEl = document.getElementById('settings-profile-trigger-avatar');
                 if (nameEl) nameEl.textContent = active?.name || active?.id || 'Profile';
@@ -84,17 +95,16 @@
                 });
             }
 
-            function renderSettingsProfileList(profiles, activeId) {
+            function renderSettingsProfileList(profiles, activeId, incognitoProfile) {
                 const list = document.getElementById('settings-profile-list');
                 if (!list) return;
-                updateSettingsProfileTrigger(profiles, activeId);
+                const incog =
+                    incognitoProfile && incognitoProfile.id
+                        ? incognitoProfile
+                        : { id: 'incognito', name: 'Incognito', icon: 'mask' };
+                updateSettingsProfileTrigger(profiles, activeId, incognitoProfile);
                 const rows = Array.isArray(profiles) ? profiles : [];
-                if (!rows.length) {
-                    list.innerHTML =
-                        '<div style="padding:6px 8px;font-size:12px;color:#86868b;">No profiles</div>';
-                    return;
-                }
-                list.innerHTML = rows
+                const regularHtml = rows
                     .map((p) => {
                         const active = p.id === activeId;
                         const avatarMarkup = settingsProfileAvatarMarkup(p.icon);
@@ -109,23 +119,88 @@
                         </button>`;
                     })
                     .join('');
+                const incogActive = activeId === 'incognito';
+                const incogHtml = `<div class="settings-profile-divider" role="presentation">Private browsing</div>
+                    <button type="button" class="settings-profile-row settings-profile-row--incognito${
+                        incogActive ? ' is-active' : ''
+                    }" data-profile-id="incognito" role="option" aria-selected="${incogActive ? 'true' : 'false'}">
+                        <span class="settings-profile-avatar" aria-hidden="true">${settingsProfileAvatarMarkup('mask')}</span>
+                        <span class="settings-profile-name">${escapeHtml(incog.name || 'Incognito')}</span>
+                        ${incogActive ? '<span class="settings-profile-check" aria-hidden="true">✓</span>' : ''}
+                    </button>`;
+                list.innerHTML = (regularHtml || '') + incogHtml;
                 wireSettingsProfileListHandlers();
             }
 
-            function bootstrapSettingsEditingProfileSwitcher() {
+            const INCOG_SETTINGS_SECTIONS = new Set(['customization', 'newtab', 'ai', 'shortcuts']);
+
+            function isSettingsSectionAllowed(section) {
+                if (settingsEditingProfileId === 'incognito') {
+                    return INCOG_SETTINGS_SECTIONS.has(section);
+                }
+                return section !== 'incognito';
+            }
+
+            function syncSettingsNavForProfile(profileId) {
+                const isIncog = profileId === 'incognito';
+                document.documentElement.classList.toggle('settings-editing-incognito', isIncog);
+                document.querySelectorAll('.sidebar-item[data-section]').forEach((item) => {
+                    const section = item.dataset.section;
+                    const hide = isIncog ? !INCOG_SETTINGS_SECTIONS.has(section) : section === 'incognito';
+                    item.classList.toggle('settings-nav-hidden', hide);
+                });
+                const divider = document.getElementById('settings-incognito-divider');
+                if (divider) divider.classList.add('settings-nav-hidden');
+                const wrap = document.getElementById('settings-profile-switch');
+                if (wrap) wrap.classList.remove('is-hidden');
+            }
+
+            function ensureSettingsEditingProfileContext() {
                 const urlProfile = new URLSearchParams(location.search).get('profile');
-                let ctx = { profileId: urlProfile || 'personal', profiles: [] };
+                let ctx = { profileId: urlProfile || 'personal', profiles: [], incognitoProfile: null };
                 try {
                     ctx = window.electronAPI?.getSettingsProfileBootstrap?.() || ctx;
                 } catch (_) {}
                 settingsEditingProfileId = ctx.profileId || urlProfile || 'personal';
-                if (typeof window.__axisPaintSettingsProfileSwitcher === 'function') {
-                    window.__axisPaintSettingsProfileSwitcher(ctx);
+                const list = document.getElementById('settings-profile-list');
+                const needsPaint = !list || list.children.length === 0;
+                if (needsPaint) {
+                    if (typeof window.__axisPaintSettingsProfileSwitcher === 'function') {
+                        window.__axisPaintSettingsProfileSwitcher(ctx);
+                    }
+                    renderSettingsProfileList(
+                        ctx.profiles || [],
+                        settingsEditingProfileId,
+                        ctx.incognitoProfile
+                    );
+                } else {
+                    updateSettingsProfileTrigger(
+                        ctx.profiles || [],
+                        settingsEditingProfileId,
+                        ctx.incognitoProfile
+                    );
+                    syncSettingsNavForProfile(settingsEditingProfileId);
                 }
-                renderSettingsProfileList(ctx.profiles || [], settingsEditingProfileId);
+                try {
+                    void window.electronAPI?.setSettingsEditingProfile?.(settingsEditingProfileId);
+                    void window.electronAPI?.setSettingsUiActive?.(true);
+                } catch (_) {}
             }
 
-            bootstrapSettingsEditingProfileSwitcher();
+            ensureSettingsEditingProfileContext();
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    try {
+                        void window.electronAPI?.setSettingsUiActive?.(true);
+                    } catch (_) {}
+                }
+            });
+            window.addEventListener('focus', () => {
+                try {
+                    void window.electronAPI?.setSettingsUiActive?.(true);
+                } catch (_) {}
+            });
 
             document.getElementById('settings-profile-trigger')?.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -140,41 +215,249 @@
                 if (e.key === 'Escape' && settingsProfileMenuOpen) closeSettingsProfileMenu();
             });
 
+            function t(key, vars) {
+                try {
+                    if (window.AxisI18n) return window.AxisI18n.t(key, vars);
+                } catch (_) {}
+                return key;
+            }
+
             const THEME_KEYS = ['themeColor', 'gradientColor', 'gradientEnabled', 'gradientDirection', 'transparentSites', 'siteThemeColor', 'windowChromeLight', 'uiTheme'];
             const SHORTCUT_ACTIONS = [
-                { action: 'spotlight-search', label: 'New Tab' },
-                { action: 'close-tab', label: 'Close Tab' },
-                { action: 'new-tab', label: 'New Window' },
-                { action: 'next-tab', label: 'Show Next Tab' },
-                { action: 'previous-tab', label: 'Show Previous Tab' },
-                { action: 'next-profile', label: 'Switch to Next Profile' },
-                { action: 'previous-profile', label: 'Switch to Previous Profile' },
-                { action: 'recover-tab', label: 'Undo' },
-                { action: 'refresh', label: 'Refresh' },
-                { action: 'focus-url', label: 'Focus URL Bar' },
-                { action: 'duplicate-tab', label: 'Duplicate Tab' },
-                { action: 'find', label: 'Find in Page' },
-                { action: 'select-all', label: 'Select All' },
-                { action: 'paste-match-style', label: 'Paste and Match Style' },
-                { action: 'print', label: 'Print Page' },
-                { action: 'copy-url', label: 'Copy URL' },
-                { action: 'copy-url-markdown', label: 'Copy URL as Markdown' },
-                { action: 'pin-tab', label: 'Pin Tab' },
-                { action: 'toggle-mute-tab', label: 'Mute / Unmute Tab' },
-                { action: 'zoom-in', label: 'Zoom In' },
-                { action: 'zoom-out', label: 'Zoom Out' },
-                { action: 'reset-zoom', label: 'Reset Zoom' },
-                { action: 'toggle-sidebar', label: 'Toggle Sidebar' },
-                { action: 'history', label: 'History' },
-                { action: 'downloads', label: 'Downloads' },
-                { action: 'toggle-chat', label: 'Open Chat' },
-                { action: 'settings', label: 'Settings' },
-                { action: 'clear-history', label: 'Clear History' },
+                { action: 'spotlight-search', labelKey: 'shortcut.newTab' },
+                { action: 'close-tab', labelKey: 'shortcut.closeTab' },
+                { action: 'new-tab', labelKey: 'shortcut.newWindow' },
+                { action: 'next-tab', labelKey: 'shortcut.nextTab' },
+                { action: 'previous-tab', labelKey: 'shortcut.prevTab' },
+                { action: 'next-profile', labelKey: 'shortcut.nextProfile' },
+                { action: 'previous-profile', labelKey: 'shortcut.prevProfile' },
+                { action: 'recover-tab', labelKey: 'shortcut.undo' },
+                { action: 'go-back', labelKey: 'shortcut.goBack' },
+                { action: 'go-forward', labelKey: 'shortcut.goForward' },
+                { action: 'refresh', labelKey: 'shortcut.refresh' },
+                { action: 'hard-reload', labelKey: 'shortcut.hardReload' },
+                { action: 'focus-url', labelKey: 'shortcut.focusUrl' },
+                { action: 'duplicate-tab', labelKey: 'shortcut.duplicateTab' },
+                { action: 'add-to-favorites', labelKey: 'shortcut.addFavorite' },
+                { action: 'find', labelKey: 'shortcut.find' },
+                { action: 'select-all', labelKey: 'shortcut.selectAll' },
+                { action: 'paste-match-style', labelKey: 'shortcut.pasteMatch' },
+                { action: 'print', labelKey: 'shortcut.print' },
+                { action: 'copy-url', labelKey: 'shortcut.copyUrl' },
+                { action: 'copy-url-markdown', labelKey: 'shortcut.copyMd' },
+                { action: 'pin-tab', labelKey: 'shortcut.pinUnpin' },
+                { action: 'toggle-mute-tab', labelKey: 'shortcut.muteUnmute' },
+                { action: 'zoom-in', labelKey: 'shortcut.zoomIn' },
+                { action: 'zoom-out', labelKey: 'shortcut.zoomOut' },
+                { action: 'reset-zoom', labelKey: 'shortcut.resetZoom' },
+                { action: 'toggle-sidebar', labelKey: 'shortcut.toggleSidebar' },
+                { action: 'history', labelKey: 'shortcut.openHistory' },
+                { action: 'downloads', labelKey: 'shortcut.openDownloads' },
+                { action: 'toggle-chat', labelKey: 'shortcut.openChat' },
+                { action: 'settings', labelKey: 'shortcut.openSettings' },
+                { action: 'clear-history', labelKey: 'shortcut.clearHistory' },
                 ...Array.from({ length: 9 }, (_, i) => ({
                     action: 'switch-tab-' + (i + 1),
-                    label: 'Switch to tab ' + (i + 1)
+                    labelKey: 'shortcut.switchTab',
+                    labelN: i + 1
                 }))
             ];
+            let settingsDynamicI18nReady = false;
+            let _settingsReadyAt = 0;
+            function applySettingsLanguage(code) {
+                const I = window.AxisI18n;
+                if (!I) return;
+                const next = I.sanitizeLocale(code || settings.uiLanguage) || I.detectSystemLocale() || 'en';
+                settings.uiLanguage = next;
+                I.setLocale(next);
+                I.applyToDom(document);
+                I.observeDom?.(document);
+                syncLanguageControls();
+                syncFontControls();
+                const langSel = document.getElementById('ui-language');
+                if (langSel) langSel.setAttribute('aria-label', t('settings.language.title'));
+                const uniSel = document.getElementById('universal-ui-language');
+                if (uniSel) {
+                    uniSel.setAttribute('aria-label', t('settings.language.universalPickerTitle'));
+                }
+                const fontSel = document.getElementById('ui-font');
+                if (fontSel) fontSel.setAttribute('aria-label', t('settings.font.title'));
+                const uniFontSel = document.getElementById('universal-ui-font');
+                if (uniFontSel) {
+                    uniFontSel.setAttribute('aria-label', t('settings.font.universalPickerTitle'));
+                }
+                try { renderShortcuts(); } catch (_) {}
+                try { renderAiProvidersList(); } catch (_) {}
+                try { renderNtpWidgetSettingsList(); } catch (_) {}
+                try { populateSpeechVoices(); } catch (_) {}
+                if (settingsDynamicI18nReady) {
+                    try { renderSitePermissionTable(); } catch (_) {}
+                    try { void loadExtensions(); } catch (_) {}
+                    try { void populateHistory(); } catch (_) {}
+                    // Never wipe an open view/edit panel (Touch ID focus refresh used to
+                    // re-render these lists and close the panel a moment after opening).
+                    const vaultUiBusy =
+                        !!vaultEditorMode ||
+                        (typeof vaultAuthInProgress === 'number' && vaultAuthInProgress > 0) ||
+                        !!document.querySelector(
+                            '.vault-table-row--open, .vault-row-detail:not(.hidden), #vault-editor:not(.hidden)'
+                        );
+                    if (!vaultUiBusy) {
+                        try { void renderVaultLogins(); } catch (_) {}
+                        try { void renderVaultCards(); } catch (_) {}
+                        try { void renderVaultAddresses(); } catch (_) {}
+                    }
+                }
+            }
+
+            function sanitizeUiFontId(raw) {
+                const F = window.AxisUiFonts;
+                if (F?.sanitizeId) return F.sanitizeId(raw);
+                const id = String(raw || '')
+                    .trim()
+                    .toLowerCase();
+                return id || 'default';
+            }
+
+            function applySettingsFont(code) {
+                const F = window.AxisUiFonts;
+                const next = sanitizeUiFontId(code || settings.uiFont);
+                settings.uiFont = next;
+                const stack = F?.getStack?.(next) || "'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+                settings.uiFontStack = stack;
+                try {
+                    if (F?.applyToDocument) {
+                        F.applyToDocument(document, next);
+                    } else {
+                        document.documentElement.style.setProperty('--axis-ui-font', stack);
+                        document.documentElement.setAttribute('data-ui-font', next);
+                    }
+                } catch (_) {}
+                syncFontControls();
+            }
+
+            function syncFontControls() {
+                const F = window.AxisUiFonts;
+                const uniOn = settings.universalBrowserFont === true;
+                const profileSel = document.getElementById('ui-font');
+                const universalSel = document.getElementById('universal-ui-font');
+                const uniToggle = document.getElementById('universal-browser-font');
+                const profileRow = profileSel?.closest?.('.axis-lang-row');
+                const universalRow = document.getElementById('universal-ui-font-row');
+                const tFn = (key) => {
+                    try {
+                        return window.AxisI18n?.t?.(key) || key;
+                    } catch (_) {
+                        return key;
+                    }
+                };
+
+                let profileFont = sanitizeUiFontId(settings.profileUiFont || '');
+                if (!settings.profileUiFont && !uniOn) {
+                    profileFont = sanitizeUiFontId(settings.uiFont || 'default');
+                }
+                if (!profileFont) profileFont = 'default';
+
+                const universalFont = sanitizeUiFontId(
+                    settings.universalUiFont ||
+                        (uniOn ? settings.uiFont : '') ||
+                        universalSel?.value ||
+                        profileFont ||
+                        'default'
+                );
+
+                if (uniToggle) uniToggle.checked = uniOn;
+                if (F?.fillSelect) {
+                    if (profileSel) F.fillSelect(profileSel, profileFont, tFn);
+                    if (universalSel) F.fillSelect(universalSel, universalFont, tFn);
+                } else {
+                    if (profileSel) profileSel.value = profileFont;
+                    if (universalSel) universalSel.value = universalFont;
+                }
+                if (profileSel) {
+                    profileSel.disabled = uniOn;
+                    profileRow?.classList.toggle('is-disabled', uniOn);
+                }
+                if (universalSel) {
+                    universalSel.disabled = !uniOn;
+                    universalRow?.classList.toggle('is-disabled', !uniOn);
+                }
+            }
+
+            function snapshotProfileUiFont() {
+                if (settings.profileUiFont) return sanitizeUiFontId(settings.profileUiFont);
+                const sel = document.getElementById('ui-font');
+                if (sel?.value) return sanitizeUiFontId(sel.value);
+                if (!settings.universalBrowserFont) {
+                    return sanitizeUiFontId(settings.uiFont || 'default');
+                }
+                return 'default';
+            }
+
+            function syncLanguageControls() {
+                const I = window.AxisI18n;
+                const uniOn = settings.universalBrowserLanguage === true;
+                const profileSel = document.getElementById('ui-language');
+                const universalSel = document.getElementById('universal-ui-language');
+                const uniToggle = document.getElementById('universal-browser-language');
+                const profileRow = profileSel?.closest?.('.axis-lang-row');
+                const universalRow = document.getElementById('universal-ui-language-row');
+
+                // Prefer an explicit profile snapshot. Never fall back to the effective
+                // (universal) uiLanguage while Universal is on - that is what made
+                // disable rewrite the profile picker.
+                let profileLang =
+                    I?.sanitizeLocale?.(settings.profileUiLanguage) ||
+                    '';
+                if (!profileLang && profileSel && !profileSel._axisI18nFilling) {
+                    profileLang = I?.sanitizeLocale?.(profileSel.value) || '';
+                }
+                if (!profileLang && !uniOn) {
+                    profileLang = I?.sanitizeLocale?.(settings.uiLanguage) || 'en';
+                }
+                if (!profileLang) profileLang = 'en';
+
+                const universalLang =
+                    I?.sanitizeLocale?.(
+                        settings.universalUiLanguage ||
+                            (uniOn ? settings.uiLanguage : '') ||
+                            settings.universalUiLanguage
+                    ) ||
+                    I?.sanitizeLocale?.(universalSel?.value) ||
+                    profileLang ||
+                    'en';
+
+                if (uniToggle) uniToggle.checked = uniOn;
+
+                if (I && profileSel) {
+                    I.fillSelect(profileSel, profileLang);
+                }
+                if (I && universalSel) {
+                    I.fillSelect(universalSel, universalLang);
+                }
+                if (profileSel) {
+                    profileSel.disabled = uniOn;
+                    profileRow?.classList.toggle('is-disabled', uniOn);
+                }
+                if (universalSel) {
+                    universalSel.disabled = !uniOn;
+                    universalRow?.classList.toggle('is-disabled', !uniOn);
+                }
+            }
+
+            function snapshotProfileUiLanguage() {
+                const I = window.AxisI18n;
+                const fromSettings = I?.sanitizeLocale?.(settings.profileUiLanguage) || '';
+                if (fromSettings) return fromSettings;
+                const sel = document.getElementById('ui-language');
+                const fromSel = I?.sanitizeLocale?.(sel?.value) || '';
+                if (fromSel) return fromSel;
+                // Only use uiLanguage when Universal is off (it is the profile language).
+                if (!settings.universalBrowserLanguage) {
+                    return I?.sanitizeLocale?.(settings.uiLanguage) || 'en';
+                }
+                return 'en';
+            }
             
             const VAULT_EYE_SVG =
                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -191,10 +474,10 @@
                 const diffMins = Math.floor(diffMs / 60000);
                 const diffHours = Math.floor(diffMs / 3600000);
                 const diffDays = Math.floor(diffMs / 86400000);
-                if (diffMins < 1) return 'Just now';
-                if (diffMins < 60) return diffMins + 'm ago';
-                if (diffHours < 24) return diffHours + 'h ago';
-                if (diffDays < 7) return diffDays + 'd ago';
+                if (diffMins < 1) return t('common.justNow');
+                if (diffMins < 60) return t('common.minutesAgo', { n: diffMins });
+                if (diffHours < 24) return t('common.hoursAgo', { n: diffHours });
+                if (diffDays < 7) return t('common.daysAgo', { n: diffDays });
                 return time.toLocaleDateString();
             }
             
@@ -205,7 +488,7 @@
             
             async function saveSetting(key, value, _notifyTheme) {
                 if (typeof window.electronAPI === 'undefined') return;
-                // setSetting persists and broadcasts settings-updated with the new value —
+                // setSetting persists and broadcasts settings-updated with the new value -
                 // no second notify (that forced a slower full reload).
                 await window.electronAPI.setSetting(key, value);
                 settings[key] = value;
@@ -216,12 +499,19 @@
             let shortcutDefaults = {};
             let shortcutOverrides = {};
             try {
-                settings = await window.electronAPI.getSettings() || {};
-                shortcutDefaults = await window.electronAPI.getDefaultShortcuts() || {};
-                shortcutOverrides = await window.electronAPI.getShortcutOverrides() || {};
+                const [loadedSettings, loadedDefaults, loadedOverrides] = await Promise.all([
+                    window.electronAPI.getSettings(),
+                    window.electronAPI.getDefaultShortcuts(),
+                    window.electronAPI.getShortcutOverrides()
+                ]);
+                settings = loadedSettings || {};
+                shortcutDefaults = loadedDefaults || {};
+                shortcutOverrides = loadedOverrides || {};
             } catch (e) { console.error(e); }
             
             // Populate form
+            applySettingsLanguage(settings.uiLanguage);
+            applySettingsFont(settings.uiFont);
             document.getElementById('ui-theme').value =
                 settings.uiTheme === 'light' || settings.uiTheme === 'system' ? settings.uiTheme : 'dark';
             async function resolveEffectiveUiTheme() {
@@ -236,6 +526,14 @@
                 }
                 return 'dark';
             }
+            function applyBootstrapLightTint() {
+                const boot = window.electronAPI?.getSettingsWindowBootstrap?.();
+                let isLight = boot?.effectiveUiTheme === 'light';
+                if (settings.uiTheme === 'light') isLight = true;
+                else if (settings.uiTheme === 'dark') isLight = false;
+                document.documentElement.classList.toggle('settings-light-tint', isLight);
+                syncNativeWindowChromeTransparency();
+            }
             async function syncSettingsLightTint() {
                 const isLight = (await resolveEffectiveUiTheme()) === 'light';
                 document.documentElement.classList.toggle('settings-light-tint', isLight);
@@ -247,11 +545,13 @@
                 const isLight = document.documentElement.classList.contains('settings-light-tint');
                 axisApplyNativeWindowChromeTransparency(raw, isLight);
             }
-            syncSettingsLightTint();
+            applyBootstrapLightTint();
             window.electronAPI?.onSystemUiThemeChanged?.(() => {
                 if (settings?.uiTheme === 'system') void syncSettingsLightTint();
             });
             document.getElementById('sidebar-position').value = settings.sidebarPosition || 'left';
+            syncLanguageControls();
+            syncFontControls();
             function normalizeSidebarZoom(raw) {
                 const n = Number(raw);
                 const v = Number.isFinite(n) ? n : 100;
@@ -313,14 +613,14 @@
                 sel.innerHTML = '';
                 const defOpt = document.createElement('option');
                 defOpt.value = '';
-                defOpt.textContent = 'Default';
+                defOpt.textContent = t('common.default');
                 sel.appendChild(defOpt);
                 voices.forEach((v) => {
                     const opt = document.createElement('option');
                     opt.value = v.voiceURI;
-                    const tag = v.lang ? ' — ' + v.lang : '';
-                    const remote = v.localService === false ? ' (cloud)' : '';
-                    opt.textContent = (v.name || 'Voice') + tag + remote;
+                    const tag = v.lang ? ' - ' + v.lang : '';
+                    const remote = v.localService === false ? t('settings.speech.cloud') : '';
+                    opt.textContent = (v.name || t('settings.speech.voice')) + tag + remote;
                     sel.appendChild(opt);
                 });
                 const candidates = [wasUserPick, speechVoicePersist, settings.speechVoiceURI || ''].filter(Boolean);
@@ -432,8 +732,8 @@
             function resetAiProviderForm({ closeForm = true } = {}) {
                 aiProviderEditingId = null;
                 aiKeyAddBlock?.classList.remove('is-editing');
-                if (aiKeyFormTitle) aiKeyFormTitle.textContent = 'Add API key';
-                if (aiProviderAddBtn) aiProviderAddBtn.textContent = 'Save key';
+                if (aiKeyFormTitle) aiKeyFormTitle.textContent = t('settings.aiKey.title');
+                if (aiProviderAddBtn) aiProviderAddBtn.textContent = t('settings.aiSaveKey');
                 aiProviderCancelBtn?.classList.add('hidden');
                 if (aiProviderType) aiProviderType.value = 'groq';
                 if (aiProviderLabel) aiProviderLabel.value = '';
@@ -455,17 +755,17 @@
 
             async function startEditAiProvider(entry) {
                 if (!entry) return;
-                aiProvidersToastMsg('Waiting for authentication…');
+                aiProvidersToastMsg(t('settings.ai.waitingAuth'));
                 try {
-                    const ok = await window.electronAPI.vaultVerifyDevice('Edit API key');
+                    const ok = await window.electronAPI.vaultVerifyDevice(t('settings.ai.editKey'));
                     if (!ok) {
-                        aiProvidersToastMsg('Authentication cancelled', true);
+                        aiProvidersToastMsg(t('settings.ai.authCancelled'), true);
                         return;
                     }
                     aiProviderEditingId = entry.id;
                     aiKeyAddBlock?.classList.add('is-editing');
-                    if (aiKeyFormTitle) aiKeyFormTitle.textContent = 'Edit API key';
-                    if (aiProviderAddBtn) aiProviderAddBtn.textContent = 'Save changes';
+                    if (aiKeyFormTitle) aiKeyFormTitle.textContent = t('settings.ai.editKey');
+                    if (aiProviderAddBtn) aiProviderAddBtn.textContent = t('settings.ai.saveChanges');
                     aiProviderCancelBtn?.classList.remove('hidden');
                     setAiProviderFormOpen(true);
                     if (aiProviderType) aiProviderType.value = entry.provider || 'groq';
@@ -478,7 +778,7 @@
                     aiKeyAddBlock?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                     aiProviderKey?.focus();
                 } catch (e) {
-                    aiProvidersToastMsg(e?.message || 'Could not verify identity', true);
+                    aiProvidersToastMsg(e?.message || t('settings.ai.verifyFail'), true);
                 }
             }
 
@@ -495,18 +795,18 @@
                     renderAiProvidersList();
                     return;
                 }
-                aiProvidersToastMsg('Waiting for authentication…');
+                aiProvidersToastMsg(t('settings.ai.waitingAuth'));
                 try {
-                    const ok = await window.electronAPI.vaultVerifyDevice('Show API key');
+                    const ok = await window.electronAPI.vaultVerifyDevice(t('settings.ai.showKey'));
                     if (!ok) {
-                        aiProvidersToastMsg('Authentication cancelled', true);
+                        aiProvidersToastMsg(t('settings.ai.authCancelled'), true);
                         return;
                     }
                     aiProviderRevealState.set(entry.id, { revealed: true });
                     aiProvidersToastMsg('');
                     renderAiProvidersList();
                 } catch (e) {
-                    aiProvidersToastMsg(e?.message || 'Could not verify identity', true);
+                    aiProvidersToastMsg(e?.message || t('settings.ai.verifyFail'), true);
                 }
             }
 
@@ -542,7 +842,7 @@
                     if (isActive) {
                         const status = document.createElement('div');
                         status.className = 'row-desc ai-key-active-status';
-                        status.textContent = 'Active';
+                        status.textContent = t('settings.ai.active');
                         labelWrap.appendChild(status);
                     }
 
@@ -553,7 +853,7 @@
                         const useBtn = document.createElement('button');
                         useBtn.type = 'button';
                         useBtn.className = 'secondary';
-                        useBtn.textContent = 'Use';
+                        useBtn.textContent = t('common.use');
                         useBtn.addEventListener('click', async () => {
                             settings.activeAiProviderId = entry.id;
                             await persistAiProviders();
@@ -566,7 +866,7 @@
                         const editBtn = document.createElement('button');
                         editBtn.type = 'button';
                         editBtn.className = 'secondary';
-                        editBtn.textContent = 'Edit';
+                        editBtn.textContent = t('common.edit');
                         editBtn.addEventListener('click', () => void startEditAiProvider(entry));
                         actions.appendChild(editBtn);
                     }
@@ -574,7 +874,7 @@
                     const removeBtn = document.createElement('button');
                     removeBtn.type = 'button';
                     removeBtn.className = 'destructive';
-                    removeBtn.textContent = 'Remove';
+                    removeBtn.textContent = t('common.remove');
                     removeBtn.addEventListener('click', async () => {
                         settings.aiProviders = (settings.aiProviders || []).filter((p) => p.id !== entry.id);
                         if (settings.activeAiProviderId === entry.id) {
@@ -612,8 +912,8 @@
                     const eyeBtn = document.createElement('button');
                     eyeBtn.type = 'button';
                     eyeBtn.className = 'vault-icon-btn';
-                    eyeBtn.title = isRevealed ? 'Hide key' : 'Show key';
-                    eyeBtn.setAttribute('aria-label', isRevealed ? 'Hide key' : 'Show key');
+                    eyeBtn.title = isRevealed ? t('settings.ai.hideKey') : t('settings.ai.showKey');
+                    eyeBtn.setAttribute('aria-label', isRevealed ? t('settings.ai.hideKey') : t('settings.ai.showKey'));
                     eyeBtn.setAttribute('aria-pressed', isRevealed ? 'true' : 'false');
                     mountVaultEyeButton(eyeBtn);
                     eyeBtn.addEventListener('click', () => void revealProviderKey(entry));
@@ -632,7 +932,7 @@
                 const apiKey = String(aiProviderKey?.value || '').trim();
                 const label = String(aiProviderLabel?.value || '').trim();
                 if (!apiKey) {
-                    aiProvidersToastMsg('Paste an API key first', true);
+                    aiProvidersToastMsg(t('settings.ai.pasteKeyFirst'), true);
                     return;
                 }
 
@@ -652,7 +952,7 @@
                         model: existing?.model || ''
                     });
                     if (!entry) {
-                        aiProvidersToastMsg('Could not save those changes', true);
+                        aiProvidersToastMsg(t('settings.ai.saveChangesFail'), true);
                         return;
                     }
                     settings.aiProviders[idx] = entry;
@@ -670,7 +970,7 @@
                     apiKey
                 });
                 if (!entry) {
-                    aiProvidersToastMsg('Could not save that key', true);
+                    aiProvidersToastMsg(t('settings.ai.saveKeyFail'), true);
                     return;
                 }
                 if (!Array.isArray(settings.aiProviders)) settings.aiProviders = [];
@@ -699,9 +999,9 @@
             const wclLabel = document.getElementById('window-chrome-light-label');
             wclInput.value = String(wclVal);
             function formatWindowChromeLightLabel(v) {
-                if (v === 50) return '50 — default';
-                if (v === 0) return '0 — opaque';
-                if (v === 100) return '100 — most light';
+                if (v === 50) return '50 - default';
+                if (v === 0) return '0 - opaque';
+                if (v === 100) return '100 - most light';
                 return String(v);
             }
             wclLabel.textContent = formatWindowChromeLightLabel(wclVal);
@@ -792,10 +1092,10 @@
                             card(
                                 title,
                                 field(
-                                    'Time format',
-                                    `<select data-ntp-field="hour12" data-widget-id="${w.id}">
-      <option value="true"${hour12 ? ' selected' : ''}>12-hour</option>
-      <option value="false"${!hour12 ? ' selected' : ''}>24-hour</option>
+                                t('ntp.widget.timeFormat'),
+                                `<select data-ntp-field="hour12" data-widget-id="${w.id}">
+      <option value="true"${hour12 ? ' selected' : ''}>${esc(t('ntp.widget.hour12'))}</option>
+      <option value="false"${!hour12 ? ' selected' : ''}>${esc(t('ntp.widget.hour24'))}</option>
     </select>`
                                 )
                             )
@@ -805,16 +1105,65 @@
 
                     if (type === 'calendar') {
                         const weekStartsOn = Number(w.config?.weekStartsOn) === 1 ? 1 : 0;
+                        const calendarSystem = api?.normalizeCalendarSystem
+                            ? api.normalizeCalendarSystem(w.config?.calendarSystem)
+                            : w.config?.calendarSystem || 'gregory';
+                        const viewMode = api?.normalizeCalendarViewMode
+                            ? api.normalizeCalendarViewMode(w.config?.viewMode)
+                            : w.config?.viewMode || 'auto';
+                        const calLabel = (id, fallback) => {
+                            const keyMap = {
+                                gregory: 'ntp.widget.gregorian',
+                                'islamic-umalqura': 'ntp.widget.islamic',
+                                hebrew: 'ntp.widget.hebrew',
+                                persian: 'ntp.widget.persian',
+                                chinese: 'ntp.widget.chinese'
+                            };
+                            return keyMap[id] ? t(keyMap[id]) : fallback;
+                        };
+                        const systems = Array.isArray(api?.calendarSystems)
+                            ? api.calendarSystems.map((s) => ({
+                                  ...s,
+                                  label: calLabel(s.id, s.label)
+                              }))
+                            : [
+                                  { id: 'gregory', label: t('ntp.widget.gregorian') },
+                                  { id: 'islamic-umalqura', label: t('ntp.widget.islamic') },
+                                  { id: 'hebrew', label: t('ntp.widget.hebrew') },
+                                  { id: 'persian', label: t('ntp.widget.persian') },
+                                  { id: 'chinese', label: t('ntp.widget.chinese') }
+                              ];
+                        const systemOpts = systems
+                            .map(
+                                (s) =>
+                                    `<option value="${esc(s.id)}"${s.id === calendarSystem ? ' selected' : ''}>${esc(s.label)}</option>`
+                            )
+                            .join('');
                         cards.push(
                             card(
                                 title,
                                 field(
-                                    'Week starts on',
-                                    `<select data-ntp-field="weekStartsOn" data-widget-id="${w.id}">
-      <option value="0"${weekStartsOn === 0 ? ' selected' : ''}>Sunday</option>
-      <option value="1"${weekStartsOn === 1 ? ' selected' : ''}>Monday</option>
+                                    t('ntp.widget.calendarType'),
+                                    `<select data-ntp-field="calendarSystem" data-widget-id="${w.id}">
+      ${systemOpts}
     </select>`
-                                )
+                                ) +
+                                    field(
+                                        t('ntp.widget.layout'),
+                                        `<select data-ntp-field="viewMode" data-widget-id="${w.id}">
+      <option value="auto"${viewMode === 'auto' ? ' selected' : ''}>${esc(t('ntp.widget.auto'))}</option>
+      <option value="day"${viewMode === 'day' ? ' selected' : ''}>${esc(t('ntp.widget.day'))}</option>
+      <option value="week"${viewMode === 'week' ? ' selected' : ''}>${esc(t('ntp.widget.week'))}</option>
+      <option value="month"${viewMode === 'month' ? ' selected' : ''}>${esc(t('ntp.widget.month'))}</option>
+    </select>`
+                                    ) +
+                                    field(
+                                        t('ntp.widget.weekStarts'),
+                                        `<select data-ntp-field="weekStartsOn" data-widget-id="${w.id}">
+      <option value="0"${weekStartsOn === 0 ? ' selected' : ''}>${esc(t('ntp.widget.sunday'))}</option>
+      <option value="1"${weekStartsOn === 1 ? ' selected' : ''}>${esc(t('ntp.widget.monday'))}</option>
+    </select>`
+                                    )
                             )
                         );
                         continue;
@@ -850,19 +1199,19 @@
                             : '';
                         const empty = norm.length
                             ? ''
-                            : '<div class="ntp-ticker-empty">No tickers yet — search below</div>';
+                            : '<div class="ntp-ticker-empty">No tickers yet - search below</div>';
                         cards.push(
                             card(
                                 title,
                                 `<div class="ntp-widget-settings-field ntp-ticker-picker" data-widget-id="${w.id}">
-  <div class="ntp-widget-settings-field-label">Tickers</div>
+  <div class="ntp-widget-settings-field-label">${esc(t('ntp.widget.tickers'))}</div>
   ${empty}
   <ul class="ntp-ticker-list" data-ntp-ticker-list data-widget-id="${w.id}">${rows}</ul>
   <div class="ntp-ticker-search-wrap">
-    <input type="text" class="ntp-weather-city-search" data-ntp-ticker-search data-widget-id="${w.id}" placeholder="Search stocks or crypto…" spellcheck="false" maxlength="40" autocomplete="off">
+    <input type="text" class="ntp-weather-city-search" data-ntp-ticker-search data-widget-id="${w.id}" placeholder="${escapeHtml(t('ntp.widget.searchTickers'))}" spellcheck="false" maxlength="40" autocomplete="off">
     <div class="ntp-ticker-results hidden" data-ntp-ticker-results role="listbox"></div>
   </div>
-  <div class="ntp-widget-settings-field-hint">Search and pick up to 8 tickers. Use ↑ ↓ to reorder. Quotes update live on New Tab.</div>
+  <div class="ntp-widget-settings-field-hint">${esc(t('ntp.widget.tickersHint'))}</div>
 </div>`
                             )
                         );
@@ -874,20 +1223,20 @@
                         const selectedLabel = esc(
                             w.config?.placeLabel ||
                                 w.config?.city ||
-                                'None — search and pick a city below'
+                                'None - search and pick a city below'
                         );
                         const fieldsHtml =
                             field(
-                                'Time format',
+                                t('ntp.widget.timeFormat'),
                                 `<select data-ntp-field="hour12" data-widget-id="${w.id}">
-      <option value="true"${hour12 ? ' selected' : ''}>12-hour</option>
-      <option value="false"${!hour12 ? ' selected' : ''}>24-hour</option>
+      <option value="true"${hour12 ? ' selected' : ''}>${esc(t('ntp.widget.hour12'))}</option>
+      <option value="false"${!hour12 ? ' selected' : ''}>${esc(t('ntp.widget.hour24'))}</option>
     </select>`
                             ) +
                             `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${w.id}">
-  <div class="ntp-widget-settings-field-label">City</div>
+  <div class="ntp-widget-settings-field-label">${esc(t('ntp.widget.city'))}</div>
   <div class="ntp-weather-city-selected" data-ntp-city-selected>${selectedLabel}</div>
-  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="Search cities worldwide…" spellcheck="false" maxlength="80" autocomplete="off">
+  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="${escapeHtml(t('ntp.widget.searchCities'))}" spellcheck="false" maxlength="80" autocomplete="off">
   <div class="ntp-weather-city-results hidden" data-ntp-city-results role="listbox"></div>
   <div class="ntp-widget-settings-field-hint">Type at least 2 letters, then choose a city. Time zone is set automatically.</div>
 </div>`;
@@ -900,7 +1249,7 @@
                         const selectedLabel = esc(
                             w.config?.placeLabel ||
                                 w.config?.city ||
-                                'None — search and pick a city below'
+                                'None - search and pick a city below'
                         );
                         const fieldsHtml =
                             field(
@@ -911,9 +1260,9 @@
     </select>`
                             ) +
                             `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${w.id}">
-  <div class="ntp-widget-settings-field-label">City</div>
+  <div class="ntp-widget-settings-field-label">${esc(t('ntp.widget.city'))}</div>
   <div class="ntp-weather-city-selected" data-ntp-city-selected>${selectedLabel}</div>
-  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="Search cities worldwide…" spellcheck="false" maxlength="80" autocomplete="off">
+  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="${escapeHtml(t('ntp.widget.searchCities'))}" spellcheck="false" maxlength="80" autocomplete="off">
   <div class="ntp-weather-city-results hidden" data-ntp-city-results role="listbox"></div>
   <div class="ntp-widget-settings-field-hint">Type at least 2 letters, then choose a city. Air quality updates automatically.</div>
 </div>`;
@@ -923,20 +1272,20 @@
 
                     const unit = String(w.config?.unit || 'C').toUpperCase() === 'F' ? 'F' : 'C';
                     const selectedLabel = esc(
-                        w.config?.placeLabel || w.config?.city || 'None — search and pick a city below'
+                        w.config?.placeLabel || w.config?.city || 'None - search and pick a city below'
                     );
                     const fieldsHtml =
                         field(
-                            'Temperature unit',
+                            t('ntp.widget.tempUnit'),
                             `<select data-ntp-field="unit" data-widget-id="${w.id}">
       <option value="C"${unit === 'C' ? ' selected' : ''}>°C</option>
       <option value="F"${unit === 'F' ? ' selected' : ''}>°F</option>
     </select>`
                         ) +
                         `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${w.id}">
-  <div class="ntp-widget-settings-field-label">City</div>
+  <div class="ntp-widget-settings-field-label">${esc(t('ntp.widget.city'))}</div>
   <div class="ntp-weather-city-selected" data-ntp-city-selected>${selectedLabel}</div>
-  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="Search cities worldwide…" spellcheck="false" maxlength="80" autocomplete="off">
+  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="${escapeHtml(t('ntp.widget.searchCities'))}" spellcheck="false" maxlength="80" autocomplete="off">
   <div class="ntp-weather-city-results hidden" data-ntp-city-results role="listbox"></div>
   <div class="ntp-widget-settings-field-hint">Type at least 2 letters, then choose a city from the list. Weather updates automatically.</div>
 </div>`;
@@ -945,7 +1294,7 @@
 
                 list.innerHTML =
                     cards.join('') ||
-                    '<div class="ntp-widgets-settings-empty">No configurable widgets yet. Turn widgets on, then add tiles on a New Tab (<strong>Edit</strong>, or right-click the widgets area) — configure cities, symbols, and options here.</div>';
+                    '<div class="ntp-widgets-settings-empty">' + escapeHtml(t('ntp.widget.settingsEmpty')) + '</div>';
             }
 
             function syncNtpWidgetSettingsFields() {
@@ -1064,10 +1413,12 @@
             updateThemePreview();
 
             async function applyLoadedSettingsToForm() {
+                applySettingsLanguage(settings.uiLanguage);
                 document.getElementById('ui-theme').value =
                     settings.uiTheme === 'light' || settings.uiTheme === 'system' ? settings.uiTheme : 'dark';
                 await syncSettingsLightTint();
                 document.getElementById('sidebar-position').value = settings.sidebarPosition || 'left';
+                syncLanguageControls();
                 syncSidebarZoomControl(settings.sidebarZoom);
                 document.getElementById('search-engine').value = settings.searchEngine || 'google';
                 document.getElementById('always-show-full-url').checked = !!settings.alwaysShowFullUrl;
@@ -1135,7 +1486,101 @@
                 syncNtpSettingsNestedState();
                 syncGradientRowsVisibility();
                 updateThemePreview();
+                const incSearch = document.getElementById('incognito-search-engine');
+                if (incSearch) incSearch.value = settings.searchEngine || 'google';
+                const incHttps = document.getElementById('incognito-https-only-mode');
+                if (incHttps) incHttps.checked = !!settings.httpsOnlyMode;
+                const incLink = document.getElementById('incognito-link-preview');
+                if (incLink) incLink.checked = settings.linkPreview !== false;
+                const incAdblock = document.getElementById('incognito-ad-blocker-enabled');
+                if (incAdblock) incAdblock.checked = settings.adBlockerEnabled !== false;
+                const incJs = document.getElementById('incognito-javascript-enabled');
+                if (incJs) incJs.checked = settings.javascriptEnabled !== false;
+                syncIncognitoAiSettingsUi();
             }
+
+            function incognitoAiToast(message, isError) {
+                const el = document.getElementById('incognito-ai-toast');
+                if (!el) return;
+                el.textContent = message || '';
+                el.classList.toggle('error', !!isError);
+            }
+
+            function populateIncognitoAiProviderTypes() {
+                const sel = document.getElementById('incognito-ai-provider-type');
+                if (!sel || !window.AxisAiProviders?.listProviderDefs) return;
+                sel.innerHTML = '';
+                for (const def of AxisAiProviders.listProviderDefs()) {
+                    const opt = document.createElement('option');
+                    opt.value = def.id;
+                    opt.textContent = def.name || def.id;
+                    sel.appendChild(opt);
+                }
+            }
+            populateIncognitoAiProviderTypes();
+
+            async function persistIncognitoAiProviders() {
+                await saveSetting('aiProviders', settings.aiProviders || [], false);
+                await saveSetting('activeAiProviderId', settings.activeAiProviderId || null, false);
+            }
+
+            function renderIncognitoAiProvidersList() {
+                const listEl = document.getElementById('incognito-ai-providers-list');
+                const emptyEl = document.getElementById('incognito-ai-providers-empty');
+                const activeSel = document.getElementById('incognito-active-ai-provider');
+                if (!listEl) return;
+                const list = Array.isArray(settings.aiProviders) ? settings.aiProviders : [];
+                listEl.innerHTML = '';
+                emptyEl?.classList.toggle('hidden', list.length > 0);
+                if (activeSel) {
+                    activeSel.innerHTML = list.length
+                        ? ''
+                        : '<option value="">Add a key below</option>';
+                    list.forEach((entry) => {
+                        const opt = document.createElement('option');
+                        opt.value = entry.id;
+                        opt.textContent = AxisAiProviders.displayName(entry);
+                        activeSel.appendChild(opt);
+                    });
+                    activeSel.value =
+                        settings.activeAiProviderId || list[0]?.id || '';
+                    activeSel.disabled = !list.length;
+                }
+                list.forEach((entry) => {
+                    const row = document.createElement('div');
+                    row.className = 'ai-key-entry' + (entry.id === settings.activeAiProviderId ? ' is-active' : '');
+                    const title = document.createElement('div');
+                    title.className = 'row-title';
+                    title.textContent = AxisAiProviders.displayName(entry);
+                    const actions = document.createElement('div');
+                    actions.className = 'ai-key-entry-actions';
+                    const removeBtn = document.createElement('button');
+                    removeBtn.type = 'button';
+                    removeBtn.className = 'destructive';
+                    removeBtn.textContent = t('common.remove');
+                    removeBtn.addEventListener('click', async () => {
+                        settings.aiProviders = list.filter((p) => p.id !== entry.id);
+                        if (settings.activeAiProviderId === entry.id) {
+                            settings.activeAiProviderId = settings.aiProviders[0]?.id || null;
+                        }
+                        await persistIncognitoAiProviders();
+                        renderIncognitoAiProvidersList();
+                    });
+                    actions.appendChild(removeBtn);
+                    row.appendChild(title);
+                    row.appendChild(actions);
+                    listEl.appendChild(row);
+                });
+            }
+
+            function syncIncognitoAiSettingsUi() {
+                const on = settings.aiFeaturesEnabled === true;
+                const toggle = document.getElementById('incognito-ai-features-enabled');
+                if (toggle) toggle.checked = on;
+                document.getElementById('incognito-ai-details')?.classList.toggle('hidden', !on);
+                renderIncognitoAiProvidersList();
+            }
+            window.__axisSyncIncognitoAiSettingsUi = syncIncognitoAiSettingsUi;
             window.__axisApplyLoadedSettingsToForm = applyLoadedSettingsToForm;
             
             // Sidebar nav
@@ -1178,8 +1623,18 @@
                 item.addEventListener('click', () => switchSection(item.dataset.section));
             });
             const hash = (location.hash || '').replace(/^#/, '');
-            if (hash) switchSection(hash);
-            window.electronAPI?.onSwitchSettingsTab?.((tab) => switchSection(tab));
+            if (settingsEditingProfileId === 'incognito') {
+                switchSection(isSettingsSectionAllowed(hash) ? hash : 'customization');
+            } else if (hash) {
+                switchSection(hash);
+            }
+            window.electronAPI?.onSwitchSettingsTab?.((tab) => {
+                if (settingsEditingProfileId === 'incognito' && tab && !isSettingsSectionAllowed(tab)) {
+                    switchSection('customization');
+                    return;
+                }
+                switchSection(tab);
+            });
 
             const SITE_PERM_KEYS = [
                 'camera',
@@ -1264,9 +1719,9 @@
             function permSelectHtml(current) {
                 const v = current === 'allow' || current === 'deny' ? current : '';
                 return (
-                    '<option value=""' + (v === '' ? ' selected' : '') + '>Default</option>' +
-                    '<option value="allow"' + (v === 'allow' ? ' selected' : '') + '>Allow</option>' +
-                    '<option value="deny"' + (v === 'deny' ? ' selected' : '') + '>Block</option>'
+                    '<option value=""' + (v === '' ? ' selected' : '') + '>' + escapeHtml(t('common.default')) + '</option>' +
+                    '<option value="allow"' + (v === 'allow' ? ' selected' : '') + '>' + escapeHtml(t('common.allow')) + '</option>' +
+                    '<option value="deny"' + (v === 'deny' ? ' selected' : '') + '>' + escapeHtml(t('common.block')) + '</option>'
                 );
             }
             function formatPermOriginLabel(origin) {
@@ -1302,7 +1757,7 @@
                 if (origins.length === 0) {
                     const empty = document.createElement('div');
                     empty.className = 'perm-empty';
-                    empty.textContent = 'No sites yet. Add a site above to set overrides.';
+                    empty.textContent = t('settings.permissions.empty');
                     container.appendChild(empty);
                     return;
                 }
@@ -1330,7 +1785,7 @@
                     const removeBtn = document.createElement('button');
                     removeBtn.type = 'button';
                     removeBtn.className = 'perm-card-remove destructive';
-                    removeBtn.textContent = 'Remove';
+                    removeBtn.textContent = t('common.remove');
                     removeBtn.addEventListener('click', () => {
                         delete sitePermissionOverrides[origin];
                         persistSitePermissionOverrides();
@@ -1378,7 +1833,7 @@
                 if (errEl) errEl.textContent = '';
                 const o = normalizeSiteOriginInput(input && input.value);
                 if (!o) {
-                    if (errEl) errEl.textContent = 'Enter a valid URL or domain.';
+                    if (errEl) errEl.textContent = t('settings.permissions.invalidUrl');
                     return;
                 }
                 if (!sitePermissionOverrides[o]) sitePermissionOverrides[o] = {};
@@ -1399,7 +1854,7 @@
                 const container = document.getElementById('extensions-list');
                 if (!container) return;
                 if (extensionsCache.length === 0) {
-                    container.innerHTML = '<div class="extensions-empty">No extensions installed. Use Install from store, .crx, or an unpacked folder.</div>';
+                    container.innerHTML = '<div class="extensions-empty">' + escapeHtml(t('settings.extensions.empty')) + '</div>';
                     applySettingsSearch(document.getElementById('settings-search')?.value || '');
                     return;
                 }
@@ -1421,7 +1876,7 @@
                                 <div class="extension-title-row">
                                     <div class="extension-title">${name}</div>
                                     <div class="extension-version">${escapeHtml(ext.version || '')}</div>
-                                    <div class="extension-status">${ext.loaded ? 'Loaded' : (ext.enabled ? 'Needs reload' : 'Off')}</div>
+                                    <div class="extension-status">${ext.loaded ? escapeHtml(t('ext.loaded')) : (ext.enabled ? escapeHtml(t('ext.needsReload')) : escapeHtml(t('ext.off')))}</div>
                                 </div>
                                 ${desc}
                                 ${err}
@@ -1460,7 +1915,7 @@
                 container.querySelectorAll('[data-extension-remove]').forEach((btn) => {
                     btn.addEventListener('click', async () => {
                         const ext = extensionsCache.find((x) => x.id === btn.getAttribute('data-extension-remove'));
-                        if (!confirm(`Remove ${ext?.name || 'this extension'}?`)) return;
+                        if (!confirm(t('note.removeExtensionNamed', { name: ext?.name || t('note.thisExtension') }))) return;
                         renderExtensions(await window.electronAPI.removeExtension(btn.getAttribute('data-extension-remove')));
                     });
                 });
@@ -1471,7 +1926,7 @@
                     renderExtensions(await window.electronAPI.getExtensions());
                 } catch (e) {
                     const container = document.getElementById('extensions-list');
-                    if (container) container.innerHTML = '<div class="extensions-empty">Could not load extensions.</div>';
+                    if (container) container.innerHTML = '<div class="extensions-empty">' + escapeHtml(t('settings.extensions.loadFail')) + '</div>';
                 }
             }
             document.getElementById('install-extension')?.addEventListener('click', async () => {
@@ -1583,8 +2038,33 @@
                     const editingWidgetField = !!document.activeElement?.closest?.(
                         '#ntp-widgets-active-list'
                     );
+                    // Prefer an in-flight language pick over a stale getSettings race.
+                    // Never let a pending Universal pick rewrite the profile language
+                    // after Universal is turned off.
+                    const pendingLang = window.__axisPendingUiLanguage;
+                    const pendingUniversal = window.__axisPendingUniversalUiLanguage;
+                    if (s.universalBrowserLanguage === true) {
+                        if (pendingUniversal) {
+                            s.uiLanguage = pendingUniversal;
+                            s.universalUiLanguage = pendingUniversal;
+                        } else if (pendingLang && s.universalUiLanguage === pendingLang) {
+                            s.uiLanguage = pendingLang;
+                        }
+                    } else if (pendingLang && !pendingUniversal) {
+                        s.uiLanguage = pendingLang;
+                        s.profileUiLanguage = pendingLang;
+                    }
+                    // Keep any local profile snapshot if the store row is empty.
+                    if (!s.profileUiLanguage && settings.profileUiLanguage) {
+                        s.profileUiLanguage = settings.profileUiLanguage;
+                    }
+                    if (!s.profileUiFont && settings.profileUiFont) {
+                        s.profileUiFont = settings.profileUiFont;
+                    }
                     settings = s;
                     settings.sidebarPosition = readLiveSidebarPosition(s.sidebarPosition);
+                    applySettingsLanguage(settings.uiLanguage);
+                    applySettingsFont(settings.uiFont);
 
                     if (!editingText) {
                         if (typeof window.__axisApplyLoadedSettingsToForm === 'function') {
@@ -1640,7 +2120,11 @@
                 } catch (_) {}
             }
             let _settingsStoreRefreshTimer = null;
-            function scheduleSettingsStoreRefresh(delayMs = 140) {
+            function scheduleSettingsStoreRefresh(delayMs = 140, opts = {}) {
+                const force = !!(opts && opts.force);
+                if (!force && _settingsReadyAt && Date.now() - _settingsReadyAt < 600) {
+                    return;
+                }
                 if (_settingsStoreRefreshTimer) clearTimeout(_settingsStoreRefreshTimer);
                 _settingsStoreRefreshTimer = setTimeout(() => {
                     _settingsStoreRefreshTimer = null;
@@ -1651,8 +2135,30 @@
             try {
                 if (window.electronAPI?.onSettingsUpdated) {
                     window.electronAPI.onSettingsUpdated((data) => {
+                        // Parked updates are for another profile's cache - never apply live.
+                        if (data && data.parkedOnly) return;
                         if (data && data.key === 'sidebarPosition') {
                             applySidebarPositionToForm(data.value);
+                        }
+                        if (data && data.key === 'uiLanguage') {
+                            const I = window.AxisI18n;
+                            const loc = I?.sanitizeLocale?.(data.value) || data.value || 'en';
+                            window.__axisPendingUiLanguage = loc;
+                            settings.uiLanguage = loc;
+                            applySettingsLanguage(loc);
+                            scheduleSettingsStoreRefresh(120);
+                            return;
+                        }
+                        if (
+                            data &&
+                            (data.key === 'universalBrowserLanguage' ||
+                                data.key === 'universalUiLanguage' ||
+                                data.key === 'uiFont' ||
+                                data.key === 'universalBrowserFont' ||
+                                data.key === 'universalUiFont')
+                        ) {
+                            scheduleSettingsStoreRefresh(80);
+                            return;
                         }
                         scheduleSettingsStoreRefresh(60);
                     });
@@ -1700,6 +2206,11 @@
 
                 let hasAnyMatch = false;
                 panes.forEach(pane => {
+                    const paneId = String(pane.id || '').replace(/-pane$/, '');
+                    if (!isSettingsSectionAllowed(paneId)) {
+                        pane.style.display = 'none';
+                        return;
+                    }
                     let paneHasMatch = false;
                     const groups = Array.from(pane.querySelectorAll('.group'));
                     if (groups.length === 0) {
@@ -1732,6 +2243,201 @@
             settingsSearchInput?.addEventListener('input', (e) => applySettingsSearch(e.target.value));
             
             // Change handlers
+            document.getElementById('ui-language')?.addEventListener('change', (e) => {
+                const sel = e.target;
+                if (sel?._axisI18nFilling) return;
+                if (settings.universalBrowserLanguage) return;
+                const I = window.AxisI18n;
+                const loc = I?.sanitizeLocale?.(sel.value) || 'en';
+                if (loc === settings.uiLanguage && I?.getLocale?.() === loc) return;
+                window.__axisPendingUiLanguage = loc;
+                window.__axisPendingUniversalUiLanguage = null;
+                settings.uiLanguage = loc;
+                settings.profileUiLanguage = loc;
+                applySettingsLanguage(loc);
+                void saveSetting('uiLanguage', loc, false).then(() => {
+                    window.__axisPendingUiLanguage = loc;
+                    applySettingsLanguage(loc);
+                    setTimeout(() => {
+                        if (window.__axisPendingUiLanguage === loc) {
+                            window.__axisPendingUiLanguage = null;
+                        }
+                    }, 400);
+                });
+            });
+            document.getElementById('universal-ui-language')?.addEventListener('change', (e) => {
+                const sel = e.target;
+                if (sel?._axisI18nFilling) return;
+                if (!settings.universalBrowserLanguage) return;
+                const I = window.AxisI18n;
+                const loc = I?.sanitizeLocale?.(sel.value) || 'en';
+                if (loc === settings.universalUiLanguage && settings.uiLanguage === loc) return;
+                // Keep profile language frozen while Universal is on.
+                settings.profileUiLanguage = snapshotProfileUiLanguage();
+                window.__axisPendingUniversalUiLanguage = loc;
+                window.__axisPendingUiLanguage = null;
+                settings.universalUiLanguage = loc;
+                settings.uiLanguage = loc;
+                applySettingsLanguage(loc);
+                void saveSetting('universalUiLanguage', loc, false).then(() => {
+                    window.__axisPendingUniversalUiLanguage = loc;
+                    applySettingsLanguage(loc);
+                    setTimeout(() => {
+                        if (window.__axisPendingUniversalUiLanguage === loc) {
+                            window.__axisPendingUniversalUiLanguage = null;
+                        }
+                    }, 400);
+                });
+            });
+            document.getElementById('universal-browser-language')?.addEventListener('change', (e) => {
+                const on = !!e.target.checked;
+                // Cancel any in-flight pending picks so disable cannot inherit
+                // the Universal language into the profile picker.
+                window.__axisPendingUiLanguage = null;
+                window.__axisPendingUniversalUiLanguage = null;
+
+                if (on) {
+                    settings.profileUiLanguage = snapshotProfileUiLanguage();
+                    const seed =
+                        document.getElementById('universal-ui-language')?.value ||
+                        settings.universalUiLanguage ||
+                        settings.profileUiLanguage ||
+                        'en';
+                    settings.universalBrowserLanguage = true;
+                    settings.universalUiLanguage = seed;
+                    settings.uiLanguage = seed;
+                    syncLanguageControls();
+                    void saveSetting(
+                        'universalBrowserLanguage',
+                        { enabled: true, universalUiLanguage: seed },
+                        false
+                    ).then(() => {
+                        void (async () => {
+                            try {
+                                const next = await window.electronAPI.getSettings();
+                                if (next && typeof next === 'object') {
+                                    const kept = settings.profileUiLanguage;
+                                    Object.assign(settings, next);
+                                    if (kept) settings.profileUiLanguage = kept;
+                                    applySettingsLanguage(settings.uiLanguage);
+                                    syncLanguageControls();
+                                }
+                            } catch (_) {}
+                        })();
+                    });
+                    return;
+                }
+
+                const restored = snapshotProfileUiLanguage();
+                settings.universalBrowserLanguage = false;
+                settings.uiLanguage = restored;
+                settings.profileUiLanguage = restored;
+                applySettingsLanguage(restored);
+                syncLanguageControls();
+                void saveSetting('universalBrowserLanguage', { enabled: false }, false).then(() => {
+                    void (async () => {
+                        try {
+                            const next = await window.electronAPI.getSettings();
+                            if (next && typeof next === 'object') {
+                                Object.assign(settings, next);
+                                // Store wins when present; otherwise keep the snapshot.
+                                if (!next.profileUiLanguage && restored) {
+                                    settings.profileUiLanguage = restored;
+                                }
+                                const loc =
+                                    settings.profileUiLanguage ||
+                                    settings.uiLanguage ||
+                                    restored;
+                                settings.uiLanguage = loc;
+                                applySettingsLanguage(loc);
+                                syncLanguageControls();
+                            }
+                        } catch (_) {}
+                    })();
+                });
+            });
+            document.getElementById('ui-font')?.addEventListener('change', (e) => {
+                const sel = e.target;
+                if (sel?._axisFontFilling) return;
+                if (settings.universalBrowserFont) return;
+                const font = sanitizeUiFontId(sel.value);
+                if (font === settings.uiFont) return;
+                settings.uiFont = font;
+                settings.profileUiFont = font;
+                applySettingsFont(font);
+                void saveSetting('uiFont', font, false);
+            });
+            document.getElementById('universal-ui-font')?.addEventListener('change', (e) => {
+                const sel = e.target;
+                if (sel?._axisFontFilling) return;
+                if (!settings.universalBrowserFont) return;
+                const font = sanitizeUiFontId(sel.value);
+                if (font === settings.universalUiFont && settings.uiFont === font) return;
+                settings.profileUiFont = snapshotProfileUiFont();
+                settings.universalUiFont = font;
+                settings.uiFont = font;
+                applySettingsFont(font);
+                void saveSetting('universalUiFont', font, false);
+            });
+            document.getElementById('universal-browser-font')?.addEventListener('change', (e) => {
+                const on = !!e.target.checked;
+                if (on) {
+                    settings.profileUiFont = snapshotProfileUiFont();
+                    const seed =
+                        document.getElementById('universal-ui-font')?.value ||
+                        settings.universalUiFont ||
+                        settings.profileUiFont ||
+                        'default';
+                    settings.universalBrowserFont = true;
+                    settings.universalUiFont = seed;
+                    settings.uiFont = seed;
+                    applySettingsFont(seed);
+                    syncFontControls();
+                    void saveSetting(
+                        'universalBrowserFont',
+                        { enabled: true, universalUiFont: seed },
+                        false
+                    ).then(() => {
+                        void (async () => {
+                            try {
+                                const next = await window.electronAPI.getSettings();
+                                if (next && typeof next === 'object') {
+                                    const kept = settings.profileUiFont;
+                                    Object.assign(settings, next);
+                                    if (kept) settings.profileUiFont = kept;
+                                    applySettingsFont(settings.uiFont);
+                                    syncFontControls();
+                                }
+                            } catch (_) {}
+                        })();
+                    });
+                    return;
+                }
+                const restored = snapshotProfileUiFont();
+                settings.universalBrowserFont = false;
+                settings.uiFont = restored;
+                settings.profileUiFont = restored;
+                applySettingsFont(restored);
+                syncFontControls();
+                void saveSetting('universalBrowserFont', { enabled: false }, false).then(() => {
+                    void (async () => {
+                        try {
+                            const next = await window.electronAPI.getSettings();
+                            if (next && typeof next === 'object') {
+                                Object.assign(settings, next);
+                                if (!next.profileUiFont && restored) {
+                                    settings.profileUiFont = restored;
+                                }
+                                const font =
+                                    settings.profileUiFont || settings.uiFont || restored;
+                                settings.uiFont = font;
+                                applySettingsFont(font);
+                                syncFontControls();
+                            }
+                        } catch (_) {}
+                    })();
+                });
+            });
             document.getElementById('sidebar-position').addEventListener('change', e => saveSetting('sidebarPosition', e.target.value, false));
             let sidebarZoomSaveTimer = null;
             const persistSidebarZoom = (raw) => {
@@ -1761,6 +2467,61 @@
             document.getElementById('https-only-mode').addEventListener('change', e => saveSetting('httpsOnlyMode', e.target.checked, false));
             document.getElementById('ad-blocker-enabled').addEventListener('change', e => saveSetting('adBlockerEnabled', e.target.checked, false));
             document.getElementById('javascript-enabled').addEventListener('change', e => saveSetting('javascriptEnabled', e.target.checked, false));
+            document.getElementById('incognito-search-engine')?.addEventListener('change', e => saveSetting('searchEngine', e.target.value, false));
+            document.getElementById('incognito-https-only-mode')?.addEventListener('change', e => saveSetting('httpsOnlyMode', e.target.checked, false));
+            document.getElementById('incognito-link-preview')?.addEventListener('change', e => saveSetting('linkPreview', e.target.checked, false));
+            document.getElementById('incognito-ad-blocker-enabled')?.addEventListener('change', e => saveSetting('adBlockerEnabled', e.target.checked, false));
+            document.getElementById('incognito-javascript-enabled')?.addEventListener('change', e => saveSetting('javascriptEnabled', e.target.checked, false));
+            document.getElementById('incognito-ai-features-enabled')?.addEventListener('change', e => {
+                settings.aiFeaturesEnabled = e.target.checked;
+                syncIncognitoAiSettingsUi();
+                saveSetting('aiFeaturesEnabled', e.target.checked, false);
+            });
+            document.getElementById('incognito-active-ai-provider')?.addEventListener('change', e => {
+                settings.activeAiProviderId = e.target.value || null;
+                saveSetting('activeAiProviderId', settings.activeAiProviderId, false);
+                renderIncognitoAiProvidersList();
+            });
+            document.getElementById('incognito-ai-open-add-btn')?.addEventListener('click', () => {
+                document.getElementById('incognito-ai-add-block')?.classList.remove('hidden');
+                document.getElementById('incognito-ai-provider-key')?.focus();
+            });
+            document.getElementById('incognito-ai-cancel-key-btn')?.addEventListener('click', () => {
+                document.getElementById('incognito-ai-add-block')?.classList.add('hidden');
+                const keyEl = document.getElementById('incognito-ai-provider-key');
+                const labelEl = document.getElementById('incognito-ai-provider-label');
+                if (keyEl) keyEl.value = '';
+                if (labelEl) labelEl.value = '';
+                incognitoAiToast('');
+            });
+            document.getElementById('incognito-ai-save-key-btn')?.addEventListener('click', async () => {
+                const provider = document.getElementById('incognito-ai-provider-type')?.value || 'groq';
+                const apiKey = String(document.getElementById('incognito-ai-provider-key')?.value || '').trim();
+                const label = String(document.getElementById('incognito-ai-provider-label')?.value || '').trim();
+                if (!apiKey) {
+                    incognitoAiToast(t('settings.ai.pasteKeyFirst'), true);
+                    return;
+                }
+                const entry = AxisAiProviders.sanitizeEntry({
+                    id: AxisAiProviders.createProviderId(),
+                    provider,
+                    label,
+                    apiKey
+                });
+                if (!entry) {
+                    incognitoAiToast('Could not save that key', true);
+                    return;
+                }
+                if (!Array.isArray(settings.aiProviders)) settings.aiProviders = [];
+                settings.aiProviders.push(entry);
+                if (!settings.activeAiProviderId) settings.activeAiProviderId = entry.id;
+                await persistIncognitoAiProviders();
+                document.getElementById('incognito-ai-add-block')?.classList.add('hidden');
+                document.getElementById('incognito-ai-provider-key').value = '';
+                document.getElementById('incognito-ai-provider-label').value = '';
+                incognitoAiToast('API key saved');
+                renderIncognitoAiProvidersList();
+            });
             document.getElementById('unpinned-clear-mode').addEventListener('change', e => {
                 syncUnpinnedClearCustomRow();
                 saveSetting('unpinnedClearMode', e.target.value, false);
@@ -1870,6 +2631,16 @@
                 let value = String(input.value || '').trim();
                 if (field === 'hour12') value = value !== 'false';
                 if (field === 'weekStartsOn') value = Number(value) === 1 ? 1 : 0;
+                if (field === 'calendarSystem') {
+                    value = window.AxisNtpWidgets?.normalizeCalendarSystem
+                        ? window.AxisNtpWidgets.normalizeCalendarSystem(value)
+                        : value || 'gregory';
+                }
+                if (field === 'viewMode') {
+                    value = window.AxisNtpWidgets?.normalizeCalendarViewMode
+                        ? window.AxisNtpWidgets.normalizeCalendarViewMode(value)
+                        : value || 'auto';
+                }
                 void patchNtpWidgetConfigById(widgetId, { [field]: value });
             });
 
@@ -1895,7 +2666,7 @@
                     }
 
                     const token = ++tickerSearchToken;
-                    resultsEl.innerHTML = '<div class="ntp-weather-city-empty">Searching…</div>';
+                    resultsEl.innerHTML = '<div class="ntp-weather-city-empty">' + escapeHtml(t('settings.weather.searching')) + '</div>';
                     resultsEl.classList.remove('hidden');
 
                     tickerSearchTimer = setTimeout(async () => {
@@ -1920,8 +2691,8 @@
                         if (token !== tickerSearchToken) return;
                         if (!rows.length) {
                             resultsEl.innerHTML = failed
-                                ? '<div class="ntp-weather-city-empty">Couldn’t reach ticker search — check your connection and try again</div>'
-                                : '<div class="ntp-weather-city-empty">No tickers found — try another symbol</div>';
+                                ? '<div class="ntp-weather-city-empty">Couldn’t reach ticker search - check your connection and try again</div>'
+                                : '<div class="ntp-weather-city-empty">No tickers found - try another symbol</div>';
                             resultsEl.classList.remove('hidden');
                             return;
                         }
@@ -1937,11 +2708,11 @@
                                 const metaBits = [r.type, r.exch].filter(Boolean).join(' · ');
                                 const restParts = [nameText, metaBits].filter(Boolean);
                                 const rest = restParts.length
-                                    ? ` — <span class="ntp-ticker-option-rest">${escapeHtml(restParts.join(' · '))}</span>`
+                                    ? ` - <span class="ntp-ticker-option-rest">${escapeHtml(restParts.join(' · '))}</span>`
                                     : '';
                                 return `<div class="ntp-ticker-option" role="option" tabindex="0" data-ntp-ticker-pick
         data-widget-id="${escapeHtml(widgetId)}"
-        data-symbol="${symbol}" title="${symbol}${nameText ? ' — ' + escapeHtml(nameText) : ''}">
+        data-symbol="${symbol}" title="${symbol}${nameText ? ' - ' + escapeHtml(nameText) : ''}">
   <span class="ntp-ticker-option-sym">${symbol}</span>${rest}
 </div>`;
                             })
@@ -1970,7 +2741,7 @@
                 }
 
                 const token = ++weatherCitySearchToken;
-                resultsEl.innerHTML = '<div class="ntp-weather-city-empty">Searching…</div>';
+                resultsEl.innerHTML = '<div class="ntp-weather-city-empty">' + escapeHtml(t('settings.weather.searching')) + '</div>';
                 resultsEl.classList.remove('hidden');
 
                 weatherCitySearchTimer = setTimeout(async () => {
@@ -1995,8 +2766,8 @@
                     if (token !== weatherCitySearchToken) return;
                     if (!rows.length) {
                         resultsEl.innerHTML = failed
-                            ? '<div class="ntp-weather-city-empty">Couldn’t reach city search — check your connection and try again</div>'
-                            : '<div class="ntp-weather-city-empty">No cities found — try another spelling</div>';
+                            ? '<div class="ntp-weather-city-empty">Couldn’t reach city search - check your connection and try again</div>'
+                            : '<div class="ntp-weather-city-empty">No cities found - try another spelling</div>';
                         resultsEl.classList.remove('hidden');
                         return;
                     }
@@ -2144,7 +2915,7 @@
                 wclLabel.textContent = formatWindowChromeLightLabel(v);
             });
             
-            // History — load in pages as you scroll
+            // History - load in pages as you scroll
             const HISTORY_PAGE_SIZE = 60;
             let historyAllItems = [];
             let historyVisibleCount = 0;
@@ -2245,7 +3016,7 @@
                 } else if (status.parentElement !== list) {
                     list.insertBefore(status, sentinel);
                 }
-                status.textContent = 'Scroll for more…';
+                status.textContent = t('settings.history.more');
                 setupHistoryObserver(sentinel);
             }
 
@@ -2273,7 +3044,7 @@
                     list.innerHTML = '';
                 }
                 if (filtered.length === 0) {
-                    list.innerHTML = '<div class="empty-state">No history</div>';
+                    list.innerHTML = '<div class="empty-state">' + escapeHtml(t('settings.history.empty')) + '</div>';
                     if (historyObserver) {
                         historyObserver.disconnect();
                         historyObserver = null;
@@ -2305,7 +3076,7 @@
                     historySearchQuery = document.getElementById('history-search')?.value || '';
                     renderMoreHistory(true);
                 } catch (e) {
-                    list.innerHTML = '<div class="empty-state">Failed to load</div>';
+                    list.innerHTML = '<div class="empty-state">' + escapeHtml(t('settings.history.loadFail')) + '</div>';
                 }
             }
             let historySearchTimer = null;
@@ -2318,7 +3089,7 @@
                 }, 120);
             });
             document.getElementById('clear-history').addEventListener('click', async () => {
-                if (confirm('Clear all history?')) {
+                if (confirm(t('settings.history.clearConfirm'))) {
                     await window.electronAPI.clearHistory();
                     populateHistory();
                 }
@@ -2350,16 +3121,28 @@
             function renderShortcuts() {
                 const list = document.getElementById('shortcuts-list');
                 const merged = mergedActiveShortcuts();
-                const enabled = SHORTCUT_ACTIONS.filter(({ action }) => merged[action]);
-                const disabled = SHORTCUT_ACTIONS.filter(
+                const actions =
+                    settingsEditingProfileId === 'incognito'
+                        ? SHORTCUT_ACTIONS.filter(
+                              ({ action }) =>
+                                  action !== 'next-profile' &&
+                                  action !== 'previous-profile' &&
+                                  action !== 'pin-tab' &&
+                                  action !== 'add-to-favorites' &&
+                                  action !== 'history' &&
+                                  action !== 'clear-history'
+                          )
+                        : SHORTCUT_ACTIONS;
+                const enabled = actions.filter(({ action }) => merged[action]);
+                const disabled = actions.filter(
                     ({ action }) => !merged[action] && shortcutDefaults[action]
                 );
                 const rowHtml = (action, label, isDisabled) => {
                     const val = merged[action];
-                    const showVal = isDisabled ? 'Disabled' : formatShortcut(val);
+                    const showVal = isDisabled ? t('settings.shortcut.disabled') : formatShortcut(val);
                     const disableBtn = !isDisabled
-                        ? `<button type="button" class="shortcut-action-btn" data-disable-action="${escapeHtml(action)}">Disable</button>`
-                        : `<button type="button" class="shortcut-action-btn" data-enable-action="${escapeHtml(action)}">Enable</button>`;
+                        ? `<button type="button" class="shortcut-action-btn" data-disable-action="${escapeHtml(action)}">${escapeHtml(t('settings.shortcut.disable'))}</button>`
+                        : `<button type="button" class="shortcut-action-btn" data-enable-action="${escapeHtml(action)}">${escapeHtml(t('settings.shortcut.enable'))}</button>`;
                     return `
                     <div class="shortcut-row ${isDisabled ? 'shortcut-row-disabled' : ''}" data-shortcut-action="${escapeHtml(action)}">
                         <div class="shortcut-row-main">
@@ -2371,19 +3154,26 @@
                         </div>
                     </div>`;
                 };
-                let html = '';
-                html += '<div class="shortcuts-subheading">Active</div>';
-                html += enabled.map(({ action, label }) => rowHtml(action, label, false)).join('');
-                html += '<div class="shortcuts-subheading">Disabled</div>';
-                html += disabled.length
-                    ? disabled.map(({ action, label }) => rowHtml(action, label, true)).join('')
-                    : '<div class="shortcut-row"><span style="font-size:12px;color:#86868b;padding:4px 16px;">No shortcuts disabled</span></div>';
-                list.innerHTML = html;
+                const shortcutLabel = (item) =>
+                    item.labelKey ? t(item.labelKey, item.labelN != null ? { n: item.labelN } : undefined) : item.label;
+                const enabledRows = enabled.map((item) => rowHtml(item.action, shortcutLabel(item), false)).join('');
+                const disabledRows = disabled.length
+                    ? disabled.map((item) => rowHtml(item.action, shortcutLabel(item), true)).join('')
+                    : `<div class="shortcut-row-empty">${escapeHtml(t('settings.shortcuts.noneDisabled'))}</div>`;
+                list.innerHTML = `
+                    <div class="shortcuts-section">
+                        <div class="shortcuts-subheading">${escapeHtml(t('settings.shortcuts.active'))}</div>
+                        <div class="group-content">${enabledRows}</div>
+                    </div>
+                    <div class="shortcuts-section">
+                        <div class="shortcuts-subheading">${escapeHtml(t('settings.shortcuts.disabledSection'))}</div>
+                        <div class="group-content">${disabledRows}</div>
+                    </div>`;
                 list.querySelectorAll('.shortcut-input').forEach((input) => {
                     if (input.disabled) return;
                     input.addEventListener('focus', () => {
                         window.electronAPI?.disableShortcuts?.();
-                        input.value = 'Press keys...';
+                        input.value = t('settings.shortcut.pressKeys');
                         input.dataset.recording = '1';
                     });
                     input.addEventListener('blur', () => {
@@ -2391,7 +3181,7 @@
                         input.removeAttribute('data-recording');
                         const a = input.dataset.action;
                         const m = mergedActiveShortcuts();
-                        if (input.value === 'Press keys...' && m[a]) {
+                        if (input.value === t('settings.shortcut.pressKeys') && m[a]) {
                             input.value = formatShortcut(m[a]);
                         }
                     });
@@ -2429,7 +3219,7 @@
                         }
                         if (conflict) {
                             const conflictName = SHORTCUT_ACTIONS.find((x) => x.action === conflict)?.label || conflict;
-                            if (!confirm('This shortcut is already used by "' + conflictName + '". Disable that shortcut and use it here?')) {
+                            if (!confirm(t('settings.shortcut.conflict', { name: conflictName }))) {
                                 input.blur();
                                 return;
                             }
@@ -2467,7 +3257,7 @@
                 applySettingsSearch(settingsSearchInput?.value || '');
             }
             document.getElementById('reset-shortcuts').addEventListener('click', async () => {
-                if (confirm('Reset all shortcuts?')) {
+                if (confirm(t('settings.shortcuts.resetConfirm'))) {
                     await window.electronAPI.resetShortcuts();
                     await reloadShortcutState();
                     renderShortcuts();
@@ -2540,8 +3330,8 @@
 
             function buildLoginRevealHtml(username, password) {
                 return `<div class="vault-reveal-grid">
-                    <div class="vault-reveal-row"><span class="vault-reveal-label">Username</span><span class="vault-reveal-val">${escapeHtml(username)}</span></div>
-                    <div class="vault-reveal-row"><span class="vault-reveal-label">Password</span><span class="vault-reveal-val">${escapeHtml(password)}</span></div>
+                    <div class="vault-reveal-row"><span class="vault-reveal-label">${escapeHtml(t('settings.vault.username'))}</span><span class="vault-reveal-val">${escapeHtml(username)}</span></div>
+                    <div class="vault-reveal-row"><span class="vault-reveal-label">${escapeHtml(t('settings.vault.password'))}</span><span class="vault-reveal-val">${escapeHtml(password)}</span></div>
                 </div>`;
             }
 
@@ -2549,10 +3339,31 @@
                 const digits = String(number || '').replace(/\D/g, '');
                 const grouped = digits.replace(/(.{4})/g, '$1 ').trim();
                 return `<div class="vault-reveal-grid">
-                    <div class="vault-reveal-row"><span class="vault-reveal-label">Number</span><span class="vault-reveal-val">${escapeHtml(grouped)}</span></div>
-                    <div class="vault-reveal-row"><span class="vault-reveal-label">Expires</span><span class="vault-reveal-val">${escapeHtml(expMonth)}/${escapeHtml(expYear)}</span></div>
-                    <div class="vault-reveal-row"><span class="vault-reveal-label">CVV</span><span class="vault-reveal-val">${escapeHtml(cvv || '—')}</span></div>
+                    <div class="vault-reveal-row"><span class="vault-reveal-label">${escapeHtml(t('settings.vault.cardNumber'))}</span><span class="vault-reveal-val">${escapeHtml(grouped)}</span></div>
+                    <div class="vault-reveal-row"><span class="vault-reveal-label">${escapeHtml(t('settings.vault.expires'))}</span><span class="vault-reveal-val">${escapeHtml(expMonth)}/${escapeHtml(expYear)}</span></div>
+                    <div class="vault-reveal-row"><span class="vault-reveal-label">${escapeHtml(t('settings.vault.cvv'))}</span><span class="vault-reveal-val">${escapeHtml(cvv || '-')}</span></div>
                 </div>`;
+            }
+
+            function buildAddressRevealHtml(addr) {
+                const rows = [
+                    [t('settings.vault.fullName'), addr.fullName],
+                    [t('settings.vault.organization'), addr.organization],
+                    [t('settings.vault.street'), addr.addressLine1],
+                    [t('settings.vault.street2'), addr.addressLine2],
+                    [t('settings.vault.city'), addr.city],
+                    [t('settings.vault.state'), addr.state],
+                    [t('settings.vault.postal'), addr.postalCode],
+                    [t('settings.vault.country'), addr.country],
+                    [t('settings.vault.phone'), addr.phone],
+                    [t('settings.vault.email'), addr.email]
+                ].filter(([, v]) => String(v || '').trim());
+                return `<div class="vault-reveal-grid">${rows
+                    .map(
+                        ([label, val]) =>
+                            `<div class="vault-reveal-row"><span class="vault-reveal-label">${escapeHtml(label)}</span><span class="vault-reveal-val">${escapeHtml(val)}</span></div>`
+                    )
+                    .join('')}</div>`;
             }
 
             async function toggleLoginReveal(id, detailEl, btn) {
@@ -2628,6 +3439,37 @@
                 }
             }
 
+            async function toggleAddressReveal(id, detailEl, btn) {
+                const row = btn.closest('.vault-table-row');
+                if (btn.getAttribute('aria-pressed') === 'true') {
+                    btn.setAttribute('aria-pressed', 'false');
+                    detailEl.classList.add('hidden');
+                    detailEl.innerHTML = '';
+                    setVaultRowOpen(row, false);
+                    vaultToast('');
+                    return;
+                }
+                hideVaultEditor();
+                vaultToast(t('settings.vault.waitingAuth'));
+                beginVaultAuth();
+                try {
+                    const revealed = await window.electronAPI.vaultGetAddress(id);
+                    if (!revealed) {
+                        vaultToast(t('settings.vault.authCancelled'), true);
+                        return;
+                    }
+                    detailEl.innerHTML = buildAddressRevealHtml(revealed);
+                    detailEl.classList.remove('hidden');
+                    btn.setAttribute('aria-pressed', 'true');
+                    setVaultRowOpen(row, true);
+                    vaultToast('');
+                } catch (e) {
+                    vaultToast(e?.message || t('settings.vault.authFailed'), true);
+                } finally {
+                    endVaultAuth();
+                }
+            }
+
             async function renderVaultLogins() {
                 const list = document.getElementById('vault-logins-list');
                 if (!list) return;
@@ -2636,16 +3478,16 @@
                 const countEl = document.getElementById('vault-login-count');
                 if (countEl) countEl.textContent = items.length === 1 ? '1 password' : `${items.length} passwords`;
                 if (!items.length) {
-                    list.innerHTML = '<div class="empty-state" style="padding:16px 12px;">No saved passwords yet. Use <strong>+ Add password</strong> or save from a login page.</div>';
+                    list.innerHTML = '<div class="empty-state" style="padding:16px 12px;">' + escapeHtml(t('settings.vault.noPasswords')) + '</div>';
                     return;
                 }
                 list.innerHTML = items.map((item) => {
-                    const site = escapeHtml(item.origin || '—');
+                    const site = escapeHtml(item.origin || '-');
                     const id = escapeHtml(item.id);
                     return `<div class="vault-table-row" data-login-id="${id}">
                         <div class="vault-td-site"><strong>${site}</strong></div>
                         <div class="vault-td-actions">
-                            <button type="button" class="vault-icon-btn vault-eye-login" data-id="${id}" title="View" aria-label="View login" aria-pressed="false"></button>
+                            <button type="button" class="vault-icon-btn vault-eye-login" data-id="${id}" title="${escapeHtml(t('common.view'))}" aria-label="${escapeHtml(t('common.view'))}" aria-pressed="false"></button>
                             <button type="button" class="vault-icon-btn vault-edit-login" data-id="${id}" title="Edit" aria-label="Edit">✎</button>
                             <button type="button" class="vault-icon-btn destructive vault-del-login" data-id="${id}" title="Delete" aria-label="Delete">⌫</button>
                         </div>
@@ -2676,7 +3518,7 @@
                 const countEl = document.getElementById('vault-card-count');
                 if (countEl) countEl.textContent = items.length === 1 ? '1 card' : `${items.length} cards`;
                 if (!items.length) {
-                    list.innerHTML = '<div class="empty-state" style="padding:16px 12px;">No saved cards yet.</div>';
+                    list.innerHTML = '<div class="empty-state" style="padding:16px 12px;">' + escapeHtml(t('settings.vault.noCards')) + '</div>';
                     return;
                 }
                 list.innerHTML = items.map((item) => {
@@ -2685,7 +3527,7 @@
                     return `<div class="vault-table-row">
                         <div class="vault-td-site"><strong>${title}</strong></div>
                         <div class="vault-td-actions">
-                            <button type="button" class="vault-icon-btn vault-eye-card" data-id="${id}" title="View" aria-label="View card" aria-pressed="false"></button>
+                            <button type="button" class="vault-icon-btn vault-eye-card" data-id="${id}" title="${escapeHtml(t('common.view'))}" aria-label="${escapeHtml(t('common.view'))}" aria-pressed="false"></button>
                             <button type="button" class="vault-icon-btn vault-edit-card" data-id="${id}" title="Edit" aria-label="Edit">✎</button>
                             <button type="button" class="vault-icon-btn destructive vault-del-card" data-id="${id}" title="Delete" aria-label="Delete">⌫</button>
                         </div>
@@ -2716,7 +3558,7 @@
                 const countEl = document.getElementById('vault-address-count');
                 if (countEl) countEl.textContent = items.length === 1 ? '1 address' : `${items.length} addresses`;
                 if (!items.length) {
-                    list.innerHTML = '<div class="empty-state" style="padding:16px 12px;">No saved addresses yet. Use <strong>+ Add address</strong> or save from a checkout form.</div>';
+                    list.innerHTML = '<div class="empty-state" style="padding:16px 12px;">' + escapeHtml(t('settings.vault.noAddresses')) + '</div>';
                     return;
                 }
                 list.innerHTML = items.map((item) => {
@@ -2727,12 +3569,21 @@
                     return `<div class="vault-table-row" data-address-id="${id}">
                         <div class="vault-td-site"><strong>${label}${name}</strong><div style="font-size:12px;color:#86868b;margin-top:2px;">${summary}</div></div>
                         <div class="vault-td-actions">
-                            <button type="button" class="vault-icon-btn vault-edit-address" data-id="${id}" title="Edit" aria-label="Edit">✎</button>
-                            <button type="button" class="vault-icon-btn destructive vault-del-address" data-id="${id}" title="Delete" aria-label="Delete">⌫</button>
+                            <button type="button" class="vault-icon-btn vault-eye-address" data-id="${id}" title="${escapeHtml(t('common.view'))}" aria-label="${escapeHtml(t('common.view'))}" aria-pressed="false"></button>
+                            <button type="button" class="vault-icon-btn vault-edit-address" data-id="${id}" title="${escapeHtml(t('common.edit'))}" aria-label="${escapeHtml(t('common.edit'))}">✎</button>
+                            <button type="button" class="vault-icon-btn destructive vault-del-address" data-id="${id}" title="${escapeHtml(t('common.delete'))}" aria-label="${escapeHtml(t('common.delete'))}">⌫</button>
                         </div>
                         <div class="vault-row-detail hidden" data-address-detail="${id}"></div>
                     </div>`;
                 }).join('');
+                list.querySelectorAll('.vault-eye-address').forEach((btn) => {
+                    mountVaultEyeButton(btn);
+                    btn.addEventListener('click', () => {
+                        const row = btn.closest('.vault-table-row');
+                        const detail = row?.querySelector('[data-address-detail]');
+                        if (detail) void toggleAddressReveal(btn.dataset.id, detail, btn);
+                    });
+                });
                 list.querySelectorAll('.vault-edit-address').forEach((btn) => {
                     btn.addEventListener('click', () => void openVaultAddressEditor(btn.dataset.id));
                 });
@@ -2768,7 +3619,7 @@
                     if (keepEditor && row.querySelector('#vault-editor')) return;
                     row.classList.remove('vault-table-row--open');
                 });
-                document.querySelectorAll('.vault-eye-login, .vault-eye-card').forEach((btn) => {
+                document.querySelectorAll('.vault-eye-login, .vault-eye-card, .vault-eye-address').forEach((btn) => {
                     btn.setAttribute('aria-pressed', 'false');
                 });
             }
@@ -2787,7 +3638,7 @@
                 vaultEditorMode = 'login';
                 vaultEditorId = id || null;
                 const ed = document.getElementById('vault-editor');
-                document.getElementById('vault-editor-title').textContent = id ? 'Edit password' : 'Add password';
+                document.getElementById('vault-editor-title').textContent = id ? t('settings.vault.editPassword') : t('settings.vault.addPassword');
                 document.getElementById('vault-editor-login-fields').classList.remove('hidden');
                 document.getElementById('vault-editor-card-fields').classList.add('hidden');
                 document.getElementById('vault-editor-address-fields').classList.add('hidden');
@@ -2862,7 +3713,7 @@
                 vaultEditorMode = 'card';
                 vaultEditorId = id || null;
                 const ed = document.getElementById('vault-editor');
-                document.getElementById('vault-editor-title').textContent = id ? 'Edit card' : 'Add card';
+                document.getElementById('vault-editor-title').textContent = id ? t('settings.vault.editCard') : t('settings.vault.addCard');
                 document.getElementById('vault-editor-login-fields').classList.add('hidden');
                 document.getElementById('vault-editor-card-fields').classList.remove('hidden');
                 document.getElementById('vault-editor-address-fields').classList.add('hidden');
@@ -2938,7 +3789,7 @@
                 vaultEditorMode = 'address';
                 vaultEditorId = id || null;
                 const ed = document.getElementById('vault-editor');
-                document.getElementById('vault-editor-title').textContent = id ? 'Edit address' : 'Add address';
+                document.getElementById('vault-editor-title').textContent = id ? t('settings.vault.editAddress') : t('settings.vault.addAddress');
                 document.getElementById('vault-editor-login-fields').classList.add('hidden');
                 document.getElementById('vault-editor-card-fields').classList.add('hidden');
                 document.getElementById('vault-editor-address-fields').classList.remove('hidden');
@@ -3070,7 +3921,7 @@
             }
 
             async function deleteVaultLogin(id) {
-                if (!confirm('Are you sure you want to delete this saved password?')) return;
+                if (!confirm(t('settings.vault.deletePasswordConfirm'))) return;
                 vaultToast('Waiting for authentication…');
                 beginVaultAuth();
                 try {
@@ -3090,7 +3941,7 @@
             }
 
             async function deleteVaultCard(id) {
-                if (!confirm('Are you sure you want to delete this saved card?')) return;
+                if (!confirm(t('settings.vault.deleteCardConfirm'))) return;
                 vaultToast('Waiting for authentication…');
                 beginVaultAuth();
                 try {
@@ -3110,7 +3961,7 @@
             }
 
             async function deleteVaultAddress(id) {
-                if (!confirm('Are you sure you want to delete this saved address?')) return;
+                if (!confirm(t('settings.vault.deleteAddressConfirm'))) return;
                 vaultToast('Waiting for authentication…');
                 beginVaultAuth();
                 try {
@@ -3312,7 +4163,7 @@
             function renderProfilesOverview(profiles, currentId) {
                 if (!profilesOverviewBody) return;
                 if (!Array.isArray(profiles) || profiles.length === 0) {
-                    profilesOverviewBody.innerHTML = '<tr><td colspan="6">No profiles found.</td></tr>';
+                    profilesOverviewBody.innerHTML = '<tr><td colspan="6">' + escapeHtml(t('settings.profiles.none')) + '</td></tr>';
                     return;
                 }
                 profilesOverviewBody.innerHTML = profiles
@@ -3336,7 +4187,7 @@
                 try {
                     const entries = await window.electronAPI.listTrashedProfiles();
                     if (!Array.isArray(entries) || entries.length === 0) {
-                        profilesTrashList.innerHTML = '<p class="profiles-trash-empty">No deleted profiles.</p>';
+                        profilesTrashList.innerHTML = '<p class="profiles-trash-empty">' + escapeHtml(t('settings.profiles.noneTrash')) + '</p>';
                         return;
                     }
                     profilesTrashList.innerHTML = entries
@@ -3358,7 +4209,7 @@
                         })
                         .join('');
                 } catch (_) {
-                    profilesTrashList.innerHTML = '<p class="profiles-trash-empty">Could not load profile trash.</p>';
+                    profilesTrashList.innerHTML = '<p class="profiles-trash-empty">' + escapeHtml(t('settings.profiles.trashLoadFail')) + '</p>';
                 }
             }
 
@@ -3418,7 +4269,7 @@
                     await loadProfileGlobalSettings(profiles);
                 } catch (_) {
                     if (profilesOverviewBody) {
-                        profilesOverviewBody.innerHTML = '<tr><td colspan="6">Could not load profiles.</td></tr>';
+                        profilesOverviewBody.innerHTML = '<tr><td colspan="6">' + escapeHtml(t('settings.profiles.loadFail')) + '</td></tr>';
                     }
                 }
                 await refreshProfilesTrash();
@@ -3563,10 +4414,10 @@
                         );
                     } else {
                         profilesImportPreview.textContent =
-                            preview?.error || 'Could not scan this profile.';
+                            preview?.error || t('settings.profiles.scanProfileFail');
                     }
                 } catch (e) {
-                    profilesImportPreview.textContent = String(e?.message || e || 'Could not scan this profile.');
+                    profilesImportPreview.textContent = String(e?.message || e || t('settings.profiles.scanProfileFail'));
                 }
             }
 
@@ -3611,12 +4462,12 @@
                     if (stillValid) {
                         await refreshImportSources({ preserveSourceId: prevSource });
                     } else if (profilesImportSource) {
-                        profilesImportSource.innerHTML = '<option value="">Choose a browser first</option>';
+                        profilesImportSource.innerHTML = '<option value="">' + escapeHtml(t('settings.profiles.chooseBrowser')) + '</option>';
                         profilesImportSource.disabled = true;
                     }
                 } catch (_) {
                     if (!prevBrowser) {
-                        profilesImportBrowser.innerHTML = '<option value="">Could not scan for browsers</option>';
+                        profilesImportBrowser.innerHTML = '<option value="">' + escapeHtml(t('settings.profiles.scanFail')) + '</option>';
                     }
                 }
             }
@@ -3630,7 +4481,7 @@
                 if (profilesImportPreview && !preserveSourceId) profilesImportPreview.textContent = '';
                 const browserId = profilesImportBrowser.value;
                 if (!browserId) {
-                    profilesImportSource.innerHTML = '<option value="">Choose a browser first</option>';
+                    profilesImportSource.innerHTML = '<option value="">' + escapeHtml(t('settings.profiles.chooseBrowser')) + '</option>';
                     profilesImportSource.disabled = true;
                     return;
                 }
@@ -3644,7 +4495,7 @@
                                           `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`
                                   )
                                   .join('')
-                            : '<option value="">No profiles found</option>';
+                            : '<option value="">' + escapeHtml(t('settings.profiles.noneFound')) + '</option>';
                     profilesImportSource.disabled = sources.length === 0;
                     if (preserveSourceId && sources.some((s) => s.id === preserveSourceId)) {
                         profilesImportSource.value = preserveSourceId;
@@ -3653,7 +4504,7 @@
                     }
                     await refreshImportPreview();
                 } catch (_) {
-                    profilesImportSource.innerHTML = '<option value="">Could not read profiles</option>';
+                    profilesImportSource.innerHTML = '<option value="">' + escapeHtml(t('settings.profiles.readFail')) + '</option>';
                     profilesImportSource.disabled = true;
                 }
             }
@@ -3734,13 +4585,15 @@
                     const ctx = window.electronAPI?.getSettingsProfileBootstrap?.();
                     if (ctx) {
                         settingsEditingProfileId = ctx.profileId || settingsEditingProfileId;
-                        renderSettingsProfileList(ctx.profiles || [], settingsEditingProfileId);
+                        renderSettingsProfileList(ctx.profiles || [], settingsEditingProfileId, ctx.incognitoProfile);
+                        syncSettingsNavForProfile(settingsEditingProfileId);
                     }
                 } catch (_) {}
             });
 
             async function reloadSettingsForEditingProfile(nextId) {
                 if (!nextId || nextId === settingsEditingProfileId) return;
+                const leavingIncognito = settingsEditingProfileId === 'incognito' && nextId !== 'incognito';
                 const wrap = document.getElementById('settings-profile-switch');
                 wrap?.classList.add('is-switching');
                 try {
@@ -3756,10 +4609,23 @@
                     vaultEditorMode = null;
                     vaultToast?.('');
                     aiProviderRevealState?.clear?.();
-                    refreshSettingsSection(activeSection || 'customization');
                     profilesCurrentId = settingsEditingProfileId;
                     const ctx = window.electronAPI?.getSettingsProfileBootstrap?.() || { profiles: [] };
-                    renderSettingsProfileList(ctx.profiles || [], settingsEditingProfileId);
+                    renderSettingsProfileList(
+                        ctx.profiles || [],
+                        settingsEditingProfileId,
+                        ctx.incognitoProfile
+                    );
+                    syncSettingsNavForProfile(settingsEditingProfileId);
+                    if (settingsEditingProfileId === 'incognito') {
+                        switchSection(
+                            isSettingsSectionAllowed(activeSection) ? activeSection : 'customization'
+                        );
+                    } else if (leavingIncognito || activeSection === 'incognito') {
+                        switchSection('customization');
+                    } else {
+                        refreshSettingsSection(activeSection || 'customization');
+                    }
                     closeSettingsProfileMenu();
                     try {
                         const u = new URL(location.href);
@@ -3811,6 +4677,16 @@
                 if (id && id !== settingsEditingProfileId) void reloadSettingsForEditingProfile(id);
             });
 
-            refreshSettingsSection(activeSection || 'customization');
+            if (settingsEditingProfileId === 'incognito') {
+                await applyLoadedSettingsToForm();
+            }
+
+            applyBootstrapLightTint();
+            _settingsReadyAt = Date.now();
+
+            settingsDynamicI18nReady = true;
+            requestAnimationFrame(() => {
+                refreshSettingsSection(activeSection || 'customization');
+            });
         })();
     
