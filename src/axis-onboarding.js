@@ -944,7 +944,7 @@
             })();
         }
 
-        let langPickerBound = false;
+        let langSelectBound = false;
 
         function applyLanguage() {
             // When setup is hidden, the shell owns ui language. Calling setLocale here
@@ -959,8 +959,8 @@
                 I.setLocale(effective);
                 I.applyToDom(document);
             }
-            const pickerHost = document.getElementById('ob-ui-language-picker');
-            if (I && pickerHost && typeof I.mountPicker === 'function') {
+            const langSelect = document.getElementById('ob-ui-language-select');
+            if (I && langSelect && typeof I.fillSelect === 'function') {
                 const value = state.universalBrowserLanguage
                     ? state.universalUiLanguage || state.uiLanguage
                     : state.uiLanguage;
@@ -991,16 +991,13 @@
                     host.applyUiLanguage?.(next);
                     applyLanguage();
                 };
-                I.mountPicker(pickerHost, {
-                    value,
-                    searchKey: 'onboarding.language.search',
-                    onChange: onPick,
-                    forceRemount: !langPickerBound
-                });
-                langPickerBound = true;
-                const trigger = pickerHost.querySelector('.axis-lang-trigger');
-                if (trigger) {
-                    trigger.setAttribute('aria-label', I.t('onboarding.language.title'));
+                I.fillSelect(langSelect, value);
+                if (!langSelectBound) {
+                    langSelectBound = true;
+                    langSelect.addEventListener('change', () => {
+                        if (langSelect._axisI18nFilling) return;
+                        onPick(langSelect.value);
+                    });
                 }
             }
             const uni = document.getElementById('ob-universal-language');
@@ -1413,7 +1410,7 @@
             }
             if (!skipConfirmOpen) return;
             if (e.key === 'Tab' && skipOverlay) {
-                const focusables = [skipContinueBtn, skipConfirmBtn].filter(Boolean);
+                const focusables = [skipConfirmBtn, skipContinueBtn].filter(Boolean);
                 if (focusables.length < 2) return;
                 const first = focusables[0];
                 const last = focusables[focusables.length - 1];
