@@ -46,6 +46,8 @@ let getParentWindow = () => BrowserWindow.getFocusedWindow() || null;
 let quitForUpdate = async () => {
     app.quit();
 };
+let getDismissedUpdateVersion = () => '';
+let setDismissedUpdateVersion = (_version) => {};
 
 function resolveGithubRepo() {
     const fromEnv = String(process.env.AXIS_UPDATE_GITHUB_REPO || '').trim();
@@ -799,7 +801,12 @@ function dismissUpdateBanner() {
         broadcastStatus();
         return publicStatus();
     }
-    if (lastStatus.version) dismissedVersion = lastStatus.version;
+    if (lastStatus.version) {
+        dismissedVersion = lastStatus.version;
+        try {
+            setDismissedUpdateVersion(dismissedVersion);
+        } catch (_) {}
+    }
     lastStatus = {
         ...lastStatus,
         available: false,
@@ -853,6 +860,13 @@ function install(options = {}) {
     if (typeof options.quitForUpdate === 'function') {
         quitForUpdate = options.quitForUpdate;
     }
+    if (typeof options.getDismissedUpdateVersion === 'function') {
+        getDismissedUpdateVersion = options.getDismissedUpdateVersion;
+    }
+    if (typeof options.setDismissedUpdateVersion === 'function') {
+        setDismissedUpdateVersion = options.setDismissedUpdateVersion;
+    }
+    dismissedVersion = String(getDismissedUpdateVersion() || '').trim();
     lastStatus.currentVersion = currentVersionLabel();
     lastStatus.packaged = isPackagedApp();
     const runSilentCheck = () => {
