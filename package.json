@@ -1,7 +1,7 @@
 {
   "name": "axis",
   "productName": "Axis",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "A minimalistic, customizable, and beautiful browser built on Electron",
   "main": "src/main.js",
   "scripts": {
@@ -15,21 +15,22 @@
   },
   "overrides": {
     "ip-address": "^10.2.0",
-    "fast-uri": "^3.1.7",
-    "tar": "^7.5.21",
+    "fast-uri": "^4.2.1",
+    "tar": "^7.5.22",
     "ajv": "^8.18.0",
     "@develar/schema-utils": {
       "ajv": "^6.12.6"
     },
-    "minimatch": "^10.2.3",
-    "brace-expansion": "^5.0.9",
-    "picomatch": "4.0.4",
+    "minimatch": "^10.2.6",
+    "brace-expansion": "^5.0.12",
+    "picomatch": "4.0.7",
     "@xmldom/xmldom": "0.8.15",
     "file-type": ">=21.3.1",
     "tmp": "0.2.7",
     "form-data": "^4.0.6",
     "js-yaml": "^4.3.1",
-    "app-builder-lib": "^26.15.7",
+    "app-builder-lib": "^26.17.0",
+    "@electron/get": "^5.1.0",
     "builder-util-runtime": "^9.7.0"
   },
   "keywords": [
@@ -42,16 +43,16 @@
   "license": "SEE LICENSE IN LICENSE.md",
   "devDependencies": {
     "electron": "41.10.6",
-    "electron-builder": "^26.15.7",
+    "electron-builder": "^26.17.0",
     "lodash": "^4.18.1",
-    "minimatch": "^10.2.3",
-    "picomatch": "4.0.4",
-    "tar": "^7.5.21"
+    "minimatch": "^10.2.6",
+    "picomatch": "4.0.7",
+    "tar": "^7.5.22"
   },
   "dependencies": {
-    "@ghostery/adblocker-electron": "^2.14.1",
+    "@ghostery/adblocker-electron": "^2.18.2",
     "@primno/dpapi": "^2.0.1",
-    "adm-zip": "^0.6.0",
+    "adm-zip": "^0.6.1",
     "dictionary-en": "^4.0.0",
     "electron-store": "^8.1.0",
     "jimp": "^1.6.1",
