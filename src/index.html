@@ -47,9 +47,11 @@
                             </button>
                         </div>
                         <button type="button" id="sidebar-new-tab-btn" class="sidebar-new-tab-btn" title="New Tab" data-i18n-title="chrome.newTab" draggable="false">
-                            <span class="sidebar-new-tab-btn-inner">
-                                <i class="fas fa-plus sidebar-new-tab-btn-icon" aria-hidden="true"></i>
-                                <span class="sidebar-new-tab-btn-label" data-i18n="chrome.newTab">New Tab</span>
+                            <span class="sidebar-new-tab-btn-content">
+                                <span class="sidebar-new-tab-btn-left">
+                                    <span class="sidebar-new-tab-btn-icon-wrap" aria-hidden="true"><i class="fas fa-plus"></i></span>
+                                    <span class="sidebar-new-tab-btn-label" data-i18n="chrome.newTab">New Tab</span>
+                                </span>
                             </span>
                         </button>
                         <!-- Unpinned tabs will be added below -->
@@ -102,10 +104,18 @@
                         </div>
                         <div class="sidebar-media-dock-expand" id="sidebar-media-dock-expand">
                             <div class="sidebar-media-dock-expand-inner">
-                                <div class="sidebar-media-expand-actions sidebar-media-expand-actions--leading" role="group" aria-label="Volume and picture in picture">
-                                    <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-vol-btn" title="Mute or unmute" aria-label="Mute or unmute" data-i18n-title="chrome.muteUnmute" data-i18n-aria="chrome.muteUnmute">
-                                        <i class="fas fa-volume-high" aria-hidden="true"></i>
-                                    </button>
+                                <div class="sidebar-media-expand-actions sidebar-media-expand-actions--leading">
+                                    <div class="sidebar-media-vol-wrap" id="sidebar-media-vol-wrap">
+                                        <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-vol-btn" title="Mute or unmute" aria-label="Mute or unmute" data-i18n-title="chrome.muteUnmute" data-i18n-aria="chrome.muteUnmute">
+                                            <i class="fas fa-volume-high" aria-hidden="true"></i>
+                                        </button>
+                                        <span class="axis-audio-mixer sidebar-media-mixer" id="sidebar-media-mixer" aria-hidden="true">
+                                            <input type="range" class="axis-audio-slider" id="sidebar-media-mixer-slider" min="0" max="100" value="100" aria-label="Volume">
+                                            <button type="button" class="axis-audio-toggle" id="sidebar-media-mixer-toggle" aria-label="Mute or full volume" title="Mute or full volume">
+                                                <i class="fas fa-volume-high" aria-hidden="true"></i>
+                                            </button>
+                                        </span>
+                                    </div>
                                     <button type="button" class="sidebar-media-expand-btn" id="sidebar-media-pip-btn" title="Picture in picture" aria-label="Picture in picture" data-i18n-title="chrome.pip" data-i18n-aria="chrome.pip">
                                         <i class="fas fa-clone" aria-hidden="true"></i>
                                     </button>
@@ -163,10 +173,9 @@
                 </div><!-- /.sidebar-scale -->
             </aside>
 
-            <div id="sidebar-resize-handle" class="resize-handle" title="Drag to resize sidebar" aria-label="Resize sidebar" data-i18n-title="chrome.resizeSidebar" data-i18n-aria="chrome.resizeSidebar"></div>
-
             <!-- Web Content Area -->
             <div id="content-area">
+                <div id="sidebar-resize-handle" class="resize-handle sidebar-resize-handle" title="Drag to resize sidebar" aria-label="Resize sidebar" data-i18n-title="chrome.resizeSidebar" data-i18n-aria="chrome.resizeSidebar"></div>
                 <!-- Single View -->
                 <div id="single-view" class="view-container active">
                     <div class="webview-container">
@@ -174,12 +183,12 @@
                         <div id="webview-url-bar" class="webview-url-bar">
                             <div class="url-bar-left">
                                 <button type="button" class="url-bar-btn url-bar-downloads-btn" id="downloads-btn-footer" title="Downloads" data-i18n-title="chrome.downloads" aria-busy="false" aria-expanded="false">
-                                    <span class="url-bar-downloads-btn-visual" aria-hidden="true">
-                                        <i class="far fa-circle-down url-bar-downloads-icon"></i>
-                                        <svg class="url-bar-downloads-ring" viewBox="0 0 24 24" width="18" height="18" focusable="false">
-                                            <circle class="url-bar-downloads-ring-track" cx="12" cy="12" r="9" fill="none" stroke-width="2.25" />
-                                            <circle class="url-bar-downloads-ring-fill" cx="12" cy="12" r="9" fill="none" stroke-width="2.25" stroke-linecap="round" transform="rotate(-90 12 12)" />
-                                        </svg>
+                                    <span class="url-bar-dl-icon-wrap" aria-hidden="true">
+                                        <i class="far fa-circle-down url-bar-dl-icon url-bar-dl-icon--idle"></i>
+                                        <i class="fas fa-check-circle url-bar-dl-icon url-bar-dl-icon--done"></i>
+                                    </span>
+                                    <span class="url-bar-dl-bar" id="url-bar-dl-bar" aria-hidden="true">
+                                        <span class="url-bar-dl-bar-fill" id="url-bar-dl-bar-fill"></span>
                                     </span>
                                 </button>
                                 <button class="url-bar-btn" id="url-bar-back" title="Go Back" data-i18n-title="chrome.goBack" disabled>
@@ -198,6 +207,10 @@
                                     <span class="url-bar-url" id="url-bar-display"></span>
                                 </div>
                                 <div class="url-bar-actions">
+                                    <button type="button" class="url-bar-btn url-bar-action-btn url-bar-zoom-badge hidden" id="url-bar-zoom-badge" title="Page zoom" aria-expanded="false" aria-haspopup="dialog" aria-hidden="true" tabindex="-1">
+                                        <i class="fas fa-magnifying-glass-plus url-bar-zoom-icon" aria-hidden="true"></i>
+                                        <span class="url-bar-zoom-label">100%</span>
+                                    </button>
                                     <button type="button" class="url-bar-btn url-bar-action-btn url-bar-adblock-btn" id="url-bar-adblock" title="Privacy protection" data-i18n-title="adblock.title" aria-pressed="true" aria-expanded="false">
                                         <i class="fas fa-shield-halved" aria-hidden="true"></i>
                                     </button>
@@ -243,8 +256,9 @@
                                 <button type="button" id="axis-store-install-host-btn" class="axis-store-install-host-btn" aria-busy="false" data-i18n="sidebar.installInAxis">Install in Axis</button>
                             </div>
                         </div>
-                        <!-- Tab pages use dynamic webviews in #webviews-container (no static guest). -->
-                        <!-- Non-interactive edge hint during trackpad/nav gestures (Safari-like pill + arrow) -->
+                        <!-- Dynamic webviews for each tab - must be after legacy so they stack on top -->
+                        <div id="webviews-container"></div>
+                        <!-- Edge pills during back/forward gestures (after webviews for stacking) -->
                         <div id="axis-nav-gesture-layer" class="axis-nav-gesture-layer" aria-hidden="true">
                             <div class="axis-nav-gesture-pill axis-nav-gesture-pill--back">
                                 <svg class="axis-nav-gesture-arrow" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
@@ -257,8 +271,18 @@
                                 </svg>
                             </div>
                         </div>
-                        <!-- Dynamic webviews for each tab - must be after legacy so they stack on top -->
-                        <div id="webviews-container"></div>
+                        <div id="screen-time-limit-overlay" class="screen-time-limit-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="screen-time-limit-title" aria-live="polite">
+                            <div class="screen-time-limit-backdrop" aria-hidden="true"></div>
+                            <div class="screen-time-limit-sheet">
+                                <p class="screen-time-limit-kicker" data-i18n="screenTime.limitKicker">Daily limit reached</p>
+                                <h2 class="screen-time-limit-title" id="screen-time-limit-title"></h2>
+                                <div class="screen-time-limit-meter" aria-hidden="true"><div class="screen-time-limit-meter-fill" id="screen-time-limit-progress"></div></div>
+                                <p class="screen-time-limit-message" id="screen-time-limit-message"></p>
+                                <div class="screen-time-limit-actions">
+                                    <button type="button" class="screen-time-limit-btn screen-time-limit-btn--primary" id="screen-time-limit-continue" data-i18n="screenTime.continue">Continue</button>
+                                </div>
+                            </div>
+                        </div>
                         <div id="axis-link-status-layer" class="axis-link-status-layer hidden" aria-hidden="true">
                             <div class="axis-link-status-hit axis-link-status-hit--left" aria-hidden="true"></div>
                             <div class="axis-link-status-hit axis-link-status-hit--right" aria-hidden="true"></div>
@@ -286,19 +310,42 @@
                                             </div>
                                         </div>
                                         <div class="new-tab-search-wrapper" id="new-tab-search-wrapper">
-                                            <div class="ai-chat-composer-chrome" id="new-tab-composer-chrome">
+                                            <div class="ai-chat-composer-chrome new-tab-composer-chrome" id="new-tab-composer-chrome">
                                                 <div id="new-tab-attach-preview" class="ai-chat-attach-preview hidden" aria-live="polite"></div>
                                                 <div class="new-tab-search-bar" id="new-tab-search-bar">
-                                                    <button type="button" id="new-tab-attach-btn" class="ai-chat-attach-btn hidden" title="Attach image (up to 4)" aria-label="Attach image" data-i18n-title="chrome.attachImage" data-i18n-aria="chrome.attachImage">
-                                                        <i class="fas fa-image" aria-hidden="true"></i>
-                                                    </button>
-                                                    <input type="text" id="new-tab-input" class="new-tab-input" placeholder="Search or Enter URL..." data-i18n-placeholder="chrome.searchOrUrl" autocomplete="off" aria-label="Search or URL" data-i18n-aria="chrome.searchOrUrlAria">
-                                                    <button type="button" id="new-tab-send-btn" class="new-tab-send-btn is-disabled" disabled aria-label="Send message" title="Send" data-i18n-title="chrome.send" data-i18n-aria="chrome.send">
-                                                        <i class="fas fa-arrow-up" aria-hidden="true"></i>
-                                                    </button>
+                                                    <div class="axis-composer-shell" data-axis-composer>
+                                                        <div id="new-tab-quote-bar" class="axis-composer-quote hidden">
+                                                            <div class="axis-composer-quote-text ai-chat-quote-text" id="new-tab-quote-text"></div>
+                                                            <button type="button" id="new-tab-quote-dismiss" class="axis-composer-quote-dismiss" title="Remove quote" data-i18n-title="chrome.removeQuote" aria-label="Remove quote">
+                                                                <i class="fas fa-times" aria-hidden="true"></i>
+                                                            </button>
+                                                        </div>
+                                                        <div class="axis-composer-input-row">
+                                                            <div class="axis-composer-body">
+                                                                <textarea id="new-tab-input" class="axis-composer-input new-tab-input" rows="1" placeholder="Search or Enter URL..." data-i18n-placeholder="chrome.searchOrUrl" autocomplete="off" aria-label="Search or URL" data-i18n-aria="chrome.searchOrUrlAria"></textarea>
+                                                            </div>
+                                                        </div>
+                                                        <div class="axis-composer-toolbar" id="new-tab-composer-toolbar" hidden>
+                                                            <div class="axis-composer-toolbar-start">
+                                                                <button type="button" id="new-tab-attach-btn" class="axis-composer-tool-btn ai-chat-attach-btn hidden" title="Attach files" aria-label="Attach files" data-i18n-title="chrome.attachImage" data-i18n-aria="chrome.attachImage">
+                                                                    <i class="fas fa-paperclip" aria-hidden="true"></i>
+                                                                </button>
+                                                                <div class="ai-chat-model-picker" id="new-tab-model-picker" data-ai-model-picker hidden>
+                                                                    <button type="button" class="ai-chat-model-trigger" id="new-tab-model-trigger" aria-haspopup="listbox" aria-expanded="false">
+                                                                        <span class="ai-chat-model-trigger-label" id="new-tab-model-label">Auto</span>
+                                                                        <i class="fas fa-chevron-down ai-chat-model-chevron" aria-hidden="true"></i>
+                                                                    </button>
+                                                                    <div class="ai-chat-model-menu hidden" id="new-tab-model-menu" role="listbox" aria-label="AI model"></div>
+                                                                </div>
+                                                            </div>
+                                                            <button type="button" id="new-tab-send-btn" class="axis-composer-send-btn new-tab-send-btn is-disabled" disabled hidden aria-label="Send message" title="Send" data-i18n-title="chrome.send" data-i18n-aria="chrome.send">
+                                                                <i class="fas fa-arrow-up" aria-hidden="true"></i>
+                                                            </button>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <input type="file" id="new-tab-image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
+                                            <input type="file" id="new-tab-image-input" accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.txt,.md,.json,.csv,.xml,.yaml,.yml,.js,.ts,.py,.html,.css,.tsx,.jsx,.sh,.sql,.toml" multiple hidden>
                                             <div class="new-tab-suggestions" id="new-tab-suggestions" aria-hidden="true">
                                                 <div class="ntp-suggestions-drawer-clip">
                                                     <div class="ntp-suggestions-drawer" id="ntp-suggestions-drawer"></div>
@@ -325,6 +372,7 @@
                                 </div>
                             </div>
                             <div id="new-tab-ai-chat-view" class="new-tab-ai-chat-view hidden" aria-label="AI Chat conversation" data-i18n-aria="chrome.aiChat">
+                                <div class="new-tab-ai-chat-top-bar ai-chat-header" aria-hidden="true"></div>
                                 <div class="new-tab-ask-messages hidden" id="new-tab-ask-messages"></div>
                                 <div class="new-tab-ai-composer" id="new-tab-ai-composer">
                                     <div class="new-tab-ai-composer-stack">
@@ -368,40 +416,55 @@
                                 <button type="button" id="ai-chat-setup-groq" class="ai-chat-setup-link" data-i18n="ai.getFreeKey">Get a free API key</button>
                             </div>
                             <div class="ai-chat-messages" id="ai-chat-messages"></div>
-                            <div id="ai-chat-quote-bar" class="ai-chat-quote-bar hidden">
-                                <i class="fas fa-quote-right ai-chat-quote-icon"></i>
-                                <div class="ai-chat-quote-text" id="ai-chat-quote-text"></div>
-                                <button type="button" id="ai-chat-quote-dismiss" class="ai-chat-quote-dismiss" title="Remove quote" data-i18n-title="chrome.removeQuote">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
                             <div class="ai-chat-input-container" id="ai-chat-input-container">
                                 <div class="ai-chat-composer-chrome" id="ai-chat-composer-chrome">
                                     <div id="ai-chat-attach-preview" class="ai-chat-attach-preview hidden" aria-live="polite"></div>
-                                    <div class="ai-chat-composer-bar ai-chat-input-row">
-                                        <button type="button" id="ai-chat-attach-btn" class="ai-chat-attach-btn hidden" title="Attach image (up to 4)" aria-label="Attach image" data-i18n-title="chrome.attachImage" data-i18n-aria="chrome.attachImage">
-                                            <i class="fas fa-image" aria-hidden="true"></i>
-                                        </button>
-                                        <textarea 
-                                            id="ai-chat-input" 
-                                            class="ai-chat-input" 
-                                            placeholder="Add an API key in Settings to start chatting"
-                                            data-i18n-placeholder="ai.setupPlaceholder"
-                                            rows="1"
-                                            disabled
-                                            aria-disabled="true"
-                                        ></textarea>
-                                        <button id="ai-chat-send" class="ai-chat-send-btn" title="Send (Enter)" data-i18n-title="chrome.sendEnter" disabled aria-disabled="true">
-                                            <i class="fas fa-arrow-up"></i>
-                                        </button>
+                                    <div class="axis-composer-shell" data-axis-composer>
+                                        <div id="ai-chat-quote-bar" class="axis-composer-quote hidden">
+                                            <div class="axis-composer-quote-text ai-chat-quote-text" id="ai-chat-quote-text"></div>
+                                            <button type="button" id="ai-chat-quote-dismiss" class="axis-composer-quote-dismiss" title="Remove quote" data-i18n-title="chrome.removeQuote" aria-label="Remove quote">
+                                                <i class="fas fa-times" aria-hidden="true"></i>
+                                            </button>
+                                        </div>
+                                        <div class="axis-composer-input-row">
+                                            <div class="axis-composer-body">
+                                                <textarea
+                                                    id="ai-chat-input"
+                                                    class="axis-composer-input ai-chat-input"
+                                                    placeholder="Add an API key in Settings to start chatting"
+                                                    data-i18n-placeholder="ai.setupPlaceholder"
+                                                    rows="1"
+                                                    disabled
+                                                    aria-disabled="true"
+                                                ></textarea>
+                                            </div>
+                                        </div>
+                                        <div class="axis-composer-toolbar" id="ai-chat-composer-toolbar" hidden>
+                                            <div class="axis-composer-toolbar-start">
+                                                <button type="button" id="ai-chat-attach-btn" class="axis-composer-tool-btn ai-chat-attach-btn hidden" title="Attach files" aria-label="Attach files" data-i18n-title="chrome.attachImage" data-i18n-aria="chrome.attachImage">
+                                                    <i class="fas fa-paperclip" aria-hidden="true"></i>
+                                                </button>
+                                                <div class="ai-chat-model-picker" id="ai-chat-model-picker" data-ai-model-picker hidden>
+                                                    <button type="button" class="ai-chat-model-trigger" id="ai-chat-model-trigger" aria-haspopup="listbox" aria-expanded="false">
+                                                        <span class="ai-chat-model-trigger-label" id="ai-chat-model-label">Auto</span>
+                                                        <i class="fas fa-chevron-down ai-chat-model-chevron" aria-hidden="true"></i>
+                                                    </button>
+                                                    <div class="ai-chat-model-menu hidden" id="ai-chat-model-menu" role="listbox" aria-label="AI model"></div>
+                                                </div>
+                                            </div>
+                                            <button id="ai-chat-send" class="axis-composer-send-btn ai-chat-send-btn" title="Send (Enter)" data-i18n-title="chrome.sendEnter" disabled aria-disabled="true" hidden>
+                                                <i class="fas fa-arrow-up" aria-hidden="true"></i>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
-                                <input type="file" id="ai-chat-image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
+                                <input type="file" id="ai-chat-image-input" accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.txt,.md,.json,.csv,.xml,.yaml,.yml,.js,.ts,.py,.html,.css,.tsx,.jsx,.sh,.sql,.toml" multiple hidden>
                             </div>
                         </div>
                         <!-- Captures clicks over page content (<webview> does not bubble to document) -->
                         <div id="downloads-popup-backdrop" class="downloads-popup-backdrop hidden" aria-hidden="true"></div>
                         <div id="extensions-menu-backdrop" class="extensions-menu-backdrop hidden" aria-hidden="true"></div>
+                        <div id="url-bar-zoom-panel-backdrop" class="url-bar-zoom-panel-backdrop hidden" aria-hidden="true"></div>
                         <div id="adblock-panel-backdrop" class="adblock-panel-backdrop hidden" aria-hidden="true"></div>
                         <div id="security-panel-backdrop" class="security-panel-backdrop hidden" aria-hidden="true"></div>
                         <div id="vault-autofill-panel" class="vault-af-menu hidden" role="listbox" aria-label="Saved passwords" data-i18n-aria="chrome.savedPasswords">
@@ -971,6 +1034,17 @@
             </button>
         </div>
 
+        <div id="url-bar-zoom-panel" class="url-bar-zoom-panel hidden" role="dialog" aria-label="Page zoom">
+            <div class="url-bar-zoom-panel-row">
+                <button type="button" class="url-bar-zoom-step" id="url-bar-zoom-out" title="Zoom out 10%" aria-label="Zoom out 10%">−</button>
+                <button type="button" class="url-bar-zoom-step url-bar-zoom-step--fine" id="url-bar-zoom-out-fine" title="Zoom out 1%" aria-label="Zoom out 1%">−1</button>
+                <span id="url-bar-zoom-panel-value" class="url-bar-zoom-panel-value">100%</span>
+                <button type="button" class="url-bar-zoom-step url-bar-zoom-step--fine" id="url-bar-zoom-in-fine" title="Zoom in 1%" aria-label="Zoom in 1%">+1</button>
+                <button type="button" class="url-bar-zoom-step" id="url-bar-zoom-in" title="Zoom in 10%" aria-label="Zoom in 10%">+</button>
+            </div>
+            <button type="button" class="url-bar-zoom-reset" id="url-bar-zoom-reset">Reset to 100%</button>
+        </div>
+
         <div id="adblock-panel" class="adblock-panel hidden" role="dialog" aria-label="Privacy protection" data-i18n-aria="adblock.title">
             <div class="adblock-panel-header">
                 <div class="adblock-panel-title">
@@ -988,7 +1062,7 @@
                 <div id="adblock-panel-stat-wrap" class="adblock-panel-stat-wrap">
                     <div class="adblock-panel-stat-hero">
                         <span id="adblock-panel-page-count" class="adblock-panel-stat-num">0</span>
-                        <span class="adblock-panel-stat-label" data-i18n="adblock.blockedThisSession">blocked this session</span>
+                        <span class="adblock-panel-stat-label" data-i18n="adblock.blockedThisPage">blocked this page</span>
                     </div>
                     <div id="adblock-panel-chips" class="adblock-panel-chips" aria-hidden="true">
                         <span class="adblock-chip" data-cat="ads"><span class="adblock-chip-num" id="adblock-chip-ads">0</span> <span data-i18n="adblock.cat.ads">Ads</span></span>
@@ -1053,6 +1127,22 @@
                     <summary data-i18n="security.certChain">Certificate chain</summary>
                     <div id="security-cert-chain" class="security-cert-chain" role="list"></div>
                 </details>
+            </div>
+        </div>
+
+        <!-- Spotlight search overlay — app-level so it centers over the whole window -->
+        <div id="spotlight-search" class="spotlight-search hidden" role="dialog" aria-modal="true" aria-label="Search">
+            <div class="spotlight-backdrop" tabindex="-1" aria-hidden="true"></div>
+            <div class="spotlight-card">
+                <div class="spotlight-input-row">
+                    <i class="fas fa-search spotlight-search-icon" aria-hidden="true"></i>
+                    <input type="text" id="spotlight-input" class="spotlight-input" placeholder="Search or enter URL..." data-i18n-placeholder="chrome.searchOrUrl" autocomplete="off" spellcheck="false" aria-label="Search or URL" data-i18n-aria="chrome.searchOrUrlAria">
+                </div>
+                <div id="spotlight-suggestions" class="spotlight-suggestions" aria-hidden="true"><div class="spotlight-suggestions-inner"></div></div>
+                <div id="spotlight-ask-setup" class="spotlight-ask-setup hidden" role="note">
+                    <p class="spotlight-ask-setup-text" data-i18n="ntp.askSetupTitle">Add an API key to use Ask</p>
+                    <button type="button" id="spotlight-ask-setup-settings" class="spotlight-ask-setup-btn" data-i18n="ntp.openAiSettings">Open AI settings</button>
+                </div>
             </div>
         </div>
 
@@ -1170,15 +1260,14 @@
                 <div class="ob-body">
                     <div class="ob-panel" data-ob-panel="language" hidden>
                         <h2 class="ob-title" id="ob-language-title" data-i18n="onboarding.language.title">Your language</h2>
-                        <p class="ob-desc" data-i18n="onboarding.language.desc">Menus, Settings, and setup. Websites keep their own language.</p>
-                        <div id="ob-ui-language-picker" class="ob-lang-picker-host" role="group" aria-labelledby="ob-language-title"></div>
-                        <div class="ob-group ob-group--universal-lang">
-                            <label class="ob-option" id="ob-universal-language-option" for="ob-universal-language">
-                                <input type="checkbox" id="ob-universal-language">
-                                <span class="ob-check-box" aria-hidden="true"></span>
-                                <span class="ob-option-text">
+                        <p class="ob-desc" data-i18n="onboarding.language.desc">Menus and Settings. Sites keep their own language.</p>
+                        <div class="ob-lang-stack">
+                            <select id="ob-ui-language-select" class="ob-native-select" aria-labelledby="ob-language-title"></select>
+                            <label class="ob-universal-row" id="ob-universal-language-option" for="ob-universal-language">
+                                <input type="checkbox" id="ob-universal-language" class="ob-native-check">
+                                <span class="ob-universal-copy">
                                     <span class="ob-option-title" data-i18n="onboarding.language.universalTitle">Universal language</span>
-                                    <span class="ob-option-desc" data-i18n="onboarding.language.universalDesc">Use this language for every profile and Incognito. You can change this later in Settings.</span>
+                                    <span class="ob-option-desc" data-i18n="onboarding.language.universalDesc">Use for every profile and Incognito.</span>
                                 </span>
                             </label>
                         </div>
@@ -1431,17 +1520,6 @@
                     <p data-i18n="onboarding.skip.body">Setup usually takes less than a minute - it doesn’t collect personal information or install bloatware. You can always change things later in Settings.</p>
                 </div>
                 <div class="ob-skip-overlay-actions">
-                    <button type="button" class="ob-skip-overlay-btn ob-skip-overlay-btn--stay" id="ob-skip-continue-btn">
-                        <span class="ob-skip-overlay-btn-text">
-                            <span class="ob-skip-overlay-btn-title" data-i18n="onboarding.skip.stay">Stay in Setup</span>
-                            <span class="ob-skip-overlay-btn-sub" data-i18n="common.recommended">Recommended</span>
-                        </span>
-                        <span class="ob-skip-overlay-btn-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M5 12h14M13 6l6 6-6 6" />
-                            </svg>
-                        </span>
-                    </button>
                     <button type="button" class="ob-skip-overlay-btn ob-skip-overlay-btn--exit" id="ob-skip-confirm-btn">
                         <span class="ob-skip-overlay-btn-text">
                             <span class="ob-skip-overlay-btn-title" data-i18n="onboarding.skip.exit">Exit Setup</span>
@@ -1450,6 +1528,17 @@
                         <span class="ob-skip-overlay-btn-icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
                                 <path d="M6 6l12 12M18 6L6 18" />
+                            </svg>
+                        </span>
+                    </button>
+                    <button type="button" class="ob-skip-overlay-btn ob-skip-overlay-btn--stay" id="ob-skip-continue-btn">
+                        <span class="ob-skip-overlay-btn-text">
+                            <span class="ob-skip-overlay-btn-title" data-i18n="onboarding.skip.stay">Stay in Setup</span>
+                            <span class="ob-skip-overlay-btn-sub" data-i18n="common.recommended">Recommended</span>
+                        </span>
+                        <span class="ob-skip-overlay-btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M5 12h14M13 6l6 6-6 6" />
                             </svg>
                         </span>
                     </button>
@@ -1472,9 +1561,13 @@
     <script src="axis-undo.js"></script>
     <script src="axis-ai-providers.js"></script>
     <script src="axis-onboarding.js"></script>
+    <script src="axis-anchored-popover.js"></script>
     <script src="axis-tab-ancestry.js"></script>
+    <script src="axis-site-style.js"></script>
+    <script src="axis-tab-audio.js"></script>
     <script src="axis-local-file-url.js"></script>
     <script src="axis-clean-url.js"></script>
+    <script src="axis-gesture-trace.js"></script>
     <script src="renderer.js"></script>
 </body>
 </html>
