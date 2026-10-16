@@ -6,34 +6,29 @@
   const SLIDE_MS = 280;
   const SLIDE_EXIT_MS = 160;
   const SLIDE_DRAG_MS = 220;
+  const SLIDE_SNAP_MS = 220;
+  const SLIDE_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
   /* How far (fraction of pane width) or how fast (px/ms flick) before a release commits. */
-  const COMMIT_RATIO = 0.5;
-  const FLICK_VELOCITY = 0.42;
-  const FLICK_MIN_PROGRESS = 0.26;
-  /* Wrong-way give - soft Arc-like resistance. */
+  const COMMIT_RATIO = 0.42;
+  const FLICK_VELOCITY = 0.32;
+  const FLICK_MIN_PROGRESS = 0.18;
   const EDGE_GIVE_RATIO = 0.1;
-  /* List-end rubber - only at first/last profile in the list. */
   const EDGE_BOUNDARY_GIVE_RATIO = 0.16;
   const EDGE_BOUNDARY_STIFFNESS = 2.85;
-  /* Finger → pane travel (< 1 = more friction; closer to 1 = tracks the finger better). */
-  const DRAG_TRACK_RATIO = 0.86;
-  /* Extra swipe power while crossing the midpoint between two profiles. */
-  const BORDER_BOOST = 0.08;
-  /* How wide the boost zone is (fraction of a pane on each side of the midpoint). */
-  const BORDER_BOOST_WIDTH = 0.22;
+  /* Direct finger tracking — side effects (theme/DOM) never run on this path during drag. */
+  const DRAG_TRACK_RATIO = 1;
+  const WHEEL_ENGAGE_PX = 8;
   /*
-   * Trackpad profile swipe:
-   * - Follow finger closely with light friction (not sticky, not 1:1 slippery).
-   * - Modest power near each profile border so crossing still feels deliberate.
-   * - Release springs to the nearest profile with velocity carry.
-   * - Idle settle adapts to speed so slow swipes don’t die mid-gesture.
-   * - Tiny isolated inertia ticks cannot start a new gesture.
+   * Debounced end-of-gesture — any wheel tick while engaged resets this. macOS trackpads emit
+   * ~one event per 16ms frame, so anything near that ends the gesture while fingers still move.
    */
-  const WHEEL_ENGAGE_PX = 18;
-  /* Adaptive idle: slow finger motion has wider gaps between ticks. */
-  const WHEEL_IDLE_SLOW_MS = 220;
-  const WHEEL_IDLE_MS = 140;
-  const WHEEL_IDLE_FAST_MS = 95;
+  const WHEEL_GESTURE_END_MS = 80;
+  const WHEEL_GESTURE_END_FAST_MS = 60;
+  /* Consecutive smoothly-decaying deltas = OS inertia after the fingers lifted. */
+  const WHEEL_MOMENTUM_DECAY_RUN = 6;
+  const WHEEL_MOMENTUM_DECAY_MIN_RATIO = 0.78;
+  /* Inertia tail after release must not start (or abort) another switch. */
+  const WHEEL_MOMENTUM_QUIET_MS = 140;
   /* Strong finger ticks reset the release timer; weaker decaying ticks are inertia. */
   const WHEEL_ACTIVE_DELTA_PX = 1.6;
   /* A fresh gesture must begin with real finger pressure, not a sub-pixel inertia tick. */
@@ -43,18 +38,16 @@
   /* Cap preview DOM so hundreds of closed pins don’t stall the gesture. */
   const PREVIEW_MAX_PINNED_ROWS = 40;
   const PREVIEW_MAX_UNPINNED_ROWS = 24;
-  /* How many neighbor panes get real tab DOM at engage; rest fill in as you approach. */
+  /* One neighbor pane, built from prefetch cache when possible. */
   const PREVIEW_EAGER_PANES = 1;
-  /* Spring settle - snappy enough that the sidebar is interactive right after release. */
-  const SPRING_STIFFNESS_COMMIT = 380;
-  const SPRING_DAMPING_COMMIT = 40;
-  const SPRING_STIFFNESS_SNAP = 420;
-  const SPRING_DAMPING_SNAP = 44;
-  const SPRING_SETTLE_PX = 0.55;
-  const SPRING_SETTLE_VEL = 0.08;
-  const SPRING_MAX_MS = 300;
-  /* Theme dissolve - skip tiny progress ticks that burn main-thread during drag. */
-  const THEME_MIX_STEP = 0.035;
+  /* Release settle runs on the compositor (WAAPI) so main-thread profile work can't stutter it. */
+  const RELEASE_COMMIT_MS = 300;
+  const RELEASE_SNAP_BACK_MS = 240;
+  const RELEASE_MIN_MS = 150;
+  const RELEASE_EASE = 'cubic-bezier(0.22, 0.85, 0.32, 1)';
+  /* Initial slope of RELEASE_EASE — lets the settle start at the finger's release speed. */
+  const RELEASE_EASE_SLOPE = 0.85 / 0.22;
+  const THEME_MIX_STEP = 0.08;
 
   function easeOutCubic(t) {
     const x = Math.max(0, Math.min(1, t));
@@ -84,6 +77,7 @@
   const profileSwipeMethods = {
     _isProfileSwipeGestureBlocked() {
       return !!(
+        this.settings?.profileSwipeEnabled === false ||
         this._sidebarReorderDragActive ||
         this._favoriteDrag ||
         document.querySelector('.smooth-dragging, .favorite-dragging')
@@ -429,15 +423,79 @@
       return direction > 0 ? accumX : -accumX;
     },
 
-    _cancelTrackMotion() {
-      if (this._trackSpringRaf) {
-        cancelAnimationFrame(this._trackSpringRaf);
-        this._trackSpringRaf = null;
-      }
-      this._trackAnim = null;
+    _isTrackAnimating() {
+      return !!this._trackWaapi;
     },
 
-    _applyTrackTransform(px) {
+    /** Stop the settle animation and freeze the track where it visually is (mid-flight grab). */
+    _cancelTrackMotion() {
+      const anim = this._trackWaapi;
+      this._trackAnim = null;
+      if (!anim) return;
+      this._trackWaapi = null;
+      const track = this._track();
+      let px = this._trackOffsetPx || 0;
+      if (track) {
+        try {
+          const t = getComputedStyle(track).transform;
+          if (t && t !== 'none') px = new DOMMatrixReadOnly(t).m41;
+        } catch (_) {}
+      }
+      try {
+        anim.cancel();
+      } catch (_) {}
+      if (track) {
+        track.style.transition = 'none';
+        track.style.transform = `translate3d(${px.toFixed(2)}px, 0, 0)`;
+        track.classList.remove('axis-track-animating');
+      }
+      this._trackOffsetPx = px;
+    },
+
+    _clearPaneCardMotion() {
+      const clearPane = (pane) => {
+        if (!pane) return;
+        pane.style.removeProperty('transform');
+        pane.style.removeProperty('transform-origin');
+        pane.classList.remove('axis-sidebar-dragging');
+      };
+      clearPane(this._slidePane());
+      (this._profilePreviewEls || []).forEach(clearPane);
+      this._track()
+        ?.querySelectorAll('.sidebar-profile-pane--preview')
+        .forEach(clearPane);
+    },
+
+    _runSwipeDragSideEffects(_px) {
+      /* Theme / preview side effects only — no card tilt or rotation. */
+    },
+
+    _syncThemeForSwipeProgress(progress, targetId) {
+      const pid = sanitizeProfileId(targetId);
+      if (!pid || progress <= 0) return;
+      if (!this._profileSwipeThemeActive || this._swipeShellTargetId !== pid) {
+        this._armProfileSwipeShellTheme(pid);
+      }
+      const mix = smoothstep01(Math.min(1, progress));
+      const last = this._swipeShellLastProgress;
+      if (last >= 0 && Math.abs(mix - last) < THEME_MIX_STEP) return;
+      this.setProfileSwipeThemeMix?.(mix, this._swipeShellFromPack, this._swipeShellToPack);
+      this._swipeShellLastProgress = mix;
+    },
+
+    _scheduleSwipeDragSideEffects(px) {
+      this._pendingSwipeSideEffectsPx = px;
+      if (this._swipeSideEffectsRaf) return;
+      this._swipeSideEffectsRaf = requestAnimationFrame(() => {
+        this._swipeSideEffectsRaf = null;
+        const next = this._pendingSwipeSideEffectsPx;
+        this._pendingSwipeSideEffectsPx = null;
+        if (next == null) return;
+        this._runSwipeDragSideEffects(next);
+      });
+    },
+
+    _applyTrackTransform(px, { sideEffects = true } = {}) {
       const track = this._track();
       if (!track) return;
       /* Subpixel translate keeps the spring/drag butter-smooth; only snap to integers at rest. */
@@ -445,13 +503,8 @@
       this._trackOffsetPx = value;
       track.style.transition = 'none';
       track.style.transform = `translate3d(${value.toFixed(2)}px, 0, 0)`;
-      if (this._coupledDirection && this._profilePreviewEls?.length) {
-        const travel = this._profileSwipeProgressFromOffset(value, this._coupledDirection);
-        this._ensurePreviewContentForTravel(travel);
-      }
-      if (this._profileSwipeThemeActive && this._swipeShellTargetId) {
-        this._syncProfileSwipeShellThemeForOffset(value);
-      }
+      if (!sideEffects) return;
+      this._scheduleSwipeDragSideEffects(value);
     },
 
     /** Drop GPU swipe layers so sidebar tabs repaint at full resolution. */
@@ -460,7 +513,17 @@
         cancelAnimationFrame(this._trackTransformRaf);
         this._trackTransformRaf = null;
       }
+      if (this._swipeSideEffectsRaf) {
+        cancelAnimationFrame(this._swipeSideEffectsRaf);
+        this._swipeSideEffectsRaf = null;
+      }
       this._pendingTrackPx = null;
+      this._pendingSwipeSideEffectsPx = null;
+      if (this._wheelTrackRaf) {
+        cancelAnimationFrame(this._wheelTrackRaf);
+        this._wheelTrackRaf = null;
+      }
+      this._pendingWheelTrackPx = null;
       this._cancelTrackMotion();
 
       const stage = this._sidebarProfileStage || document.getElementById('sidebar-profile-swipe-stage');
@@ -491,6 +554,7 @@
         track.style.removeProperty('will-change');
       }
 
+      this._clearPaneCardMotion();
       const pane = this._slidePane();
       if (pane) {
         if (pane._axisSlideAnim) {
@@ -499,8 +563,7 @@
           } catch (_) {}
           pane._axisSlideAnim = null;
         }
-        pane.classList.remove('axis-sidebar-dragging', 'axis-sidebar-animating', 'axis-sidebar-snap-back');
-        pane.style.removeProperty('transform');
+        pane.classList.remove('axis-sidebar-animating');
         pane.style.removeProperty('-webkit-transform');
         pane.style.removeProperty('transition');
         pane.style.removeProperty('will-change');
@@ -521,6 +584,20 @@
       this._setTrackTransform(this._pendingTrackPx, { immediate: true });
     },
 
+    _flushSwipeDragSideEffects() {
+      if (this._swipeSideEffectsRaf) {
+        cancelAnimationFrame(this._swipeSideEffectsRaf);
+        this._swipeSideEffectsRaf = null;
+      }
+      if (this._pendingSwipeSideEffectsPx != null) {
+        const px = this._pendingSwipeSideEffectsPx;
+        this._pendingSwipeSideEffectsPx = null;
+        this._runSwipeDragSideEffects(px);
+      } else if (this._trackOffsetPx != null) {
+        this._runSwipeDragSideEffects(this._trackOffsetPx);
+      }
+    },
+
     _scheduleTrackTransform(px) {
       this._pendingTrackPx = px;
       if (this._trackTransformRaf) return;
@@ -533,14 +610,15 @@
       });
     },
 
-    _setTrackTransform(px, { immediate = false } = {}) {
+
+    _setTrackTransform(px, { immediate = false, sideEffects = true } = {}) {
       if (immediate) {
         if (this._trackTransformRaf) {
           cancelAnimationFrame(this._trackTransformRaf);
           this._trackTransformRaf = null;
         }
         this._pendingTrackPx = null;
-        this._applyTrackTransform(px);
+        this._applyTrackTransform(px, { sideEffects });
         return;
       }
       this._scheduleTrackTransform(px);
@@ -569,10 +647,33 @@
       if (typeof finishWheel !== 'function') return;
       if (state.endTimer) clearTimeout(state.endTimer);
       const vel = state.vel || 0;
-      /* Slow swipes leave wider gaps between trackpad ticks - wait longer before settling. */
-      const idleMs =
-        vel >= 0.35 ? WHEEL_IDLE_FAST_MS : vel >= 0.12 ? WHEEL_IDLE_MS : WHEEL_IDLE_SLOW_MS;
-      state.endTimer = setTimeout(finishWheel, idleMs);
+      const ms = vel >= FLICK_VELOCITY ? WHEEL_GESTURE_END_FAST_MS : WHEEL_GESTURE_END_MS;
+      state.endTimer = setTimeout(finishWheel, ms);
+    },
+
+    /** Batch wheel deltas to one transform paint per frame. */
+    _coalesceTrackTransform(px) {
+      this._pendingWheelTrackPx = px;
+      if (this._wheelTrackRaf) return;
+      this._wheelTrackRaf = requestAnimationFrame(() => {
+        this._wheelTrackRaf = null;
+        const next = this._pendingWheelTrackPx;
+        this._pendingWheelTrackPx = null;
+        if (next == null) return;
+        this._setTrackTransform(next, { immediate: true, sideEffects: false });
+      });
+    },
+
+    _flushCoalescedTrackTransform() {
+      if (this._wheelTrackRaf) {
+        cancelAnimationFrame(this._wheelTrackRaf);
+        this._wheelTrackRaf = null;
+      }
+      if (this._pendingWheelTrackPx != null) {
+        const px = this._pendingWheelTrackPx;
+        this._pendingWheelTrackPx = null;
+        this._setTrackTransform(px, { immediate: true, sideEffects: false });
+      }
     },
 
     /** Cap travel at the end of the profile list, not at the next profile. */
@@ -660,6 +761,7 @@
     },
 
     _clearProfileSwipeShellThemeState(restoreCurrent = true) {
+      this._profileSwipeEngageGen = (this._profileSwipeEngageGen || 0) + 1;
       this._swipeShellFromPack = null;
       this._swipeShellToPack = null;
       this._swipeShellTargetId = null;
@@ -677,6 +779,12 @@
         cancelAnimationFrame(this._swipeShellThemeRaf);
         this._swipeShellThemeRaf = null;
       }
+      if (this._swipeSideEffectsRaf) {
+        cancelAnimationFrame(this._swipeSideEffectsRaf);
+        this._swipeSideEffectsRaf = null;
+      }
+      this._pendingSwipeSideEffectsPx = null;
+      this._lastPreviewFillThrough = -1;
       this.tearDownProfileSwipeThemeOverlay?.();
       const dropThemeSwitching = () => {
         if (!this._profileSwipeThemeActive) {
@@ -755,18 +863,7 @@
 
     _startProfileReleaseSpring(direction, releaseVelocity = 0, steps = 1) {
       const fullOffset = this._coupledFullOffset(direction, steps);
-      const current = this._trackOffsetPx || 0;
-      const remaining = Math.abs(fullOffset - current);
-      const W = this._stageWidthPx() || 320;
-      /* Already covering the target - snap and unlock; don't coast for hundreds of ms. */
-      if (remaining < Math.max(6, W * 0.08)) {
-        this._setTrackTransform(fullOffset, { immediate: true });
-        return Promise.resolve();
-      }
-      /* Carry finger velocity toward the commit target (px/ms → px/s). */
-      const signedVel =
-        (fullOffset >= current ? 1 : -1) * Math.max(0, releaseVelocity) * 1000;
-      return this._animateTrackSpring(fullOffset, signedVel, 'commit');
+      return this._animateTrackSettle(fullOffset, { mode: 'commit', velocity: releaseVelocity });
     },
 
     _revealProfileSwitchSidebar() {
@@ -779,102 +876,59 @@
     },
 
     /**
-     * Velocity spring settle - feels closer to Arc Spaces than a fixed ease curve.
-     * releaseVelocityPxPerSec is signed in track-offset space.
+     * Settle the track to `toPx` on the compositor. Duration shrinks with distance and is
+     * matched to the release speed (px/ms) so the hand-off from finger to animation is seamless.
      */
-    _animateTrackSpring(toPx, releaseVelocityPxPerSec = 0, mode = 'commit') {
+    _animateTrackSettle(toPx, { mode = 'commit', velocity = 0 } = {}) {
       const track = this._track();
       if (!track) return Promise.resolve();
+      this._cancelTrackMotion();
       const fromPx = this._trackOffsetPx || 0;
-      const remaining = Math.abs(toPx - fromPx);
-      if (!track || prefersReducedMotion() || remaining < 0.5) {
-        this._setTrackTransform(toPx, { immediate: true });
+      const distance = Math.abs(toPx - fromPx);
+      if (prefersReducedMotion() || distance < 0.5 || typeof track.animate !== 'function') {
+        this._setTrackTransform(toPx, { immediate: true, sideEffects: false });
         return Promise.resolve();
       }
 
-      this._cancelTrackMotion();
+      const W = Math.max(1, this._stageWidthPx() || 320);
+      const base = mode === 'snap' ? RELEASE_SNAP_BACK_MS : RELEASE_COMMIT_MS;
+      let duration = base * (0.55 + 0.45 * Math.min(1, distance / W));
+      const speed = Math.abs(Number(velocity) || 0);
+      if (speed > 0.05) {
+        duration = Math.min(duration, (RELEASE_EASE_SLOPE * distance) / speed);
+      }
+      duration = Math.round(Math.max(RELEASE_MIN_MS, duration));
+
+      const from = `translate3d(${fromPx.toFixed(2)}px, 0, 0)`;
+      const to = `translate3d(${toPx.toFixed(2)}px, 0, 0)`;
       track.classList.add('axis-track-animating');
+      track.style.transition = 'none';
+      track.style.transform = to;
+      this._trackOffsetPx = toPx;
 
-      const stiffness = mode === 'snap' ? SPRING_STIFFNESS_SNAP : SPRING_STIFFNESS_COMMIT;
-      const damping = mode === 'snap' ? SPRING_DAMPING_SNAP : SPRING_DAMPING_COMMIT;
-      let pos = fromPx;
-      let vel = Number.isFinite(releaseVelocityPxPerSec) ? releaseVelocityPxPerSec : 0;
-      /* Cap initial velocity so a hard flick coasts, not rockets. */
-      const maxVel = Math.max(900, remaining * 6);
-      vel = Math.max(-maxVel, Math.min(maxVel, vel));
-      let last = performance.now();
-      const start = last;
-      const animToken = {};
-      this._trackAnim = animToken;
-
+      const anim = track.animate([{ transform: from }, { transform: to }], {
+        duration,
+        easing: RELEASE_EASE
+      });
+      this._trackWaapi = anim;
       return new Promise((resolve) => {
-        const finish = () => {
-          this._trackSpringRaf = null;
-          if (this._trackAnim === animToken) this._trackAnim = null;
-          this._setTrackTransform(toPx, { immediate: true });
-          track.classList.remove('axis-track-animating');
+        const done = () => {
+          if (this._trackWaapi === anim) {
+            this._trackWaapi = null;
+            track.classList.remove('axis-track-animating');
+          }
           resolve();
         };
-        const tick = (now) => {
-          if (this._trackAnim !== animToken) {
-            resolve();
-            return;
-          }
-          const dt = Math.min(0.032, Math.max(0.001, (now - last) / 1000));
-          last = now;
-          const x = pos - toPx;
-          const accel = -stiffness * x - damping * vel;
-          vel += accel * dt;
-          pos += vel * dt;
-          this._setTrackTransform(pos, { immediate: true });
-
-          const settled =
-            Math.abs(pos - toPx) < SPRING_SETTLE_PX && Math.abs(vel) < SPRING_SETTLE_VEL;
-          if (settled || now - start > SPRING_MAX_MS) {
-            finish();
-            return;
-          }
-          this._trackSpringRaf = requestAnimationFrame(tick);
-        };
-        this._trackSpringRaf = requestAnimationFrame(tick);
+        anim.finished.then(done, done);
       });
     },
 
-    /** Fallback timed ease for non-interactive menu switches. */
-    _animateTrackTo(toPx, duration, mode = 'commit') {
-      const track = this._track();
-      if (!track) return Promise.resolve();
-      const fromPx = this._trackOffsetPx || 0;
-      const remaining = Math.abs(toPx - fromPx);
-      if (!track || prefersReducedMotion() || duration <= 0 || remaining < 0.5) {
-        this._setTrackTransform(toPx, { immediate: true });
-        return Promise.resolve();
-      }
-      this._cancelTrackMotion();
-      track.classList.add('axis-track-animating');
-      const easeFn = mode === 'snap' ? easeOutCubic : (t) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 2.4);
-      const start = performance.now();
-      return new Promise((resolve) => {
-        const tick = (now) => {
-          const elapsed = now - start;
-          const raw = Math.min(1, elapsed / duration);
-          const eased = easeFn(raw);
-          const px = fromPx + (toPx - fromPx) * eased;
-          this._setTrackTransform(px, { immediate: true });
-          if (raw < 1) {
-            this._trackSpringRaf = requestAnimationFrame(tick);
-            return;
-          }
-          this._trackSpringRaf = null;
-          if (this._trackAnim === animToken) this._trackAnim = null;
-          this._setTrackTransform(toPx, { immediate: true });
-          track.classList.remove('axis-track-animating');
-          resolve();
-        };
-        const animToken = {};
-        this._trackAnim = animToken;
-        this._trackSpringRaf = requestAnimationFrame(tick);
-      });
+    _animateTrackSpring(toPx, releaseVelocity = 0, mode = 'commit') {
+      return this._animateTrackSettle(toPx, { mode, velocity: releaseVelocity });
+    },
+
+    _animateTrackTo(toPx, _duration, mode = 'commit') {
+      return this._animateTrackSettle(toPx, { mode });
     },
 
     _releaseProfileSwipeUi() {
@@ -1043,38 +1097,21 @@
       return !this._adjacentProfileIdFrom(swipeTargetId, direction);
     },
 
-    /**
-     * Gain > 1 near the midpoint between two profile panes so crossing a border
-     * feels more powerful than crawling through the middle of a pane.
-     */
-    _borderSwipeGainFromNatural(naturalPx) {
-      const W = this._stageWidthPx() || 320;
-      if (W <= 0) return 1;
-      const travel = Math.max(0, naturalPx) * DRAG_TRACK_RATIO / W;
-      const frac = travel - Math.floor(travel);
-      const dist = Math.abs(frac - 0.5);
-      if (dist >= BORDER_BOOST_WIDTH) return 1;
-      const t = 1 - dist / BORDER_BOOST_WIDTH;
-      const bump = t * t * (3 - 2 * t);
-      return 1 + BORDER_BOOST * bump;
-    },
-
-    /** Map raw pointer dx to track offset - linear across every profile; rubber only at list ends. */
+    /** Map raw pointer dx to track offset — paginated Arc-style travel; rubber only at list ends. */
     _coupledOffsetFor(rawPointerDx, direction, hasNeighbor, swipeTargetId = null) {
       const W = this._stageWidthPx() || 1;
       const natural = direction > 0 ? -rawPointerDx : rawPointerDx;
       const rest = hasNeighbor ? this._coupledRestOffset(direction) : 0;
       const atListEdge = this._isProfileListEdge(direction);
-      const maxTravel = Math.max(1, this._swipeTargetIds?.length || 1) * W;
+      const maxPages = Math.max(1, this._swipeTargetIds?.length || 1);
+      const maxTravel = maxPages * W;
       let prog;
 
       if (natural <= 0) {
         prog = -this._rubber(-natural, W * EDGE_GIVE_RATIO);
       } else if (atListEdge) {
-        /* First or last profile - resistance only here, not at the pane midpoint. */
         prog = this._rubberEdge(natural, W);
       } else if (hasNeighbor) {
-        /* Follow continuously across all available profile panes. */
         const mapped = natural * DRAG_TRACK_RATIO;
         prog = Math.min(maxTravel, mapped);
         if (mapped > maxTravel) {
@@ -1132,7 +1169,9 @@
         <div class="tab-content">
           <div class="tab-left">
             ${this._staticPreviewTabIconHtml(tabData)}
-            <span class="tab-audio-indicator" style="display:none;"><i class="fas fa-volume-up"></i></span>
+            <span class="tab-audio-wrap">
+                <button type="button" class="tab-audio-indicator" aria-label="Tab audio"><i class="fas fa-volume-up"></i></button>
+            </span>
             <span class="tab-title">${this._escapePreviewText(displayTitle)}</span>
           </div>
           <div class="tab-right"><button class="tab-close" tabindex="-1"><i class="fas fa-times"></i></button></div>
@@ -1524,15 +1563,37 @@
       else preview.appendChild(section);
     },
 
+    _warmNeighborPreviewSectionCache(profileId) {
+      const pid = sanitizeProfileId(profileId);
+      if (!pid) return;
+      if (!this._profilePreviewSectionCache) this._profilePreviewSectionCache = new Map();
+      if (this._profilePreviewSectionCache.has(pid)) return;
+      const { section, ready } = this._buildPreviewSection(pid);
+      if (ready && section) this._profilePreviewSectionCache.set(pid, section.cloneNode(true));
+    },
+
+    _cloneCachedPreviewSection(profileId) {
+      const pid = sanitizeProfileId(profileId);
+      const cached = this._profilePreviewSectionCache?.get(pid);
+      return cached ? cached.cloneNode(true) : null;
+    },
+
     /** Fill deferred preview panes as the finger approaches them (avoids engage hitch). */
     _fillPreviewPaneContent(preview) {
       if (!preview?.dataset?.previewFor) return;
       if (preview.dataset.deferredContent !== '1') return;
       delete preview.dataset.deferredContent;
       const pid = preview.dataset.previewFor;
+      const cloned = this._cloneCachedPreviewSection(pid);
+      if (cloned) {
+        preview.replaceChildren(cloned);
+        preview.dataset.needsHydration = '0';
+        return;
+      }
       const { section, ready } = this._buildPreviewSection(pid);
       preview.replaceChildren(section);
       preview.dataset.needsHydration = ready ? '0' : '1';
+      if (ready) this._profilePreviewSectionCache?.set(pid, section.cloneNode(true));
       if (!ready) void this._hydratePreviewPane(pid);
     },
 
@@ -1540,7 +1601,12 @@
       const previews = this._profilePreviewEls;
       if (!previews?.length) return;
       /* Keep the current pane + one ahead filled so the next profile is ready before you land. */
-      const needThrough = Math.min(previews.length - 1, Math.max(0, Math.ceil(travel + 0.65)));
+      const needThrough = Math.min(
+        previews.length - 1,
+        travel < 0.04 ? 0 : Math.max(0, Math.ceil(travel + 0.45))
+      );
+      if (needThrough <= (this._lastPreviewFillThrough ?? -1)) return;
+      this._lastPreviewFillThrough = needThrough;
       for (let i = 0; i <= needThrough; i++) {
         this._fillPreviewPaneContent(previews[i]);
       }
@@ -1571,9 +1637,20 @@
         preview.setAttribute('aria-hidden', 'true');
         preview.dataset.previewFor = pid;
         if (index < eager) {
-          const { section, ready } = this._buildPreviewSection(pid);
-          preview.appendChild(section);
-          preview.dataset.needsHydration = ready ? '0' : '1';
+          const cloned = this._cloneCachedPreviewSection(pid);
+          if (cloned) {
+            preview.appendChild(cloned);
+            preview.dataset.needsHydration = '0';
+          } else if (singleStep) {
+            /* Empty shell on engage — fill after the track moves so the gesture stays instant. */
+            preview.dataset.deferredContent = '1';
+            preview.dataset.needsHydration = '0';
+          } else {
+            const { section, ready } = this._buildPreviewSection(pid);
+            preview.appendChild(section);
+            preview.dataset.needsHydration = ready ? '0' : '1';
+            if (ready) this._profilePreviewSectionCache?.set(pid, section.cloneNode(true));
+          }
         } else {
           /* Cheap empty shell - tab DOM fills in as travel approaches this pane. */
           preview.dataset.deferredContent = '1';
@@ -1618,57 +1695,90 @@
       this._swipeTargetIds = null;
       this._coupledPaneCount = 2;
       this._coupledDirection = 0;
+      this._lastPreviewFillThrough = -1;
     },
 
     /** Arm the coupled slide: stage ready, neighbor preview built, drag classes on. */
-    _beginCoupledTransition(direction, targetId, { singleStep = false } = {}) {
-      this._abortInFlightProfileSwitch();
-      this._ensureSidebarProfileStage();
-      this._pinSidebarFooterOutsideStage();
-      this._pinSidebarTopbarOutsideStage();
+    _beginCoupledTransition(direction, targetId, { singleStep = false, skipTheme = false } = {}) {
+      const pid = sanitizeProfileId(targetId);
       const track = this._track();
+      const reuseCarousel =
+        !!track &&
+        !!pid &&
+        track.classList.contains('axis-sidebar-coupled-duo') &&
+        this._coupledDirection === direction &&
+        this._profilePreviewEls?.[0]?.dataset?.previewFor === pid;
+
+      if (!reuseCarousel && this._profileSwipeFinalizing) {
+        this._abortInFlightProfileSwitch();
+      }
+      this._swipeResetGen = (this._swipeResetGen || 0) + 1;
+      this._profileSwipeEngageGen = (this._profileSwipeEngageGen || 0) + 1;
+      this._ensureSidebarProfileStage();
+      if (!reuseCarousel) {
+        this._pinSidebarFooterOutsideStage();
+        this._pinSidebarTopbarOutsideStage();
+      }
       if (!track) return false;
       this._cancelTrackMotion();
       this._coupledDirection = direction;
-      const hasNeighbor = targetId
-        ? this._buildProfilePreviewPane(direction, targetId, { singleStep })
-        : false;
-      if (targetId) {
-        const warmIds = this._swipeTargetIds?.length
-          ? this._swipeTargetIds
-          : [sanitizeProfileId(targetId)];
-        /* Warm the first neighbor immediately; prefetch the rest without blocking the gesture. */
-        const first = warmIds[0];
-        if (first) {
-          void this._prefetchProfileBootstrap?.(first);
-          void this._warmProfileSwipeTarget?.(first);
-        }
-        for (const pid of warmIds.slice(1)) {
-          void this._prefetchProfileBootstrap?.(pid);
-        }
-        this._armProfileSwipeShellTheme(targetId);
-      } else {
-        this._clearProfileSwipeShellThemeState();
-      }
+      const hasNeighbor = reuseCarousel
+        ? true
+        : targetId
+          ? this._buildProfilePreviewPane(direction, targetId, { singleStep })
+          : false;
       document.getElementById('sidebar')?.classList.add('is-profile-swiping');
       this._sidebarProfileStage?.classList.add('axis-sidebar-drag-active');
       if (!hasNeighbor) track.classList.add('axis-sidebar-coupled');
       const rest = hasNeighbor ? this._coupledRestOffset(direction) : this._trackOffsetPx || 0;
-      this._setTrackTransform(rest, { immediate: true });
+      this._setTrackTransform(rest, { immediate: true, sideEffects: false });
+
+      if (targetId) {
+        const warmIds = this._swipeTargetIds?.length
+          ? this._swipeTargetIds
+          : [sanitizeProfileId(targetId)];
+        const first = warmIds[0];
+        const deferredPreview = this._profilePreviewEls?.find(
+          (el) => el?.dataset?.deferredContent === '1'
+        );
+        if (deferredPreview) {
+          requestAnimationFrame(() => {
+            if (deferredPreview.isConnected && deferredPreview.dataset.deferredContent === '1') {
+              this._fillPreviewPaneContent(deferredPreview);
+            }
+          });
+        }
+        if (first) {
+          const warm = () => {
+            void this._prefetchProfileBootstrap?.(first);
+            this._warmNeighborPreviewSectionCache(first);
+          };
+          if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(warm, { timeout: 160 });
+          } else {
+            setTimeout(warm, 0);
+          }
+        }
+        if (!skipTheme) {
+          this._armProfileSwipeShellTheme(targetId);
+        }
+      } else {
+        this._clearProfileSwipeShellThemeState();
+      }
       return hasNeighbor;
     },
 
-    async _resetCoupledTransition(animate = true) {
+    async _resetCoupledTransition(animate = true, releaseVelocity = 0) {
+      const gen = (this._swipeResetGen = (this._swipeResetGen || 0) + 1);
       const track = this._track();
-      const from = this._trackOffsetPx || 0;
       const direction = this._coupledDirection || 1;
       const coupled = track?.classList.contains('axis-sidebar-coupled-duo');
       const target = coupled ? this._coupledRestOffset(direction) : 0;
-      if (animate && Math.abs(from - target) > 0.5) {
-        await this._animateTrackSpring(target, 0, 'snap');
-      } else {
-        this._setTrackTransform(target, { immediate: true });
+      if (animate) {
+        await this._animateTrackSettle(target, { mode: 'snap', velocity: releaseVelocity });
       }
+      /* A new swipe grabbed the track mid snap-back — its carousel must survive. */
+      if (gen !== this._swipeResetGen) return;
       this._clearProfileSwipeShellThemeState(true);
       this._resetProfileSwipeCompositorLayers();
       this.updatePinnedSeparatorVisibility?.();
@@ -1939,9 +2049,6 @@
       this.settings = this._cloneSettingsForProfileRuntime?.(state.settings) || {};
       this._ntpWidgetStructureKeyCached = '';
       this._ntpWidgetLayout = null;
-      try {
-        this._ntpFetchCache?.clear?.();
-      } catch (_) {}
       if (Array.isArray(state.pinnedSidebarOrder) && state.pinnedSidebarOrder.length) {
         this.settings.pinnedSidebarOrder = state.pinnedSidebarOrder.map((item) => ({
           type: item.type,
@@ -1982,6 +2089,7 @@
         }
         this.applyUiFont?.(s.uiFont);
       } catch (_) {}
+      this.syncAiProviderFromSettings?.();
 
       const restored = fast && this._restorePooledSidebar(pid);
       this._clearDetachedTabElementPool?.();
@@ -2172,9 +2280,6 @@
       this._ntpWidgetStructureKeyCached = '';
       this._ntpWidgetLayout = null;
       try {
-        this._ntpFetchCache?.clear?.();
-      } catch (_) {}
-      try {
         const grid = document.getElementById('ntp-widgets-grid');
         if (grid) grid.innerHTML = '';
       } catch (_) {}
@@ -2184,9 +2289,6 @@
       this._profileNtpIsolating = false;
       this._suppressNtpWidgetPersist = false;
       this._ntpWidgetStructureKeyCached = '';
-      try {
-        this._ntpFetchCache?.clear?.();
-      } catch (_) {}
       try {
         // Drop stale localized city labels from the previous profile's language.
         const layout = this.settings?.ntpWidgetLayout;
@@ -2543,6 +2645,19 @@
 
     _commitProfileWebview(profileId = this.profileId) {
       const pid = sanitizeProfileId(profileId);
+      const container = document.getElementById('webviews-container');
+      if (container) {
+        for (const wv of container.querySelectorAll('webview')) {
+          const wvPid = sanitizeProfileId(wv.dataset?.axisProfile || '');
+          if (wvPid === pid) continue;
+          try {
+            wv.classList.add('axis-profile-webview-suspended', 'inactive');
+            wv.style.setProperty('visibility', 'hidden', 'important');
+            wv.style.setProperty('pointer-events', 'none', 'important');
+            wv.style.setProperty('opacity', '0', 'important');
+          } catch (_) {}
+        }
+      }
       /*
        * Show this profile’s pages; keep foreign PiP / mini-player guests process-alive but
        * hidden. Never re-hide a guest that belongs to the profile we just entered - that
@@ -2584,6 +2699,9 @@
         this._hideShellPanelsForProfileSwitch();
         this.updateNewTabPageVisibility?.(false);
         this.updateUrlBar?.(null);
+        this._hideAllWebviewsForNewTabPage?.();
+        this.updateEmptyState?.();
+        this._ensureActiveWebviewInteractable?.();
       }
     },
 
@@ -2627,9 +2745,6 @@
         this.settings = this._cloneSettingsForProfileRuntime?.(boot.settings) || { ...boot.settings };
         this._ntpWidgetStructureKeyCached = '';
         this._ntpWidgetLayout = null;
-        try {
-          this._ntpFetchCache?.clear?.();
-        } catch (_) {}
         if (Array.isArray(boot.pinnedTabs)) this.settings.pinnedTabs = boot.pinnedTabs;
         if (Array.isArray(boot.tabGroups)) this.settings.tabGroups = boot.tabGroups;
         if (Array.isArray(boot.unpinnedTabs)) this.settings.unpinnedTabs = boot.unpinnedTabs;
@@ -2777,7 +2892,7 @@
 
     _cancelSidebarSlideAnimation() {
       const keepCoupledTrack =
-        !!this._profileSwipeFinalizing || !!this._trackSpringRaf || !!this._activeSpringPromise;
+        !!this._profileSwipeFinalizing || this._isTrackAnimating() || !!this._activeSpringPromise;
       const pane = this._slidePane();
       if (pane?._axisSlideAnim) {
         try {
@@ -2791,9 +2906,6 @@
         pane.style.removeProperty('transition');
       }
       if (this._trackAnim) {
-        try {
-          this._trackAnim.cancel();
-        } catch (_) {}
         this._trackAnim = null;
       }
       if (keepCoupledTrack) return;
@@ -2996,6 +3108,14 @@
       /** Tab reorder uses mouse drag - profile switch is trackpad wheel only. */
       this._cancelProfilePointerSwipe = () => {};
 
+      const extendMomentumLock = () => {
+        this._profileWheelMomentumLock = true;
+        clearTimeout(this._profileWheelMomentumTimer);
+        this._profileWheelMomentumTimer = setTimeout(() => {
+          this._profileWheelMomentumLock = false;
+        }, WHEEL_MOMENTUM_QUIET_MS);
+      };
+
       /* ---- Trackpad: continuous 1:1 carousel across all profiles ---- */
       const finishWheel = () => {
         const ws = this._wheelSwipe;
@@ -3008,30 +3128,28 @@
           this._resetProfileSwipeCompositorLayers();
           return;
         }
+        extendMomentumLock();
+        this._flushCoalescedTrackTransform();
         this._flushTrackTransform();
         const progress = this._profileSwipeProgressFromOffset(this._trackOffsetPx || 0, ws.direction);
         const releaseVel = ws.vel || 0;
+        const targets = this._swipeTargetIds || [ws.targetId];
         const commit = this._shouldCommitProfileWheel(ws, progress);
         if (commit) {
-          const targets = this._swipeTargetIds || [ws.targetId];
-          let steps = Math.max(1, Math.min(targets.length, Math.round(progress)));
-          /* Fast flick past halfway into the next pane should advance even if round() sits low. */
-          if (releaseVel >= FLICK_VELOCITY && progress - Math.floor(progress) >= FLICK_MIN_PROGRESS) {
-            steps = Math.max(steps, Math.min(targets.length, Math.ceil(progress)));
-          }
-          this._ensurePreviewContentForTravel(steps);
-          const targetId = targets[steps - 1] || ws.targetId;
+          const targetId = targets[0] || ws.targetId;
+          const preview = this._profilePreviewEls?.[0];
+          if (preview) this._fillPreviewPaneContent(preview);
           /*
            * Do not settle-hide the live (outgoing) pane here. That blanked the profile
            * you were leaving whenever the preview had not fully covered the stage yet.
            * Interactive commit mounts the target only after the spring finishes (live
            * off-screen), then snaps the track back.
            */
-          const releaseSpringPromise = this._startProfileReleaseSpring(
-            ws.direction,
-            releaseVel,
-            steps
-          );
+          const fullOffset = this._coupledFullOffset(ws.direction, 1);
+          const releaseSpringPromise = this._animateTrackSettle(fullOffset, {
+            mode: 'commit',
+            velocity: releaseVel
+          });
           void this.switchToProfileId(targetId, {
             animate: true,
             direction: ws.direction,
@@ -3047,16 +3165,33 @@
 
       const onProfileWheel = (e) => {
         if (this.isIncognitoWindow) return;
+        if (this._isProfileSwipeGestureBlocked()) return;
+        const sidebar = document.getElementById('sidebar');
+        const activeSwipe = this._wheelSwipe;
+        if (!activeSwipe?.engaged) {
+          if (!sidebar || (sidebar.classList.contains('hidden') && !sidebar.classList.contains('slide-out'))) {
+            return;
+          }
+          const inSidebar =
+            (e.target instanceof Node && sidebar.contains(e.target)) ||
+            (gestureRoot && e.target instanceof Node && gestureRoot.contains(e.target));
+          if (!inSidebar) return;
+        }
         const absX = Math.abs(e.deltaX);
         const absY = Math.abs(e.deltaY);
         /*
          * Fast vertical trackpad flicks often carry a little deltaX. Require a clear
          * horizontal bias before stealing the gesture from the tab list scroller.
          */
-        const clearlyHorizontal = absX > absY * 1.35 && absX >= WHEEL_START_DELTA_PX;
-        const clearlyVertical = absY > absX * 1.15;
+        const clearlyHorizontal = absX > absY * 1.2 && absX >= WHEEL_START_DELTA_PX;
+        const clearlyVertical = absY > absX * 1.12;
 
         let s = this._wheelSwipe;
+        if (!s && this._profileWheelMomentumLock && absX > absY && absX >= 0.12) {
+          extendMomentumLock();
+          e.preventDefault();
+          return;
+        }
         if (!s) {
           if (!clearlyHorizontal) return;
           if (shouldIgnoreSwipeTarget(e.target)) return;
@@ -3067,9 +3202,12 @@
           /* Ignore isolated tiny tail ticks; real finger input starts above this floor. */
           if (absX < WHEEL_START_DELTA_PX) return;
           /* Let a new swipe take over a snap-back spring immediately. */
-          if (this._trackSpringRaf && !this._profileSwipeFinalizing) {
+          if (this._isTrackAnimating() && !this._profileSwipeFinalizing) {
             this._cancelTrackMotion();
             this._flushTrackTransform();
+          }
+          if (this._profileSwipeFinalizing) {
+            this._abortInFlightProfileSwitch();
           }
           this._cancelSidebarSlideAnimation();
           s = this._wheelSwipe = {
@@ -3108,13 +3246,8 @@
         const strong = absX >= WHEEL_ACTIVE_DELTA_PX;
         s.peakDelta = Math.max(s.peakDelta || 0, absX);
 
-        /* Follow the full stream, including natural momentum, until it actually stops. */
         if (absX >= 0.12) {
-          const naturalBefore = s.direction
-            ? this._wheelNaturalPx(s.accumX, s.direction)
-            : Math.abs(s.accumX);
-          const borderGain = s.engaged ? this._borderSwipeGainFromNatural(naturalBefore) : 1;
-          s.accumX += e.deltaX * borderGain;
+          s.accumX += e.deltaX;
           if (!s.direction && Math.abs(s.accumX) >= WHEEL_ENGAGE_PX) {
             s.direction = s.accumX > 0 ? 1 : -1;
           }
@@ -3128,36 +3261,46 @@
           if (!s.engaged && s.direction && natural > WHEEL_ENGAGE_PX) {
             s.targetId = adjacentProfileId(s.direction);
             s.engaged = true;
-            this._beginCoupledTransition(s.direction, s.targetId);
+            this._beginCoupledTransition(s.direction, s.targetId, {
+              singleStep: true,
+              skipTheme: true
+            });
           }
           if (s.engaged) {
             const offset = this._coupledOffsetFor(-s.accumX, s.direction, !!s.targetId, s.targetId);
-            /* Batch to the next frame - sync transforms every wheel tick felt laggy. */
-            this._setTrackTransform(offset);
+            this._setTrackTransform(offset, { immediate: true, sideEffects: false });
           }
 
           if (s.direction && absX >= 0.35) {
-            const v = ((s.direction > 0 ? e.deltaX : -e.deltaX) * borderGain) / dt;
+            const v = ((s.direction > 0 ? e.deltaX : -e.deltaX)) / dt;
             this._pushSwipeVelocitySample(s, Math.max(0, v));
           } else if (!strong && s.vel) {
-            /* Decay estimated velocity between soft ticks so idle adapts correctly. */
-            s.vel *= 0.82;
+            s.vel *= 0.75;
           }
         }
 
         s.lastTs = now;
 
-        if (absX >= 0.12) {
-          /* The gesture is still moving - settle only after the stream really stops. */
+        if (s.engaged && absX >= 0.12) {
+          /* Fingers lifted: inertia deltas decay smoothly; human motion is noisier. */
+          const prev = s.lastAbsX || 0;
+          const ratio = prev > 0 ? absX / prev : 0;
+          s.decayRun =
+            ratio >= WHEEL_MOMENTUM_DECAY_MIN_RATIO && ratio < 1 ? (s.decayRun || 0) + 1 : 0;
+          s.lastAbsX = absX;
+          if (s.decayRun >= WHEEL_MOMENTUM_DECAY_RUN) {
+            finishWheel();
+            return;
+          }
           this._armProfileWheelIdle(s);
-        } else if (s.engaged && !s.endTimer) {
+        } else if (!s.engaged && absX >= WHEEL_ACTIVE_DELTA_PX) {
           this._armProfileWheelIdle(s);
         }
       };
 
       if (gestureRoot.dataset.profileWheelBound !== '1') {
         gestureRoot.dataset.profileWheelBound = '1';
-        gestureRoot.addEventListener('wheel', onProfileWheel, { passive: false });
+        window.addEventListener('wheel', onProfileWheel, { passive: false, capture: true });
       }
 
       if (gestureRoot.dataset.profilePointerGestures !== '1') {
@@ -3405,6 +3548,7 @@
       if (this._profileRuntime.has(pid)) return;
       if (this._profileBootstrapCache?.has(pid)) {
         this._storeProfileRuntimeFromBootstrap(pid, this._profileBootstrapCache.get(pid));
+        this._warmNeighborPreviewSectionCache(pid);
         return;
       }
       if (this._profilePrefetchPending?.has(pid)) return;
@@ -3417,6 +3561,7 @@
           this._storeProfileRuntimeFromBootstrap(pid, boot);
           this._invalidateProfileSwipeThemePack?.(pid);
           this._themePackForProfile(pid);
+          this._warmNeighborPreviewSectionCache(pid);
         }
       } catch (_) {
         /* optional */
@@ -3432,7 +3577,9 @@
       const idx = ids.indexOf(cur);
       if (idx < 0) return;
       for (const neighbor of [ids[idx - 1], ids[idx + 1]]) {
-        if (neighbor) void this._prefetchProfileBootstrap(neighbor);
+        if (!neighbor) continue;
+        this._warmNeighborPreviewSectionCache(neighbor);
+        void this._prefetchProfileBootstrap(neighbor);
       }
     },
 
@@ -3508,6 +3655,7 @@
         const title = tab.customTitle || tab.title || 'Playing media';
         const url = tab.url || '';
         const webview = tab.webview;
+        this._pipHandoffTabId = tabId;
         /* Optimistic guest so profile apply / webview suspend do not drop media mid-flight. */
         this._crossProfileMediaGuest = {
           tabId,
@@ -3517,7 +3665,8 @@
           title,
           url
         };
-        void Promise.resolve(this.checkAndShowPIP?.(tabId, webview)).then((ok) => {
+        void Promise.resolve(this.checkAndShowPIP?.(tabId, webview, { leaveTab: true })).then((ok) => {
+          this._pipHandoffTabId = null;
           if (!ok) {
             if (this._crossProfileMediaGuest?.webview === webview) {
               this._crossProfileMediaGuest = null;
@@ -3618,21 +3767,23 @@
       /* Pop PiP out while the outgoing profile’s video guest is still alive. */
       this._armPictureInPictureForProfileSwitch();
 
-      const prepPromise = this._beginProfileSwitchPrep(outgoingId, { immediate: true });
-      /* Warm cache during the spring - mount only once the preview fully covers. */
+      /* Warm cache during the slide - mount only once the preview fully covers. */
       const runtimePrepPromise = this._prepareProfileRuntimeForSwitch(id);
 
       return (async () => {
         try {
-          const prep = await prepPromise;
+          await Promise.all([slidePromise, runtimePrepPromise]);
+          if (!this._isProfileSwitchEpochCurrent(epoch)) return;
+
+          /* Snapshot after the slide: the live pane is still the outgoing profile and the
+             synchronous capture no longer competes with the release animation. */
+          const prep = await this._beginProfileSwitchPrep(outgoingId, { immediate: true });
           if (!this._isProfileSwitchEpochCurrent(epoch)) return;
           if (prep.error) throw prep.error;
 
           const outPid = sanitizeProfileId(outgoingId);
-          await Promise.all([slidePromise, runtimePrepPromise]);
-          if (!this._isProfileSwitchEpochCurrent(epoch)) return;
 
-          /* Live pane is off-screen - swap + peel in one turn so the sidebar unlocks now. */
+          /* Live pane is off-screen — mount from warm cache, then collapse in one turn. */
           const activated = await this._loadTargetProfileState(
             id,
             this._profileRuntime?.get(id) || cached
@@ -3648,18 +3799,22 @@
 
           this.syncProfileSwitcherState?.();
           this._finalizeCoupledTransition(activated);
+          this._commitProfileWebview?.(id);
+          this._syncWebPanelVisualState?.();
+          this._unpinWebPanelRingForProfileSwipe?.();
+
           this._profileSwipeFinalizing = false;
           completed = true;
 
-          /* Heavy follow-up after unlock so the first click/swipe is never blocked. */
+          try {
+            void window.electronAPI?.switchProfileInWindow?.(id);
+          } catch (_) {}
+          void this._persistOutgoingProfile(outPid, prep.captured);
+
+          /* Heavy follow-up — webview + panel ring already restored synchronously above. */
           const afterUnlock = () => {
             if (!this._isProfileSwitchEpochCurrent(epoch)) return;
             if (typeof this.setupTabDragDrop === 'function') this.setupTabDragDrop();
-            void this._persistOutgoingProfile(outPid, prep.captured);
-            void window.electronAPI?.switchProfileInWindow?.(id);
-            void this._commitProfileWebview?.(id);
-            this._syncWebPanelVisualState?.();
-            this._unpinWebPanelRingForProfileSwipe?.();
             void this.reloadFavoritesForProfile?.(id);
             void this._applyProfileChromeAfterSwitch?.();
             if (!activated && !this.isIncognitoWindow && this.settings?.transparentSites) {
@@ -3669,7 +3824,7 @@
             this._prefetchAdjacentProfileCaches?.();
           };
           if (typeof requestAnimationFrame === 'function') {
-            requestAnimationFrame(() => setTimeout(afterUnlock, 0));
+            requestAnimationFrame(afterUnlock);
           } else {
             setTimeout(afterUnlock, 0);
           }
@@ -3768,6 +3923,10 @@
        * both start a switch before either reaches async work (that skipped two profiles).
        */
       this._profileSwipeLock = true;
+      if (this._pinnedTabsSaveTimer) {
+        clearTimeout(this._pinnedTabsSaveTimer);
+        this._pinnedTabsSaveTimer = null;
+      }
 
       if (options.gestureStep) {
         this._profileSwipeFinalizing = true;
@@ -3836,17 +3995,21 @@
           throw e;
         }
 
+        this._commitProfileWebview?.(id);
+        this._syncWebPanelVisualState?.();
+        this._unpinWebPanelRingForProfileSwipe?.();
+
         this._profileSwipeFinalizing = false;
         this._releaseProfileSwipeUi();
         completed = true;
 
+        try {
+          void window.electronAPI?.switchProfileInWindow?.(id);
+        } catch (_) {}
+        void this._persistOutgoingProfile(cur, prep.captured);
+
         const afterUnlock = () => {
           if (typeof this.setupTabDragDrop === 'function') this.setupTabDragDrop();
-          void this._persistOutgoingProfile(cur, prep.captured);
-          void window.electronAPI?.switchProfileInWindow?.(id);
-          void this._commitProfileWebview?.(id);
-          this._syncWebPanelVisualState?.();
-          this._unpinWebPanelRingForProfileSwipe?.();
           void this.reloadFavoritesForProfile?.(id);
           void this._applyProfileChromeAfterSwitch?.();
           if (!activated && !this.isIncognitoWindow && this.settings?.transparentSites) {
@@ -3856,7 +4019,7 @@
           this._prefetchAdjacentProfileCaches?.();
         };
         if (typeof requestAnimationFrame === 'function') {
-          requestAnimationFrame(() => setTimeout(afterUnlock, 0));
+          requestAnimationFrame(afterUnlock);
         } else {
           setTimeout(afterUnlock, 0);
         }
