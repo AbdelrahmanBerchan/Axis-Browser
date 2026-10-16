@@ -139,21 +139,16 @@
       }
     ],
     "dmg": {
-      "background": "assets/dmg-background.png",
-      "window": {
-        "width": 540,
-        "height": 380
-      },
       "iconSize": 80,
       "contents": [
         {
-          "x": 140,
-          "y": 160,
+          "x": 130,
+          "y": 220,
           "type": "file"
         },
         {
-          "x": 400,
-          "y": 160,
+          "x": 410,
+          "y": 220,
           "type": "link",
           "path": "/Applications"
         }
