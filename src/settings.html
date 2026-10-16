@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https: http: file: chrome-extension:; connect-src 'self' https://geocoding-api.open-meteo.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; img-src 'self' data: blob: https: http: file: chrome-extension:; connect-src 'self' https://geocoding-api.open-meteo.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark" id="axis-settings-color-scheme">
     <title>Settings</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
@@ -313,8 +314,25 @@
             color: #ffffff;
         }
                 html.axis-dark .sidebar-item.active { background: #ffffff; color: #000000; }
-        .sidebar-item svg { width: 16px; height: 16px; opacity: 0.8; }
+        .sidebar-item svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            display: block;
+            opacity: 0.8;
+        }
         .sidebar-item.active svg { opacity: 1; }
+        .sidebar-item .settings-nav-fa {
+            width: 18px;
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            line-height: 1;
+            opacity: 0.72;
+        }
+        .sidebar-item.active .settings-nav-fa { opacity: 1; }
         .sidebar-incognito-divider,
         .sidebar-incognito-divider.settings-nav-hidden {
             display: none !important;
@@ -376,7 +394,7 @@
         .pane.active { display: block; }
         
         .group {
-            margin-bottom: 24px;
+            margin-bottom: 14px;
         }
         .group-title {
             font-size: 11px;
@@ -384,7 +402,7 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
             color: #86868b;
-            margin-bottom: 8px;
+            margin-bottom: 4px;
             padding: 0 4px;
         }
                 html.axis-dark .group-title { color: #98989d; }
@@ -402,14 +420,20 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 12px 18px;
-            min-height: 40px;
-            border-bottom: 1px solid rgba(0,0,0,0.06);
+            padding: 7px 14px;
+            min-height: 34px;
+            border-bottom: none;
+            border-top: 1px solid rgba(0,0,0,0.06);
         }
-                html.axis-dark .row { border-bottom-color: rgba(255,255,255,0.06); }
+                html.axis-dark .row { border-top-color: rgba(255,255,255,0.06); }
+        .row:first-child { border-top: none; }
         .row:last-child { border-bottom: none; }
-        .row-label { flex: 1; }
         .row-title { font-size: 13px; font-weight: 600; }
+        .row-label {
+            flex: 1;
+            min-width: 0;
+            padding-right: 16px;
+        }
         .row-title .axis-beta-label {
             display: inline-block;
             font-size: 10px;
@@ -429,19 +453,44 @@
             background: rgba(255, 255, 255, 0.12);
             color: rgba(255, 255, 255, 0.85);
         }
-        .row-desc { font-size: 11px; color: #86868b; margin-top: 2px; }
+        .row-controls {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .row select,
+        .row .switch,
+        .row input[type="checkbox"],
+        .row input[type="range"] {
+            flex-shrink: 0;
+        }
+        .row-desc {
+            display: none !important;
+        }
+        .ntp-settings-intro,
+        .extensions-pane-lead,
+        .profiles-pane-lead,
+        .extensions-hint,
+        .shortcuts-hint,
+        .perm-intro,
+        .ai-settings-intro {
+            display: none !important;
+        }
                 html.axis-dark .row-desc { color: #98989d; }
         
         /* Native form controls */
         select {
-            -webkit-appearance: none;
-            appearance: none;
-            padding: 4px 24px 4px 8px;
+            appearance: auto;
+            -webkit-appearance: menulist;
+            padding: 2px 8px;
             font-size: 13px;
             border: 1px solid rgba(0,0,0,0.2);
             border-radius: 6px;
-            background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E") no-repeat right 8px center;
+            background: transparent;
+            background-image: none;
             min-width: 120px;
+            min-height: 28px;
             color: inherit;
         }
         input[type="text"],
@@ -809,7 +858,8 @@
         .groq-key-toast.error { color: #ff3b30; }
         html.axis-dark .groq-key-toast.error { color: #ff453a; }
         button.secondary { opacity: 0.88; }
-        .shortcut-input {
+        .shortcut-input,
+        .shortcut-key-btn {
             font-family: 'SF Mono', Monaco, monospace;
             font-size: 12px;
             padding: 4px 10px;
@@ -819,6 +869,31 @@
             min-height: 28px;
             text-align: center;
             box-sizing: border-box;
+        }
+        .shortcut-key-btn {
+            border: 1px solid var(--settings-card-border, rgba(0,0,0,0.12));
+            border-radius: 8px;
+            background: var(--settings-control-bg, rgba(0,0,0,0.03));
+            color: inherit;
+            cursor: pointer;
+            font: inherit;
+        }
+        html.axis-dark .shortcut-key-btn {
+            border-color: rgba(255,255,255,0.14);
+            background: rgba(255,255,255,0.06);
+        }
+        .shortcut-key-btn:hover:not(:disabled) {
+            background: var(--settings-hover-bg, rgba(0,0,0,0.05));
+        }
+        .shortcut-key-btn.is-recording,
+        .shortcut-input.is-recording {
+            border-color: var(--settings-text) !important;
+            box-shadow: 0 0 0 2px var(--settings-focus);
+            color: var(--settings-text);
+        }
+        .shortcut-key-btn:disabled {
+            opacity: 0.5;
+            cursor: default;
         }
         .theme-preview {
             width: 80px;
@@ -1066,6 +1141,7 @@
         .vault-form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
         .vault-field-with-eye { display: flex; gap: 6px; align-items: center; }
         .vault-field-with-eye input { flex: 1; min-width: 0; }
+        .vault-field-with-eye .vault-icon-btn.hidden { display: none !important; }
         .vault-settings-error { color: #ff3b30; font-size: 12px; }
         html.axis-dark .vault-settings-error { color: #ff453a; }
         .empty-state { text-align: center; padding: 40px 20px; color: #86868b; }
@@ -1073,8 +1149,8 @@
             font-size: 12px;
             color: #86868b;
             margin: 0 0 16px 0;
-            line-height: 1.45;
-            max-width: 720px;
+            line-height: 1.4;
+            max-width: 52ch;
         }
                 html.axis-dark .extensions-pane-lead { color: #98989d; }
         .extensions-section {
@@ -1085,9 +1161,10 @@
         /* Profiles settings */
         .profiles-pane-lead {
             color: var(--settings-muted, #98989d);
-            line-height: 1.5;
+            font-size: 12px;
+            line-height: 1.4;
             margin-bottom: 16px;
-            max-width: 640px;
+            max-width: 52ch;
         }
         .profiles-overview-wrap {
             overflow-x: auto;
@@ -1412,6 +1489,288 @@
             align-items: center;
             gap: 12px;
             margin-bottom: 10px;
+        }
+        .shortcuts-hint {
+            margin: 0 0 12px;
+            padding: 0 2px;
+            font-size: 12px;
+            color: #86868b;
+            line-height: 1.35;
+        }
+        html.axis-dark .shortcuts-hint { color: #98989d; }
+        .shortcuts-subheading-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        .shortcuts-subheading-row .shortcuts-subheading { margin: 0; }
+        .shortcut-custom-fields {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+            flex: 1;
+        }
+        .shortcut-custom-name,
+        .shortcut-custom-url {
+            width: 100%;
+            box-sizing: border-box;
+            height: 30px;
+            padding: 0 10px;
+            border-radius: 7px;
+            border: 1px solid var(--settings-card-border, rgba(0,0,0,0.12));
+            background: var(--settings-control-bg, rgba(0,0,0,0.03));
+            color: inherit;
+            font-size: 12px;
+        }
+        html.axis-dark .shortcut-custom-name,
+        html.axis-dark .shortcut-custom-url {
+            border-color: rgba(255,255,255,0.14);
+            background: rgba(255,255,255,0.06);
+        }
+        .shortcut-row-custom {
+            align-items: flex-start;
+            padding-top: 12px;
+            padding-bottom: 12px;
+        }
+        .shortcut-row-custom .shortcut-row-actions {
+            padding-top: 0;
+        }
+        .shortcut-custom-card {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 14px 16px;
+            border-top: 1px solid var(--settings-row-border, rgba(0,0,0,0.06));
+        }
+        .shortcut-custom-card:first-child { border-top: none; }
+        html.axis-dark .shortcut-custom-card {
+            border-top-color: rgba(255,255,255,0.06);
+        }
+        .shortcut-custom-top {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 148px auto;
+            gap: 8px;
+            align-items: center;
+        }
+        .shortcut-custom-meta {
+            display: grid;
+            grid-template-columns: 132px minmax(0, 1fr);
+            gap: 8px;
+            align-items: center;
+        }
+        .shortcut-custom-kind,
+        .shortcut-custom-url,
+        .shortcut-custom-command {
+            width: 100%;
+            box-sizing: border-box;
+            height: 32px;
+            padding: 0 10px;
+            border-radius: 8px;
+            border: 1px solid var(--settings-card-border);
+            background: var(--settings-control-bg);
+            color: inherit;
+            font-size: 12px;
+        }
+        .shortcut-custom-url.is-hidden,
+        .shortcut-custom-command.is-hidden {
+            display: none !important;
+        }
+        .shortcut-custom-host {
+            font-size: 11px;
+            color: var(--settings-muted, #86868b);
+            margin-top: -2px;
+        }
+        .shortcuts-list .group-content:has(.shortcut-custom-card) {
+            padding: 0;
+        }
+        .shortcut-input.is-recording {
+            border-color: rgba(10, 132, 255, 0.55) !important;
+            box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.18);
+            color: #0a84ff;
+        }
+        .gestures-custom-group {
+            margin-top: 8px;
+        }
+        .gestures-custom-group .perm-panel-hint {
+            margin: 0 0 4px;
+            padding: 0 20px;
+        }
+        #custom-gestures-mount {
+            border-top: none;
+        }
+        .gesture-custom-header .row-label {
+            flex: 1;
+            min-width: 0;
+        }
+        .gesture-saved-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .gesture-empty-hint {
+            padding: 0 20px 10px;
+            font-size: 12px;
+            color: var(--settings-muted, #86868b);
+        }
+        #custom-gestures-mount .shortcut-custom-card {
+            margin: 0;
+            border-top: 1px solid var(--settings-row-border, rgba(0,0,0,0.06));
+        }
+        html.axis-dark #custom-gestures-mount .shortcut-custom-card {
+            border-top-color: rgba(255,255,255,0.06);
+        }
+        .gesture-custom-name--full {
+            width: 100%;
+            box-sizing: border-box;
+            height: 32px;
+            padding: 0 10px;
+            border-radius: 8px;
+            border: 1px solid var(--settings-card-border);
+            background: var(--settings-control-bg);
+            font-size: 12px;
+        }
+        .gesture-type-label {
+            display: block;
+            margin: 10px 0 6px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--settings-text-secondary, #86868b);
+        }
+        .gesture-type-select {
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 10px;
+        }
+        .gesture-trackpad-shell {
+            width: 100%;
+            margin-top: 4px;
+        }
+        #custom-gestures-mount .gesture-record-pad {
+            position: relative;
+            display: block;
+            width: 100%;
+            height: 112px;
+            padding: 8px;
+            border-radius: 12px;
+            border: 1px solid var(--settings-card-border, rgba(0,0,0,0.1));
+            background: var(--settings-control-bg, rgba(0,0,0,0.03));
+            box-sizing: border-box;
+            cursor: pointer;
+            overflow: hidden;
+            touch-action: none;
+        }
+        html.axis-dark #custom-gestures-mount .gesture-record-pad {
+            border-color: rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.04);
+        }
+        #custom-gestures-mount .gesture-record-canvas {
+            display: block;
+            width: 100%;
+            height: 88px;
+            max-height: 88px;
+            border-radius: 8px;
+            background: rgba(128,128,128,0.08);
+        }
+        #custom-gestures-mount .gesture-record-hint {
+            position: absolute;
+            left: 50%;
+            top: 44px;
+            transform: translateX(-50%);
+            pointer-events: none;
+        }
+        #custom-gestures-mount .gesture-record-hint.is-hidden {
+            display: none;
+        }
+        .gesture-record-hint {
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1.2;
+            text-align: center;
+            color: var(--settings-muted, #86868b);
+        }
+        .gesture-record-help {
+            margin: 0 0 4px;
+            font-size: 11px;
+            line-height: 1.35;
+            color: var(--settings-muted, #86868b);
+        }
+        .gesture-record-status {
+            margin: 6px 0 4px;
+            font-size: 11px;
+            line-height: 1.4;
+            color: var(--settings-muted, #86868b);
+        }
+        .gesture-record-done-btn {
+            margin: 0 0 8px;
+            align-self: flex-start;
+        }
+        .gesture-saved-title {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 6px 10px;
+            line-height: 1.35;
+        }
+        .gesture-how-to-chip {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--settings-muted, #86868b);
+            flex: 1 1 180px;
+            min-width: 0;
+        }
+        html.axis-dark .gesture-how-to-chip {
+            color: rgba(235, 235, 245, 0.55);
+        }
+        .gesture-draft-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .gesture-draft-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--settings-muted, #86868b);
+        }
+        .settings-inline-input {
+            width: 100%;
+            height: 30px;
+            padding: 0 10px;
+            border-radius: 8px;
+            border: 1px solid var(--settings-card-border);
+            background: var(--settings-control-bg);
+            color: inherit;
+            font-size: 12px;
+            box-sizing: border-box;
+        }
+        .gesture-custom-steps .shortcut-custom-step {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto auto;
+            gap: 6px;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .gesture-draft-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            padding-top: 2px;
+        }
+        #custom-gestures-mount .gesture-record-pad--recording {
+            border-color: rgba(10, 132, 255, 0.65);
+            box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.16), inset 0 0 24px rgba(10, 132, 255, 0.06);
+            animation: gesture-record-pulse 1.4s ease-in-out infinite;
+        }
+        #custom-gestures-mount .gesture-record-pad--captured {
+            border-color: rgba(10, 132, 255, 0.45);
+            box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.2);
+        }
+        @keyframes gesture-record-pulse {
+            0%, 100% { box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.14), inset 0 0 20px rgba(10, 132, 255, 0.05); }
+            50% { box-shadow: 0 0 0 5px rgba(10, 132, 255, 0.22), inset 0 0 28px rgba(10, 132, 255, 0.08); }
         }
         .shortcuts-header .group-title {
             margin-bottom: 0;
@@ -1834,15 +2193,7 @@
             }
         }
         .ntp-settings-intro {
-            padding: 14px 18px;
-            font-size: 12px;
-            line-height: 1.55;
-            color: #86868b;
-            border-bottom: 1px solid rgba(0,0,0,0.06);
-        }
-        html.axis-dark .ntp-settings-intro {
-            color: #98989d;
-            border-bottom-color: rgba(255,255,255,0.06);
+            display: none;
         }
         .ntp-settings-intro p { margin: 0; }
         .settings-search-wrap {
@@ -1899,196 +2250,143 @@
         .axis-lang-row.is-disabled .row-desc {
             opacity: 0.55;
         }
-        .perm-intro {
-            font-size: 12px;
-            color: #86868b;
-            line-height: 1.45;
-            padding: 12px 16px 0;
-            margin: 0;
+        .perm-panel {
+            padding: 0;
         }
-                html.axis-dark .perm-intro { color: #98989d; }
         .perm-add-row {
             display: flex;
-            flex-wrap: wrap;
             align-items: center;
-            gap: 10px;
-            padding: 12px 16px 14px;
-            border-bottom: 1px solid rgba(0,0,0,0.06);
+            gap: 8px;
+            padding: 8px 14px;
+            border-bottom: none;
         }
-                html.axis-dark .perm-add-row { border-bottom-color: rgba(255,255,255,0.06); }
         .perm-add-row input[type="text"] {
             flex: 1;
             min-width: 0;
-            padding: 9px 12px;
-            border: 1px solid rgba(0,0,0,0.2);
-            border-radius: 8px;
+            height: 28px;
+            padding: 0 10px;
+            border: 1px solid var(--settings-card-border, rgba(0,0,0,0.12));
+            border-radius: 6px;
             font-size: 13px;
-            background: #fff;
+            background: var(--settings-control-bg, #fff);
             color: inherit;
+            box-sizing: border-box;
         }
-                html.axis-dark .perm-add-row input[type="text"] { background: #3a3a3c;
-                border-color: rgba(255,255,255,0.2); }
+        html.axis-dark .perm-add-row input[type="text"] {
+            background: rgba(255,255,255,0.06);
+            border-color: rgba(255,255,255,0.14);
+        }
+        #site-perm-add-btn {
+            flex-shrink: 0;
+            height: 28px;
+            padding: 0 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+        }
         .perm-add-error {
+            display: block;
             font-size: 11px;
             color: #ff3b30;
-            flex-basis: 100%;
+            padding: 0 14px 6px;
         }
-                html.axis-dark .perm-add-error { color: #ff453a; }
-        .perm-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            padding: 12px 16px 16px;
+        .perm-add-error:empty { display: none; }
+        html.axis-dark .perm-add-error { color: #ff453a; }
+        .perm-list { padding: 0; }
+        .perm-site {
+            border-top: 1px solid var(--settings-row-border, rgba(0,0,0,0.06));
         }
-        .perm-card {
-            border: 1px solid rgba(0, 0, 0, 0.08);
-            border-radius: 12px;
-            background: rgba(0, 0, 0, 0.02);
-            overflow: hidden;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-        }
-        html.axis-dark .perm-card {
-            border-color: rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.04);
-            box-shadow: none;
-        }
-        .perm-card-header {
+        html.axis-dark .perm-site { border-top-color: rgba(255,255,255,0.06); }
+        .perm-site:first-child { border-top: none; }
+        #settings-main .perm-site:first-child { border-top: 1px solid var(--ax-sep); }
+        .perm-site-summary {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
-            padding: 11px 14px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-            background: rgba(0, 0, 0, 0.015);
+            gap: 10px;
+            padding: 8px 14px;
+            min-height: 34px;
+            cursor: pointer;
+            list-style: none;
         }
-        html.axis-dark .perm-card-header {
-            border-bottom-color: rgba(255, 255, 255, 0.06);
-            background: rgba(255, 255, 255, 0.02);
-        }
-        .perm-card-site-wrap {
-            min-width: 0;
-            flex: 1;
-        }
-        .perm-card-site-title {
-            display: block;
+        .perm-site-summary::-webkit-details-marker { display: none; }
+        .perm-site-name {
             font-size: 13px;
-            font-weight: 650;
-            letter-spacing: -0.01em;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            color: inherit;
-        }
-        .perm-card-site-url {
-            display: block;
-            margin-top: 3px;
-            font-size: 11px;
-            line-height: 1.3;
-            color: #86868b;
+            font-weight: 600;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        html.axis-dark .perm-card-site-url { color: #98989d; }
-        .perm-card-remove {
+        .perm-site-meta {
+            font-size: 12px;
+            color: var(--settings-muted, #86868b);
             flex-shrink: 0;
-            padding: 5px 10px;
-            font-size: 11px;
-            font-weight: 500;
-            border-radius: 7px;
-            border: 1px solid rgba(255, 59, 48, 0.25);
+        }
+        .perm-site-rows {
+            border-top: 1px solid var(--settings-row-border, rgba(0,0,0,0.06));
+        }
+        html.axis-dark .perm-site-rows { border-top-color: rgba(255,255,255,0.06); }
+        .perm-site-row {
+            padding: 6px 14px;
+            min-height: 32px;
+        }
+        .perm-site-row .row-title { font-weight: 500; }
+        .perm-native-select {
+            min-width: 112px;
+            max-width: 140px;
+        }
+        .perm-more { padding: 0 14px 4px; }
+        .perm-more-btn {
+            border: none;
             background: transparent;
-            color: #ff3b30;
+            color: var(--settings-muted, #86868b);
+            font: inherit;
+            font-size: 12px;
+            padding: 4px 0;
             cursor: pointer;
         }
-        html.axis-dark .perm-card-remove {
-            color: #ff453a;
-            border-color: rgba(255, 69, 58, 0.28);
-        }
-        .perm-card-remove:hover {
-            background: rgba(255, 59, 48, 0.08);
-        }
-        html.axis-dark .perm-card-remove:hover {
-            background: rgba(255, 69, 58, 0.12);
-        }
-        .perm-card-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 1px;
-            background: rgba(0, 0, 0, 0.06);
-        }
-        html.axis-dark .perm-card-grid {
-            background: rgba(255, 255, 255, 0.08);
-        }
-        .perm-card-cell {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            padding: 10px 12px;
-            background: rgba(255, 255, 255, 0.55);
-            min-width: 0;
-        }
-        html.axis-dark .perm-card-cell {
-            background: rgba(28, 28, 30, 0.92);
-        }
-        html:not(.axis-dark) .perm-card-cell {
-            background: #fff;
-        }
-        .perm-card-cell label {
-            font-size: 10px;
-            font-weight: 650;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            color: #86868b;
-        }
-        html.axis-dark .perm-card-cell label { color: #98989d; }
-        .perm-card-cell select {
-            width: 100%;
-            min-width: 0;
-            padding: 7px 10px;
-            font-size: 13px;
-            border-radius: 8px;
-            border: 1px solid rgba(0, 0, 0, 0.12);
-            background: rgba(0, 0, 0, 0.03);
-            color: inherit;
-            box-sizing: border-box;
+        .perm-more-body[hidden] { display: none !important; }
+        .perm-site-remove {
+            display: block;
+            width: calc(100% - 28px);
+            margin: 4px 14px 10px;
+            padding: 6px 0;
+            border: none;
+            background: transparent;
+            color: var(--settings-muted, #86868b);
+            font: inherit;
+            font-size: 12px;
+            text-align: left;
             cursor: pointer;
         }
-        html.axis-dark .perm-card-cell select {
-            border-color: rgba(255, 255, 255, 0.14);
-            background: rgba(255, 255, 255, 0.06);
-        }
-        .perm-card-cell select:focus {
-            outline: none;
-            border-color: rgba(0, 0, 0, 0.28);
-            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.08);
-        }
-        html.axis-dark .perm-card-cell select:focus {
-            border-color: rgba(255, 255, 255, 0.32);
-            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
-        }
-        @media (max-width: 420px) {
-            .perm-card-grid { grid-template-columns: 1fr; }
-        }
-        .perm-list > .perm-empty {
-            margin: 0;
-        }
+        .perm-site-remove:hover { color: var(--settings-text); }
         .perm-empty {
             text-align: center;
             color: #86868b;
             font-size: 12px;
+            padding: 20px 14px;
+        }
+        html.axis-dark .perm-empty { color: #98989d; }
+        .perm-panel-hint {
+            margin: 0 0 12px;
+            font-size: 12px;
             line-height: 1.45;
-            padding: 32px 20px;
-            border: 1px dashed rgba(0, 0, 0, 0.1);
-            border-radius: 12px;
-            margin: 12px 16px 16px;
-            background: rgba(0, 0, 0, 0.02);
+            color: #86868b;
         }
-        html.axis-dark .perm-empty {
-            color: #98989d;
-            border-color: rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.02);
+        html.axis-dark .perm-panel-hint { color: #98989d; }
+        .cookies-clear-all-row {
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(128, 128, 128, 0.2);
         }
+        .cookie-site-count {
+            font-size: 11px;
+            color: #86868b;
+            font-variant-numeric: tabular-nums;
+        }
+        html.axis-dark .cookie-site-count { color: #98989d; }
 
         /* -- Light `uiTheme` only: Chromium was still using dark *native* form chrome (black
            select rings, checkboxes, scrollbars) when the OS is dark, because `light dark`
@@ -2171,13 +2469,13 @@
         }
         /* Light mode: flat warm mist on dark settings chrome (solid fills only). */
         html.axis-dark.settings-light-tint:not(.settings-native-window) {
-            --settings-bg: #363330;
-            --settings-sidebar-bg: #2e2c2a;
-            --settings-card-bg: #3e3b38;
-            --settings-control-bg: #464340;
-            --settings-hover-bg: #4e4b48;
-            --settings-card-border: #524f4c;
-            --settings-row-border: #484542;
+            --settings-bg: #403d3a;
+            --settings-sidebar-bg: #383533;
+            --settings-card-bg: #4a4744;
+            --settings-control-bg: #524f4c;
+            --settings-hover-bg: #5a5754;
+            --settings-card-border: #5e5b58;
+            --settings-row-border: #54514e;
         }
         html.axis-dark.settings-light-tint:not(.settings-native-window) body,
         html.axis-dark.settings-light-tint:not(.settings-native-window) .main,
@@ -2197,14 +2495,14 @@
             box-shadow: none;
         }
         html.settings-native-window.axis-dark.settings-light-tint .sidebar {
-            background: var(--settings-native-sidebar-bg, rgba(42, 40, 38, 0.94)) !important;
+            background: var(--settings-native-sidebar-bg, rgba(50, 48, 46, 0.94)) !important;
             background-image: none !important;
             border-right-color: rgba(255, 253, 250, 0.12) !important;
             backdrop-filter: blur(var(--settings-native-sidebar-blur, 26px)) saturate(var(--settings-native-sidebar-sat, 118%)) !important;
             -webkit-backdrop-filter: blur(var(--settings-native-sidebar-blur, 26px)) saturate(var(--settings-native-sidebar-sat, 118%)) !important;
         }
         html.settings-native-window.axis-dark.settings-light-tint .group-content {
-            background: var(--settings-native-card-bg, rgba(48, 46, 44, 0.96)) !important;
+            background: var(--settings-native-card-bg, rgba(56, 54, 52, 0.96)) !important;
             background-image: none !important;
             border-color: rgba(255, 253, 250, 0.11) !important;
             backdrop-filter: blur(var(--settings-native-card-blur, 22px)) saturate(var(--settings-native-card-sat, 118%)) !important;
@@ -2212,7 +2510,7 @@
             box-shadow: var(--settings-native-card-shadow, 0 4px 22px rgba(0, 0, 0, 0.2)) !important;
         }
         html.settings-native-window.axis-dark.settings-light-tint .settings-search {
-            background: var(--settings-native-search-bg, rgba(54, 52, 50, 0.96)) !important;
+            background: var(--settings-native-search-bg, rgba(62, 60, 58, 0.96)) !important;
             border-color: rgba(255, 253, 250, 0.14) !important;
         }
         body,
@@ -2251,6 +2549,8 @@
         .sidebar-item svg {
             width: 17px;
             height: 17px;
+            flex-shrink: 0;
+            display: block;
             opacity: 0.8;
         }
         .sidebar-item:hover,
@@ -2321,12 +2621,21 @@
         html.axis-dark .row,
         html.axis-dark .shortcut-row,
         html.axis-dark .extension-card {
-            border-bottom-color: var(--settings-row-border);
+            border-bottom: none;
+            border-top-color: var(--settings-row-border);
         }
         .row {
             min-height: 54px;
             padding: 14px 20px;
             gap: 18px;
+            border-top: 1px solid var(--settings-row-border);
+        }
+        .row:first-child {
+            border-top: none;
+        }
+        .group-content > .row + .row,
+        .group-content > .row:not(:first-child) {
+            border-top: 1px solid var(--settings-row-border);
         }
         .row-title,
         .extension-title,
@@ -2469,6 +2778,228 @@
         .shortcuts-header {
             margin-bottom: 10px;
         }
+        .screen-time-panel {
+            padding: 12px 14px 14px;
+            border-top: 1px solid var(--ax-sep);
+        }
+        .screen-time-summary {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+        .screen-time-summary-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: rgba(0, 0, 0, 0.45);
+        }
+        html.axis-dark .screen-time-summary-label {
+            color: rgba(255, 255, 255, 0.45);
+        }
+        .screen-time-summary-value {
+            font-size: 22px;
+            font-weight: 700;
+            line-height: 1.1;
+            margin-top: 2px;
+        }
+        .screen-time-chart {
+            display: flex;
+            align-items: flex-end;
+            gap: 6px;
+            height: 96px;
+            margin-bottom: 12px;
+        }
+        .screen-time-bar-col {
+            position: relative;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+            min-width: 0;
+            cursor: pointer;
+        }
+        .screen-time-bar-col.is-selected .screen-time-bar-label {
+            font-weight: 600;
+        }
+        .screen-time-bar-col::after {
+            content: attr(data-tip);
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% + 6px);
+            transform: translateX(-50%) translateY(2px);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.12s ease, transform 0.12s ease;
+            z-index: 2;
+        }
+        .screen-time-chart.screen-time-chart--light .screen-time-bar-col::after {
+            background: #ffffff;
+            color: #111111;
+            border: 1px solid #dcdcdc;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+        }
+        .screen-time-chart:not(.screen-time-chart--light) .screen-time-bar-col::after {
+            background: #2c2c2e;
+            color: #f5f5f7;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.38);
+        }
+        .screen-time-bar-col:hover::after,
+        .screen-time-bar-col:focus-within::after {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+        .screen-time-bar-track {
+            width: 100%;
+            height: 72px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+        }
+        .screen-time-bar {
+            width: 100%;
+            max-width: 28px;
+            border-radius: 4px 4px 0 0;
+            background: rgba(0, 0, 0, 0.14);
+            min-height: 1px;
+            transition: height 0.2s ease, background 0.2s ease;
+        }
+        html.axis-dark .screen-time-bar {
+            background: rgba(255, 255, 255, 0.16);
+        }
+        .screen-time-bar-col.is-selected .screen-time-bar {
+            background: #007aff;
+        }
+        html.axis-dark .screen-time-bar-col.is-selected .screen-time-bar {
+            background: #0a84ff;
+        }
+        .screen-time-bar-col.is-selected .screen-time-bar-label {
+            color: #007aff;
+            font-weight: 600;
+        }
+        html.axis-dark .screen-time-bar-col.is-selected .screen-time-bar-label {
+            color: #0a84ff;
+        }
+        .screen-time-bar-col.is-today:not(.is-selected) .screen-time-bar-label {
+            font-weight: 600;
+        }
+        .screen-time-top-heading {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: rgba(0, 0, 0, 0.45);
+            margin-bottom: 2px;
+        }
+        html.axis-dark .screen-time-top-heading {
+            color: rgba(255, 255, 255, 0.45);
+        }
+        .screen-time-bar-label {
+            font-size: 10px;
+            color: rgba(0, 0, 0, 0.45);
+            white-space: nowrap;
+        }
+        html.axis-dark .screen-time-bar-label {
+            color: rgba(255, 255, 255, 0.45);
+        }
+        .screen-time-top {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .screen-time-top-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 12px;
+        }
+        .screen-time-top-domain {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: rgba(0, 0, 0, 0.72);
+        }
+        html.axis-dark .screen-time-top-domain {
+            color: rgba(255, 255, 255, 0.78);
+        }
+        .screen-time-top-time {
+            flex-shrink: 0;
+            font-variant-numeric: tabular-nums;
+            color: rgba(0, 0, 0, 0.45);
+        }
+        html.axis-dark .screen-time-top-time {
+            color: rgba(255, 255, 255, 0.45);
+        }
+        .screen-time-off {
+            padding: 12px 14px;
+            font-size: 12px;
+            color: rgba(0, 0, 0, 0.45);
+            border-top: 1px solid var(--settings-card-border, rgba(0, 0, 0, 0.06));
+        }
+        html.axis-dark .screen-time-off {
+            color: rgba(255, 255, 255, 0.45);
+        }
+        .screen-time-chart-scale {
+            display: flex;
+            justify-content: flex-end;
+            font-size: 9px;
+            color: rgba(0, 0, 0, 0.38);
+            margin: -4px 0 8px;
+        }
+        html.axis-dark .screen-time-chart-scale {
+            color: rgba(255, 255, 255, 0.38);
+        }
+        #settings-main .screen-time-limit-add-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            min-width: 0;
+        }
+        #settings-main .screen-time-limit-add-controls > input[type="text"] {
+            flex: 1 1 auto;
+            min-width: 0;
+            width: auto;
+            max-width: none;
+        }
+        #settings-main .screen-time-limit-add-controls > input[type="number"] {
+            flex: 0 0 72px;
+            width: 72px;
+        }
+        #settings-main .screen-time-limit-add-controls select {
+            flex: 0 0 var(--ax-ctl-w);
+            width: var(--ax-ctl-w);
+            min-width: 96px;
+        }
+        #settings-main .screen-time-limit-add-controls .primary {
+            flex: 0 0 auto;
+            white-space: nowrap;
+        }
+        #settings-main .screen-time-limit-row .row-sub {
+            font-variant-numeric: tabular-nums;
+        }
+        #settings-main .screen-time-limit-row .row-sub.is-over {
+            color: var(--ax-danger);
+        }
+        #settings-main .screen-time-limits-empty {
+            margin: 0;
+            padding: 10px var(--ax-row-px) 12px;
+            border-top: 1px solid var(--ax-sep);
+            font-size: 11.5px;
+            line-height: 1.35;
+            color: var(--ax-text-3);
+        }
         #history-pane .history-toolbar {
             margin-bottom: 0;
         }
@@ -2484,6 +3015,13 @@
         }
         .extensions-section {
             margin-bottom: 24px;
+        }
+        .extensions-section-card .extensions-section-pad {
+            padding: 14px 16px 16px;
+        }
+        .extensions-section-card .extensions-hint {
+            margin: 10px 0 0;
+            padding: 0;
         }
         .extensions-store-buttons button,
         .extensions-file-actions button,
@@ -2691,8 +3229,26 @@
             padding: 0 12px;
             box-sizing: border-box;
         }
-        html.settings-native-window:not(.macos) .settings-native-win-controls {
+        /* Linux frameless: custom close + drag strip. Win32 uses native titleBarOverlay. */
+        html.settings-native-window.platform-linux .settings-native-win-controls {
             display: flex;
+        }
+        html.settings-native-window.win32 .settings-native-win-controls {
+            display: none !important;
+        }
+        html.settings-native-window.win32 .settings-wrap {
+            position: relative;
+        }
+        html.settings-native-window.win32 .settings-wrap::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: var(--axis-win-caption-inset, 140px);
+            height: var(--axis-win-titlebar-height, 48px);
+            -webkit-app-region: drag;
+            z-index: 25;
+            pointer-events: auto;
         }
         html.settings-native-window .settings-native-close {
             -webkit-app-region: no-drag;
@@ -2782,45 +3338,1773 @@
             background: rgba(255, 255, 255, 0.85);
             border-color: rgba(0, 0, 0, 0.12);
         }
-        /* Native Settings at window transparency 0 - solid shell (vibrancy/acrylic is off). */
-        html.settings-native-window.settings-opaque-shell {
-            background: #000000 !important;
-            background-color: #000000 !important;
+        /* Consistency pass: toggles, controls, and feature blocks share shell tokens. */
+        .switch {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            width: 42px;
+            height: 26px;
+            flex-shrink: 0;
+            cursor: pointer;
         }
-        html.settings-native-window.settings-opaque-shell,
-        html.settings-native-window.settings-opaque-shell body {
-            --settings-bg: #000000;
-            --settings-sidebar-bg: #050505;
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            position: absolute;
         }
-        html.settings-native-window.settings-opaque-shell.axis-dark.settings-light-tint,
-        html.settings-native-window.settings-opaque-shell.axis-dark.settings-light-tint body {
-            --settings-bg: #363330;
-            --settings-sidebar-bg: #2e2c2a;
+        .switch .slider {
+            position: absolute;
+            inset: 0;
+            border-radius: 999px;
+            background: var(--settings-hover-bg);
+            border: 1px solid var(--settings-card-border);
+            transition: background 0.16s ease, border-color 0.16s ease;
         }
-        html.settings-native-window.settings-opaque-shell body,
-        html.settings-native-window.settings-opaque-shell .main {
-            background: var(--settings-bg) !important;
-            background-color: var(--settings-bg) !important;
+        .switch .slider::before {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            left: 2px;
+            top: 2px;
+            border-radius: 50%;
+            background: var(--settings-card-bg);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+            transition: transform 0.16s ease;
         }
-        html.settings-native-window.settings-opaque-shell .sidebar {
-            background: var(--settings-sidebar-bg) !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
+        .switch input:checked + .slider {
+            background: var(--settings-active-bg);
+            border-color: var(--settings-active-bg);
         }
-        html.settings-native-window.settings-opaque-shell .group-content,
-        html.settings-native-window.settings-opaque-shell.axis-dark .group-content,
-        html.settings-native-window.settings-opaque-shell.axis-dark.settings-light-tint .group-content {
-            background: var(--settings-card-bg, #0d0d0d) !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
+        .switch input:checked + .slider::before {
+            transform: translateX(16px);
+            background: var(--settings-active-text);
+        }
+        .switch input:focus-visible + .slider {
+            box-shadow: 0 0 0 3px var(--settings-focus);
+        }
+        .row {
+            min-height: 34px;
+            align-items: center;
+            padding: 7px 14px;
+        }
+        .group {
+            margin-bottom: 14px;
+        }
+        .group-title {
+            margin: 0 0 4px 2px;
+        }
+        .group-content {
+            border-radius: 10px;
             box-shadow: none;
         }
-        html.settings-native-window.settings-opaque-shell .settings-search,
-        html.settings-native-window.settings-opaque-shell.axis-dark.settings-light-tint .settings-search {
-            background: var(--settings-control-bg, #151515) !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
+        .main {
+            padding: 18px 24px;
         }
+        .main-inner {
+            max-width: 640px;
+        }
+        .row-title {
+            font-weight: 600;
+            color: var(--settings-text);
+        }
+        .row-desc,
+        .ai-settings-intro,
+        .ai-providers-empty,
+        .empty-state,
+        .group-title {
+            color: var(--settings-muted);
+        }
+        .group-title {
+            font-size: 11px;
+            font-weight: 650;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin: 0 0 8px 2px;
+        }
+        .group-content {
+            border-radius: 14px;
+            border: 1px solid var(--settings-card-border);
+            background: var(--settings-card-bg);
+            overflow: hidden;
+        }
+        .row + .row,
+        .group-content > .row:not(:first-child) {
+            border-top: 1px solid var(--settings-row-border);
+        }
+        /* Avoid stacked top+bottom rules on the same row */
+        .group-content > .row {
+            border-bottom: none;
+        }
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--settings-text);
+            cursor: pointer;
+        }
+        input[type="range"] {
+            accent-color: var(--settings-text);
+        }
+        button:not(.sidebar-item):not(.settings-profile-trigger):not(.settings-profile-row):not(.settings-native-close),
+        select,
+        .shortcut-capture,
+        .ai-key-entry-actions button,
+        .vault-icon-btn,
+        .perm-card-cell select {
+            border-radius: 9px;
+        }
+        .ai-key-entry.is-active,
+        .ai-key-entry:focus-within,
+        .ai-providers-list .ai-key-entry.is-editing {
+            background: var(--settings-hover-bg);
+            box-shadow: none;
+        }
+        html.axis-dark .ai-key-active-status,
+        .ai-key-active-status {
+            color: var(--settings-text);
+            font-weight: 600;
+        }
+        .vault-seg,
+        .vault-segmented {
+            border-radius: 10px;
+            background: var(--settings-hover-bg);
+            border: 1px solid var(--settings-card-border);
+        }
+        .vault-seg button.active,
+        .vault-segmented button.active,
+        .vault-seg-btn.active {
+            background: var(--settings-card-bg);
+            color: var(--settings-text);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+        }
+        .settings-profile-menu {
+            border-radius: 12px;
+            border: 1px solid var(--settings-card-border);
+            background: var(--settings-card-bg);
+            box-shadow: var(--settings-shadow);
+        }
+        .settings-profile-row {
+            border-radius: 9px;
+            min-height: 36px;
+        }
+        .settings-profile-row:hover {
+            background: var(--settings-hover-bg);
+        }
+        .settings-profile-row[aria-selected="true"] {
+            background: var(--settings-hover-bg);
+        }
+        .extension-card,
+        .history-day {
+            border-radius: 12px;
+            border-color: var(--settings-card-border);
+            background: var(--settings-card-bg);
+        }
+        .main-inner .pane h2 {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--settings-text);
+            margin: 0 0 18px;
+        }
+
+        /* ================================================================
+           Settings content design system.
+           Scoped to #settings-main so it outranks the older layered rules
+           above; the sidebar and window chrome are intentionally untouched.
+           ================================================================ */
+        :root {
+            --ax-fill-1: rgba(255, 255, 255, 0.06);
+            --ax-fill-2: rgba(255, 255, 255, 0.095);
+            --ax-fill-3: rgba(255, 255, 255, 0.15);
+            --ax-stroke: rgba(255, 255, 255, 0.085);
+            --ax-stroke-2: rgba(255, 255, 255, 0.18);
+            --ax-sep: rgba(255, 255, 255, 0.065);
+            --ax-text: rgba(255, 255, 255, 0.94);
+            --ax-text-2: rgba(235, 235, 245, 0.6);
+            --ax-text-3: rgba(235, 235, 245, 0.38);
+            --ax-on: #f2f2f7;
+            --ax-on-ink: #1c1c1e;
+            --ax-danger: #ff6b63;
+            --ax-danger-fill: rgba(255, 107, 99, 0.12);
+            --ax-danger-stroke: rgba(255, 107, 99, 0.28);
+            --ax-focus-ring: 0 0 0 3px rgba(255, 255, 255, 0.16);
+            --ax-r-card: 12px;
+            --ax-r-ctl: 8px;
+            --ax-row-h: 44px;
+            --ax-row-px: 16px;
+            --ax-ctl-h: 28px;
+            --ax-ctl-w: 216px;
+            --ax-ease: cubic-bezier(0.25, 0.8, 0.25, 1);
+            --ax-t: 0.14s;
+            --ax-chevrons: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 12' fill='none' stroke='%23c7c7cc' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 4.25 4.5 1.5l3 2.75M1.5 7.75l3 2.75 3-2.75'/%3E%3C/svg%3E");
+            --ax-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%231c1c1e' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.6 6.3 4.9 8.6 9.4 3.6'/%3E%3C/svg%3E");
+            --ax-search-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23a1a1a6' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='4.75'/%3E%3Cpath d='M10.5 10.5 14 14'/%3E%3C/svg%3E");
+            --ax-disclosure: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12' fill='none' stroke='%23a1a1a6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 1.75 6 6l-4 4.25'/%3E%3C/svg%3E");
+        }
+
+        /* ---------- Layout ---------- */
+        html body .main {
+            scrollbar-gutter: stable;
+            padding: 22px 28px 48px;
+        }
+        #settings-main {
+            max-width: 640px;
+            margin: 0 auto;
+            color: var(--ax-text);
+            font-size: 13px;
+        }
+        #settings-main .pane.active {
+            animation: axPaneIn 0.2s var(--ax-ease) both;
+        }
+        @keyframes axPaneIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #settings-main .pane.active { animation: none; }
+        }
+
+        /* ---------- Search ---------- */
+        #settings-main .settings-search-wrap {
+            position: relative;
+            margin: 0 0 22px;
+        }
+        #settings-main .settings-search {
+            width: 100%;
+            height: 32px;
+            min-height: 32px;
+            box-sizing: border-box;
+            padding: 0 12px 0 34px;
+            background-color: var(--ax-fill-1);
+            background-image: var(--ax-search-icon);
+            background-repeat: no-repeat;
+            background-position: 11px center;
+            background-size: 14px 14px;
+            border: 1px solid var(--ax-stroke);
+            border-radius: 9px;
+            color: var(--ax-text);
+            font: inherit;
+            font-size: 13px;
+            line-height: normal;
+            -webkit-appearance: none;
+            appearance: none;
+            outline: none;
+            box-shadow: none;
+            transition: border-color var(--ax-t) var(--ax-ease), box-shadow var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .settings-search::-webkit-search-decoration,
+        #settings-main .settings-search::-webkit-search-results-decoration,
+        #settings-main .settings-search::-webkit-search-cancel-button {
+            -webkit-appearance: none;
+            appearance: none;
+            display: none;
+        }
+        #settings-main .settings-search::placeholder { color: var(--ax-text-3); }
+        #settings-main .settings-search:focus {
+            border-color: var(--ax-stroke-2);
+            box-shadow: var(--ax-focus-ring);
+        }
+        #settings-main .settings-search-empty {
+            padding: 36px 0;
+            text-align: center;
+            font-size: 13px;
+            color: var(--ax-text-2);
+        }
+
+        /* ---------- Groups & cards ---------- */
+        #settings-main .group {
+            margin: 0 0 24px;
+        }
+        #settings-main .group-title,
+        #settings-main .group-subtitle,
+        #settings-main .shortcuts-subheading {
+            margin: 0 0 7px 4px;
+            padding: 0;
+            font-size: 11px;
+            font-weight: 650;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: rgba(235, 235, 245, 0.48);
+        }
+        #settings-main .group-subtitle {
+            margin-top: 16px;
+        }
+        #settings-main .group-content {
+            margin: 0;
+            padding: 0;
+            border: 1px solid var(--ax-stroke);
+            border-radius: var(--ax-r-card);
+            overflow: hidden;
+            box-shadow: none;
+        }
+        #settings-main .group-content + .group-content {
+            margin-top: 10px;
+        }
+
+        /* ---------- Rows ---------- */
+        #settings-main .row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            min-height: var(--ax-row-h);
+            margin: 0;
+            padding: 8px var(--ax-row-px);
+            box-sizing: border-box;
+            border: 0;
+            border-top: 0;
+            background: transparent;
+        }
+        #settings-main .group-content > .row + .row,
+        #settings-main .group-content > .ntp-welcome-subgroup + .row,
+        #settings-main .group-content > .row.hidden + .row {
+            border-top: 1px solid var(--ax-sep);
+        }
+        #settings-main .row-label {
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        #settings-main .row-title {
+            margin: 0;
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1.3;
+            letter-spacing: -0.005em;
+            color: var(--ax-text);
+        }
+        #settings-main .row-sub {
+            font-size: 11.5px;
+            line-height: 1.35;
+            color: var(--ax-text-2);
+        }
+        #settings-main .row-arrow {
+            margin-left: 4px;
+            font-weight: 400;
+            color: var(--ax-text-2);
+        }
+        #settings-main .row-unit {
+            font-size: 12px;
+            color: var(--ax-text-2);
+            white-space: nowrap;
+        }
+        #settings-main .row-controls,
+        #settings-main .row-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        #settings-main .row--stacked {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 8px;
+            padding-top: 12px;
+            padding-bottom: 12px;
+        }
+        #settings-main .row-field {
+            display: flex;
+            gap: 8px;
+        }
+        #settings-main .row-field > input { flex: 1 1 auto; min-width: 0; }
+        #settings-main .row:has(> input[type="checkbox"]:not(:disabled)),
+        #settings-main .row:has(> .switch input:not(:disabled)) {
+            cursor: pointer;
+        }
+        #settings-main .row--check {
+            cursor: pointer;
+            transition: background var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .row--check:hover { background: rgba(255, 255, 255, 0.025); }
+        #settings-main .axis-lang-row.is-disabled .row-title,
+        #settings-main .row.is-disabled .row-title {
+            color: var(--ax-text-3);
+        }
+        #settings-main .axis-beta-label {
+            display: inline-block;
+            margin-left: 6px;
+            padding: 1px 6px;
+            border-radius: 5px;
+            font-size: 9.5px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            vertical-align: 1px;
+            color: var(--ax-text-2);
+            background: var(--ax-fill-2);
+        }
+        /* Nested option rows (e.g. welcome/widgets sub-settings) */
+        #settings-main .ntp-welcome-subgroup {
+            background: rgba(0, 0, 0, 0.1);
+            border: 0;
+            border-top: 1px solid var(--ax-sep);
+        }
+        #settings-main .ntp-welcome-subgroup > .row:first-child { border-top: 0; }
+        #settings-main .ntp-welcome-subgroup .row {
+            padding-left: calc(var(--ax-row-px) + 16px);
+        }
+
+        /* ---------- Selects ---------- */
+        #settings-main select {
+            -webkit-appearance: none;
+            appearance: none;
+            height: var(--ax-ctl-h);
+            min-height: var(--ax-ctl-h);
+            padding: 0 28px 0 10px;
+            box-sizing: border-box;
+            border: 1px solid var(--ax-stroke);
+            border-radius: var(--ax-r-ctl);
+            background-color: var(--ax-fill-1);
+            background-image: var(--ax-chevrons);
+            background-repeat: no-repeat;
+            background-position: right 9px center;
+            background-size: 9px 12px;
+            color: var(--ax-text);
+            font: inherit;
+            font-size: 12.5px;
+            line-height: normal;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            overflow: hidden;
+            cursor: pointer;
+            outline: none;
+            box-shadow: none;
+            transition: background-color var(--ax-t) var(--ax-ease), border-color var(--ax-t) var(--ax-ease), box-shadow var(--ax-t) var(--ax-ease);
+        }
+        #settings-main select:hover:not(:disabled) { background-color: var(--ax-fill-2); }
+        #settings-main select:focus-visible {
+            border-color: var(--ax-stroke-2);
+            box-shadow: var(--ax-focus-ring);
+        }
+        #settings-main select:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+        #settings-main select option {
+            background: #2c2c2e;
+            color: #f5f5f7;
+        }
+        #settings-main .row > select,
+        #settings-main .row > .row-controls > select,
+        #settings-main .row > input[type="text"],
+        #settings-main .row > .row-controls > input[type="text"] {
+            flex: 0 0 var(--ax-ctl-w);
+            width: var(--ax-ctl-w);
+            max-width: var(--ax-ctl-w);
+            min-width: 0;
+        }
+
+        /* ---------- Text inputs ---------- */
+        #settings-main input[type="text"],
+        #settings-main input[type="url"],
+        #settings-main input[type="email"],
+        #settings-main input[type="tel"],
+        #settings-main input[type="password"],
+        #settings-main input[type="number"],
+        #settings-main input[type="search"]:not(.settings-search) {
+            height: var(--ax-ctl-h);
+            min-height: var(--ax-ctl-h);
+            padding: 0 10px;
+            box-sizing: border-box;
+            border: 1px solid var(--ax-stroke);
+            border-radius: var(--ax-r-ctl);
+            background: var(--ax-fill-1);
+            color: var(--ax-text);
+            font: inherit;
+            font-size: 12.5px;
+            outline: none;
+            box-shadow: none;
+            transition: background-color var(--ax-t) var(--ax-ease), border-color var(--ax-t) var(--ax-ease), box-shadow var(--ax-t) var(--ax-ease);
+        }
+        #settings-main input::placeholder { color: var(--ax-text-3); }
+        #settings-main input[type="text"]:focus,
+        #settings-main input[type="url"]:focus,
+        #settings-main input[type="email"]:focus,
+        #settings-main input[type="tel"]:focus,
+        #settings-main input[type="password"]:focus,
+        #settings-main input[type="number"]:focus,
+        #settings-main input[type="search"]:not(.settings-search):focus {
+            background: var(--ax-fill-2);
+            border-color: var(--ax-stroke-2);
+            box-shadow: var(--ax-focus-ring);
+        }
+        #settings-main input[type="number"] {
+            width: 80px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ---------- Toggles (switch labels + bare row checkboxes) ---------- */
+        #settings-main .row > input[type="checkbox"],
+        #settings-main .row > .row-controls > input[type="checkbox"] {
+            -webkit-appearance: none;
+            appearance: none;
+            position: relative;
+            flex: 0 0 auto;
+            width: 34px;
+            height: 20px;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            border-radius: 999px;
+            background: var(--ax-fill-3);
+            box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+            cursor: pointer;
+            outline: none;
+            transition: background-color 0.18s var(--ax-ease), box-shadow var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .row > input[type="checkbox"]::before,
+        #settings-main .row > .row-controls > input[type="checkbox"]::before {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--ax-on);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+            transition: transform 0.2s var(--ax-ease), background-color 0.18s var(--ax-ease);
+        }
+        #settings-main .row > input[type="checkbox"]:checked,
+        #settings-main .row > .row-controls > input[type="checkbox"]:checked {
+            background: var(--ax-on);
+        }
+        #settings-main .row > input[type="checkbox"]:checked::before,
+        #settings-main .row > .row-controls > input[type="checkbox"]:checked::before {
+            transform: translateX(14px);
+            background: var(--ax-on-ink);
+            box-shadow: none;
+        }
+        #settings-main .row > input[type="checkbox"]:focus-visible,
+        #settings-main .row > .row-controls > input[type="checkbox"]:focus-visible {
+            box-shadow: var(--ax-focus-ring);
+        }
+        #settings-main .row > input[type="checkbox"]:disabled,
+        #settings-main .row > .row-controls > input[type="checkbox"]:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+        #settings-main .switch {
+            position: relative;
+            display: inline-block;
+            flex: 0 0 auto;
+            width: 34px;
+            height: 20px;
+            margin: 0;
+            cursor: pointer;
+        }
+        #settings-main .switch input {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            opacity: 0;
+            cursor: pointer;
+            z-index: 1;
+        }
+        #settings-main .switch .slider {
+            position: absolute;
+            inset: 0;
+            border: 0;
+            border-radius: 999px;
+            background: var(--ax-fill-3);
+            box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+            transition: background-color 0.18s var(--ax-ease), box-shadow var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .switch .slider::before {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            bottom: auto;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--ax-on);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+            transform: none;
+            transition: transform 0.2s var(--ax-ease), background-color 0.18s var(--ax-ease);
+        }
+        #settings-main .switch input:checked + .slider { background: var(--ax-on); border: 0; }
+        #settings-main .switch input:checked + .slider::before {
+            transform: translateX(14px);
+            background: var(--ax-on-ink);
+            box-shadow: none;
+        }
+        #settings-main .switch input:focus-visible + .slider { box-shadow: var(--ax-focus-ring); }
+        #settings-main .switch input:disabled + .slider { opacity: 0.4; }
+
+        #settings-main .row.gestures-row-disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        /* Plain checkboxes outside rows */
+        #settings-main input[type="checkbox"] {
+            -webkit-appearance: none;
+            appearance: none;
+            flex: 0 0 auto;
+            width: 16px;
+            height: 16px;
+            margin: 0;
+            border: 1px solid var(--ax-stroke-2);
+            border-radius: 4.5px;
+            background: var(--ax-fill-1) no-repeat center / 12px 12px;
+            cursor: pointer;
+            transition: background-color var(--ax-t) var(--ax-ease), border-color var(--ax-t) var(--ax-ease);
+        }
+        #settings-main input[type="checkbox"]:checked {
+            border-color: var(--ax-on);
+            background-color: var(--ax-on);
+            background-image: var(--ax-check);
+        }
+
+        /* ---------- Sliders ---------- */
+        #settings-main .window-chrome-light-stack,
+        #settings-main .ambient-volume-wrap {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            flex: 0 0 var(--ax-ctl-w);
+            width: var(--ax-ctl-w);
+            margin: 0;
+        }
+        #settings-main .window-chrome-light-stack .window-chrome-light-value,
+        #settings-main .ambient-volume-value {
+            order: 2;
+            flex: 0 0 38px;
+            margin: 0;
+            text-align: right;
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            color: var(--ax-text-2);
+        }
+        #settings-main input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            flex: 1 1 auto;
+            width: auto;
+            min-width: 0;
+            height: 20px;
+            margin: 0;
+            background: transparent;
+            cursor: pointer;
+            accent-color: var(--ax-on);
+        }
+        #settings-main input[type="range"]::-webkit-slider-runnable-track {
+            height: 4px;
+            border-radius: 999px;
+            background: var(--ax-fill-3);
+        }
+        #settings-main input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            margin-top: -6px;
+            border-radius: 50%;
+            background: var(--ax-on);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+            transition: transform var(--ax-t) var(--ax-ease);
+        }
+        #settings-main input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.1); }
+        #settings-main input[type="range"]:focus-visible { outline: none; }
+        #settings-main input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--ax-focus-ring); }
+        #settings-main input[type="range"]:disabled { opacity: 0.4; cursor: default; }
+
+        /* ---------- Color ---------- */
+        #settings-main input[type="color"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 26px;
+            height: 26px;
+            padding: 0;
+            border: 1px solid var(--ax-stroke-2);
+            border-radius: 50%;
+            background: transparent;
+            cursor: pointer;
+            overflow: hidden;
+        }
+        #settings-main input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        #settings-main input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 50%; }
+        #settings-main .theme-preview {
+            width: 56px;
+            height: 26px;
+            border-radius: 7px;
+            border: 1px solid var(--ax-stroke-2);
+        }
+
+        /* ---------- Buttons ---------- */
+        #settings-main button:where(:not(.vault-icon-btn, .ntp-ticker-move, .vault-segment, .perm-site-remove, .ai-key-link-btn, .shortcut-key-btn, .history-delete)) {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            height: var(--ax-ctl-h);
+            min-height: var(--ax-ctl-h);
+            padding: 0 12px;
+            box-sizing: border-box;
+            border: 1px solid var(--ax-stroke);
+            border-radius: var(--ax-r-ctl);
+            background: var(--ax-fill-1);
+            color: var(--ax-text);
+            font: inherit;
+            font-size: 12.5px;
+            font-weight: 550;
+            line-height: 1;
+            white-space: nowrap;
+            cursor: pointer;
+            opacity: 1;
+            box-shadow: none;
+            transform: none;
+            transition: background-color var(--ax-t) var(--ax-ease), border-color var(--ax-t) var(--ax-ease), color var(--ax-t) var(--ax-ease), opacity var(--ax-t) var(--ax-ease);
+        }
+        #settings-main button:where(:not(.vault-icon-btn, .ntp-ticker-move, .vault-segment, .perm-site-remove, .ai-key-link-btn, .shortcut-key-btn, .history-delete)):hover:not(:disabled) {
+            background: var(--ax-fill-2);
+            border-color: var(--ax-stroke-2);
+        }
+        #settings-main button:where(:not(.vault-icon-btn, .ntp-ticker-move, .vault-segment, .perm-site-remove, .ai-key-link-btn, .shortcut-key-btn, .history-delete)):active:not(:disabled) {
+            background: var(--ax-fill-3);
+        }
+        #settings-main button:focus-visible {
+            outline: none;
+            box-shadow: var(--ax-focus-ring);
+        }
+        #settings-main button:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+        #settings-main button.primary,
+        #settings-main #site-perm-add-btn {
+            border-color: transparent;
+            background: var(--ax-on);
+            color: var(--ax-on-ink);
+        }
+        #settings-main button.primary:hover:not(:disabled),
+        #settings-main #site-perm-add-btn:hover:not(:disabled) {
+            border-color: transparent;
+            background: #ffffff;
+        }
+        #settings-main button.destructive,
+        #settings-main #clear-history,
+        #settings-main .profiles-trash-delete {
+            border-color: var(--ax-danger-stroke);
+            background: var(--ax-danger-fill);
+            color: var(--ax-danger);
+        }
+        #settings-main button.destructive:hover:not(:disabled),
+        #settings-main #clear-history:hover:not(:disabled),
+        #settings-main .profiles-trash-delete:hover:not(:disabled) {
+            border-color: rgba(255, 107, 99, 0.45);
+            background: rgba(255, 107, 99, 0.18);
+        }
+        #settings-main button.secondary { opacity: 1; }
+
+        /* ---------- Empty states & status ---------- */
+        #settings-main .shortcut-row-empty,
+        #settings-main .extensions-empty,
+        #settings-main .perm-empty,
+        #settings-main .profiles-trash-empty,
+        #settings-main .ai-providers-empty,
+        #settings-main .empty-state,
+        #settings-main .history-empty {
+            margin: 0;
+            padding: 18px var(--ax-row-px);
+            text-align: center;
+            font-size: 12.5px;
+            color: var(--ax-text-2);
+        }
+        #settings-main .profiles-status:empty { display: none; }
+        #settings-main .profiles-status {
+            font-size: 12px;
+            color: var(--ax-text-2);
+        }
+        #settings-main .group > .profiles-status { margin: 8px 4px 0; }
+        #settings-main .incognito-settings-banner {
+            margin: 0 0 18px;
+            padding: 10px 14px;
+            border: 1px solid var(--ax-stroke);
+            border-radius: var(--ax-r-card);
+            background: var(--ax-fill-1);
+            font-size: 12.5px;
+            color: var(--ax-text-2);
+        }
+
+        /* ---------- Shortcuts ---------- */
+        #settings-main .shortcuts-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 0 0 10px;
+        }
+        #settings-main .shortcuts-header .group-title { margin-bottom: 0; }
+        #settings-main .shortcuts-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        #settings-main .shortcuts-list .shortcuts-section {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+        #settings-main .shortcuts-subheading-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin: 0 0 7px;
+        }
+        #settings-main .shortcuts-subheading-row .shortcuts-subheading { margin-bottom: 0; }
+        #settings-main .shortcut-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            min-height: var(--ax-row-h);
+            margin: 0;
+            padding: 8px var(--ax-row-px);
+            box-sizing: border-box;
+            border: 0;
+            border-top: 1px solid var(--ax-sep);
+        }
+        #settings-main .group-content > .shortcut-row:first-child { border-top: 0; }
+        #settings-main .shortcut-row .shortcut-row-main span {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--ax-text);
+        }
+        #settings-main .shortcut-row.shortcut-row-disabled .shortcut-row-main span { color: var(--ax-text-2); }
+        #settings-main .shortcut-row-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        #settings-main .shortcut-key-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 124px;
+            min-width: 124px;
+            max-width: 124px;
+            height: var(--ax-ctl-h);
+            min-height: var(--ax-ctl-h);
+            padding: 0 10px;
+            box-sizing: border-box;
+            border: 1px solid var(--ax-stroke);
+            border-radius: var(--ax-r-ctl);
+            background: var(--ax-fill-1);
+            color: var(--ax-text);
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.06em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+            box-shadow: none;
+            transition: background-color var(--ax-t) var(--ax-ease), border-color var(--ax-t) var(--ax-ease), box-shadow var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .shortcut-key-btn:hover:not(:disabled) {
+            background: var(--ax-fill-2);
+            border-color: var(--ax-stroke-2);
+        }
+        #settings-main .shortcut-key-btn.is-recording {
+            border-color: var(--ax-on) !important;
+            background: var(--ax-fill-2);
+            box-shadow: var(--ax-focus-ring);
+            font-size: 12px;
+            letter-spacing: 0;
+            color: var(--ax-text-2);
+        }
+        #settings-main .shortcut-key-btn:disabled {
+            opacity: 0.45;
+            cursor: default;
+            letter-spacing: 0;
+            font-size: 12px;
+        }
+        #settings-main .shortcut-action-btn {
+            min-width: 0;
+            height: 26px;
+            min-height: 26px;
+            padding: 0 10px;
+            font-size: 12px;
+            font-weight: 550;
+            color: var(--ax-text-2);
+        }
+        #settings-main .shortcut-action-btn:hover:not(:disabled) { color: var(--ax-text); }
+        #settings-main .shortcut-custom-card {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 12px var(--ax-row-px);
+            border-top: 1px solid var(--ax-sep);
+        }
+        #settings-main .shortcut-custom-card:first-child { border-top: 0; }
+        #settings-main .shortcut-custom-top,
+        #settings-main .shortcut-custom-meta {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+        #settings-main .shortcut-custom-name { flex: 1 1 auto; min-width: 0; }
+        #settings-main .shortcut-custom-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding-top: 4px;
+        }
+        #settings-main .shortcut-custom-steps-label {
+            font-size: 12px;
+            opacity: 0.72;
+        }
+        #settings-main .shortcut-custom-step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        #settings-main .shortcut-step-verb {
+            flex: 0 0 120px;
+            min-width: 100px;
+        }
+        #settings-main .shortcut-step-target {
+            flex: 1 1 180px;
+            min-width: 140px;
+        }
+        #settings-main .shortcut-step-verb:has(option[value='']:checked),
+        #settings-main .shortcut-step-target:has(option[value='']:checked) {
+            color: rgba(128, 128, 128, 0.72);
+        }
+        html.axis-dark #settings-main .shortcut-step-verb:has(option[value='']:checked),
+        html.axis-dark #settings-main .shortcut-step-target:has(option[value='']:checked) {
+            color: rgba(255, 255, 255, 0.42);
+        }
+        #settings-main .shortcut-step-action {
+            flex: 1 1 200px;
+            min-width: 0;
+        }
+        #settings-main .shortcut-step-action--fn {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 11px;
+        }
+        #settings-main .shortcut-custom-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding-top: 4px;
+        }
+        #settings-main .shortcuts-subheading-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        /* ---------- Site permissions ---------- */
+        #settings-main .perm-add-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px var(--ax-row-px);
+            border-bottom: none;
+        }
+        #settings-main .perm-panel .perm-list {
+            border-top: none;
+        }
+        #settings-main .perm-add-row input[type="text"] { flex: 1 1 auto; min-width: 0; }
+        #settings-main .perm-add-error {
+            display: block;
+            padding: 0 var(--ax-row-px) 8px;
+            font-size: 11.5px;
+            color: var(--ax-danger);
+        }
+        #settings-main .perm-add-error:empty { display: none; }
+        #settings-main .perm-list { padding: 0; }
+        #settings-main .perm-site {
+            border-top: 1px solid var(--ax-sep);
+        }
+        #settings-main .perm-site-summary {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: var(--ax-row-h);
+            padding: 8px var(--ax-row-px);
+            box-sizing: border-box;
+            cursor: pointer;
+            list-style: none;
+            background: transparent;
+            transition: background var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .perm-site-summary::-webkit-details-marker { display: none; }
+        #settings-main .perm-site-summary:hover { background: rgba(255, 255, 255, 0.025); }
+        #settings-main .perm-site[open] > .perm-site-summary { background: transparent; }
+        #settings-main .perm-site-summary::before {
+            content: '';
+            flex: 0 0 8px;
+            width: 8px;
+            height: 12px;
+            background: var(--ax-disclosure) no-repeat center / contain;
+            transition: transform 0.18s var(--ax-ease);
+        }
+        #settings-main .perm-site[open] > .perm-site-summary::before { transform: rotate(90deg); }
+        #settings-main .perm-site-favicon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 18px;
+            width: 18px;
+            height: 18px;
+            overflow: hidden;
+            border-radius: 5px;
+            background: var(--ax-fill-2);
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--ax-text-2);
+        }
+        #settings-main .perm-site-favicon img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        #settings-main .perm-site-name {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--ax-text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #settings-main .perm-site-meta {
+            flex-shrink: 0;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: var(--ax-fill-1);
+            font-size: 11px;
+            font-weight: 550;
+            color: var(--ax-text-2);
+        }
+        #settings-main .perm-site-rows {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            column-gap: 0;
+            border-top: 1px solid var(--ax-sep);
+            background: rgba(0, 0, 0, 0.1);
+        }
+        #settings-main .perm-site-rows > .row.perm-site-row {
+            min-height: 40px;
+            padding: 6px 12px 6px var(--ax-row-px);
+            border-top: 1px solid var(--ax-sep);
+        }
+        #settings-main .perm-site-rows > .row.perm-site-row:nth-child(-n + 2) { border-top: 0; }
+        #settings-main .perm-site-rows > .row.perm-site-row:nth-child(even) {
+            border-left: 1px solid var(--ax-sep);
+            padding-left: 14px;
+        }
+        #settings-main .perm-site-row .row-title {
+            font-size: 12.5px;
+            font-weight: 450;
+            color: var(--ax-text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #settings-main .cookies-toolbar-row {
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        #settings-main .cookies-clear-all-inline {
+            margin-left: auto;
+        }
+        #settings-main .cookie-site-rows {
+            display: flex;
+            flex-direction: column;
+            grid-template-columns: none;
+            border-top: 1px solid var(--ax-sep);
+            background: rgba(0, 0, 0, 0.1);
+        }
+        #settings-main .cookie-detail-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            max-height: min(52vh, 420px);
+            overflow-y: auto;
+        }
+        #settings-main .cookie-detail-block {
+            padding: 10px var(--ax-row-px);
+            border-top: 1px solid var(--ax-sep);
+        }
+        #settings-main .cookie-detail-block:first-child {
+            border-top: none;
+        }
+        #settings-main .cookie-detail-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 4px;
+        }
+        #settings-main .cookie-detail-name {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: var(--ax-text);
+            word-break: break-word;
+        }
+        #settings-main .cookie-detail-path {
+            flex-shrink: 0;
+            font-size: 11px;
+            color: var(--ax-text-2);
+        }
+        #settings-main .cookie-detail-meta {
+            font-size: 11px;
+            color: var(--ax-text-2);
+            margin-bottom: 6px;
+        }
+        #settings-main .cookie-detail-value {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 11px;
+            line-height: 1.45;
+            color: var(--ax-text);
+            word-break: break-all;
+            user-select: text;
+            -webkit-user-select: text;
+        }
+        #settings-main .cookie-detail-loading,
+        #settings-main .cookie-detail-empty {
+            padding: 12px var(--ax-row-px);
+            font-size: 12px;
+            color: var(--ax-text-2);
+        }
+        #settings-main .perm-site-row select.perm-native-select {
+            flex: 0 0 96px;
+            width: 96px;
+            min-width: 96px;
+            max-width: 96px;
+            height: 26px;
+            min-height: 26px;
+            font-size: 12px;
+        }
+        #settings-main .perm-site-row select.perm-native-select.is-allow { color: #8be28b; }
+        #settings-main .perm-site-row select.perm-native-select.is-deny { color: var(--ax-danger); }
+        #settings-main .perm-site-remove {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: auto;
+            height: 36px;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            border-top: 1px solid var(--ax-sep);
+            border-radius: 0;
+            background: transparent;
+            color: var(--ax-danger);
+            font: inherit;
+            font-size: 12.5px;
+            font-weight: 550;
+            text-align: center;
+            cursor: pointer;
+            transition: background var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .perm-site-remove:hover { background: var(--ax-danger-fill); color: var(--ax-danger); }
+
+        /* ---------- History ---------- */
+        #settings-main .history-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px var(--ax-row-px);
+            border-bottom: 1px solid var(--ax-sep);
+        }
+        #settings-main .history-toolbar input[type="search"] { flex: 1 1 auto; min-width: 0; }
+        #settings-main .history-count {
+            flex-shrink: 0;
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            color: var(--ax-text-2);
+        }
+        #settings-main .history-list { display: block; padding: 4px 0; }
+        #settings-main .history-item {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 0 6px;
+            padding: 7px 10px;
+            padding-right: 72px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .history-item:hover { background: var(--ax-fill-1); }
+        #settings-main .history-favicon {
+            flex: 0 0 16px;
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+        }
+        #settings-main .history-info {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+        }
+        #settings-main .history-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--ax-text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #settings-main .history-url {
+            font-size: 11.5px;
+            color: var(--ax-text-2);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #settings-main .history-time {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 11.5px;
+            color: var(--ax-text-2);
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+            pointer-events: none;
+            transition: opacity var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .history-delete {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 1;
+            height: 24px;
+            padding: 0 9px;
+            border: 1px solid var(--ax-stroke);
+            border-radius: 7px;
+            background: var(--ax-fill-2);
+            color: var(--ax-text-2);
+            font: inherit;
+            font-size: 11.5px;
+            font-weight: 550;
+            opacity: 0;
+            pointer-events: none;
+            cursor: pointer;
+            transition: opacity var(--ax-t) var(--ax-ease), color var(--ax-t) var(--ax-ease), background var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .history-item:hover .history-time { opacity: 0; }
+        #settings-main .history-item:hover .history-delete,
+        #settings-main .history-delete:focus-visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        #settings-main .history-delete:hover {
+            color: var(--ax-danger);
+            border-color: var(--ax-danger-stroke);
+            background: var(--ax-danger-fill);
+        }
+        #settings-main .history-day-label,
+        #settings-main .history-group-title {
+            padding: 10px var(--ax-row-px) 4px;
+            font-size: 11px;
+            font-weight: 650;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: rgba(235, 235, 245, 0.48);
+        }
+
+        /* ---------- Extensions ---------- */
+        #settings-main .extensions-list { display: block; padding: 0; }
+        #settings-main .extension-card {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin: 0;
+            padding: 12px var(--ax-row-px);
+            border: 0;
+            border-top: 1px solid var(--ax-sep);
+            border-radius: 0;
+            background: transparent;
+        }
+        #settings-main .extension-card:first-child { border-top: 0; }
+        #settings-main .extension-card img,
+        #settings-main .extension-icon {
+            flex: 0 0 28px;
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+        }
+        #settings-main .extension-main { flex: 1 1 auto; min-width: 0; }
+        #settings-main .extension-title { font-size: 13px; font-weight: 600; color: var(--ax-text); }
+        #settings-main .extension-version,
+        #settings-main .extension-status,
+        #settings-main .extension-desc,
+        #settings-main .extension-path {
+            font-size: 11.5px;
+            color: var(--ax-text-2);
+        }
+        #settings-main .extension-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        /* ---------- Profiles ---------- */
+        #settings-main .profiles-overview-wrap { overflow-x: auto; margin: 0; border: 0; border-radius: 0; }
+        #settings-main .profiles-overview-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12.5px;
+        }
+        #settings-main .profiles-overview-table th {
+            padding: 9px 12px;
+            text-align: left;
+            font-size: 10.5px;
+            font-weight: 650;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: rgba(235, 235, 245, 0.48);
+            background: rgba(0, 0, 0, 0.1);
+            border: 0;
+            border-bottom: 1px solid var(--ax-sep);
+        }
+        #settings-main .profiles-overview-table td {
+            padding: 10px 12px;
+            border: 0;
+            border-top: 1px solid var(--ax-sep);
+            color: var(--ax-text);
+            font-variant-numeric: tabular-nums;
+        }
+        #settings-main .profiles-overview-table tbody tr:first-child td { border-top: 0; }
+        #settings-main .profiles-overview-table th:first-child,
+        #settings-main .profiles-overview-table td:first-child { padding-left: var(--ax-row-px); }
+        #settings-main .profiles-trash-list { display: block; margin: 0; padding: 0; }
+        #settings-main .profiles-trash-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            min-height: var(--ax-row-h);
+            padding: 8px var(--ax-row-px);
+            border: 0;
+            border-top: 1px solid var(--ax-sep);
+            border-radius: 0;
+            background: transparent;
+        }
+        #settings-main .profiles-trash-row:first-child { border-top: 0; }
+        #settings-main .profiles-trash-name { font-size: 13px; font-weight: 500; }
+        #settings-main .profiles-trash-date { font-size: 11.5px; color: var(--ax-text-2); }
+        #settings-main .profiles-trash-actions { display: flex; gap: 6px; }
+        #settings-main .profiles-import-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin: 12px 0 0;
+        }
+        #settings-main .profiles-import-preview:empty { display: none; }
+        #settings-main .profiles-import-preview {
+            margin: 12px 0 0;
+            padding: 10px 14px;
+            border: 1px solid var(--ax-stroke);
+            border-radius: var(--ax-r-card);
+            font-size: 12.5px;
+            color: var(--ax-text-2);
+        }
+        #settings-main .profiles-import-options { display: block; padding: 0; }
+
+        /* ---------- Vault ---------- */
+        #settings-main .vault-settings-card { margin-bottom: 16px; }
+        #settings-main .vault-autofill-row {
+            display: flex;
+            gap: 16px;
+            font-size: 13px;
+        }
+        #settings-main .vault-segmented {
+            display: flex;
+            gap: 2px;
+            width: 100%;
+            margin: 0 0 14px;
+            padding: 2px;
+            box-sizing: border-box;
+            border: 1px solid var(--ax-stroke);
+            border-radius: 9px;
+            background: rgba(0, 0, 0, 0.18);
+        }
+        #settings-main .vault-segment {
+            flex: 1 1 0;
+            height: 26px;
+            padding: 0 12px;
+            border: 0;
+            border-radius: 7px;
+            background: transparent;
+            color: var(--ax-text-2);
+            font: inherit;
+            font-size: 12.5px;
+            font-weight: 550;
+            cursor: pointer;
+            box-shadow: none;
+            transition: background var(--ax-t) var(--ax-ease), color var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .vault-segment:hover { color: var(--ax-text); }
+        #settings-main .vault-segment.active {
+            background: var(--ax-fill-3);
+            color: var(--ax-text);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        }
+        #settings-main .vault-list-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 0 0 8px;
+            padding: 0 4px;
+        }
+        #settings-main .vault-list-count {
+            font-size: 12px;
+            color: var(--ax-text-2);
+        }
+        #settings-main .vault-table {
+            border: 1px solid var(--ax-stroke);
+            border-radius: var(--ax-r-card);
+            overflow: hidden;
+            background: transparent;
+        }
+        #settings-main .vault-table-head {
+            padding: 8px var(--ax-row-px);
+            font-size: 10.5px;
+            font-weight: 650;
+            letter-spacing: 0.05em;
+            color: rgba(235, 235, 245, 0.48);
+            background: rgba(0, 0, 0, 0.1);
+            border-bottom: 1px solid var(--ax-sep);
+        }
+        #settings-main .vault-table-row {
+            min-height: var(--ax-row-h);
+            padding: 8px var(--ax-row-px);
+            border-bottom: 1px solid var(--ax-sep);
+            font-size: 13px;
+        }
+        #settings-main .vault-table-row:last-child { border-bottom: 0; }
+        #settings-main .vault-table-row--open { background: rgba(255, 255, 255, 0.03); }
+        #settings-main .vault-td-site strong { font-weight: 500; color: var(--ax-text); }
+        #settings-main .vault-td-site div { color: var(--ax-text-2) !important; }
+        #settings-main .vault-icon-btn {
+            width: 28px;
+            height: 28px;
+            min-height: 28px;
+            padding: 0;
+            border: 1px solid var(--ax-stroke);
+            border-radius: var(--ax-r-ctl);
+            background: var(--ax-fill-1);
+            color: var(--ax-text-2);
+            font-size: 12px;
+            cursor: pointer;
+            transition: background var(--ax-t) var(--ax-ease), color var(--ax-t) var(--ax-ease), border-color var(--ax-t) var(--ax-ease);
+        }
+        #settings-main .vault-icon-btn:hover {
+            background: var(--ax-fill-2);
+            border-color: var(--ax-stroke-2);
+            color: var(--ax-text);
+        }
+        #settings-main .vault-icon-btn.destructive:hover {
+            color: var(--ax-danger);
+            border-color: var(--ax-danger-stroke);
+            background: var(--ax-danger-fill);
+        }
+        #settings-main .vault-editor {
+            margin: 0 0 14px;
+            padding: 16px;
+            border: 1px solid var(--ax-stroke-2);
+            border-radius: var(--ax-r-card);
+            background: rgba(0, 0, 0, 0.14);
+        }
+        #settings-main .vault-editor h3 {
+            margin: 0 0 12px;
+            font-size: 14px;
+            font-weight: 650;
+        }
+        #settings-main .vault-field-label {
+            display: block;
+            margin: 10px 0 5px 2px;
+            font-size: 11.5px;
+            font-weight: 550;
+            color: var(--ax-text-2);
+        }
+        #settings-main .vault-editor input { width: 100%; }
+        #settings-main .vault-field-with-eye { display: flex; gap: 6px; }
+        #settings-main .vault-field-with-eye input { flex: 1 1 auto; min-width: 0; }
+        #settings-main .vault-form-row { display: flex; gap: 8px; margin-top: 12px; }
+        #settings-main .vault-form-row .vault-field-stack { flex: 1 1 0; min-width: 0; }
+        #settings-main .vault-form-row .vault-field-label { margin-top: 0; }
+        #settings-main .vault-settings-error {
+            font-size: 12px;
+            color: var(--ax-danger);
+        }
+        #settings-main .vault-settings-error:empty { display: none; }
+        #settings-main #vault-toast:empty { display: none; }
+        #settings-main #vault-toast { margin: 0 4px 10px; font-size: 12px; color: var(--ax-text-2); }
+
+        /* ---------- AI providers ---------- */
+        #settings-main .ai-settings-subpanel {
+            margin: 0;
+            padding: 12px var(--ax-row-px) 14px;
+            border-top: 1px solid var(--ax-sep);
+            background: transparent;
+            border-radius: 0;
+        }
+        #settings-main .ai-providers-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #settings-main .ai-key-entry,
+        #settings-main .ai-providers-list .ai-key-entry.is-active,
+        #settings-main .ai-providers-list .ai-key-entry:focus-within,
+        #settings-main .ai-providers-list .ai-key-entry.is-editing {
+            margin: 0;
+            padding: 10px 12px;
+            border: 1px solid var(--ax-stroke);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            box-shadow: none;
+        }
+        #settings-main .ai-providers-list .ai-key-entry.is-active { border-color: var(--ax-stroke-2); }
+        #settings-main .ai-key-entry-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        #settings-main .ai-key-entry-actions button {
+            height: 24px;
+            min-height: 24px;
+            padding: 0 9px;
+            font-size: 11.5px;
+        }
+        #settings-main .ai-key-list-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        #settings-main .ai-key-list-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--ax-text-2);
+            letter-spacing: 0.01em;
+        }
+        #settings-main .ai-key-add-btn {
+            min-height: 28px;
+            height: 28px;
+            padding: 0 12px;
+            font-size: 12px;
+            font-weight: 500;
+            border-radius: 8px;
+            flex-shrink: 0;
+        }
+        #settings-main .ai-key-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 10px;
+            margin-top: 8px;
+            padding: 0;
+            border: none;
+        }
+        #settings-main .ai-key-toolbar .ai-key-toast {
+            text-align: left;
+            flex: 1;
+        }
+        #settings-main .ai-key-add-block {
+            margin-top: 10px;
+            padding: 12px 14px;
+            border: 1px solid var(--ax-stroke);
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.08);
+        }
+        #settings-main .ai-key-form-head .row-title {
+            font-size: 13px;
+            font-weight: 600;
+        }
+        #settings-main .ai-key-form-head .row-desc {
+            font-size: 11.5px;
+            line-height: 1.45;
+            color: var(--ax-text-2);
+        }
+        #settings-main .ai-key-form-fields {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            margin: 10px 0 12px;
+        }
+        #settings-main .ai-key-field {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(140px, 200px);
+            align-items: center;
+            gap: 12px;
+            padding: 7px 0;
+            border-top: 1px solid var(--ax-sep);
+        }
+        #settings-main .ai-key-field:first-child { border-top: none; }
+        #settings-main .ai-key-field-label {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--ax-text);
+        }
+        #settings-main .ai-key-field select,
+        #settings-main .ai-key-field input,
+        #settings-main .ai-provider-type-select,
+        #settings-main .ai-provider-label-input,
+        #settings-main .ai-provider-key-input {
+            width: 100%;
+            min-height: 28px;
+            max-width: none;
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 7px;
+            box-sizing: border-box;
+        }
+        #settings-main .ai-provider-key-input {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 11.5px;
+        }
+        #settings-main .ai-key-mask-display {
+            min-height: 28px;
+            padding: 5px 8px;
+            font-size: 11px;
+            border-radius: 7px;
+        }
+        #settings-main .ai-key-mask-row .vault-icon-btn {
+            width: 28px;
+            min-height: 28px;
+            border-radius: 7px;
+        }
+        #settings-main .ai-key-actions {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding-top: 0;
+        }
+        #settings-main .ai-key-actions button {
+            min-height: 28px;
+            height: 28px;
+            padding: 0 12px;
+            font-size: 12px;
+        }
+        #settings-main .ai-key-actions .ai-key-link-btn {
+            margin-left: auto;
+            min-height: 28px;
+            height: auto;
+            padding: 4px 0;
+            color: var(--ax-text-2);
+            font-size: 11.5px;
+            border: none;
+            background: transparent;
+        }
+        #settings-main .ai-key-actions .ai-key-link-btn:hover { color: var(--ax-text); }
+        #settings-main .ai-providers-empty {
+            padding: 10px 0 4px;
+            font-size: 12px;
+            border: none;
+        }
+
+        /* ---------- New Tab widget cards ---------- */
+        #settings-main .ntp-widgets-settings-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            padding: 0;
+        }
+        #settings-main .ntp-widgets-settings-list:empty { display: none; }
+        #settings-main .ntp-widget-settings-card {
+            margin: 0;
+            padding: 0;
+            border: 0;
+            border-top: 1px solid var(--ax-sep);
+            border-radius: 0;
+            background: transparent;
+        }
+        #settings-main .ntp-widget-settings-card-head {
+            padding: 12px var(--ax-row-px) 4px calc(var(--ax-row-px) + 16px);
+            font-size: 11px;
+            font-weight: 650;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: rgba(235, 235, 245, 0.48);
+            border: 0;
+            background: transparent;
+        }
+        #settings-main .ntp-widget-settings-fields {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            padding: 0 0 6px;
+        }
+        #settings-main .ntp-widget-settings-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 6px var(--ax-row-px) 6px calc(var(--ax-row-px) + 16px);
+        }
+        #settings-main .ntp-widget-settings-field:has(> select) {
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 36px;
+        }
+        #settings-main .ntp-widget-settings-field:has(> select) > select {
+            flex: 0 0 var(--ax-ctl-w);
+            width: var(--ax-ctl-w);
+        }
+        #settings-main .ntp-widget-settings-field-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--ax-text);
+            text-transform: none;
+            letter-spacing: 0;
+        }
+        #settings-main .ntp-ticker-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 32px;
+            margin: 0;
+            padding: 0 6px 0 10px;
+            border: 1px solid var(--ax-stroke);
+            border-radius: var(--ax-r-ctl);
+            background: var(--ax-fill-1);
+        }
+        #settings-main .ntp-ticker-row + .ntp-ticker-row { margin-top: 4px; }
+        #settings-main .ntp-ticker-row-sym { font-size: 12.5px; font-weight: 600; }
+        #settings-main .ntp-ticker-move {
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--ax-text-2);
+            font-size: 12px;
+            cursor: pointer;
+        }
+        #settings-main .ntp-ticker-move:hover:not(:disabled) { background: var(--ax-fill-2); color: var(--ax-text); }
+        #settings-main .ntp-ticker-move:disabled { opacity: 0.3; cursor: default; }
     </style>
     <script src="settings-inline-early.js"></script>
 </head>
@@ -2858,17 +5142,29 @@
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12zM7 9h2v2H7V9zm4 0h2v2h-2V9zm4 0h2v2h-2V9z"/></svg>
             <span data-i18n="settings.nav.ai">AI Chat</span>
         </div>
+        <div class="sidebar-item" data-section="screentime">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+            <span data-i18n="settings.nav.screentime">Screen Time</span>
+        </div>
         <div class="sidebar-item" data-section="history">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7.1-7 7-7v2c4.97 0 9 4.03 9 9s-4.03 9-9 9-9-4.03-9-9H4l3.89-3.89.07-.14L11 12h3c0 3.87-3.13 7-7 7s-7-3.13-7-7 3.13-7 7-7V3z"/></svg>
+            <i class="fas fa-clock-rotate-left settings-nav-fa" aria-hidden="true"></i>
             <span data-i18n="settings.nav.history">History</span>
         </div>
         <div class="sidebar-item" data-section="shortcuts">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 20H7v-2h10v2zm2-4H5V6h14v10zm-2-8H7V4h10v4z"/></svg>
+            <i class="fas fa-keyboard settings-nav-fa" aria-hidden="true"></i>
             <span data-i18n="settings.nav.shortcuts">Shortcuts</span>
+        </div>
+        <div class="sidebar-item" data-section="gestures">
+            <i class="fas fa-hand-pointer settings-nav-fa" aria-hidden="true"></i>
+            <span data-i18n="settings.nav.gestures">Trackpad &amp; gestures</span>
         </div>
         <div class="sidebar-item" data-section="permissions">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
             <span data-i18n="settings.nav.permissions">Site permissions</span>
+        </div>
+        <div class="sidebar-item" data-section="cookies">
+            <i class="fas fa-cookie-bite settings-nav-fa" aria-hidden="true"></i>
+            <span>Cookies &amp; site data</span>
         </div>
         <div class="sidebar-item" data-section="extensions">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-2 .9-2 2v3.8h1.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"/></svg>
@@ -2890,7 +5186,7 @@
     </nav>
     
     <main class="main">
-        <div class="main-inner">
+        <div class="main-inner" id="settings-main">
         <h1 class="native-settings-title" data-i18n="settings.title">Settings</h1>
         <div class="settings-search-wrap">
             <input type="search" id="settings-search" class="settings-search" placeholder="Search settings..." data-i18n-placeholder="settings.search">
@@ -2898,7 +5194,7 @@
         <div class="settings-search-empty" id="settings-search-empty" data-i18n="settings.searchEmpty">No matching settings</div>
         <div class="pane active" id="customization-pane">
             <div class="incognito-settings-banner" id="incognito-settings-banner" data-i18n="settings.incognitoBanner">
-                These options apply only to private windows. History, site permissions, extensions, and saved passwords stay off.
+                Private windows only. History and passwords stay off.
             </div>
             <div class="group">
                 <div class="group-title" data-i18n="settings.group.appearance">Appearance</div>
@@ -2906,14 +5202,14 @@
                     <div class="row axis-lang-row">
                         <div class="row-label">
                             <div class="row-title" data-i18n="settings.language.title">Language</div>
-                            <div class="row-desc" data-i18n="settings.language.desc">Menus, Settings, setup, and the rest of Axis for this profile. Websites keep their own language. The layout does not flip.</div>
+                            <div class="row-desc" data-i18n="settings.language.desc">Menus and Settings for this profile.</div>
                         </div>
                         <select id="ui-language" aria-label="Language" data-i18n-aria="settings.language.title"></select>
                     </div>
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title" data-i18n="settings.language.universalTitle">Universal language</div>
-                            <div class="row-desc" data-i18n="settings.language.universalDesc">Use one Axis language for every profile and Incognito. When this is off, each profile can pick its own language again.</div>
+                            <div class="row-desc" data-i18n="settings.language.universalDesc">One language for every profile.</div>
                         </div>
                         <label class="switch">
                             <input type="checkbox" id="universal-browser-language">
@@ -2923,7 +5219,7 @@
                     <div class="row axis-lang-row" id="universal-ui-language-row">
                         <div class="row-label">
                             <div class="row-title" data-i18n="settings.language.universalPickerTitle">Universal language choice</div>
-                            <div class="row-desc" data-i18n="settings.language.universalPickerDesc">Used for all profiles and Incognito while Universal language is on.</div>
+                            <div class="row-desc" data-i18n="settings.language.universalPickerDesc">Used while Universal language is on.</div>
                         </div>
                         <select id="universal-ui-language" aria-label="Universal language" data-i18n-aria="settings.language.universalPickerTitle"></select>
                     </div>
@@ -2968,7 +5264,7 @@
                         </div>
                         <div class="window-chrome-light-stack">
                             <span class="window-chrome-light-value" id="sidebar-zoom-label">100%</span>
-                            <input type="range" id="sidebar-zoom" min="75" max="150" step="5" value="100">
+                            <input type="range" id="sidebar-zoom" min="75" max="150" step="1" value="100">
                         </div>
                     </div>
                     <div class="row">
@@ -3049,7 +5345,7 @@
                         </div>
                         <div class="row-controls">
                             <input type="number" id="unpinned-clear-custom-minutes" min="1" max="10080" step="1" value="60">
-                            <span class="row-desc" style="margin-left:8px;white-space:nowrap">minutes</span>
+                            <span class="row-unit">minutes</span>
                         </div>
                     </div>
                 </div>
@@ -3208,9 +5504,9 @@
                             <div class="row-title" data-i18n="settings.ambientVolume.title">Volume</div>
                             <div class="row-desc" data-i18n="settings.ambientVolume.desc">Background level - changes apply right away</div>
                         </div>
-                        <div class="ambient-volume-wrap">
+                        <div class="window-chrome-light-stack">
+                            <span class="window-chrome-light-value ambient-volume-value" id="ambient-audio-volume-label">48%</span>
                             <input type="range" id="ambient-audio-volume" min="0" max="100" step="1" value="48">
-                            <span class="ambient-volume-value" id="ambient-audio-volume-label">48%</span>
                         </div>
                     </div>
                 </div>
@@ -3219,17 +5515,28 @@
         
         <div class="pane" id="permissions-pane">
             <div class="group">
-                <div class="group-title" data-i18n="settings.group.permissions">Site permission overrides</div>
+                <div class="group-title" data-i18n="settings.group.permissions">Site permissions</div>
                 <div class="group-content perm-panel">
-                    <p class="perm-intro" data-i18n="settings.permissions.lead">
-                        Choose Allow, Block, or Default (no override) for each site. Camera and Microphone both apply when a page requests media (e.g. video calls). Saved per origin (scheme + host + port).
-                    </p>
                     <div class="perm-add-row">
-                        <input type="text" id="site-perm-add-input" placeholder="example.com or https://site.org/…" data-i18n-placeholder="settings.permissions.urlPh" autocomplete="off">
-                        <button type="button" id="site-perm-add-btn" data-i18n="settings.permissions.addSite">Add site</button>
-                        <span class="perm-add-error" id="site-perm-add-error"></span>
+                        <input type="text" id="site-perm-add-input" placeholder="example.com" data-i18n-placeholder="settings.permissions.urlPh" autocomplete="off">
+                        <button type="button" id="site-perm-add-btn" data-i18n="settings.permissions.addSite">Add</button>
                     </div>
+                    <span class="perm-add-error" id="site-perm-add-error"></span>
                     <div class="perm-list" id="site-perm-list" aria-label="Per-site permissions" data-i18n-aria="settings.permissions.listAria"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="pane" id="cookies-pane">
+            <div class="group">
+                <div class="group-title">Cookies &amp; site data</div>
+                <div class="group-content perm-panel">
+                    <div class="perm-add-row cookies-toolbar-row">
+                        <input type="text" id="cookie-site-filter" placeholder="Filter sites…" autocomplete="off">
+                        <button type="button" id="cookies-refresh-btn">Refresh</button>
+                        <button type="button" class="shortcut-action-btn cookies-clear-all-inline" id="cookies-clear-all-btn">Clear all</button>
+                    </div>
+                    <div class="perm-list" id="cookie-site-list" aria-label="Sites with stored cookies"></div>
                 </div>
             </div>
         </div>
@@ -3237,32 +5544,33 @@
         <div class="pane" id="extensions-pane">
             <div class="group">
                 <div class="group-title" data-i18n="settings.group.extensions">Extensions</div>
-                <p class="extensions-pane-lead" data-i18n="settings.extensions.lead">
-                    Browse a store below, open an add-on’s page, then use the blue Install in Axis bar (or the URL bar install icon). You can also paste a link or ID here, use a .crx file, or an unpacked folder. Axis is Chromium-based - some Firefox-only add-ons won’t run; Electron supports a subset of extension APIs.
-                </p>
-
-                <div class="extensions-section">
-                    <h3 class="extensions-section-label" data-i18n="settings.extensions.browse">Browse stores</h3>
-                    <div class="extensions-store-buttons">
-                        <button type="button" id="extensions-open-chrome-webstore" title="Open Chrome Web Store in Axis" data-i18n="settings.extensions.chromeStore">Chrome Web Store</button>
-                        <button type="button" id="extensions-open-firefox-addons" title="Open Mozilla add-ons for Firefox in Axis" data-i18n="settings.extensions.firefoxAddons">Firefox add-ons</button>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.extensions.browse">Browse stores</div>
+                        </div>
+                        <div class="row-actions">
+                            <button type="button" id="extensions-open-chrome-webstore" title="Open Chrome Web Store in Axis" data-i18n="settings.extensions.chromeStore">Chrome Web Store</button>
+                            <button type="button" id="extensions-open-firefox-addons" title="Open Mozilla add-ons for Firefox in Axis" data-i18n="settings.extensions.firefoxAddons">Firefox add-ons</button>
+                        </div>
                     </div>
-                </div>
-
-                <div class="extensions-section">
-                    <h3 class="extensions-section-label" data-i18n="settings.extensions.installUrl">Install from URL or ID</h3>
-                    <div class="extensions-webstore-row">
-                        <input type="text" class="extensions-webstore-input" id="extension-webstore-input" placeholder="Store URL, Chrome extension ID, or Firefox slug (e.g. ublock-origin)…" data-i18n-placeholder="settings.extensions.urlPlaceholder" autocomplete="off" spellcheck="false">
-                        <button type="button" id="install-extension-webstore" data-i18n="common.install">Install</button>
+                    <div class="row row--stacked">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.extensions.installUrl">Install from URL or ID</div>
+                        </div>
+                        <div class="row-field">
+                            <input type="text" class="extensions-webstore-input" id="extension-webstore-input" placeholder="Store URL, Chrome extension ID, or Firefox slug (e.g. ublock-origin)…" data-i18n-placeholder="settings.extensions.urlPlaceholder" autocomplete="off" spellcheck="false">
+                            <button type="button" id="install-extension-webstore" class="primary" data-i18n="common.install">Install</button>
+                        </div>
                     </div>
-                    <p class="extensions-hint" data-i18n="settings.extensions.hint">Works with Chrome Web Store and Mozilla Add-ons listings. IDs and slugs are fetched inside Axis (no stray package downloads).</p>
-                </div>
-
-                <div class="extensions-section">
-                    <h3 class="extensions-section-label" data-i18n="settings.extensions.installDisk">Install from disk</h3>
-                    <div class="extensions-file-actions">
-                        <button type="button" id="install-extension-crx" data-i18n="settings.extensions.chooseCrx">Choose .crx file…</button>
-                        <button type="button" id="install-extension" data-i18n="settings.extensions.chooseFolder">Choose unpacked folder…</button>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.extensions.installDisk">Install from disk</div>
+                        </div>
+                        <div class="row-actions">
+                            <button type="button" id="install-extension-crx" data-i18n="settings.extensions.chooseCrx">Choose .crx file…</button>
+                            <button type="button" id="install-extension" data-i18n="settings.extensions.chooseFolder">Choose unpacked folder…</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3285,7 +5593,7 @@
                         <div class="row-label">
                             <div class="row-title" data-i18n="settings.startupWhen.title">When Axis opens</div>
                             <div class="row-desc" data-i18n="settings.startupWhen.desc">Which profile loads when you launch the app</div>
-                </div>
+                        </div>
                         <select id="profiles-startup-mode">
                             <option value="resume" data-i18n="settings.startup.resume">Resume last profile</option>
                             <option value="personal" data-i18n="settings.startup.alwaysPersonal">Always Personal</option>
@@ -3309,14 +5617,15 @@
                             <option value="personal" data-i18n="settings.startup.alwaysPersonal">Always Personal</option>
                         </select>
                     </div>
+                </div>
             </div>
-        </div>
-        
+
             <div class="group">
                 <div class="group-title" data-i18n="settings.group.overview">Overview</div>
                 <p class="profiles-pane-lead" data-i18n="settings.profiles.overviewLead">
                     Each profile keeps its own tabs, favorites, history, extensions, and passwords. Switch profiles, add new ones, rename, or delete from the profile menu at the bottom of the sidebar.
                 </p>
+                <div class="group-content">
                 <div class="profiles-overview-wrap">
                     <table class="profiles-overview-table" id="profiles-overview-table">
                         <thead>
@@ -3334,70 +5643,91 @@
                         </tbody>
                     </table>
                 </div>
-                <div class="profiles-backup-row">
-                    <div>
-                        <label for="profiles-export-select" data-i18n="settings.profiles.exportBackup">Export backup</label>
-                        <select id="profiles-export-select"></select>
+                </div>
             </div>
-                    <div class="profiles-backup-actions">
-                        <button type="button" id="profiles-export-btn" data-i18n="settings.profiles.exportBtn">Export…</button>
-                        <button type="button" id="profiles-import-backup-btn" data-i18n="settings.profiles.importBackup">Import backup…</button>
-        </div>
-        </div>
-                <div class="profiles-status" id="profiles-backup-status"></div>
-  </div>
+
+            <div class="group">
+                <div class="group-title" data-i18n="settings.profiles.exportBackup">Export backup</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <label class="row-title" for="profiles-export-select" data-i18n="profile.label">Profile</label>
+                        </div>
+                        <select id="profiles-export-select"></select>
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="profiles-status" id="profiles-backup-status"></div>
+                        </div>
+                        <div class="row-actions">
+                            <button type="button" id="profiles-import-backup-btn" data-i18n="settings.profiles.importBackup">Import backup…</button>
+                            <button type="button" id="profiles-export-btn" class="primary" data-i18n="settings.profiles.exportBtn">Export…</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <div class="group">
                 <div class="group-title" data-i18n="settings.group.trash">Profile trash</div>
                 <p class="profiles-pane-lead" data-i18n="settings.profiles.trashLead">
                     Deleted profiles stay here until you restore them or remove them permanently. You can also press ⌘Z right after deleting to bring a profile back.
                 </p>
-                <div class="profiles-trash-list" id="profiles-trash-list">
-                    <p class="profiles-trash-empty">No deleted profiles.</p>
+                <div class="group-content">
+                    <div class="profiles-trash-list" id="profiles-trash-list">
+                        <p class="profiles-trash-empty">No deleted profiles.</p>
+                    </div>
                 </div>
                 <div class="profiles-status" id="profiles-trash-status"></div>
-  </div>
-    
+            </div>
+
             <div class="group">
                 <div class="group-title" data-i18n="settings.group.import">Import from another browser</div>
                 <p class="profiles-pane-lead">
                     Bring favorites, pinned tabs, bookmarks, folders, saved passwords, payment cards, addresses, extensions, site permissions, and recent history into a new Axis profile. Chrome, Edge, Brave, Firefox, Arc, and other Chromium browsers are detected automatically when installed on this computer. Quit the source browser before importing for the most reliable results.
                 </p>
-                <div class="profiles-import-grid">
-                    <div>
-                        <label for="profiles-import-browser">Browser</label>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <label class="row-title" for="profiles-import-browser">Browser</label>
+                        </div>
                         <select id="profiles-import-browser">
                             <option value="">Detecting browsers…</option>
                         </select>
                     </div>
-                    <div>
-                        <label for="profiles-import-source">Their profile</label>
+                    <div class="row">
+                        <div class="row-label">
+                            <label class="row-title" for="profiles-import-source">Their profile</label>
+                        </div>
                         <select id="profiles-import-source" disabled>
                             <option value="">Choose a browser first</option>
                         </select>
                     </div>
-                    <div>
-                        <label for="profiles-import-name">New Axis profile name</label>
+                    <div class="row">
+                        <div class="row-label">
+                            <label class="row-title" for="profiles-import-name">New Axis profile name</label>
+                        </div>
                         <input type="text" id="profiles-import-name" maxlength="48" placeholder="Imported profile" autocomplete="off">
                     </div>
                 </div>
-                <div class="profiles-import-options">
-                    <p class="profiles-import-options-heading">Sidebar &amp; tabs</p>
-                    <label><input type="checkbox" id="profiles-import-favorites" checked> Import favorites &amp; browser pinned tabs → <strong>Favorites</strong></label>
-                    <label><input type="checkbox" id="profiles-import-bookmarks" checked> Import bookmarks → <strong>Pinned tabs</strong></label>
-                    <label><input type="checkbox" id="profiles-import-open-tabs"> Import open tabs → <strong>Unpinned tabs</strong></label>
-                    <label><input type="checkbox" id="profiles-import-folders" checked> Import folders → <strong>Tab groups</strong></label>
-                    <p class="profiles-import-options-heading">Other data</p>
-                    <label><input type="checkbox" id="profiles-import-history" checked> Import browsing history</label>
-                    <label><input type="checkbox" id="profiles-import-passwords" checked> Import saved passwords</label>
-                    <label><input type="checkbox" id="profiles-import-cards" checked> Import saved payment cards</label>
-                    <label><input type="checkbox" id="profiles-import-addresses" checked> Import saved addresses</label>
-                    <label><input type="checkbox" id="profiles-import-permissions" checked> Import site permissions (camera, mic, location, notifications)</label>
-                    <label><input type="checkbox" id="profiles-import-extensions" checked> Import extensions (re-download from the store when possible)</label>
+                <div class="group-subtitle">Sidebar &amp; tabs</div>
+                <div class="group-content profiles-import-options">
+                    <label class="row row--check"><span class="row-title">Favorites &amp; browser pinned tabs <span class="row-arrow">→ Favorites</span></span><input type="checkbox" id="profiles-import-favorites" checked></label>
+                    <label class="row row--check"><span class="row-title">Bookmarks <span class="row-arrow">→ Pinned tabs</span></span><input type="checkbox" id="profiles-import-bookmarks" checked></label>
+                    <label class="row row--check"><span class="row-title">Open tabs <span class="row-arrow">→ Unpinned tabs</span></span><input type="checkbox" id="profiles-import-open-tabs"></label>
+                    <label class="row row--check"><span class="row-title">Folders <span class="row-arrow">→ Tab groups</span></span><input type="checkbox" id="profiles-import-folders" checked></label>
+                </div>
+                <div class="group-subtitle">Other data</div>
+                <div class="group-content profiles-import-options">
+                    <label class="row row--check"><span class="row-title">Browsing history</span><input type="checkbox" id="profiles-import-history" checked></label>
+                    <label class="row row--check"><span class="row-title">Saved passwords</span><input type="checkbox" id="profiles-import-passwords" checked></label>
+                    <label class="row row--check"><span class="row-title">Payment cards</span><input type="checkbox" id="profiles-import-cards" checked></label>
+                    <label class="row row--check"><span class="row-title">Addresses</span><input type="checkbox" id="profiles-import-addresses" checked></label>
+                    <label class="row row--check"><span class="row-title">Site permissions</span><input type="checkbox" id="profiles-import-permissions" checked></label>
+                    <label class="row row--check"><span class="row-title">Extensions</span><input type="checkbox" id="profiles-import-extensions" checked></label>
                 </div>
                 <div class="profiles-import-actions">
-                    <button type="button" id="profiles-import-run">Import profile</button>
                     <button type="button" id="profiles-import-folder">Choose profile folder…</button>
+                    <button type="button" id="profiles-import-run" class="primary">Import profile</button>
                 </div>
                 <div class="profiles-import-preview" id="profiles-import-preview"></div>
                 <div class="profiles-status" id="profiles-import-status"></div>
@@ -3406,14 +5736,14 @@
 
         <div class="pane" id="vault-pane">
             <div class="group">
-                <div class="vault-pane-header">
-                    <div>
-                        <h2 data-i18n="settings.vault.heading">Passwords, cards &amp; addresses</h2>
-                        <p data-i18n="settings.vault.savedLocal">Saved locally on this Mac. Not synced.</p>
-                    </div>
-                    <label class="vault-autofill-row">
+                <div class="group-title" data-i18n="settings.vault.heading">Passwords, cards &amp; addresses</div>
+                <div class="group-content vault-settings-card">
+                    <label class="row row--check vault-autofill-row">
+                        <span class="row-label">
+                            <span class="row-title" data-i18n="settings.vault.autofill">Autofill on sites</span>
+                            <span class="row-sub" data-i18n="settings.vault.savedLocal">Saved locally on this Mac. Not synced.</span>
+                        </span>
                         <input type="checkbox" id="vault-autofill-enabled" checked>
-                        <span data-i18n="settings.vault.autofill">Autofill on sites</span>
                     </label>
                 </div>
                 <p id="vault-encryption-warning" class="vault-settings-error hidden" role="status"></p>
@@ -3562,8 +5892,17 @@
             <div class="group">
                 <div class="group-title" data-i18n="settings.group.newtab">New Tab</div>
                 <div class="group-content">
-                    <div class="ntp-settings-intro">
-                        <p>Customize the start page greeting and suggestions. Changes apply to this profile and show up the next time you open a new tab.</p>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.newTabMode.title">New tab opens as</div>
+                            <div class="row-desc" data-i18n="settings.newTabMode.desc">Full start page or a compact spotlight search overlay</div>
+                        </div>
+                        <div class="row-controls">
+                            <select id="new-tab-mode-select" class="settings-select">
+                                <option value="page" data-i18n="settings.newTabMode.page">Start page</option>
+                                <option value="spotlight" data-i18n="settings.newTabMode.spotlight">Spotlight search</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="row">
                         <div class="row-label">
@@ -3612,7 +5951,7 @@
                     <div class="row">
                         <div class="row-label">
                             <div class="row-title" data-i18n="settings.widgetsShow.title">Show widgets</div>
-                            <div class="row-desc">Tiles below search - use <strong>Edit</strong> on a New Tab to add or arrange them, or right-click the widgets area</div>
+                            <div class="row-desc">Tiles below search</div>
                         </div>
                         <input type="checkbox" id="ntp-widgets-enabled">
                     </div>
@@ -3627,7 +5966,7 @@
                         <div class="row">
                             <div class="row-label">
                                 <div class="row-title" data-i18n="settings.widgetsEdit.title">Edit button</div>
-                                <div class="row-desc">Shows <strong>Edit</strong> under your tiles. If off, right-click the widgets area to edit (or press Escape to finish)</div>
+                                <div class="row-desc">Show Edit under tiles</div>
                             </div>
                             <input type="checkbox" id="ntp-show-widgets-edit-button">
                         </div>
@@ -3661,16 +6000,19 @@
                             <p data-i18n="settings.ai.intro">Connect an AI provider for sidebar chat and new tab Ask. Keys stay on this profile on your device only.</p>
                             </div>
                         <div class="ai-key-block">
+                            <div class="ai-key-list-header">
+                                <span class="ai-key-list-title" data-i18n="settings.ai.keysHeading">Saved keys</span>
+                            </div>
                             <div id="ai-providers-empty" class="ai-providers-empty hidden" data-i18n="settings.ai.empty">No API keys saved yet. Add one below to use chat and Ask.</div>
                             <div id="ai-providers-list" class="ai-providers-list"></div>
                             <div class="ai-key-toolbar" id="ai-key-toolbar">
-                                <button type="button" id="ai-provider-open-add-btn" data-i18n="settings.aiKey.title">Add API key</button>
+                                <button type="button" id="ai-provider-open-add-btn" class="ai-key-add-btn" data-i18n="settings.aiKey.title">Add API key</button>
                                 <p id="ai-providers-toast" class="ai-key-toast" aria-live="polite"></p>
                         </div>
                             <div class="ai-key-add-block hidden" id="ai-key-add-block">
                                 <div class="ai-key-form-head">
-                                    <div class="row-title" id="ai-key-form-title" data-i18n="settings.aiKey.title">Add API key</div>
-                                    <div class="row-desc" data-i18n="settings.aiKey.desc">Groq, OpenAI, Gemini, OpenRouter, and Mistral are supported.</div>
+                                    <div class="row-title" id="ai-key-form-title">Add API key</div>
+                                    <div class="row-desc" id="ai-key-form-desc">Groq, OpenAI, Gemini, OpenRouter, and Mistral are supported.</div>
                                 </div>
                                 <div class="ai-key-form-fields">
                                     <label class="ai-key-field">
@@ -3699,6 +6041,55 @@
             </div>
         </div>
         
+        <div class="pane" id="screentime-pane">
+            <div class="group">
+                <div class="group-title" data-i18n="settings.group.screentime">Screen Time</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.screenTime.enabledTitle">Track screen time</div>
+                            <div class="row-desc" data-i18n="settings.screenTime.enabledDesc">Counts time on websites locally on this device. Nothing is sent anywhere.</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="screen-time-enabled">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="screen-time-panel" id="screen-time-panel" hidden>
+                        <div class="screen-time-summary">
+                            <div>
+                                <div class="screen-time-summary-label" id="screen-time-summary-label" data-i18n="settings.screenTime.today">Today</div>
+                                <div class="screen-time-summary-value" id="screen-time-today">0m</div>
+                            </div>
+                            <button type="button" class="shortcut-action-btn" id="screen-time-clear" data-i18n="settings.screenTime.clear">Clear data</button>
+                        </div>
+                        <div class="screen-time-chart-scale" id="screen-time-chart-scale"><span data-i18n="settings.screenTime.chartMax">24h</span></div>
+                        <div class="screen-time-chart" id="screen-time-chart" aria-hidden="true"></div>
+                        <div class="screen-time-top" id="screen-time-top"></div>
+                    </div>
+                    <div id="screen-time-limits-section" hidden>
+                        <div class="row row--stacked" id="screen-time-limit-add-row">
+                            <div class="row-label">
+                                <div class="row-title" data-i18n="settings.screenTime.limitsTitle">Site limits</div>
+                            </div>
+                            <div class="row-field screen-time-limit-add-controls">
+                                <input type="text" id="screen-time-limit-domain" placeholder="example.com" autocomplete="off" data-i18n-placeholder="settings.screenTime.limitDomain" aria-label="Site domain">
+                                <input type="number" id="screen-time-limit-value" min="1" step="1" value="30" aria-label="Limit amount">
+                                <select id="screen-time-limit-unit" aria-label="Time unit">
+                                    <option value="seconds" data-i18n="settings.screenTime.unitSeconds">Seconds</option>
+                                    <option value="minutes" selected data-i18n="settings.screenTime.unitMinutes">Minutes</option>
+                                    <option value="hours" data-i18n="settings.screenTime.unitHours">Hours</option>
+                                </select>
+                                <button type="button" class="primary" id="screen-time-limit-add" data-i18n="settings.screenTime.limitAdd">Add</button>
+                            </div>
+                        </div>
+                        <div id="screen-time-limits-list"></div>
+                    </div>
+                    <div class="screen-time-off" id="screen-time-off" data-i18n="settings.screenTime.offHint">Turn on tracking to see your weekly chart.</div>
+                </div>
+            </div>
+        </div>
+
         <div class="pane" id="history-pane">
             <div class="group">
                 <div class="group-title" data-i18n="settings.group.history">Browsing History</div>
@@ -3717,9 +6108,48 @@
             <div class="group">
                 <div class="shortcuts-header">
                     <div class="group-title" data-i18n="settings.group.shortcuts">Keyboard Shortcuts</div>
-                    <button type="button" id="reset-shortcuts" data-i18n="settings.shortcuts.resetBtn">Reset to Defaults</button>
+                    <button type="button" id="reset-shortcuts" class="shortcut-action-btn" data-i18n="settings.shortcuts.resetBtn">Reset to Defaults</button>
                 </div>
+                <p class="shortcuts-hint" data-i18n="settings.shortcuts.hint">Click a key field, then press the new shortcut.</p>
                 <div id="shortcuts-list" class="shortcuts-list"></div>
+            </div>
+        </div>
+
+        <div class="pane" id="gestures-pane">
+            <div class="group">
+                <div class="group-title" data-i18n="settings.group.gestures">Trackpad &amp; gestures</div>
+                <div class="group-content">
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.gestures.nav.title">Swipe to go back or forward</div>
+                            <div class="row-desc" data-i18n="settings.gestures.nav.desc">Two-finger horizontal swipe on web pages triggers back and forward with a smooth slide animation.</div>
+                        </div>
+                        <input type="checkbox" id="nav-gesture-enabled">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.gestures.profileSwipe.title">Swipe to switch profiles</div>
+                            <div class="row-desc" data-i18n="settings.gestures.profileSwipe.desc">Two-finger horizontal swipe on the sidebar switches between profiles.</div>
+                        </div>
+                        <input type="checkbox" id="profile-swipe-enabled">
+                    </div>
+                    <div class="row">
+                        <div class="row-label">
+                            <div class="row-title" data-i18n="settings.gestures.sensitivity.title">Swipe sensitivity</div>
+                            <div class="row-desc" data-i18n="settings.gestures.sensitivity.desc">Lower = harder to trigger. Higher = easier to trigger.</div>
+                        </div>
+                        <div class="window-chrome-light-stack">
+                            <span class="window-chrome-light-value" id="nav-gesture-sensitivity-label">100%</span>
+                            <input type="range" id="nav-gesture-sensitivity" min="50" max="150" step="5" value="100">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="group gestures-custom-group">
+                <div class="group-title">Custom gestures</div>
+                <div class="group-content">
+                    <div id="custom-gestures-mount"></div>
+                </div>
             </div>
         </div>
 
@@ -3841,6 +6271,12 @@
     <script src="settings-inline-mid.js"></script>
     <script src="axis-ntp-widgets.js"></script>
     <script src="axis-ai-providers.js"></script>
+    <script src="axis-shortcut-catalog.js"></script>
+    <script src="axis-shortcut-builder.js"></script>
+    <script src="axis-anchored-popover.js"></script>
+    <script src="axis-gesture-trace.js"></script>
+    <script src="axis-gesture-physics.js"></script>
+    <script src="axis-custom-gestures-ui.js"></script>
     <script src="settings-app.js"></script>
 </body>
 </html>
