@@ -125,7 +125,7 @@ function profileIconSvgMarkup(iconId) {
   return `<svg viewBox="${spec.viewBox}" aria-hidden="true" focusable="false"><path fill="currentColor" d="${spec.d}"/></svg>`;
 }
 
-const exportsObj = {
+const axisProfileIconsApi = {
   AXIS_PROFILE_ICON_IDS,
   AXIS_PROFILE_ICON_OPTIONS,
   AXIS_PROFILE_ICON_SVGS,
@@ -135,8 +135,8 @@ const exportsObj = {
 };
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = exportsObj;
+  module.exports = axisProfileIconsApi;
 }
 if (typeof window !== 'undefined') {
-  window.AXIS_PROFILE_ICONS = exportsObj;
+  window.AXIS_PROFILE_ICONS = axisProfileIconsApi;
 }
