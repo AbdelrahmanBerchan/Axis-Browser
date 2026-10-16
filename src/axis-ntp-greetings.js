@@ -189,7 +189,7 @@ function getGreetingDomParts(now = new Date(), name = 'User') {
   };
 }
 
-const exportsObj = {
+const axisNtpGreetingsApi = {
   AXIS_NTP_GREETING_SLOTS,
   formatGreetingTemplate,
   splitGreetingForDom,
@@ -201,8 +201,8 @@ const exportsObj = {
 };
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = exportsObj;
+  module.exports = axisNtpGreetingsApi;
 }
 if (typeof window !== 'undefined') {
-  window.AXIS_NTP_GREETINGS = exportsObj;
+  window.AXIS_NTP_GREETINGS = axisNtpGreetingsApi;
 }
