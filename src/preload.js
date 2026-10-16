@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   flushSessionAsync: (payload) => ipcRenderer.invoke('axis-flush-session-async', payload),
   getSitePermissionOverrides: () => ipcRenderer.invoke('get-site-permission-overrides'),
   setSitePermissionOverrides: (obj) => ipcRenderer.invoke('set-site-permission-overrides', obj),
+  getProfileCookieSites: () => ipcRenderer.invoke('get-profile-cookie-sites'),
+  getProfileCookiesForDomain: (domain) => ipcRenderer.invoke('get-profile-cookies-for-domain', domain),
+  clearProfileCookiesForDomain: (domain) => ipcRenderer.invoke('clear-profile-cookies-for-domain', domain),
+  clearProfileCookiesAll: () => ipcRenderer.invoke('clear-profile-cookies-all'),
   respondSitePermissionPrompt: (payload) => ipcRenderer.send('axis-site-permission-response', payload),
   onSitePermissionPrompt: (callback) => {
     const handler = (_event, data) => callback(data);
@@ -81,6 +85,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // History management
   getHistory: () => ipcRenderer.invoke('get-history'),
   addHistoryItem: (item) => ipcRenderer.invoke('add-history-item', item),
+  getScreenTimeStats: () => ipcRenderer.invoke('get-screen-time-stats'),
+  recordScreenTimeTick: (payload) => ipcRenderer.invoke('record-screen-time-tick', payload),
+  clearScreenTimeData: () => ipcRenderer.invoke('clear-screen-time-data'),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
   deleteHistoryItem: (id) => ipcRenderer.invoke('delete-history-item', id),
   
@@ -97,11 +104,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLibraryItems: (locationKey) => ipcRenderer.invoke('get-library-items', locationKey),
   openLibraryItem: (fullPath) => ipcRenderer.invoke('open-library-item', fullPath),
   showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
-  startFileDrag: (filePath) => ipcRenderer.send('start-file-drag', filePath),
+  // Must be fire-and-forget: invoke blocks the renderer until macOS drop completes.
+  startFileDrag: (filePath) => {
+    ipcRenderer.send('start-file-drag', filePath);
+  },
+  getPathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch (_) {
+      return '';
+    }
+  },
+  readAiChatAttachmentPath: (filePath) => ipcRenderer.invoke('read-ai-chat-attachment-path', filePath),
+  onDownloadsFileDragComplete: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('axis-downloads-file-drag-complete', handler);
+    return () => ipcRenderer.removeListener('axis-downloads-file-drag-complete', handler);
+  },
+  onFileDragBegan: (callback) => {
+    const handler = (_event, filePath) => callback(filePath);
+    ipcRenderer.on('axis-file-drag-began', handler);
+    return () => ipcRenderer.removeListener('axis-file-drag-began', handler);
+  },
   cacheDragIcons: (paths) => ipcRenderer.invoke('cache-drag-icons', paths),
   showDownloadsPopup: (x, y, width, height) => ipcRenderer.invoke('show-downloads-popup', x, y, width, height),
   getDownloadsFromFolder: () => ipcRenderer.invoke('get-downloads-from-folder'),
   getFileThumbnailDataUrl: (filePath, maxSize) => ipcRenderer.invoke('get-file-thumbnail-data-url', filePath, maxSize),
+  fetchAiChatImageUrl: (url) => ipcRenderer.invoke('fetch-ai-chat-image-url', url),
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
   onDownloadsPopupAction: (callback) => ipcRenderer.on('downloads-popup-action', (event, action, data) => callback(action, data)),
   onAxisDownloadActivity: (callback) =>
@@ -111,9 +140,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Event listeners
   onNewTab: (callback) => ipcRenderer.on('new-tab', callback),
   onCloseTab: (callback) => ipcRenderer.on('close-tab', callback),
+  closeBrowserWindow: () => ipcRenderer.invoke('close-browser-window'),
   onRequestQuit: (callback) => ipcRenderer.on('request-quit', callback),
   onBrowserShortcut: (callback) => ipcRenderer.on('browser-shortcut', (event, action) => callback(action)),
   setAxisUndoPending: (pending) => ipcRenderer.send('axis-undo-pending', !!pending),
+  navigateActiveTabHistory: (direction, guestWebContentsId) =>
+    ipcRenderer.invoke('axis-active-tab-history-nav', direction, guestWebContentsId),
   onAxisHostNavGesture: (callback) => {
     const handler = (_event, action) => {
       if (action === 'back' || action === 'forward') callback(action);
@@ -121,12 +153,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('axis-host-nav-gesture', handler);
     return () => ipcRenderer.removeListener('axis-host-nav-gesture', handler);
   },
+  onAxisHostNavGestureFeedback: (callback) => {
+    const handler = (_event, action) => {
+      if (action === 'back' || action === 'forward') callback(action);
+    };
+    ipcRenderer.on('axis-host-nav-gesture-feedback', handler);
+    return () => ipcRenderer.removeListener('axis-host-nav-gesture-feedback', handler);
+  },
+  onAxisGuestLinkPreviewInput: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('axis-guest-link-preview-input', handler);
+    return () => ipcRenderer.removeListener('axis-guest-link-preview-input', handler);
+  },
+  onAxisGuestSwipeNav: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('axis-guest-swipe-nav', handler);
+    return () => ipcRenderer.removeListener('axis-guest-swipe-nav', handler);
+  },
   onThemeColorHeader: (callback) => {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('axis-theme-color-header', handler);
     return () => ipcRenderer.removeListener('axis-theme-color-header', handler);
   },
-  onHostResizeLive: (callback) => ipcRenderer.on('axis-host-resize-live', () => callback()),
+  onHostResizeActive: (callback) => {
+    const handler = (_event, active) => callback(!!active);
+    ipcRenderer.on('axis-host-resize-active', handler);
+    return () => ipcRenderer.removeListener('axis-host-resize-active', handler);
+  },
   onHostResizeSettled: (callback) => ipcRenderer.on('axis-host-resize-settled', () => callback()),
   onOpenUrlInBrowser: (callback) => ipcRenderer.on('open-url-in-browser', (event, url) => callback(url)),
   onGuestOpenUrlInNewTab: (callback) => {
@@ -216,8 +269,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vaultVerifyDevice: (reason) => ipcRenderer.invoke('axis-vault-verify-device', reason),
   vaultRevealLogin: (id) => ipcRenderer.invoke('axis-vault-reveal-login', id),
   vaultRevealCard: (id) => ipcRenderer.invoke('axis-vault-reveal-card', id),
-  vaultGetLoginForFill: (id) => ipcRenderer.invoke('axis-vault-get-login-for-fill', id),
-  vaultGetCardForFill: (id) => ipcRenderer.invoke('axis-vault-get-card-for-fill', id),
+  vaultGetLoginForFill: (id, opts) => ipcRenderer.invoke('axis-vault-get-login-for-fill', id, opts),
+  vaultGetCardForFill: (id, opts) => ipcRenderer.invoke('axis-vault-get-card-for-fill', id, opts),
   vaultListLogins: () => ipcRenderer.invoke('axis-vault-list-logins'),
   vaultGetLogin: (id) => ipcRenderer.invoke('axis-vault-get-login', id),
   vaultSaveLogin: (entry) => ipcRenderer.invoke('axis-vault-save-login', entry),
@@ -230,7 +283,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vaultGetAddress: (id) => ipcRenderer.invoke('axis-vault-get-address', id),
   vaultSaveAddress: (entry) => ipcRenderer.invoke('axis-vault-save-address', entry),
   vaultDeleteAddress: (id) => ipcRenderer.invoke('axis-vault-delete-address', id),
-  vaultGetAddressForFill: (id) => ipcRenderer.invoke('axis-vault-get-address-for-fill', id),
+  vaultGetAddressForFill: (id, opts) => ipcRenderer.invoke('axis-vault-get-address-for-fill', id, opts),
   vaultShouldOfferAddressSave: (payload) => ipcRenderer.invoke('axis-vault-should-offer-address-save', payload),
   vaultShouldOfferCardSave: (payload) => ipcRenderer.invoke('axis-vault-should-offer-card-save', payload),
   vaultCaptureLogin: (payload) => ipcRenderer.invoke('axis-vault-capture-login', payload),
@@ -259,8 +312,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDefaultShortcuts: () => ipcRenderer.invoke('get-default-shortcuts'),
   setShortcuts: (shortcuts) => ipcRenderer.invoke('set-shortcuts', shortcuts),
   resetShortcuts: () => ipcRenderer.invoke('reset-shortcuts'),
+  getCustomShortcuts: () => ipcRenderer.invoke('get-custom-shortcuts'),
+  setCustomShortcuts: (list) => ipcRenderer.invoke('set-custom-shortcuts', list),
+  getCustomGestures: () => ipcRenderer.invoke('get-custom-gestures'),
+  setCustomGestures: (list) => ipcRenderer.invoke('set-custom-gestures', list),
   disableShortcuts: () => ipcRenderer.invoke('disable-shortcuts'),
   enableShortcuts: () => ipcRenderer.invoke('enable-shortcuts'),
+  beginShortcutCapture: () => ipcRenderer.invoke('begin-shortcut-capture'),
+  endShortcutCapture: (epoch) => ipcRenderer.invoke('end-shortcut-capture', epoch),
+  onShortcutCaptureKey: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('axis-shortcut-capture-key', handler);
+    return () => ipcRenderer.removeListener('axis-shortcut-capture-key', handler);
+  },
   
   // Performance monitoring
   getPerformanceMetrics: () => ipcRenderer.invoke('get-performance-metrics'),
