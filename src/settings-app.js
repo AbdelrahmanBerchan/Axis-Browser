@@ -30,6 +30,16 @@
                 return div.innerHTML;
             }
 
+            function axisScreenTimeBarHeightPx(totalSeconds, trackPx = 72, capSeconds = 24 * 3600) {
+                const ext = window.AXIS_GESTURE_PHYSICS?.screenTimeBarHeightPx;
+                if (typeof ext === 'function') return ext(totalSeconds, trackPx, capSeconds);
+                if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return 1;
+                const cap = Math.max(1, capSeconds);
+                const t = Math.min(Math.max(0, totalSeconds), cap);
+                const curved = Math.pow(t / cap, 0.52);
+                return Math.max(2, Math.round(curved * trackPx));
+            }
+
             function settingsProfileAvatarMarkup(iconId) {
                 return window.AXIS_PROFILE_ICONS?.profileIconSvgMarkup?.(iconId) || '';
             }
@@ -162,25 +172,13 @@
                     ctx = window.electronAPI?.getSettingsProfileBootstrap?.() || ctx;
                 } catch (_) {}
                 settingsEditingProfileId = ctx.profileId || urlProfile || 'personal';
-                const list = document.getElementById('settings-profile-list');
-                const needsPaint = !list || list.children.length === 0;
-                if (needsPaint) {
-                    if (typeof window.__axisPaintSettingsProfileSwitcher === 'function') {
-                        window.__axisPaintSettingsProfileSwitcher(ctx);
-                    }
-                    renderSettingsProfileList(
-                        ctx.profiles || [],
-                        settingsEditingProfileId,
-                        ctx.incognitoProfile
-                    );
-                } else {
-                    updateSettingsProfileTrigger(
-                        ctx.profiles || [],
-                        settingsEditingProfileId,
-                        ctx.incognitoProfile
-                    );
-                    syncSettingsNavForProfile(settingsEditingProfileId);
-                }
+                // Always re-render so row click handlers are attached (early mid.js paint has none).
+                renderSettingsProfileList(
+                    ctx.profiles || [],
+                    settingsEditingProfileId,
+                    ctx.incognitoProfile
+                );
+                syncSettingsNavForProfile(settingsEditingProfileId);
                 try {
                     void window.electronAPI?.setSettingsEditingProfile?.(settingsEditingProfileId);
                     void window.electronAPI?.setSettingsUiActive?.(true);
@@ -224,7 +222,7 @@
 
             const THEME_KEYS = ['themeColor', 'gradientColor', 'gradientEnabled', 'gradientDirection', 'transparentSites', 'siteThemeColor', 'windowChromeLight', 'uiTheme'];
             const SHORTCUT_ACTIONS = [
-                { action: 'spotlight-search', labelKey: 'shortcut.newTab' },
+                { action: 'spotlight-search', labelKey: 'shortcut.newTabSpotlight' },
                 { action: 'close-tab', labelKey: 'shortcut.closeTab' },
                 { action: 'new-tab', labelKey: 'shortcut.newWindow' },
                 { action: 'next-tab', labelKey: 'shortcut.nextTab' },
@@ -256,6 +254,20 @@
                 { action: 'toggle-chat', labelKey: 'shortcut.openChat' },
                 { action: 'settings', labelKey: 'shortcut.openSettings' },
                 { action: 'clear-history', labelKey: 'shortcut.clearHistory' },
+                { action: 'stop-loading', label: 'Stop loading' },
+                { action: 'toggle-notes', label: 'Toggle notes' },
+                { action: 'toggle-extensions', label: 'Toggle extensions' },
+                { action: 'toggle-adblock', label: 'Toggle ad blocker' },
+                { action: 'open-incognito-window', label: 'New incognito window' },
+                { action: 'copy-title', label: 'Copy page title' },
+                { action: 'open-settings-newtab', label: 'New tab settings' },
+                { action: 'open-settings-vault', label: 'Passwords & cards settings' },
+                { action: 'open-settings-extensions', label: 'Extensions settings' },
+                { action: 'open-settings-permissions', label: 'Site permissions settings' },
+                { action: 'open-settings-profiles', label: 'Profiles settings' },
+                { action: 'tab-volume-up', label: 'Tab volume up' },
+                { action: 'tab-volume-down', label: 'Tab volume down' },
+                { action: 'toggle-tab-mono', label: 'Toggle tab mono audio' },
                 ...Array.from({ length: 9 }, (_, i) => ({
                     action: 'switch-tab-' + (i + 1),
                     labelKey: 'shortcut.switchTab',
@@ -481,9 +493,43 @@
                 return time.toLocaleDateString();
             }
             
+            const SHORTCUT_MOD_ORDER = ['Ctrl', 'Alt', 'Shift', 'Cmd'];
+            const SHORTCUT_MOD_ALIASES = {
+                Control: 'Ctrl', Ctrl: 'Ctrl',
+                Option: 'Alt', Alt: 'Alt', AltGr: 'Alt',
+                Shift: 'Shift',
+                Command: 'Cmd', Cmd: 'Cmd', Meta: 'Cmd', Super: 'Cmd',
+                CommandOrControl: 'Cmd', CmdOrCtrl: 'Cmd'
+            };
+            const SHORTCUT_MAC_SYMBOLS = { Ctrl: '⌃', Alt: '⌥', Shift: '⇧', Cmd: '⌘' };
+            const SHORTCUT_KEY_SYMBOLS = {
+                Up: '↑', Down: '↓', Left: '←', Right: '→',
+                Enter: '↩', Return: '↩', Backspace: '⌫', Delete: '⌦',
+                Escape: '⎋', Esc: '⎋', Tab: '⇥', Space: 'Space', Plus: '+',
+                PageUp: '⇞', PageDown: '⇟', Home: '↖', End: '↘'
+            };
             function formatShortcut(s) {
                 if (!s) return '';
-                return s.replace(/Cmd/g, '⌘').replace(/Ctrl/g, '⌃').replace(/Alt/g, '⌥').replace(/Shift/g, '⇧').replace(/\+/g, ' + ');
+                const parts = String(s).split('+');
+                const keys = [];
+                const mods = new Set();
+                for (let i = 0; i < parts.length; i++) {
+                    const raw = parts[i];
+                    if (raw === '' && i === parts.length - 1) {
+                        keys.push('+');
+                        continue;
+                    }
+                    if (!raw) continue;
+                    const mod = SHORTCUT_MOD_ALIASES[raw];
+                    if (mod) mods.add(mod);
+                    else keys.push(raw);
+                }
+                const orderedMods = SHORTCUT_MOD_ORDER.filter((m) => mods.has(m));
+                if (window.electronAPI?.platform === 'darwin') {
+                    const keyText = keys.map((k) => SHORTCUT_KEY_SYMBOLS[k] || (k.length === 1 ? k.toUpperCase() : k)).join('');
+                    return orderedMods.map((m) => SHORTCUT_MAC_SYMBOLS[m]).join('') + keyText;
+                }
+                return [...orderedMods.map((m) => (m === 'Cmd' ? 'Win' : m)), ...keys].join('+');
             }
             
             async function saveSetting(key, value, _notifyTheme) {
@@ -498,6 +544,24 @@
             let settings = {};
             let shortcutDefaults = {};
             let shortcutOverrides = {};
+            let customShortcuts = [];
+            let customShortcutDraft = null;
+            let customGestures = [];
+            let customGestureDraft = null;
+            let screenTimeSelectedDate = '';
+            const GESTURE_LABELS = {
+                'swipe-left': '← Swipe left',
+                'swipe-right': '→ Swipe right',
+                'swipe-up': '↑ Swipe up',
+                'swipe-down': '↓ Swipe down',
+                'pinch-in': 'Pinch in',
+                'pinch-out': 'Pinch out',
+                tap: 'Tap',
+                'double-tap': 'Double tap',
+                'triple-tap': 'Triple tap',
+                'long-press': 'Long press',
+                'two-finger-tap': 'Two-finger tap'
+            };
             try {
                 const [loadedSettings, loadedDefaults, loadedOverrides] = await Promise.all([
                     window.electronAPI.getSettings(),
@@ -538,6 +602,7 @@
                 const isLight = (await resolveEffectiveUiTheme()) === 'light';
                 document.documentElement.classList.toggle('settings-light-tint', isLight);
                 syncNativeWindowChromeTransparency();
+                if (activeSection === 'screentime') void renderScreenTimePane();
             }
             function syncNativeWindowChromeTransparency() {
                 if (!document.documentElement.classList.contains('settings-native-window')) return;
@@ -555,7 +620,7 @@
             function normalizeSidebarZoom(raw) {
                 const n = Number(raw);
                 const v = Number.isFinite(n) ? n : 100;
-                return Math.max(75, Math.min(150, Math.round(v / 5) * 5));
+                return Math.max(75, Math.min(150, Math.round(v)));
             }
             function syncSidebarZoomControl(raw) {
                 const zoom = normalizeSidebarZoom(raw);
@@ -589,10 +654,25 @@
                     row.style.removeProperty('display');
                 });
             }
+            function formatGestureLabel(gesture) {
+                return GESTURE_LABELS[gesture] || 'Gesture';
+            }
+            function syncGesturesSettingsUi() {
+                const navOn = settings.navGestureEnabled !== false;
+                const sensRow = document.getElementById('nav-gesture-sensitivity')?.closest('.row');
+                if (sensRow) sensRow.classList.toggle('gestures-row-disabled', !navOn);
+                if (window.AxisCustomGesturesUI?.refresh) {
+                    void window.AxisCustomGesturesUI.refresh();
+                } else if (typeof renderCustomGesturesSection === 'function' && typeof reloadGestureState === 'function') {
+                    void reloadGestureState().then(() => renderCustomGesturesSection());
+                }
+            }
+
             function syncConditionalSettingsRows() {
                 syncGradientRowsVisibility();
                 syncUnpinnedClearCustomRow();
                 syncNtpSettingsNestedState();
+                syncGesturesSettingsUi();
             }
             syncUnpinnedClearCustomRow();
             document.getElementById('speech-enabled').checked = settings.speechEnabled !== false;
@@ -647,6 +727,17 @@
             document.getElementById('transparent-sites').checked = !!settings.transparentSites;
             document.getElementById('site-theme-color').checked = !!settings.siteThemeColor;
             document.getElementById('link-preview').checked = settings.linkPreview !== false;
+            const navGestureEnabledEl = document.getElementById('nav-gesture-enabled');
+            const navGestureSensitivityEl = document.getElementById('nav-gesture-sensitivity');
+            const navGestureSensitivityLabelEl = document.getElementById('nav-gesture-sensitivity-label');
+            const profileSwipeEnabledEl = document.getElementById('profile-swipe-enabled');
+            if (navGestureEnabledEl) navGestureEnabledEl.checked = settings.navGestureEnabled !== false;
+            if (profileSwipeEnabledEl) profileSwipeEnabledEl.checked = settings.profileSwipeEnabled !== false;
+            if (navGestureSensitivityEl) {
+                const sens = Math.max(50, Math.min(150, Number(settings.navGestureSensitivity) || 100));
+                navGestureSensitivityEl.value = String(sens);
+                if (navGestureSensitivityLabelEl) navGestureSensitivityLabelEl.textContent = `${sens}%`;
+            }
 
             function ensureAiProvidersFromSettings() {
                 const norm = AxisAiProviders.normalizeSettings(settings);
@@ -682,8 +773,28 @@
             const aiKeyAddBlock = document.getElementById('ai-key-add-block');
             const aiKeyToolbar = document.getElementById('ai-key-toolbar');
             const aiKeyFormTitle = document.getElementById('ai-key-form-title');
+            const aiKeyFormDesc = document.getElementById('ai-key-form-desc');
             const aiProviderRevealState = new Map();
             let aiProviderEditingId = null;
+
+            function syncAiProviderFormCopy() {
+                const editing = !!aiProviderEditingId;
+                if (aiKeyFormTitle) {
+                    aiKeyFormTitle.textContent = editing
+                        ? t('settings.ai.editKey')
+                        : t('settings.aiKey.title');
+                }
+                if (aiKeyFormDesc) {
+                    aiKeyFormDesc.textContent = editing
+                        ? t('settings.ai.editKeyDesc')
+                        : t('settings.aiKey.desc');
+                }
+                if (aiProviderAddBtn) {
+                    aiProviderAddBtn.textContent = editing
+                        ? t('settings.ai.saveChanges')
+                        : t('settings.aiSaveKey');
+                }
+            }
 
             function aiProvidersToastMsg(message, isError) {
                 if (!aiProvidersToast) return;
@@ -719,7 +830,7 @@
 
             function setAiProviderFormOpen(open) {
                 aiKeyAddBlock?.classList.toggle('hidden', !open);
-                aiKeyToolbar?.classList.toggle('hidden', !!open);
+                aiProviderOpenAddBtn?.classList.toggle('hidden', !!open);
                 if (aiProvidersToast) {
                     if (open) {
                         aiKeyAddBlock?.appendChild(aiProvidersToast);
@@ -732,8 +843,7 @@
             function resetAiProviderForm({ closeForm = true } = {}) {
                 aiProviderEditingId = null;
                 aiKeyAddBlock?.classList.remove('is-editing');
-                if (aiKeyFormTitle) aiKeyFormTitle.textContent = t('settings.aiKey.title');
-                if (aiProviderAddBtn) aiProviderAddBtn.textContent = t('settings.aiSaveKey');
+                syncAiProviderFormCopy();
                 aiProviderCancelBtn?.classList.add('hidden');
                 if (aiProviderType) aiProviderType.value = 'groq';
                 if (aiProviderLabel) aiProviderLabel.value = '';
@@ -764,8 +874,7 @@
                     }
                     aiProviderEditingId = entry.id;
                     aiKeyAddBlock?.classList.add('is-editing');
-                    if (aiKeyFormTitle) aiKeyFormTitle.textContent = t('settings.ai.editKey');
-                    if (aiProviderAddBtn) aiProviderAddBtn.textContent = t('settings.ai.saveChanges');
+                    syncAiProviderFormCopy();
                     aiProviderCancelBtn?.classList.remove('hidden');
                     setAiProviderFormOpen(true);
                     if (aiProviderType) aiProviderType.value = entry.provider || 'groq';
@@ -929,12 +1038,8 @@
 
             aiProviderAddBtn?.addEventListener('click', async () => {
                 const provider = aiProviderType?.value || 'groq';
-                const apiKey = String(aiProviderKey?.value || '').trim();
+                let apiKey = String(aiProviderKey?.value || '').trim();
                 const label = String(aiProviderLabel?.value || '').trim();
-                if (!apiKey) {
-                    aiProvidersToastMsg(t('settings.ai.pasteKeyFirst'), true);
-                    return;
-                }
 
                 if (aiProviderEditingId) {
                     const idx = (settings.aiProviders || []).findIndex((p) => p.id === aiProviderEditingId);
@@ -944,6 +1049,13 @@
                         return;
                     }
                     const existing = settings.aiProviders[idx];
+                    if (!apiKey) {
+                        apiKey = String(existing?.apiKey || '').trim();
+                    }
+                    if (!apiKey) {
+                        aiProvidersToastMsg(t('settings.ai.pasteKeyFirst'), true);
+                        return;
+                    }
                     const entry = AxisAiProviders.sanitizeEntry({
                         id: aiProviderEditingId,
                         provider,
@@ -960,6 +1072,11 @@
                     resetAiProviderForm();
                     renderAiProvidersList();
                     aiProvidersToastMsg('API key updated');
+                    return;
+                }
+
+                if (!apiKey) {
+                    aiProvidersToastMsg(t('settings.ai.pasteKeyFirst'), true);
                     return;
                 }
 
@@ -999,15 +1116,14 @@
             const wclLabel = document.getElementById('window-chrome-light-label');
             wclInput.value = String(wclVal);
             function formatWindowChromeLightLabel(v) {
-                if (v === 50) return '50 - default';
-                if (v === 0) return '0 - opaque';
-                if (v === 100) return '100 - most light';
-                return String(v);
+                return `${v}%`;
             }
             wclLabel.textContent = formatWindowChromeLightLabel(wclVal);
             syncNativeWindowChromeTransparency();
 
             const AMBIENT_PRESET_IDS = ['rain', 'warm', 'focus', 'ocean', 'wind', 'still'];
+            const screenTimeEnabledEl = document.getElementById('screen-time-enabled');
+            if (screenTimeEnabledEl) screenTimeEnabledEl.checked = !!settings.screenTimeEnabled;
             document.getElementById('ambient-audio-enabled').checked = !!settings.ambientAudioEnabled;
             document.getElementById('ambient-mute-when-tab-audio').checked = !!settings.ambientMuteWhenTabAudio;
             const ambientPreset = settings.ambientAudioPreset || 'rain';
@@ -1037,6 +1153,10 @@
             setNtpCheck('ntp-widgets-enabled', settings.ntpWidgetsEnabled === true);
             setNtpCheck('ntp-widget-backgrounds', settings.ntpWidgetBackgrounds !== false);
             setNtpCheck('ntp-show-widgets-edit-button', settings.ntpShowWidgetsEditButton !== false);
+            const ntpModeSel = document.getElementById('new-tab-mode-select');
+            if (ntpModeSel) {
+                ntpModeSel.value = settings.newTabMode === 'spotlight' ? 'spotlight' : 'page';
+            }
 
             function renderNtpWidgetSettingsList() {
                 const api = window.AxisNtpWidgets;
@@ -1443,6 +1563,17 @@
                 document.getElementById('transparent-sites').checked = !!settings.transparentSites;
                 document.getElementById('site-theme-color').checked = !!settings.siteThemeColor;
                 document.getElementById('link-preview').checked = settings.linkPreview !== false;
+                const navGestureEnabledApply = document.getElementById('nav-gesture-enabled');
+                const navGestureSensitivityApply = document.getElementById('nav-gesture-sensitivity');
+                const navGestureSensitivityLabelApply = document.getElementById('nav-gesture-sensitivity-label');
+                const profileSwipeEnabledApply = document.getElementById('profile-swipe-enabled');
+                if (navGestureEnabledApply) navGestureEnabledApply.checked = settings.navGestureEnabled !== false;
+                if (profileSwipeEnabledApply) profileSwipeEnabledApply.checked = settings.profileSwipeEnabled !== false;
+                if (navGestureSensitivityApply) {
+                    const sensApply = Math.max(50, Math.min(150, Number(settings.navGestureSensitivity) || 100));
+                    navGestureSensitivityApply.value = String(sensApply);
+                    if (navGestureSensitivityLabelApply) navGestureSensitivityLabelApply.textContent = `${sensApply}%`;
+                }
                 ensureAiProvidersFromSettings();
                 resetAiProviderForm();
                 renderAiProvidersList();
@@ -1454,6 +1585,8 @@
                 if (wclInput) wclInput.value = String(wclValApply);
                 if (wclLabel) wclLabel.textContent = formatWindowChromeLightLabel(wclValApply);
                 syncNativeWindowChromeTransparency();
+                const screenTimeEnabledApply = document.getElementById('screen-time-enabled');
+                if (screenTimeEnabledApply) screenTimeEnabledApply.checked = !!settings.screenTimeEnabled;
                 document.getElementById('ambient-audio-enabled').checked = !!settings.ambientAudioEnabled;
                 document.getElementById('ambient-mute-when-tab-audio').checked = !!settings.ambientMuteWhenTabAudio;
                 const ambientPresetApply = settings.ambientAudioPreset || 'rain';
@@ -1622,6 +1755,26 @@
             document.querySelectorAll('.sidebar-item').forEach(item => {
                 item.addEventListener('click', () => switchSection(item.dataset.section));
             });
+
+            document.getElementById('settings-main')?.addEventListener('click', (e) => {
+                const addGesture = e.target.closest('[data-add-custom-gesture]');
+                if (addGesture) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof window.__axisBeginCustomGestureDraft === 'function') {
+                        window.__axisBeginCustomGestureDraft();
+                    }
+                    return;
+                }
+                const row = e.target.closest('.row');
+                if (!row || row.tagName === 'LABEL') return;
+                if (e.target.closest('input, select, button, a, label, textarea, .switch')) return;
+                const toggles = row.querySelectorAll(
+                    ':scope > input[type="checkbox"], :scope > .row-controls > input[type="checkbox"], :scope > .switch > input[type="checkbox"]'
+                );
+                if (toggles.length !== 1 || toggles[0].disabled) return;
+                toggles[0].click();
+            });
             const hash = (location.hash || '').replace(/^#/, '');
             if (settingsEditingProfileId === 'incognito') {
                 switchSection(isSettingsSectionAllowed(hash) ? hash : 'customization');
@@ -1704,7 +1857,7 @@
                         if (!/^[a-zA-Z0-9._-]{1,64}$/.test(k)) continue;
                         if (v === 'allow' || v === 'deny') row[k] = v;
                     }
-                    if (Object.keys(row).length) out[origin] = row;
+                    out[origin] = row;
                 }
                 return out;
             }
@@ -1749,9 +1902,62 @@
                 );
                 renderSitePermissionTable();
             }
+            const SITE_PERM_PRIMARY = [
+                'camera',
+                'microphone',
+                'geolocation',
+                'notifications',
+                'display-capture',
+                'clipboard-read'
+            ];
+            function applyPermChoice(origin, key, val) {
+                if (!sitePermissionOverrides[origin]) sitePermissionOverrides[origin] = {};
+                if (!val) delete sitePermissionOverrides[origin][key];
+                else sitePermissionOverrides[origin][key] = val;
+                persistSitePermissionOverrides();
+            }
+            function makePermRow(origin, key, perms) {
+                const row = document.createElement('div');
+                row.className = 'row perm-site-row';
+                const labelWrap = document.createElement('div');
+                labelWrap.className = 'row-label';
+                const title = document.createElement('div');
+                title.className = 'row-title';
+                title.textContent = SITE_PERM_LABELS[key] || key;
+                labelWrap.appendChild(title);
+                const sel = document.createElement('select');
+                sel.className = 'perm-native-select';
+                sel.setAttribute(
+                    'aria-label',
+                    `${SITE_PERM_LABELS[key] || key} for ${formatPermOriginLabel(origin)}`
+                );
+                sel.innerHTML = permSelectHtml(perms[key]);
+                const syncTone = () => {
+                    sel.classList.toggle('is-allow', sel.value === 'allow');
+                    sel.classList.toggle('is-deny', sel.value === 'deny');
+                };
+                syncTone();
+                sel.addEventListener('change', () => {
+                    syncTone();
+                    window.__axisPermForceOpenOrigin = origin;
+                    applyPermChoice(origin, key, sel.value);
+                });
+                row.appendChild(labelWrap);
+                row.appendChild(sel);
+                return row;
+            }
             function renderSitePermissionTable() {
                 const container = document.getElementById('site-perm-list');
                 if (!container) return;
+                const openOrigins = new Set(
+                    Array.from(container.querySelectorAll('.perm-site[open]'))
+                        .map((el) => el.dataset.origin)
+                        .filter(Boolean)
+                );
+                if (window.__axisPermForceOpenOrigin) {
+                    openOrigins.add(window.__axisPermForceOpenOrigin);
+                    window.__axisPermForceOpenOrigin = null;
+                }
                 container.innerHTML = '';
                 const origins = Object.keys(sitePermissionOverrides).sort((a, b) => a.localeCompare(b));
                 if (origins.length === 0) {
@@ -1763,68 +1969,66 @@
                 }
                 for (const origin of origins) {
                     const perms = sitePermissionOverrides[origin] || {};
-                    const card = document.createElement('article');
-                    card.className = 'perm-card';
+                    const allKeys = permKeysForSite(perms);
+                    const orderedKeys = [
+                        ...SITE_PERM_PRIMARY.filter((k) => allKeys.includes(k)),
+                        ...allKeys.filter((k) => !SITE_PERM_PRIMARY.includes(k))
+                    ];
+                    const setCount = allKeys.filter((k) => perms[k] === 'allow' || perms[k] === 'deny').length;
+                    const startOpen = openOrigins.has(origin);
 
-                    const header = document.createElement('div');
-                    header.className = 'perm-card-header';
+                    const site = document.createElement('details');
+                    site.className = 'perm-site';
+                    site.dataset.origin = origin;
+                    site.open = startOpen;
 
-                    const siteWrap = document.createElement('div');
-                    siteWrap.className = 'perm-card-site-wrap';
+                    const summary = document.createElement('summary');
+                    summary.className = 'perm-site-summary';
+                    const icon = document.createElement('span');
+                    icon.className = 'perm-site-favicon';
+                    icon.setAttribute('aria-hidden', 'true');
+                    icon.textContent = (formatPermOriginLabel(origin).charAt(0) || '?').toUpperCase();
+                    if (/^https?:\/\//i.test(origin)) {
+                        const img = new Image();
+                        img.alt = '';
+                        img.decoding = 'async';
+                        img.referrerPolicy = 'no-referrer';
+                        img.onload = () => {
+                            if (!img.naturalWidth) return;
+                            icon.textContent = '';
+                            icon.appendChild(img);
+                        };
+                        img.src = origin.replace(/\/+$/, '') + '/favicon.ico';
+                    }
+                    summary.appendChild(icon);
                     const title = document.createElement('span');
-                    title.className = 'perm-card-site-title';
+                    title.className = 'perm-site-name';
                     title.textContent = formatPermOriginLabel(origin);
                     title.title = origin;
-                    const url = document.createElement('span');
-                    url.className = 'perm-card-site-url';
-                    url.textContent = origin;
-                    url.title = origin;
-                    siteWrap.appendChild(title);
-                    siteWrap.appendChild(url);
+                    const meta = document.createElement('span');
+                    meta.className = 'perm-site-meta';
+                    meta.textContent = setCount > 0 ? `${setCount} set` : t('common.default');
+                    summary.appendChild(title);
+                    summary.appendChild(meta);
+                    site.appendChild(summary);
+
+                    const body = document.createElement('div');
+                    body.className = 'perm-site-rows';
+
+                    for (const key of orderedKeys) body.appendChild(makePermRow(origin, key, perms));
 
                     const removeBtn = document.createElement('button');
                     removeBtn.type = 'button';
-                    removeBtn.className = 'perm-card-remove destructive';
-                    removeBtn.textContent = t('common.remove');
-                    removeBtn.addEventListener('click', () => {
+                    removeBtn.className = 'perm-site-remove';
+                    removeBtn.textContent = t('common.remove') || 'Remove site';
+                    removeBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
                         delete sitePermissionOverrides[origin];
                         persistSitePermissionOverrides();
                     });
-
-                    header.appendChild(siteWrap);
-                    header.appendChild(removeBtn);
-                    card.appendChild(header);
-
-                    const grid = document.createElement('div');
-                    grid.className = 'perm-card-grid';
-                    for (const key of permKeysForSite(perms)) {
-                        const cell = document.createElement('div');
-                        cell.className = 'perm-card-cell';
-                        const label = document.createElement('label');
-                        label.textContent = SITE_PERM_LABELS[key] || key;
-                        const sel = document.createElement('select');
-                        sel.dataset.origin = origin;
-                        sel.dataset.permKey = key;
-                        sel.setAttribute(
-                            'aria-label',
-                            `${SITE_PERM_LABELS[key] || key} for ${formatPermOriginLabel(origin)}`
-                        );
-                        sel.innerHTML = permSelectHtml(perms[key]);
-                        sel.addEventListener('change', () => {
-                            const o = sel.dataset.origin;
-                            const k = sel.dataset.permKey;
-                            const val = sel.value;
-                            if (!sitePermissionOverrides[o]) sitePermissionOverrides[o] = {};
-                            if (!val) delete sitePermissionOverrides[o][k];
-                            else sitePermissionOverrides[o][k] = val;
-                            persistSitePermissionOverrides();
-                        });
-                        cell.appendChild(label);
-                        cell.appendChild(sel);
-                        grid.appendChild(cell);
-                    }
-                    card.appendChild(grid);
-                    container.appendChild(card);
+                    body.appendChild(removeBtn);
+                    site.appendChild(body);
+                    container.appendChild(site);
                 }
             }
             document.getElementById('site-perm-add-btn')?.addEventListener('click', async () => {
@@ -1838,6 +2042,7 @@
                 }
                 if (!sitePermissionOverrides[o]) sitePermissionOverrides[o] = {};
                 input.value = '';
+                window.__axisPermForceOpenOrigin = o;
                 await persistSitePermissionOverrides();
             });
             document.getElementById('site-perm-add-input')?.addEventListener('keydown', (e) => {
@@ -1847,6 +2052,186 @@
                 }
             });
             // Site permission overrides load when that section is opened (or prefetched in native mode).
+
+            let cookieSitesCache = [];
+            function formatCookieExpiryLabel(cookie) {
+                if (!cookie || cookie.session) return 'Session';
+                const exp = Number(cookie.expirationDate);
+                if (!exp || exp <= 0) return 'Session';
+                const d = new Date(exp * 1000);
+                if (Number.isNaN(d.getTime())) return 'Session';
+                if (d.getTime() < Date.now()) return `Expired · ${d.toLocaleString()}`;
+                return d.toLocaleString();
+            }
+            function cookieFlagsLabel(cookie) {
+                const parts = [];
+                parts.push(cookie.secure ? 'Secure' : 'Not secure');
+                parts.push(cookie.httpOnly ? 'HttpOnly' : 'Script readable');
+                const ss = String(cookie.sameSite || 'unspecified');
+                if (ss && ss !== 'unspecified') parts.push(`SameSite=${ss}`);
+                return parts.join(' · ');
+            }
+            function appendCookieDetailRows(container, cookies) {
+                container.innerHTML = '';
+                if (!cookies.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'cookie-detail-empty';
+                    empty.textContent = 'No cookies for this site.';
+                    container.appendChild(empty);
+                    return;
+                }
+                for (const c of cookies) {
+                    const block = document.createElement('div');
+                    block.className = 'cookie-detail-block';
+                    const head = document.createElement('div');
+                    head.className = 'cookie-detail-head';
+                    const name = document.createElement('div');
+                    name.className = 'cookie-detail-name';
+                    name.textContent = c.name || '(unnamed)';
+                    const path = document.createElement('div');
+                    path.className = 'cookie-detail-path';
+                    path.textContent = `Path ${c.path || '/'}`;
+                    head.append(name, path);
+                    const meta = document.createElement('div');
+                    meta.className = 'cookie-detail-meta';
+                    meta.textContent = `${formatCookieExpiryLabel(c)} · ${cookieFlagsLabel(c)}`;
+                    const value = document.createElement('div');
+                    value.className = 'cookie-detail-value';
+                    value.textContent = c.value || '';
+                    value.title = c.value || '';
+                    block.append(head, meta, value);
+                    container.appendChild(block);
+                }
+            }
+            async function loadCookieDetailsForSite(siteEl, domain) {
+                const list = siteEl.querySelector('.cookie-detail-list');
+                if (!list) return;
+                list.innerHTML = '<div class="cookie-detail-loading">Loading…</div>';
+                let cookies = [];
+                try {
+                    cookies = (await window.electronAPI.getProfileCookiesForDomain?.(domain)) || [];
+                } catch (_) {
+                    cookies = [];
+                }
+                appendCookieDetailRows(list, cookies);
+                siteEl.dataset.cookiesLoaded = '1';
+            }
+            async function loadCookieSites() {
+                const listEl = document.getElementById('cookie-site-list');
+                if (!listEl) return;
+                if (settingsEditingProfileId === 'incognito') {
+                    listEl.innerHTML =
+                        '<div class="perm-empty">Not available in Incognito settings.</div>';
+                    return;
+                }
+                try {
+                    cookieSitesCache = (await window.electronAPI.getProfileCookieSites?.()) || [];
+                } catch (_) {
+                    cookieSitesCache = [];
+                }
+                renderCookieSiteList();
+            }
+            function renderCookieSiteList() {
+                const listEl = document.getElementById('cookie-site-list');
+                if (!listEl) return;
+                const openDomains = new Set(
+                    Array.from(listEl.querySelectorAll('.perm-site[open]'))
+                        .map((el) => el.dataset.domain)
+                        .filter(Boolean)
+                );
+                const filter = (
+                    document.getElementById('cookie-site-filter')?.value || ''
+                )
+                    .trim()
+                    .toLowerCase();
+                const rows = cookieSitesCache.filter(
+                    (row) => !filter || String(row.domain || '').toLowerCase().includes(filter)
+                );
+                if (!rows.length) {
+                    listEl.innerHTML =
+                        '<div class="perm-empty">' +
+                        escapeHtml(filter ? 'No matching sites.' : 'No cookies stored in this profile.') +
+                        '</div>';
+                    return;
+                }
+                listEl.innerHTML = '';
+                for (const row of rows) {
+                    const domain = String(row.domain || '');
+                    const count = Number(row.count) || 0;
+                    const site = document.createElement('details');
+                    site.className = 'perm-site cookie-site';
+                    site.dataset.domain = domain;
+                    site.open = openDomains.has(domain);
+                    const summary = document.createElement('summary');
+                    summary.className = 'perm-site-summary';
+                    const icon = document.createElement('span');
+                    icon.className = 'perm-site-favicon';
+                    icon.setAttribute('aria-hidden', 'true');
+                    icon.textContent = (domain.charAt(0) || '?').toUpperCase();
+                    const origin = `https://${domain.replace(/^\.+/, '')}/`;
+                    const img = new Image();
+                    img.alt = '';
+                    img.decoding = 'async';
+                    img.referrerPolicy = 'no-referrer';
+                    img.onload = () => {
+                        if (!img.naturalWidth) return;
+                        icon.textContent = '';
+                        icon.appendChild(img);
+                    };
+                    img.src = origin.replace(/\/+$/, '') + '/favicon.ico';
+                    const label = document.createElement('span');
+                    label.className = 'perm-site-name';
+                    label.textContent = domain;
+                    label.title = domain;
+                    const meta = document.createElement('span');
+                    meta.className = 'perm-site-meta';
+                    meta.textContent = count === 1 ? '1 cookie' : `${count} cookies`;
+                    summary.append(icon, label, meta);
+                    site.appendChild(summary);
+                    const body = document.createElement('div');
+                    body.className = 'perm-site-rows cookie-site-rows';
+                    const detailList = document.createElement('div');
+                    detailList.className = 'cookie-detail-list';
+                    body.appendChild(detailList);
+                    const removeBtn = document.createElement('button');
+                    removeBtn.type = 'button';
+                    removeBtn.className = 'perm-site-remove';
+                    removeBtn.textContent = 'Clear cookies for this site';
+                    removeBtn.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        removeBtn.disabled = true;
+                        try {
+                            await window.electronAPI.clearProfileCookiesForDomain?.(domain);
+                        } catch (_) {}
+                        removeBtn.disabled = false;
+                        await loadCookieSites();
+                    });
+                    body.appendChild(removeBtn);
+                    site.appendChild(body);
+                    site.addEventListener('toggle', () => {
+                        if (!site.open) return;
+                        if (site.dataset.cookiesLoaded === '1') return;
+                        void loadCookieDetailsForSite(site, domain);
+                    });
+                    if (site.open) void loadCookieDetailsForSite(site, domain);
+                    listEl.appendChild(site);
+                }
+            }
+            document.getElementById('cookies-refresh-btn')?.addEventListener('click', () => {
+                void loadCookieSites();
+            });
+            document.getElementById('cookie-site-filter')?.addEventListener('input', () => {
+                renderCookieSiteList();
+            });
+            document.getElementById('cookies-clear-all-btn')?.addEventListener('click', async () => {
+                const msg =
+                    'Clear all cookies for this profile? You will be signed out of most sites.';
+                if (!window.confirm(msg)) return;
+                try {
+                    await window.electronAPI.clearProfileCookiesAll?.();
+                } catch (_) {}
+                await loadCookieSites();
+            });
 
             let extensionsCache = [];
             function renderExtensions(list) {
@@ -2088,21 +2473,15 @@
 
                     const section = activeSection || 'customization';
                     if (typeof refreshSettingsSectionInternal === 'function') {
-                        if (
-                            section === 'history' ||
-                            section === 'extensions' ||
-                            section === 'permissions' ||
-                            section === 'profiles' ||
-                            section === 'shortcuts'
-                        ) {
-                            refreshSettingsSectionInternal(section);
-                        } else if (section === 'vault') {
+                        if (section === 'vault') {
                             const hasOpenReveal = !!document.querySelector(
                                 '.vault-table-row--open, .vault-row-detail:not(.hidden)'
                             );
                             if (!vaultEditorMode && !hasOpenReveal && vaultAuthInProgress <= 0) {
                                 refreshSettingsSectionInternal(section);
                             }
+                        } else {
+                            refreshSettingsSectionInternal(section);
                         }
                     }
 
@@ -2137,8 +2516,32 @@
                     window.electronAPI.onSettingsUpdated((data) => {
                         // Parked updates are for another profile's cache - never apply live.
                         if (data && data.parkedOnly) return;
+                        if (data && typeof data.key === 'string' && data.value !== undefined) {
+                            settings[data.key] = data.value;
+                            if (
+                                data.key === 'navGestureEnabled' ||
+                                data.key === 'navGestureSensitivity' ||
+                                data.key === 'navPinchZoomEnabled' ||
+                                data.key === 'profileSwipeEnabled'
+                            ) {
+                                syncGesturesSettingsUi();
+                            }
+                        }
                         if (data && data.key === 'sidebarPosition') {
                             applySidebarPositionToForm(data.value);
+                        }
+                        if (data && data.key === 'screenTimeEnabled') {
+                            const el = document.getElementById('screen-time-enabled');
+                            if (el && document.activeElement !== el) {
+                                el.checked = !!data.value;
+                            }
+                            void renderScreenTimePane();
+                        }
+                        if (data && (data.key === 'screenTimeLimits' || data.key === 'screenTimeLimitBaselines')) {
+                            if (data.key === 'screenTimeLimitBaselines' && data.value && typeof data.value === 'object') {
+                                settings.screenTimeLimitBaselines = data.value;
+                            }
+                            void renderScreenTimePane();
                         }
                         if (data && data.key === 'uiLanguage') {
                             const I = window.AxisI18n;
@@ -2467,6 +2870,61 @@
             document.getElementById('https-only-mode').addEventListener('change', e => saveSetting('httpsOnlyMode', e.target.checked, false));
             document.getElementById('ad-blocker-enabled').addEventListener('change', e => saveSetting('adBlockerEnabled', e.target.checked, false));
             document.getElementById('javascript-enabled').addEventListener('change', e => saveSetting('javascriptEnabled', e.target.checked, false));
+            document.getElementById('screen-time-enabled')?.addEventListener('change', async (e) => {
+                settings.screenTimeEnabled = e.target.checked;
+                await saveSetting('screenTimeEnabled', e.target.checked, false);
+                void renderScreenTimePane();
+            });
+            document.getElementById('screen-time-clear')?.addEventListener('click', async () => {
+                if (!window.electronAPI?.clearScreenTimeData) return;
+                await window.electronAPI.clearScreenTimeData();
+                settings.screenTimeLog = {};
+                settings.screenTimeLimitBaselines = {};
+                void renderScreenTimePane();
+            });
+            function parseScreenTimeLimitInput(rawValue, unit) {
+                const value = Math.floor(Number(rawValue) || 0);
+                if (value <= 0) return 0;
+                const u = String(unit || 'minutes').toLowerCase();
+                let seconds = value * 60;
+                if (u === 'seconds' || u === 'second' || u === 'sec' || u === 's') {
+                    seconds = value;
+                } else if (u === 'hours' || u === 'hour' || u === 'hr' || u === 'h') {
+                    seconds = value * 3600;
+                }
+                return Math.min(24 * 3600, Math.max(1, seconds));
+            }
+
+            document.getElementById('screen-time-limit-add')?.addEventListener('click', async () => {
+                const domainInput = document.getElementById('screen-time-limit-domain');
+                const valueEl = document.getElementById('screen-time-limit-value');
+                const unitEl = document.getElementById('screen-time-limit-unit');
+                let domain = String(domainInput?.value || '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/^https?:\/\//i, '')
+                    .replace(/^www\./i, '')
+                    .split('/')[0];
+                const limitSeconds = parseScreenTimeLimitInput(valueEl?.value, unitEl?.value);
+                if (!domain || limitSeconds <= 0) return;
+                let usageToday = 0;
+                try {
+                    const stats = await window.electronAPI.getScreenTimeStats();
+                    usageToday = Number(stats?.domainUsage?.[domain]) || 0;
+                } catch (_) {}
+                const limits = { ...(settings.screenTimeLimits || {}) };
+                limits[domain] = limitSeconds;
+                settings.screenTimeLimits = limits;
+                const baselines = { ...(settings.screenTimeLimitBaselines || {}) };
+                baselines[domain] = usageToday;
+                settings.screenTimeLimitBaselines = baselines;
+                await saveSetting('screenTimeLimits', limits, false);
+                await saveSetting('screenTimeLimitBaselines', baselines, false);
+                if (domainInput) domainInput.value = '';
+                if (valueEl) valueEl.value = '30';
+                if (unitEl) unitEl.value = 'minutes';
+                void renderScreenTimePane();
+            });
             document.getElementById('incognito-search-engine')?.addEventListener('change', e => saveSetting('searchEngine', e.target.value, false));
             document.getElementById('incognito-https-only-mode')?.addEventListener('change', e => saveSetting('httpsOnlyMode', e.target.checked, false));
             document.getElementById('incognito-link-preview')?.addEventListener('change', e => saveSetting('linkPreview', e.target.checked, false));
@@ -2598,6 +3056,10 @@
             document.getElementById('ntp-welcome-enabled')?.addEventListener('change', e => {
                 syncNtpSettingsNestedState();
                 saveSetting('ntpWelcomeEnabled', e.target.checked, false);
+            });
+            document.getElementById('new-tab-mode-select')?.addEventListener('change', (e) => {
+                const v = e.target.value === 'spotlight' ? 'spotlight' : 'page';
+                saveSetting('newTabMode', v, false);
             });
             document.getElementById('ntp-welcome-greeting')?.addEventListener('change', e => saveSetting('ntpWelcomeGreeting', e.target.checked, false));
             function saveNtpGreetingName() {
@@ -2900,6 +3362,32 @@
             document.getElementById('link-preview').addEventListener('change', e => {
                 saveSetting('linkPreview', e.target.checked, false);
             });
+            document.getElementById('nav-gesture-enabled')?.addEventListener('change', (e) => {
+                settings.navGestureEnabled = e.target.checked;
+                syncGesturesSettingsUi();
+                saveSetting('navGestureEnabled', e.target.checked, false);
+            });
+            document.getElementById('profile-swipe-enabled')?.addEventListener('change', (e) => {
+                settings.profileSwipeEnabled = e.target.checked;
+                syncGesturesSettingsUi();
+                saveSetting('profileSwipeEnabled', e.target.checked, false);
+            });
+            const navGestureSensInput = document.getElementById('nav-gesture-sensitivity');
+            const navGestureSensLabel = document.getElementById('nav-gesture-sensitivity-label');
+            navGestureSensInput?.addEventListener('input', (e) => {
+                const v = Math.max(50, Math.min(150, parseInt(e.target.value, 10) || 100));
+                if (navGestureSensLabel) navGestureSensLabel.textContent = `${v}%`;
+                settings.navGestureSensitivity = v;
+                syncGesturesSettingsUi();
+            });
+            navGestureSensInput?.addEventListener('change', (e) => {
+                const v = Math.max(50, Math.min(150, parseInt(e.target.value, 10) || 100));
+                settings.navGestureSensitivity = v;
+                if (navGestureSensLabel) navGestureSensLabel.textContent = `${v}%`;
+                syncGesturesSettingsUi();
+                saveSetting('navGestureSensitivity', v, false);
+            });
+            syncGesturesSettingsUi();
             wclInput.addEventListener('input', (e) => {
                 const v = parseInt(e.target.value, 10);
                 const n = Number.isFinite(v) ? v : 0;
@@ -3044,11 +3532,13 @@
                     list.innerHTML = '';
                 }
                 if (filtered.length === 0) {
+                    historyVisibleCount = 0;
                     list.innerHTML = '<div class="empty-state">' + escapeHtml(t('settings.history.empty')) + '</div>';
                     if (historyObserver) {
                         historyObserver.disconnect();
                         historyObserver = null;
                     }
+                    updateHistoryCountLabel();
                     return;
                 }
                 const batch = filtered.slice(historyVisibleCount, historyVisibleCount + HISTORY_PAGE_SIZE);
@@ -3100,9 +3590,19 @@
             async function persistShortcutOverrides() {
                 await window.electronAPI.setShortcuts(shortcutOverrides);
             }
+            async function persistCustomShortcuts() {
+                customShortcuts = await window.electronAPI.setCustomShortcuts(customShortcuts);
+            }
             async function reloadShortcutState() {
-                shortcutOverrides = await window.electronAPI.getShortcutOverrides() || {};
-                shortcutDefaults = await window.electronAPI.getDefaultShortcuts() || {};
+                shortcutOverrides = (await window.electronAPI.getShortcutOverrides()) || {};
+                shortcutDefaults = (await window.electronAPI.getDefaultShortcuts()) || {};
+                customShortcuts = (await window.electronAPI.getCustomShortcuts?.()) || [];
+                customShortcuts = customShortcuts.filter(
+                    (cs) =>
+                        cs &&
+                        cs.keys &&
+                        ((Array.isArray(cs.steps) && cs.steps.length) || cs.command)
+                );
             }
             function mergedActiveShortcuts() {
                 const merged = {};
@@ -3118,8 +3618,897 @@
                 }
                 return merged;
             }
+            function shortcutLabel(item) {
+                return item.labelKey
+                    ? t(item.labelKey, item.labelN != null ? { n: item.labelN } : undefined)
+                    : item.label || item.name || item.action;
+            }
+            function isBindableSingleKey(key) {
+                if (!key || typeof key !== 'string') return false;
+                if (/^F\d{1,2}$/i.test(key)) return true;
+                if (
+                    /^(Space|Tab|Enter|Backspace|Delete|Left|Right|Up|Down|Home|End|PageUp|PageDown|Comma|Period|Slash|Backslash|Minus|Equal|Backquote)$/.test(
+                        key
+                    )
+                ) {
+                    return true;
+                }
+                if (key.length === 1 && /[A-Za-z0-9]/.test(key)) return true;
+                return false;
+            }
+            function isCompleteShortcut(accel) {
+                if (!accel || typeof accel !== 'string') return false;
+                const parts = accel.split('+').filter(Boolean);
+                if (!parts.length) return false;
+                if (parts.length >= 2) return true;
+                return isBindableSingleKey(parts[0]);
+            }
+            function captureShortcutFromEvent(e) {
+                if (!e) return null;
+                const isMac = navigator.platform.toUpperCase().includes('MAC');
+                const parts = [];
+                if (isMac && e.metaKey) parts.push('Cmd');
+                else if (e.ctrlKey) parts.push('Ctrl');
+                if (e.altKey) parts.push('Alt');
+                if (e.shiftKey) parts.push('Shift');
+                let key = e.key;
+                if (key === ' ') key = 'Space';
+                else if (key === 'ArrowLeft') key = 'Left';
+                else if (key === 'ArrowRight') key = 'Right';
+                else if (key === 'ArrowUp') key = 'Up';
+                else if (key === 'ArrowDown') key = 'Down';
+                else if (key === 'Escape') return null;
+                else if (key.length === 1) key = key.toUpperCase();
+                if (['Control', 'Meta', 'Alt', 'Shift', 'Dead'].includes(key)) return null;
+                if (!parts.length) return isBindableSingleKey(key) ? key : null;
+                parts.push(key);
+                return parts.join('+');
+            }
+            function captureShortcutFromPayload(payload) {
+                if (!payload || typeof payload !== 'object') return null;
+                if (payload.accelerator && isCompleteShortcut(payload.accelerator)) return payload.accelerator;
+                const isMac = navigator.platform.toUpperCase().includes('MAC');
+                const parts = [];
+                if (isMac && payload.meta) parts.push('Cmd');
+                else if (payload.control) parts.push('Ctrl');
+                if (payload.alt) parts.push('Alt');
+                if (payload.shift) parts.push('Shift');
+                let key = payload.key || '';
+                if (key === ' ') key = 'Space';
+                else if (key === 'ArrowLeft') key = 'Left';
+                else if (key === 'ArrowRight') key = 'Right';
+                else if (key === 'ArrowUp') key = 'Up';
+                else if (key === 'ArrowDown') key = 'Down';
+                else if (key.length === 1) key = key.toUpperCase();
+                if (['Control', 'Meta', 'Alt', 'Shift', 'Escape', 'Dead'].includes(key)) return null;
+                if (!parts.length) return isBindableSingleKey(key) ? key : null;
+                parts.push(key);
+                return parts.join('+');
+            }
+            let activeShortcutCaptureBtn = null;
+            function bindShortcutCapture(input, onCapture) {
+                if (!input || input.disabled) return;
+                let unsub = null;
+                let busy = false;
+                let epoch = null;
+                let active = false;
+                let outsideListen = null;
+                let keyListen = null;
+                const stopListen = () => {
+                    if (outsideListen) {
+                        document.removeEventListener('pointerdown', outsideListen, true);
+                        outsideListen = null;
+                    }
+                    if (keyListen) {
+                        window.removeEventListener('keydown', keyListen, true);
+                        keyListen = null;
+                    }
+                    if (typeof unsub === 'function') {
+                        try { unsub(); } catch (_) {}
+                    }
+                    unsub = null;
+                };
+                const setRecordingLabel = () => {
+                    const label = t('settings.shortcut.pressKeys');
+                    if (input.tagName === 'BUTTON') input.textContent = label;
+                    else input.value = label;
+                };
+                const restoreDisplay = () => {
+                    if (typeof input._axisRestoreValue === 'function') input._axisRestoreValue();
+                };
+                const endCapture = async (shortcut) => {
+                    if (!active || busy) return;
+                    busy = true;
+                    active = false;
+                    if (activeShortcutCaptureBtn === input) activeShortcutCaptureBtn = null;
+                    input.classList.remove('is-recording');
+                    input.removeAttribute('data-recording');
+                    const mine = epoch;
+                    epoch = null;
+                    stopListen();
+                    try { await window.electronAPI?.endShortcutCapture?.(mine); } catch (_) {}
+                    try {
+                        if (shortcut) {
+                            await onCapture(shortcut, input);
+                        } else {
+                            restoreDisplay();
+                        }
+                    } finally {
+                        busy = false;
+                    }
+                };
+                const startCapture = async (e) => {
+                    if (input.disabled || active) return;
+                    if (activeShortcutCaptureBtn && activeShortcutCaptureBtn !== input) {
+                        activeShortcutCaptureBtn.blur?.();
+                    }
+                    e.preventDefault();
+                    e.stopPropagation();
+                    active = true;
+                    activeShortcutCaptureBtn = input;
+                    input.classList.add('is-recording');
+                    input.dataset.recording = '1';
+                    setRecordingLabel();
+                    try {
+                        epoch = await window.electronAPI?.beginShortcutCapture?.();
+                    } catch (_) {}
+                    unsub = window.electronAPI?.onShortcutCaptureKey?.((payload) => {
+                        if (!active || busy) return;
+                        if (!payload || payload.cancel || payload.key === 'Escape') {
+                            void endCapture(null);
+                            return;
+                        }
+                        const shortcut = captureShortcutFromPayload(payload);
+                        if (shortcut && isCompleteShortcut(shortcut)) void endCapture(shortcut);
+                    });
+                    outsideListen = (ev) => {
+                        if (!active || busy) return;
+                        if (input.contains(ev.target)) return;
+                        void endCapture(null);
+                    };
+                    setTimeout(() => {
+                        if (active) document.addEventListener('pointerdown', outsideListen, true);
+                    }, 0);
+                    keyListen = (ev) => {
+                        if (!active || busy) return;
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        if (ev.key === 'Escape') {
+                            void endCapture(null);
+                            return;
+                        }
+                        const shortcut = captureShortcutFromEvent(ev);
+                        if (shortcut && isCompleteShortcut(shortcut)) void endCapture(shortcut);
+                    };
+                    window.addEventListener('keydown', keyListen, true);
+                    try { input.focus({ preventScroll: true }); } catch (_) {}
+                };
+                input.addEventListener('pointerdown', (e) => {
+                    void startCapture(e);
+                });
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        void startCapture(e);
+                    }
+                });
+            }
+            function applyShortcutKeyLabel(btn, shortcut) {
+                if (!btn) return;
+                btn.textContent = shortcut ? formatShortcut(shortcut) : t('settings.shortcut.pressKeys');
+            }
+            function ensureShortcutResetButton(row, action) {
+                if (!row || row.querySelector('[data-reset-action]')) return;
+                const actions = row.querySelector('.shortcut-row-actions');
+                if (!actions) return;
+                const disableBtn = actions.querySelector('[data-disable-action]');
+                const resetBtn = document.createElement('button');
+                resetBtn.type = 'button';
+                resetBtn.className = 'shortcut-action-btn';
+                resetBtn.dataset.resetAction = action;
+                resetBtn.textContent = t('settings.shortcut.reset') || 'Reset';
+                if (disableBtn) actions.insertBefore(resetBtn, disableBtn);
+                else actions.appendChild(resetBtn);
+            }
+            function tOr(key, fallback) {
+                const v = t(key);
+                return v && v !== key ? v : fallback;
+            }
+            function builder() {
+                return window.AXIS_SHORTCUT_BUILDER || null;
+            }
+            function defaultBuilderStep() {
+                return { verb: '', target: '' };
+            }
+            function normalizeBuilderSteps(raw) {
+                const b = builder();
+                if (!b) return [defaultBuilderStep()];
+                if (Array.isArray(raw) && raw.length) {
+                    return raw.map((step) => {
+                        if (step && typeof step === 'object') {
+                            return { verb: step.verb || '', target: step.target || '' };
+                        }
+                        if (typeof step === 'string') {
+                            const pair = b.actionToBuilderStep(step);
+                            return { verb: pair.verb, target: pair.target };
+                        }
+                        return defaultBuilderStep();
+                    });
+                }
+                return [defaultBuilderStep()];
+            }
+            function builderStepLabel(step) {
+                const b = builder();
+                if (!b || !step) return '';
+                return b.stepLabel(step.verb, step.target);
+            }
+            function builderStepsSummary(steps) {
+                const list = normalizeBuilderSteps(steps);
+                return list.map((s) => builderStepLabel(s)).join(' → ');
+            }
+            function renderBuilderStepRow(step, idx) {
+                const b = builder();
+                const verb = step?.verb || '';
+                const target = verb ? step?.target || '' : '';
+                const verbPh = '—';
+                const targetPh = '—';
+                const verbOpts = b ? b.verbOptions(verb, verbPh) : '';
+                const targetOpts = b ? b.targetOptions(verb, target, targetPh) : '';
+                return `
+                    <div class="shortcut-custom-step" data-step-index="${idx}">
+                        <select class="shortcut-step-verb" data-step-verb="${idx}" aria-label="${escapeHtml(tOr('settings.shortcuts.customVerb', 'Do'))}">${verbOpts}</select>
+                        <select class="shortcut-step-target" data-step-target="${idx}" aria-label="${escapeHtml(tOr('settings.shortcuts.customTarget', 'What'))}"${verb ? '' : ' disabled'}>${targetOpts}</select>
+                        <button type="button" class="shortcut-action-btn" data-duplicate-custom-step="${idx}" title="${escapeHtml(tOr('settings.shortcuts.duplicateStep', 'Duplicate step'))}">⧉</button>
+                        <button type="button" class="shortcut-action-btn" data-remove-custom-step="${idx}" title="Remove">−</button>
+                    </div>`;
+            }
+            async function persistCustomGestures() {
+                customGestures = await window.electronAPI.setCustomGestures(customGestures);
+            }
+            async function reloadGestureState() {
+                customGestures = (await window.electronAPI.getCustomGestures?.()) || [];
+                customGestures = customGestures.filter(
+                    (g) =>
+                        g &&
+                        g.gesture &&
+                        ((Array.isArray(g.steps) && g.steps.length) || g.command)
+                );
+            }
+            function renderCustomGestureStepsEditor(steps) {
+                const rows = normalizeBuilderSteps(steps)
+                    .map((step, idx) => renderBuilderStepRow(step, idx))
+                    .join('');
+                return `
+                    <div class="shortcut-custom-steps gesture-custom-steps">
+                        ${rows}
+                        <button type="button" class="shortcut-action-btn" data-add-gesture-step>+ ${escapeHtml(tOr('settings.shortcuts.addStep', 'Add step'))}</button>
+                    </div>`;
+            }
+            function readCustomGestureDraftFromDom() {
+                const card = document.querySelector('[data-gesture-draft="1"]');
+                if (!customGestureDraft || !card) return;
+                const nameEl = card.querySelector('.gesture-custom-name');
+                if (nameEl) {
+                    customGestureDraft.name =
+                        nameEl.value.trim() || customGestureDraft.name || 'New gesture';
+                }
+                const steps = [];
+                card.querySelectorAll('.shortcut-custom-step').forEach((row) => {
+                    const verb = row.querySelector('.shortcut-step-verb')?.value || '';
+                    const target = (verb && row.querySelector('.shortcut-step-target')?.value) || '';
+                    steps.push({ verb, target });
+                });
+                customGestureDraft.builderSteps = steps.length ? steps : [defaultBuilderStep()];
+            }
+            function bindGestureRecordPad(pad) {
+                if (!pad) return;
+                let accX = 0;
+                let accY = 0;
+                let pinchAcc = 0;
+                let lastMs = 0;
+                let wheelBound = false;
+                const THRESH = 48;
+                const finish = (gesture) => {
+                    if (!customGestureDraft) return;
+                    customGestureDraft.gesture = gesture;
+                    const label = pad.parentElement?.querySelector('[data-gesture-label]');
+                    if (label) label.textContent = formatGestureLabel(gesture);
+                    pad.classList.remove('gesture-record-pad--recording');
+                    pad.classList.add('gesture-record-pad--captured');
+                    pad.textContent = formatGestureLabel(gesture);
+                    if (wheelBound) {
+                        pad.removeEventListener('wheel', onWheel);
+                        wheelBound = false;
+                    }
+                };
+                const onWheel = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    let dx = Number(e.deltaX) || 0;
+                    let dy = Number(e.deltaY) || 0;
+                    if (e.deltaMode === 1) {
+                        dx *= 16;
+                        dy *= 16;
+                    } else if (e.deltaMode === 2) {
+                        dx *= 96;
+                        dy *= 96;
+                    }
+                    const now = Date.now();
+                    if (now - lastMs > 220) {
+                        accX = 0;
+                        accY = 0;
+                        pinchAcc = 0;
+                    }
+                    lastMs = now;
+                    if (e.ctrlKey || e.metaKey) {
+                        pinchAcc += dy;
+                        if (Math.abs(pinchAcc) >= 8) {
+                            finish(pinchAcc > 0 ? 'pinch-out' : 'pinch-in');
+                        }
+                        return;
+                    }
+                    accX += dx;
+                    accY += dy;
+                    if (Math.abs(accX) >= THRESH && Math.abs(accX) > Math.abs(accY)) {
+                        finish(accX < 0 ? 'swipe-left' : 'swipe-right');
+                        return;
+                    }
+                    if (Math.abs(accY) >= THRESH && Math.abs(accY) > Math.abs(accX)) {
+                        finish(accY < 0 ? 'swipe-up' : 'swipe-down');
+                    }
+                };
+                const start = () => {
+                    accX = 0;
+                    accY = 0;
+                    pinchAcc = 0;
+                    pad.classList.add('gesture-record-pad--recording');
+                    if (!wheelBound) {
+                        pad.addEventListener('wheel', onWheel, { passive: false });
+                        wheelBound = true;
+                    }
+                };
+                pad.addEventListener('pointerdown', start);
+                pad.addEventListener('focus', start);
+            }
+            async function saveCustomGestureDraft() {
+                readCustomGestureDraftFromDom();
+                if (!customGestureDraft) return;
+                if (!customGestureDraft.gesture) {
+                    alert('Swipe or pinch on the record area first.');
+                    return;
+                }
+                const builderSteps = (customGestureDraft.builderSteps || []).filter(
+                    (s) => s && (s.verb || s.target)
+                );
+                if (builderSteps.some((s) => !s.verb || !s.target)) {
+                    alert(tOr('settings.shortcuts.finishSteps', 'Pick both an action and a target for every step.'));
+                    return;
+                }
+                if (!builderSteps.length) {
+                    alert(tOr('settings.shortcuts.needStep', 'Add at least one action.'));
+                    return;
+                }
+                const b = builder();
+                const steps = b ? b.builderStepsToActions(builderSteps) : [];
+                if (!steps.length) {
+                    alert(tOr('settings.shortcuts.addStep', 'Add at least one valid step'));
+                    return;
+                }
+                const saved = {
+                    id: customGestureDraft.id,
+                    name: customGestureDraft.name || 'New gesture',
+                    kind: 'macro',
+                    gesture: customGestureDraft.gesture,
+                    builderSteps,
+                    steps,
+                    command: steps[0]
+                };
+                customGestures = customGestures.filter(
+                    (g) => g.id === saved.id || g.gesture !== saved.gesture
+                );
+                if (customGestureDraft.editingId) {
+                    const idx = customGestures.findIndex((x) => x.id === customGestureDraft.editingId);
+                    if (idx >= 0) customGestures[idx] = saved;
+                    else customGestures.push(saved);
+                } else {
+                    customGestures.push(saved);
+                }
+                customGestureDraft = null;
+                await persistCustomGestures();
+                renderCustomGesturesSection();
+            }
+            function renderCustomGesturesSection() {
+                const mount = document.getElementById('custom-gestures-mount');
+                if (!mount) return;
+                const savedRows = customGestures
+                    .map((cg) => {
+                        const id = escapeHtml(cg.id || '');
+                        const name = escapeHtml(cg.name || 'Gesture');
+                        const gesture = escapeHtml(formatGestureLabel(cg.gesture));
+                        const summary = escapeHtml(builderStepsSummary(cg.builderSteps || cg.steps));
+                        return `
+                            <div class="row gesture-saved-row" data-gesture-id="${id}">
+                                <div class="row-label">
+                                    <div class="row-title">${name}</div>
+                                    <div class="row-desc">${gesture}${summary ? ` · ${summary}` : ''}</div>
+                                </div>
+                                <div class="gesture-saved-actions">
+                                    <button type="button" class="shortcut-action-btn" data-edit-gesture="${id}">${escapeHtml(t('common.edit') || 'Edit')}</button>
+                                    <button type="button" class="shortcut-action-btn" data-delete-gesture="${id}">${escapeHtml(t('common.delete'))}</button>
+                                </div>
+                            </div>`;
+                    })
+                    .join('');
+                const draft = customGestureDraft
+                    ? `
+                    <div class="gesture-draft-panel" data-gesture-draft="1">
+                        <label class="gesture-draft-field">
+                            <span class="gesture-draft-label">Name</span>
+                            <input type="text" class="gesture-custom-name settings-inline-input" value="${escapeHtml(customGestureDraft.name || '')}" placeholder="Gesture name">
+                        </label>
+                        <label class="gesture-draft-field">
+                            <span class="gesture-draft-label">Gesture</span>
+                            <div class="gesture-record-pad${customGestureDraft.gesture ? ' gesture-record-pad--captured' : ''}" data-gesture-record-pad tabindex="0">${escapeHtml(customGestureDraft.gesture ? formatGestureLabel(customGestureDraft.gesture) : 'Swipe or pinch here')}</div>
+                        </label>
+                        ${renderCustomGestureStepsEditor(customGestureDraft.builderSteps || [defaultBuilderStep()])}
+                        <div class="gesture-draft-actions">
+                            <button type="button" class="shortcut-action-btn shortcut-action-btn--primary" data-save-gesture-draft>${escapeHtml(t('common.save') || 'Save')}</button>
+                            <button type="button" class="shortcut-action-btn" data-cancel-gesture-draft>${escapeHtml(t('common.cancel') || 'Cancel')}</button>
+                        </div>
+                    </div>`
+                    : '';
+                mount.innerHTML = `
+                    <div class="gesture-custom-block">
+                        <div class="row gesture-custom-header">
+                            <div class="row-label">
+                                <div class="row-title">Custom gestures</div>
+                                <div class="row-desc">Assign browser actions to swipes or pinches.</div>
+                            </div>
+                            ${!customGestureDraft ? `<button type="button" class="shortcut-action-btn" data-add-custom-gesture">Add</button>` : ''}
+                        </div>
+                        ${savedRows}
+                        ${draft}
+                        ${!savedRows && !customGestureDraft ? '<div class="gesture-empty-hint">No custom gestures yet.</div>' : ''}
+                    </div>`;
+                const pad = mount.querySelector('[data-gesture-record-pad]');
+                if (pad) bindGestureRecordPad(pad);
+                mount.querySelector('[data-add-custom-gesture]')?.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    beginCustomGestureDraft();
+                });
+            }
+            function beginCustomGestureDraft() {
+                customGestureDraft = {
+                    id: `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+                    name: 'New gesture',
+                    kind: 'macro',
+                    gesture: '',
+                    builderSteps: [defaultBuilderStep()]
+                };
+                renderCustomGesturesSection();
+            }
+            window.__axisBeginCustomGestureDraft = beginCustomGestureDraft;
+            window.__axisFlushPendingGestureAdd?.();
+
+            function setupCustomGesturesDelegation() {
+                const root = document.getElementById('settings-main');
+                if (!root || root._axisCustomGesturesDelegated) return;
+                root._axisCustomGesturesDelegated = true;
+                root.addEventListener('click', async (e) => {
+                    const addBtn = e.target.closest('[data-add-custom-gesture]');
+                    if (addBtn) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        beginCustomGestureDraft();
+                        return;
+                    }
+                    if (!e.target.closest('#gestures-pane')) return;
+                    const addStepBtn = e.target.closest('[data-add-gesture-step]');
+                    if (addStepBtn) {
+                        e.preventDefault();
+                        if (!customGestureDraft) return;
+                        readCustomGestureDraftFromDom();
+                        customGestureDraft.builderSteps = customGestureDraft.builderSteps || [defaultBuilderStep()];
+                        customGestureDraft.builderSteps.push(defaultBuilderStep());
+                        renderCustomGesturesSection();
+                        return;
+                    }
+                    const editBtn = e.target.closest('[data-edit-gesture]');
+                    if (editBtn) {
+                        e.preventDefault();
+                        const id = editBtn.getAttribute('data-edit-gesture');
+                        const item = customGestures.find((x) => x.id === id);
+                        if (!item) return;
+                        customGestureDraft = {
+                            id: item.id,
+                            editingId: item.id,
+                            name: item.name,
+                            gesture: item.gesture,
+                            builderSteps: normalizeBuilderSteps(item.builderSteps || item.steps)
+                        };
+                        renderCustomGesturesSection();
+                        return;
+                    }
+                    const removeStepBtn = e.target.closest('[data-remove-custom-step]');
+                    if (removeStepBtn && removeStepBtn.closest('[data-gesture-draft="1"]')) {
+                        e.preventDefault();
+                        if (!customGestureDraft) return;
+                        readCustomGestureDraftFromDom();
+                        const idx = Number(removeStepBtn.getAttribute('data-remove-custom-step'));
+                        if ((customGestureDraft.builderSteps || []).length <= 1) return;
+                        customGestureDraft.builderSteps.splice(idx, 1);
+                        renderCustomGesturesSection();
+                        return;
+                    }
+                    const dupStepBtn = e.target.closest('[data-duplicate-custom-step]');
+                    if (dupStepBtn && dupStepBtn.closest('[data-gesture-draft="1"]')) {
+                        e.preventDefault();
+                        if (!customGestureDraft) return;
+                        readCustomGestureDraftFromDom();
+                        const idx = Number(dupStepBtn.getAttribute('data-duplicate-custom-step'));
+                        const steps = customGestureDraft.builderSteps || [defaultBuilderStep()];
+                        const src = steps[idx] || defaultBuilderStep();
+                        steps.splice(idx + 1, 0, { verb: src.verb, target: src.target });
+                        customGestureDraft.builderSteps = steps;
+                        renderCustomGesturesSection();
+                        return;
+                    }
+                    const saveBtn = e.target.closest('[data-save-gesture-draft]');
+                    if (saveBtn) {
+                        e.preventDefault();
+                        try {
+                            await saveCustomGestureDraft();
+                        } catch (err) {
+                            console.error('Failed to save custom gesture', err);
+                        }
+                        return;
+                    }
+                    const cancelBtn = e.target.closest('[data-cancel-gesture-draft]');
+                    if (cancelBtn) {
+                        e.preventDefault();
+                        customGestureDraft = null;
+                        renderCustomGesturesSection();
+                        return;
+                    }
+                    const delBtn = e.target.closest('[data-delete-gesture]');
+                    if (delBtn) {
+                        e.preventDefault();
+                        const id = delBtn.getAttribute('data-delete-gesture');
+                        customGestures = customGestures.filter((x) => x.id !== id);
+                        renderCustomGesturesSection();
+                        try {
+                            await persistCustomGestures();
+                        } catch (err) {
+                            console.error('Failed to delete custom gesture', err);
+                        }
+                    }
+                });
+                root.addEventListener('change', (e) => {
+                    if (!e.target.closest('#gestures-pane')) return;
+                    if (!customGestureDraft) return;
+                    const card = e.target.closest('[data-gesture-draft="1"]');
+                    if (!card) return;
+                    if (e.target.classList.contains('gesture-custom-name')) {
+                        readCustomGestureDraftFromDom();
+                        return;
+                    }
+                    if (e.target.classList.contains('shortcut-step-verb')) {
+                        readCustomGestureDraftFromDom();
+                        const idx = Number(e.target.getAttribute('data-step-verb'));
+                        const b = builder();
+                        const step = customGestureDraft.builderSteps?.[idx];
+                        if (step && b) {
+                            const options = b.targetsForVerb(step.verb);
+                            step.target = options.length === 1 ? options[0].target : '';
+                            customGestureDraft.builderSteps[idx] = step;
+                        }
+                        renderCustomGesturesSection();
+                        return;
+                    }
+                    if (e.target.classList.contains('shortcut-step-target')) {
+                        readCustomGestureDraftFromDom();
+                    }
+                });
+            }
+            setupCustomGesturesDelegation();
+            function renderCustomShortcutStepsEditor(steps) {
+                const rows = normalizeBuilderSteps(steps)
+                    .map((step, idx) => renderBuilderStepRow(step, idx))
+                    .join('');
+                return `
+                    <div class="shortcut-custom-steps">
+                        <div class="shortcut-custom-steps-label">${escapeHtml(tOr('settings.shortcuts.customSteps', 'What should happen (in order)'))}</div>
+                        ${rows}
+                        <button type="button" class="shortcut-action-btn" data-add-custom-step>+ ${escapeHtml(tOr('settings.shortcuts.addStep', 'Add step'))}</button>
+                    </div>`;
+            }
+            function renderCustomShortcutDraftCard() {
+                if (!customShortcutDraft) return '';
+                const name = escapeHtml(customShortcutDraft.name || '');
+                const keys = customShortcutDraft.keys
+                    ? formatShortcut(customShortcutDraft.keys)
+                    : t('settings.shortcut.pressKeys');
+                const steps = customShortcutDraft.builderSteps || customShortcutDraft.steps || [defaultBuilderStep()];
+                const editing = customShortcutDraft.editingId ? ' shortcut-custom-card--editing' : '';
+                return `
+                    <div class="shortcut-custom-card shortcut-custom-card--draft${editing}" data-custom-draft="1">
+                        <div class="shortcut-custom-top">
+                            <input type="text" class="shortcut-custom-name" value="${name}" placeholder="${escapeHtml(t('common.name'))}" aria-label="${escapeHtml(t('common.name'))}">
+                            <button type="button" class="shortcut-key-btn" data-draft-keys="1">${escapeHtml(keys)}</button>
+                        </div>
+                        ${renderCustomShortcutStepsEditor(steps)}
+                        <div class="shortcut-custom-actions">
+                            <button type="button" class="shortcut-action-btn shortcut-action-btn--primary" data-save-custom-draft>${escapeHtml(t('common.save') || 'Save')}</button>
+                            <button type="button" class="shortcut-action-btn" data-cancel-custom-draft>${escapeHtml(t('common.cancel') || 'Cancel')}</button>
+                        </div>
+                    </div>`;
+            }
+            function renderSavedCustomShortcutRow(cs) {
+                const id = escapeHtml(cs.id || '');
+                const name = escapeHtml(cs.name || t('settings.shortcuts.newCustom') || 'Shortcut');
+                const keys = cs.keys ? formatShortcut(cs.keys) : t('settings.shortcut.pressKeys');
+                return `
+                    <div class="shortcut-row shortcut-row--custom" data-custom-id="${id}">
+                        <div class="shortcut-row-main">
+                            <span class="shortcut-row-name">${name}</span>
+                        </div>
+                        <div class="shortcut-row-actions">
+                            <button type="button" class="shortcut-key-btn" data-custom-keys="${id}" aria-label="${name}">${escapeHtml(keys)}</button>
+                            <button type="button" class="shortcut-action-btn" data-edit-custom="${id}">${escapeHtml(t('common.edit') || 'Edit')}</button>
+                            <button type="button" class="shortcut-action-btn" data-delete-custom="${id}">${escapeHtml(t('common.delete'))}</button>
+                        </div>
+                    </div>`;
+            }
+            function renderCustomShortcutsSection() {
+                const cards = customShortcuts.map((cs) => renderSavedCustomShortcutRow(cs)).join('');
+                const draft = renderCustomShortcutDraftCard();
+                const showAdd = !customShortcutDraft;
+                let body = draft;
+                if (cards) {
+                    body += cards;
+                } else if (!customShortcutDraft) {
+                    body += `<div class="shortcut-row-empty">${escapeHtml(t('settings.shortcuts.customEmpty'))}</div>`;
+                }
+                return `
+                    <div class="shortcuts-section shortcuts-section--custom">
+                        <div class="shortcuts-subheading-row">
+                            <div class="shortcuts-subheading">${escapeHtml(t('settings.shortcuts.custom'))}</div>
+                            ${showAdd ? `<button type="button" class="shortcut-action-btn" data-add-custom-shortcut>${escapeHtml(t('settings.shortcuts.addCustom'))}</button>` : ''}
+                        </div>
+                        <div class="group-content">${body}</div>
+                    </div>`;
+            }
+            function bindCustomShortcutKeyButtons() {
+                const list = document.getElementById('shortcuts-list');
+                if (!list) return;
+                list.querySelectorAll('[data-custom-keys]').forEach((btn) => {
+                    const id = btn.getAttribute('data-custom-keys');
+                    const item = customShortcuts.find((x) => x.id === id);
+                    if (!item) return;
+                    btn._axisRestoreValue = () => {
+                        btn.textContent = item.keys ? formatShortcut(item.keys) : t('settings.shortcut.pressKeys');
+                    };
+                    bindShortcutCapture(btn, async (shortcut) => {
+                        const merged = mergedActiveShortcuts();
+                        for (const [other, sc] of Object.entries(merged)) {
+                            if (sc === shortcut) {
+                                if (!confirm(t('settings.shortcut.conflict', { name: other }))) return;
+                            }
+                        }
+                        for (const other of customShortcuts) {
+                            if (other.id !== item.id && other.keys === shortcut) {
+                                if (!confirm(t('settings.shortcut.conflict', { name: other.name || 'Shortcut' }))) return;
+                                other.keys = '';
+                            }
+                        }
+                        item.keys = shortcut;
+                        await persistCustomShortcuts();
+                        applyShortcutKeyLabel(btn, shortcut);
+                    });
+                });
+                const draftBtn = list.querySelector('[data-draft-keys]');
+                if (draftBtn && customShortcutDraft) {
+                    draftBtn._axisRestoreValue = () => {
+                        draftBtn.textContent = customShortcutDraft.keys
+                            ? formatShortcut(customShortcutDraft.keys)
+                            : t('settings.shortcut.pressKeys');
+                    };
+                    bindShortcutCapture(draftBtn, async (shortcut) => {
+                        if (!customShortcutDraft) return;
+                        customShortcutDraft.keys = shortcut;
+                        applyShortcutKeyLabel(draftBtn, shortcut);
+                    });
+                }
+            }
+            function readCustomShortcutDraftFromDom() {
+                const card = document.querySelector('[data-custom-draft="1"]');
+                if (!customShortcutDraft || !card) return;
+                const nameEl = card.querySelector('.shortcut-custom-name');
+                if (nameEl) {
+                    customShortcutDraft.name =
+                        nameEl.value.trim() || customShortcutDraft.name || t('settings.shortcuts.newCustom');
+                }
+                const steps = [];
+                card.querySelectorAll('.shortcut-custom-step').forEach((row) => {
+                    const verb = row.querySelector('.shortcut-step-verb')?.value || '';
+                    const target = (verb && row.querySelector('.shortcut-step-target')?.value) || '';
+                    steps.push({ verb, target });
+                });
+                customShortcutDraft.builderSteps = steps.length ? steps : [defaultBuilderStep()];
+            }
+            async function saveCustomShortcutDraft() {
+                readCustomShortcutDraftFromDom();
+                if (!customShortcutDraft) return;
+                if (!customShortcutDraft.keys || !isCompleteShortcut(customShortcutDraft.keys)) {
+                    alert(t('settings.shortcut.pressKeys') || 'Press keys to set a shortcut');
+                    return;
+                }
+                const builderSteps = (customShortcutDraft.builderSteps || []).filter(
+                    (s) => s && (s.verb || s.target)
+                );
+                if (builderSteps.some((s) => !s.verb || !s.target)) {
+                    alert(tOr('settings.shortcuts.finishSteps', 'Pick both an action and a target for every step.'));
+                    return;
+                }
+                if (!builderSteps.length) {
+                    alert(tOr('settings.shortcuts.needStep', 'Add at least one action.'));
+                    return;
+                }
+                const b = builder();
+                const steps = b ? b.builderStepsToActions(builderSteps) : [];
+                if (!steps.length) {
+                    alert(tOr('settings.shortcuts.addStep', 'Add at least one valid step'));
+                    return;
+                }
+                const saved = {
+                    id: customShortcutDraft.id,
+                    name: customShortcutDraft.name || t('settings.shortcuts.newCustom') || 'Shortcut',
+                    kind: 'macro',
+                    builderSteps,
+                    steps,
+                    command: steps[0],
+                    keys: customShortcutDraft.keys
+                };
+                if (customShortcutDraft.editingId) {
+                    const idx = customShortcuts.findIndex((x) => x.id === customShortcutDraft.editingId);
+                    if (idx >= 0) customShortcuts[idx] = saved;
+                    else customShortcuts.push(saved);
+                } else {
+                    customShortcuts.push(saved);
+                }
+                customShortcutDraft = null;
+                await persistCustomShortcuts();
+                renderShortcuts();
+            }
+            function setupCustomShortcutsDelegation() {
+                const list = document.getElementById('shortcuts-list');
+                if (!list || list._axisCustomShortcutsDelegated) return;
+                list._axisCustomShortcutsDelegated = true;
+
+                list.addEventListener('click', async (e) => {
+                    const addBtn = e.target.closest('[data-add-custom-shortcut]');
+                    if (addBtn) {
+                        e.preventDefault();
+                        customShortcutDraft = {
+                            id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+                            name: t('settings.shortcuts.newCustom') || 'New shortcut',
+                            kind: 'macro',
+                            builderSteps: [defaultBuilderStep()],
+                            keys: ''
+                        };
+                        renderShortcuts();
+                        return;
+                    }
+                    const addStepBtn = e.target.closest('[data-add-custom-step]');
+                    if (addStepBtn) {
+                        e.preventDefault();
+                        if (!customShortcutDraft) return;
+                        readCustomShortcutDraftFromDom();
+                        customShortcutDraft.builderSteps = customShortcutDraft.builderSteps || [defaultBuilderStep()];
+                        customShortcutDraft.builderSteps.push(defaultBuilderStep());
+                        renderShortcuts();
+                        return;
+                    }
+                    const editBtn = e.target.closest('[data-edit-custom]');
+                    if (editBtn) {
+                        e.preventDefault();
+                        const id = editBtn.getAttribute('data-edit-custom');
+                        const item = customShortcuts.find((x) => x.id === id);
+                        if (!item) return;
+                        customShortcutDraft = {
+                            id: item.id,
+                            editingId: item.id,
+                            name: item.name,
+                            keys: item.keys,
+                            builderSteps: normalizeBuilderSteps(item.builderSteps || item.steps)
+                        };
+                        renderShortcuts();
+                        return;
+                    }
+                    const removeStepBtn = e.target.closest('[data-remove-custom-step]');
+                    if (removeStepBtn) {
+                        e.preventDefault();
+                        if (!customShortcutDraft) return;
+                        readCustomShortcutDraftFromDom();
+                        const idx = Number(removeStepBtn.getAttribute('data-remove-custom-step'));
+                        if ((customShortcutDraft.builderSteps || []).length <= 1) return;
+                        customShortcutDraft.builderSteps.splice(idx, 1);
+                        renderShortcuts();
+                        return;
+                    }
+                    const dupStepBtn = e.target.closest('[data-duplicate-custom-step]');
+                    if (dupStepBtn) {
+                        e.preventDefault();
+                        if (!customShortcutDraft) return;
+                        readCustomShortcutDraftFromDom();
+                        const idx = Number(dupStepBtn.getAttribute('data-duplicate-custom-step'));
+                        const steps = customShortcutDraft.builderSteps || [defaultBuilderStep()];
+                        const src = steps[idx] || defaultBuilderStep();
+                        steps.splice(idx + 1, 0, { verb: src.verb, target: src.target });
+                        customShortcutDraft.builderSteps = steps;
+                        renderShortcuts();
+                        return;
+                    }
+                    const saveBtn = e.target.closest('[data-save-custom-draft]');
+                    if (saveBtn) {
+                        e.preventDefault();
+                        try {
+                            await saveCustomShortcutDraft();
+                        } catch (err) {
+                            console.error('Failed to save custom shortcut', err);
+                        }
+                        return;
+                    }
+                    const cancelBtn = e.target.closest('[data-cancel-custom-draft]');
+                    if (cancelBtn) {
+                        e.preventDefault();
+                        customShortcutDraft = null;
+                        renderShortcuts();
+                        return;
+                    }
+                    const delBtn = e.target.closest('[data-delete-custom]');
+                    if (delBtn) {
+                        e.preventDefault();
+                        const id = delBtn.getAttribute('data-delete-custom');
+                        customShortcuts = customShortcuts.filter((x) => x.id !== id);
+                        renderShortcuts();
+                        try {
+                            await persistCustomShortcuts();
+                        } catch (err) {
+                            console.error('Failed to delete custom shortcut', err);
+                        }
+                    }
+                });
+
+                list.addEventListener('change', (e) => {
+                    if (!customShortcutDraft) return;
+                    const card = e.target.closest('[data-custom-draft="1"]');
+                    if (!card) return;
+                    if (e.target.classList.contains('shortcut-custom-name')) {
+                        readCustomShortcutDraftFromDom();
+                        return;
+                    }
+                    if (e.target.classList.contains('shortcut-step-verb')) {
+                        readCustomShortcutDraftFromDom();
+                        const idx = Number(e.target.getAttribute('data-step-verb'));
+                        const b = builder();
+                        const step = customShortcutDraft.builderSteps?.[idx];
+                        if (step && b) {
+                            const options = b.targetsForVerb(step.verb);
+                            step.target = options.length === 1 ? options[0].target : '';
+                            customShortcutDraft.builderSteps[idx] = step;
+                        }
+                        renderShortcuts();
+                        return;
+                    }
+                    if (e.target.classList.contains('shortcut-step-target')) {
+                        readCustomShortcutDraftFromDom();
+                    }
+                });
+            }
             function renderShortcuts() {
                 const list = document.getElementById('shortcuts-list');
+                if (!list) return;
                 const merged = mergedActiveShortcuts();
                 const actions =
                     settingsEditingProfileId === 'incognito'
@@ -3134,33 +4523,69 @@
                           )
                         : SHORTCUT_ACTIONS;
                 const enabled = actions.filter(({ action }) => merged[action]);
-                const disabled = actions.filter(
-                    ({ action }) => !merged[action] && shortcutDefaults[action]
-                );
-                const rowHtml = (action, label, isDisabled) => {
+                const disabled = actions.filter(({ action }) => !merged[action] && shortcutDefaults[action]);
+                const rowHtml = (item, isDisabled) => {
+                    const action = item.action;
+                    const label = shortcutLabel(item);
                     const val = merged[action];
                     const showVal = isDisabled ? t('settings.shortcut.disabled') : formatShortcut(val);
+                    const isRemapped =
+                        !isDisabled &&
+                        Object.prototype.hasOwnProperty.call(shortcutOverrides, action) &&
+                        shortcutOverrides[action] !== null;
                     const disableBtn = !isDisabled
                         ? `<button type="button" class="shortcut-action-btn" data-disable-action="${escapeHtml(action)}">${escapeHtml(t('settings.shortcut.disable'))}</button>`
                         : `<button type="button" class="shortcut-action-btn" data-enable-action="${escapeHtml(action)}">${escapeHtml(t('settings.shortcut.enable'))}</button>`;
+                    const resetBtn = isRemapped
+                        ? `<button type="button" class="shortcut-action-btn" data-reset-action="${escapeHtml(action)}">${escapeHtml(t('settings.shortcut.reset') || 'Reset')}</button>`
+                        : '';
                     return `
                     <div class="shortcut-row ${isDisabled ? 'shortcut-row-disabled' : ''}" data-shortcut-action="${escapeHtml(action)}">
                         <div class="shortcut-row-main">
                             <span>${escapeHtml(label)}</span>
                         </div>
                         <div class="shortcut-row-actions">
-                            <input type="text" class="shortcut-input" readonly data-action="${escapeHtml(action)}" value="${escapeHtml(showVal)}" ${isDisabled ? 'disabled' : ''}>
+                            <button type="button" class="shortcut-key-btn" data-action="${escapeHtml(action)}" aria-label="${escapeHtml(label)}" ${isDisabled ? 'disabled' : ''}>${escapeHtml(showVal)}</button>
+                            ${resetBtn}
                             ${disableBtn}
                         </div>
                     </div>`;
                 };
-                const shortcutLabel = (item) =>
-                    item.labelKey ? t(item.labelKey, item.labelN != null ? { n: item.labelN } : undefined) : item.label;
-                const enabledRows = enabled.map((item) => rowHtml(item.action, shortcutLabel(item), false)).join('');
+                const enabledRows = enabled.map((item) => rowHtml(item, false)).join('');
                 const disabledRows = disabled.length
-                    ? disabled.map((item) => rowHtml(item.action, shortcutLabel(item), true)).join('')
+                    ? disabled.map((item) => rowHtml(item, true)).join('')
                     : `<div class="shortcut-row-empty">${escapeHtml(t('settings.shortcuts.noneDisabled'))}</div>`;
+                if (!list._axisShortcutActionsDelegated) {
+                    list._axisShortcutActionsDelegated = true;
+                    list.addEventListener('click', async (e) => {
+                        const resetBtn = e.target.closest('[data-reset-action]');
+                        if (resetBtn) {
+                            delete shortcutOverrides[resetBtn.getAttribute('data-reset-action')];
+                            await persistShortcutOverrides();
+                            await reloadShortcutState();
+                            renderShortcuts();
+                            return;
+                        }
+                        const disableBtn = e.target.closest('[data-disable-action]');
+                        if (disableBtn) {
+                            shortcutOverrides[disableBtn.getAttribute('data-disable-action')] = null;
+                            await persistShortcutOverrides();
+                            await reloadShortcutState();
+                            renderShortcuts();
+                            return;
+                        }
+                        const enableBtn = e.target.closest('[data-enable-action]');
+                        if (enableBtn) {
+                            delete shortcutOverrides[enableBtn.getAttribute('data-enable-action')];
+                            await persistShortcutOverrides();
+                            await reloadShortcutState();
+                            renderShortcuts();
+                        }
+                    });
+                }
+
                 list.innerHTML = `
+                    ${renderCustomShortcutsSection()}
                     <div class="shortcuts-section">
                         <div class="shortcuts-subheading">${escapeHtml(t('settings.shortcuts.active'))}</div>
                         <div class="group-content">${enabledRows}</div>
@@ -3169,46 +4594,17 @@
                         <div class="shortcuts-subheading">${escapeHtml(t('settings.shortcuts.disabledSection'))}</div>
                         <div class="group-content">${disabledRows}</div>
                     </div>`;
-                list.querySelectorAll('.shortcut-input').forEach((input) => {
-                    if (input.disabled) return;
-                    input.addEventListener('focus', () => {
-                        window.electronAPI?.disableShortcuts?.();
-                        input.value = t('settings.shortcut.pressKeys');
-                        input.dataset.recording = '1';
-                    });
-                    input.addEventListener('blur', () => {
-                        window.electronAPI?.enableShortcuts?.();
-                        input.removeAttribute('data-recording');
-                        const a = input.dataset.action;
+
+                setupCustomShortcutsDelegation();
+                bindCustomShortcutKeyButtons();
+
+                list.querySelectorAll('.shortcut-key-btn[data-action]').forEach((btn) => {
+                    const action = btn.dataset.action;
+                    btn._axisRestoreValue = () => {
                         const m = mergedActiveShortcuts();
-                        if (input.value === t('settings.shortcut.pressKeys') && m[a]) {
-                            input.value = formatShortcut(m[a]);
-                        }
-                    });
-                    input.addEventListener('keydown', async (e) => {
-                        if (!input.dataset.recording) return;
-                        e.preventDefault();
-                        if (e.key === 'Escape') {
-                            input.blur();
-                            return;
-                        }
-                        const isMac = navigator.platform.toUpperCase().includes('MAC');
-                        const parts = [];
-                        if (isMac && e.metaKey) parts.push('Cmd');
-                        else if (e.ctrlKey) parts.push('Ctrl');
-                        if (e.altKey) parts.push('Alt');
-                        if (e.shiftKey) parts.push('Shift');
-                        let key = e.key;
-                        if (key === ' ') key = 'Space';
-                        else if (key === 'ArrowLeft') key = 'Left';
-                        else if (key === 'ArrowRight') key = 'Right';
-                        else if (key === 'ArrowUp') key = 'Up';
-                        else if (key === 'ArrowDown') key = 'Down';
-                        else if (key.length === 1) key = key.toUpperCase();
-                        if (['Control', 'Meta', 'Alt', 'Shift'].includes(key)) return;
-                        parts.push(key);
-                        const shortcut = parts.join('+');
-                        const action = input.dataset.action;
+                        btn.textContent = m[action] ? formatShortcut(m[action]) : t('settings.shortcut.disabled');
+                    };
+                    bindShortcutCapture(btn, async (shortcut) => {
                         let conflict = null;
                         const m0 = mergedActiveShortcuts();
                         for (const [other, sc] of Object.entries(m0)) {
@@ -3218,42 +4614,26 @@
                             }
                         }
                         if (conflict) {
-                            const conflictName = SHORTCUT_ACTIONS.find((x) => x.action === conflict)?.label || conflict;
+                            const conflictItem = SHORTCUT_ACTIONS.find((x) => x.action === conflict);
+                            const conflictName = conflictItem ? shortcutLabel(conflictItem) : conflict;
                             if (!confirm(t('settings.shortcut.conflict', { name: conflictName }))) {
-                                input.blur();
                                 return;
                             }
                             shortcutOverrides[conflict] = null;
                         }
-                        if (shortcut === shortcutDefaults[action]) {
-                            delete shortcutOverrides[action];
-                        } else {
-                            shortcutOverrides[action] = shortcut;
+                        if (shortcut === shortcutDefaults[action]) delete shortcutOverrides[action];
+                        else shortcutOverrides[action] = shortcut;
+                        await persistShortcutOverrides();
+                        await reloadShortcutState();
+                        if (conflict) {
+                            renderShortcuts();
+                            return;
                         }
-                        await persistShortcutOverrides();
-                        await reloadShortcutState();
-                        renderShortcuts();
-                        window.electronAPI?.enableShortcuts?.();
+                        applyShortcutKeyLabel(btn, shortcut);
+                        ensureShortcutResetButton(btn.closest('.shortcut-row'), action);
                     });
                 });
-                list.querySelectorAll('[data-disable-action]').forEach((btn) => {
-                    btn.addEventListener('click', async () => {
-                        const action = btn.getAttribute('data-disable-action');
-                        shortcutOverrides[action] = null;
-                        await persistShortcutOverrides();
-                        await reloadShortcutState();
-                        renderShortcuts();
-                    });
-                });
-                list.querySelectorAll('[data-enable-action]').forEach((btn) => {
-                    btn.addEventListener('click', async () => {
-                        const action = btn.getAttribute('data-enable-action');
-                        delete shortcutOverrides[action];
-                        await persistShortcutOverrides();
-                        await reloadShortcutState();
-                        renderShortcuts();
-                    });
-                });
+
                 applySettingsSearch(settingsSearchInput?.value || '');
             }
             document.getElementById('reset-shortcuts').addEventListener('click', async () => {
@@ -3608,6 +4988,23 @@
                 ed.classList.toggle('vault-editor--inline', inline);
             }
 
+            function syncVaultEditorSensitiveUi(isAddMode) {
+                const pw = document.getElementById('vault-edit-password');
+                const pwEye = document.getElementById('vault-edit-password-eye');
+                const num = document.getElementById('vault-edit-card-number');
+                const numEye = document.getElementById('vault-edit-card-number-eye');
+                const cvv = document.getElementById('vault-edit-cvv');
+                const cvvEye = document.getElementById('vault-edit-cvv-eye');
+                if (pw) pw.type = isAddMode ? 'text' : 'password';
+                if (num) num.type = isAddMode ? 'text' : 'password';
+                if (cvv) cvv.type = isAddMode ? 'text' : 'password';
+                [pwEye, numEye, cvvEye].forEach((btn) => {
+                    if (!btn) return;
+                    btn.classList.toggle('hidden', isAddMode);
+                    if (isAddMode) btn.setAttribute('aria-pressed', 'false');
+                });
+            }
+
             function closeVaultRowPanels({ keepEditor = false } = {}) {
                 if (!keepEditor) parkVaultEditor();
                 document.querySelectorAll('.vault-row-detail').forEach((el) => {
@@ -3686,20 +5083,19 @@
                         pw.value = revealed.password || '';
                         pw.placeholder = '';
                     }
-                    if (pwEye) pwEye.setAttribute('aria-pressed', 'false');
                     document.getElementById('vault-edit-notes').value = rowMeta.notes || '';
+                    syncVaultEditorSensitiveUi(false);
                     vaultToast('');
                 } else {
                     document.getElementById('vault-edit-origin').value = '';
                     document.getElementById('vault-edit-username').value = '';
                     if (pw) {
                         pw.value = '';
-                        pw.type = 'password';
                         pw.placeholder = '';
                     }
-                    if (pwEye) pwEye.setAttribute('aria-pressed', 'false');
                     document.getElementById('vault-edit-notes').value = '';
                 }
+                syncVaultEditorSensitiveUi(!id);
                 if (mountTarget) {
                     mountVaultEditor(mountTarget, mountInline);
                     if (mountInline) mountTarget.closest('.vault-table-row')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -3769,6 +5165,7 @@
                         cvv.placeholder = '';
                     }
                     document.getElementById('vault-edit-billing-zip').value = rowMeta.billingZip || '';
+                    syncVaultEditorSensitiveUi(false);
                     vaultToast('');
                 } else {
                     ['vault-edit-card-label','vault-edit-cardholder','vault-edit-card-number','vault-edit-exp-month','vault-edit-exp-year','vault-edit-cvv','vault-edit-billing-zip'].forEach((i) => {
@@ -3776,6 +5173,7 @@
                         if (el) el.value = '';
                     });
                 }
+                syncVaultEditorSensitiveUi(!id);
                 if (mountTarget) {
                     mountVaultEditor(mountTarget, mountInline);
                     if (mountInline) mountTarget.closest('.vault-table-row')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -3848,12 +5246,14 @@
                     document.getElementById('vault-edit-address-country').value = rowMeta.country || '';
                     document.getElementById('vault-edit-address-phone').value = rowMeta.phone || '';
                     document.getElementById('vault-edit-address-email').value = rowMeta.email || '';
+                    syncVaultEditorSensitiveUi(false);
                     vaultToast('');
                 } else {
                     fieldIds.forEach((fid) => {
                         const el = document.getElementById(fid);
                         if (el) el.value = '';
                     });
+                    syncVaultEditorSensitiveUi(true);
                 }
                 if (mountTarget) {
                     mountVaultEditor(mountTarget, mountInline);
@@ -4637,14 +6037,227 @@
                 }
             }
 
+            function formatScreenTimeMinutes(totalSec) {
+                const sec = Math.max(0, Math.floor(Number(totalSec) || 0));
+                if (sec < 60) return `${sec}s`;
+                const m = Math.round(sec / 60);
+                if (m < 60) return `${m}m`;
+                const h = Math.floor(m / 60);
+                const rm = m % 60;
+                return rm ? `${h}h ${rm}m` : `${h}h`;
+            }
+
+            function formatScreenTimeLimitDuration(seconds) {
+                const sec = Math.max(0, Math.floor(Number(seconds) || 0));
+                if (sec < 60) return `${sec}s`;
+                const m = Math.floor(sec / 60);
+                if (m < 60) return `${m}m`;
+                const h = Math.floor(m / 60);
+                const rm = m % 60;
+                return rm ? `${h}h ${rm}m` : `${h}h`;
+            }
+
+            async function renderScreenTimePane() {
+                const enabledEl = document.getElementById('screen-time-enabled');
+                const panel = document.getElementById('screen-time-panel');
+                const limitsSection = document.getElementById('screen-time-limits-section');
+                const offHint = document.getElementById('screen-time-off');
+                const todayEl = document.getElementById('screen-time-today');
+                const chartEl = document.getElementById('screen-time-chart');
+                const topEl = document.getElementById('screen-time-top');
+                const limitsList = document.getElementById('screen-time-limits-list');
+                if (!enabledEl || !panel || !chartEl) return;
+                const enabled = !!settings.screenTimeEnabled;
+                enabledEl.checked = enabled;
+                panel.hidden = !enabled;
+                if (limitsSection) limitsSection.hidden = !enabled;
+                if (offHint) offHint.hidden = enabled;
+                if (!enabled) {
+                    chartEl.innerHTML = '';
+                    if (topEl) topEl.innerHTML = '';
+                    if (limitsList) limitsList.innerHTML = '';
+                    if (todayEl) todayEl.textContent = '0m';
+                    return;
+                }
+                let stats = { days: [], hours: [], topDomains: [], todayTotal: 0, limits: {} };
+                try {
+                    stats = await window.electronAPI.getScreenTimeStats();
+                } catch (_) {}
+                if (stats.limits && typeof stats.limits === 'object') {
+                    settings.screenTimeLimits = stats.limits;
+                }
+                if (stats.limitBaselines && typeof stats.limitBaselines === 'object') {
+                    settings.screenTimeLimitBaselines = stats.limitBaselines;
+                }
+                const maxSec = 24 * 3600;
+                const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                const todayKey = (() => {
+                    const d = new Date();
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    return `${y}-${m}-${day}`;
+                })();
+                const days = Array.isArray(stats.days) ? stats.days : [];
+                if (!screenTimeSelectedDate || !days.some((d) => d.date === screenTimeSelectedDate)) {
+                    screenTimeSelectedDate = todayKey;
+                }
+                const selectedDay =
+                    days.find((d) => d.date === screenTimeSelectedDate) || days[days.length - 1] || null;
+                const selectedTotal = selectedDay ? Number(selectedDay.total) || 0 : 0;
+                if (todayEl) todayEl.textContent = formatScreenTimeMinutes(selectedTotal);
+                const summaryLabel = document.getElementById('screen-time-summary-label');
+                if (summaryLabel) {
+                    if (screenTimeSelectedDate === todayKey) {
+                        const todayTxt = AxisI18n.t('settings.screenTime.today');
+                        summaryLabel.textContent =
+                            todayTxt && todayTxt !== 'settings.screenTime.today' ? todayTxt : 'Today';
+                    } else {
+                        try {
+                            const dt = new Date(`${screenTimeSelectedDate}T12:00:00`);
+                            summaryLabel.textContent = dt.toLocaleDateString(undefined, {
+                                weekday: 'short',
+                                month: 'short',
+                                day: 'numeric'
+                            });
+                        } catch (_) {
+                            summaryLabel.textContent = screenTimeSelectedDate;
+                        }
+                    }
+                }
+                const chartIsLight =
+                    document.documentElement.classList.contains('settings-light-tint') ||
+                    !document.documentElement.classList.contains('axis-dark');
+                chartEl.classList.toggle('screen-time-chart--light', chartIsLight);
+                chartEl.innerHTML = days
+                    .map((d) => {
+                        const total = Number(d.total) || 0;
+                        const barH = axisScreenTimeBarHeightPx(total, 72, maxSec);
+                        const isToday = d.date === todayKey;
+                        let label = '';
+                        try {
+                            const dt = new Date(`${d.date}T12:00:00`);
+                            label = dayNames[dt.getDay()] || d.date.slice(5);
+                        } catch (_) {
+                            label = d.date?.slice(5) || '';
+                        }
+                        const tip = formatScreenTimeMinutes(total);
+                        const isSelected = d.date === screenTimeSelectedDate;
+                        return `<div class="screen-time-bar-col${isToday ? ' is-today' : ''}${isSelected ? ' is-selected' : ''}" data-screen-time-date="${escapeHtml(d.date)}" data-tip="${escapeHtml(tip)}"><div class="screen-time-bar-track"><div class="screen-time-bar" style="height:${barH}px"></div></div><span class="screen-time-bar-label">${label}</span></div>`;
+                    })
+                    .join('');
+                if (!chartEl._axisScreenTimeChartBound) {
+                    chartEl._axisScreenTimeChartBound = true;
+                    chartEl.addEventListener('click', (e) => {
+                        const col = e.target.closest('[data-screen-time-date]');
+                        if (!col) return;
+                        const date = col.getAttribute('data-screen-time-date');
+                        if (!date || date === screenTimeSelectedDate) return;
+                        screenTimeSelectedDate = date;
+                        void renderScreenTimePane();
+                    });
+                    chartEl.addEventListener('keydown', (e) => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                        const col = e.target.closest('[data-screen-time-date]');
+                        if (!col) return;
+                        e.preventDefault();
+                        const date = col.getAttribute('data-screen-time-date');
+                        if (!date || date === screenTimeSelectedDate) return;
+                        screenTimeSelectedDate = date;
+                        void renderScreenTimePane();
+                    });
+                }
+                const tops = Array.isArray(selectedDay?.topDomains)
+                    ? selectedDay.topDomains
+                    : Array.isArray(stats.topDomains)
+                      ? stats.topDomains
+                      : [];
+                const topSitesLabel = (() => {
+                    const v = AxisI18n.t('settings.screenTime.usage');
+                    return v && v !== 'settings.screenTime.usage' ? v : 'Usage';
+                })();
+                const emptyDayLabel =
+                    screenTimeSelectedDate === todayKey
+                        ? (() => {
+                              const v = AxisI18n.t('settings.screenTime.empty');
+                              return v && v !== 'settings.screenTime.empty' ? v : 'No sites yet today';
+                          })()
+                        : (() => {
+                              const v = AxisI18n.t('settings.screenTime.emptyDay');
+                              return v && v !== 'settings.screenTime.emptyDay'
+                                  ? v
+                                  : 'No sites recorded this day';
+                          })();
+                if (topEl) {
+                    topEl.innerHTML = tops.length
+                        ? `<div class="screen-time-top-heading">${escapeHtml(topSitesLabel)}</div>${tops
+                              .map(
+                                  (row) =>
+                                      `<div class="screen-time-top-row"><span class="screen-time-top-domain">${escapeHtml(row.domain)}</span><span class="screen-time-top-time">${formatScreenTimeMinutes(row.total)}</span></div>`
+                              )
+                              .join('')}`
+                        : `<div class="screen-time-top-heading">${escapeHtml(topSitesLabel)}</div><div class="screen-time-top-row"><span class="screen-time-top-domain">${escapeHtml(emptyDayLabel)}</span></div>`;
+                }
+                const limits = settings.screenTimeLimits && typeof settings.screenTimeLimits === 'object'
+                    ? settings.screenTimeLimits
+                    : {};
+                const baselines =
+                    settings.screenTimeLimitBaselines && typeof settings.screenTimeLimitBaselines === 'object'
+                        ? settings.screenTimeLimitBaselines
+                        : {};
+                const usage = stats.domainUsage && typeof stats.domainUsage === 'object' ? stats.domainUsage : {};
+                const limitRows = Object.keys(limits).sort((a, b) => a.localeCompare(b));
+                if (limitsList) {
+                    const emptyLabel =
+                        AxisI18n.t('settings.screenTime.limitEmpty') ||
+                        AxisI18n.t('settings.screenTime.limitsEmpty') ||
+                        'No site limits yet';
+                    const removeLabel = AxisI18n.t('common.remove') || 'Remove';
+                    const todayLabel = AxisI18n.t('settings.screenTime.today') || 'Today';
+                    limitsList.innerHTML = limitRows.length
+                        ? limitRows
+                              .map((domain) => {
+                                  const capSec = limits[domain];
+                                  const rawUsed = Number(usage[domain]) || 0;
+                                  const baseline = Number(baselines[domain]) || 0;
+                                  const usedSec = Math.max(0, rawUsed - baseline);
+                                  const usedLabel = formatScreenTimeMinutes(usedSec);
+                                  const capLabel = formatScreenTimeLimitDuration(capSec);
+                                  const over = usedSec >= capSec;
+                                  return `<div class="row screen-time-limit-row"><div class="row-label"><div class="row-title">${escapeHtml(domain)}</div><div class="row-sub${over ? ' is-over' : ''}">${escapeHtml(usedLabel)} / ${escapeHtml(capLabel)} · ${escapeHtml(todayLabel)}</div></div><div class="row-controls"><button type="button" class="destructive" data-remove-limit="${escapeHtml(domain)}">${escapeHtml(removeLabel)}</button></div></div>`;
+                              })
+                              .join('')
+                        : `<div class="screen-time-limits-empty">${escapeHtml(emptyLabel)}</div>`;
+                    limitsList.querySelectorAll('[data-remove-limit]').forEach((btn) => {
+                        btn.addEventListener('click', async () => {
+                            const domain = btn.getAttribute('data-remove-limit');
+                            if (!domain) return;
+                            const next = { ...(settings.screenTimeLimits || {}) };
+                            delete next[domain];
+                            settings.screenTimeLimits = next;
+                            const nextBaselines = { ...(settings.screenTimeLimitBaselines || {}) };
+                            delete nextBaselines[domain];
+                            settings.screenTimeLimitBaselines = nextBaselines;
+                            await saveSetting('screenTimeLimits', next, false);
+                            await saveSetting('screenTimeLimitBaselines', nextBaselines, false);
+                            void renderScreenTimePane();
+                        });
+                    });
+                }
+            }
+
             const refreshSettingsSectionInternal = (section) => {
-                if (section === 'history') void populateHistory();
+                if (section === 'screentime') void renderScreenTimePane();
+                else if (section === 'history') void populateHistory();
                 else if (section === 'extensions') void loadExtensions();
                 else if (section === 'permissions') void loadSitePermissionOverrides();
+                else if (section === 'cookies') void loadCookieSites();
                 else if (section === 'vault') void refreshVaultPane();
                 else if (section === 'profiles') void refreshProfilesPane();
                 else if (section === 'shortcuts') {
                     void reloadShortcutState().then(() => renderShortcuts());
+                } else if (section === 'gestures') {
+                    syncGesturesSettingsUi();
                 }
             };
             window.__axisRefreshAllSettingsData = () => {
@@ -4654,6 +6267,7 @@
                 void loadSitePermissionOverrides();
                 void refreshVaultPane();
                 void refreshProfilesPane();
+                void renderScreenTimePane();
                 void reloadShortcutState().then(() => renderShortcuts());
             };
 
@@ -4683,6 +6297,16 @@
 
             applyBootstrapLightTint();
             _settingsReadyAt = Date.now();
+
+            try {
+                setupCustomGesturesDelegation();
+                if (typeof beginCustomGestureDraft === 'function') {
+                    window.__axisBeginCustomGestureDraft = beginCustomGestureDraft;
+                }
+                void reloadGestureState().then(() => renderCustomGesturesSection());
+            } catch (err) {
+                console.error('Custom gestures init failed', err);
+            }
 
             settingsDynamicI18nReady = true;
             requestAnimationFrame(() => {
