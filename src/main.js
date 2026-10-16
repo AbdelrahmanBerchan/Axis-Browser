@@ -1,11 +1,19 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, session, globalShortcut, shell, screen, nativeImage, clipboard, nativeTheme, systemPreferences, net, desktopCapturer } = require('electron');
 const path = require('path');
+const { ALLOWED_IDS: AXIS_SHORTCUT_ALLOWED_IDS } = require('./axis-shortcut-catalog.js');
+const { scheduleDailyActivePing } = require('./axis-analytics.js');
+const { applyStarterSidebarIfNeeded } = require('./axis-starter-sidebar.js');
 // Must run before `ready`. Keep Dock label + userData folder identical for `npm start` and the packaged .app
 // (package.json `name` is lowercase `axis`, which otherwise creates a separate Application Support folder).
 app.setName('Axis');
 try {
   app.setPath('userData', path.join(app.getPath('appData'), 'Axis'));
 } catch (_) {}
+if (process.platform === 'win32') {
+  try {
+    app.setAppUserModelId('com.axis.browser');
+  } catch (_) {}
+}
 
 /**
  * Single-instance + external http(s) links (macOS open-url, Windows/Linux argv).
@@ -145,8 +153,69 @@ for (const href of axisExtractHttpUrlsFromArgv(process.argv)) {
   axisPendingOpenUrls.push(href);
 }
 
-const Store = require('electron-store');
+const ElectronStore = require('electron-store');
 const fs = require('fs');
+
+/**
+ * electron-store re-reads and re-parses the whole JSON file on every get/has/set. Profile
+ * stores are read hundreds of times per profile switch, which stalls the main process (and
+ * every renderer sync IPC such as <webview>.getURL()). Keep the parsed data in memory,
+ * revalidated by mtime/size so external edits are still picked up.
+ */
+const axisStoreDataCache = new Map();
+
+function axisCloneStoreValue(value) {
+  return value !== null && typeof value === 'object' ? structuredClone(value) : value;
+}
+
+class Store extends ElectronStore {
+  _axisCachedData() {
+    const filePath = this.path;
+    let stat = null;
+    try {
+      stat = fs.statSync(filePath);
+    } catch (_) {
+      axisStoreDataCache.delete(filePath);
+      return super.store;
+    }
+    const hit = axisStoreDataCache.get(filePath);
+    if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.data;
+    const data = super.store;
+    axisStoreDataCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, data });
+    return data;
+  }
+
+  get store() {
+    return structuredClone(this._axisCachedData());
+  }
+
+  set store(value) {
+    super.store = value;
+    try {
+      const stat = fs.statSync(this.path);
+      axisStoreDataCache.set(this.path, {
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        data: structuredClone(value)
+      });
+    } catch (_) {
+      axisStoreDataCache.delete(this.path);
+    }
+  }
+
+  get(key, defaultValue) {
+    if (typeof key !== 'string' || key.includes('.')) return super.get(key, defaultValue);
+    const data = this._axisCachedData();
+    return Object.prototype.hasOwnProperty.call(data, key) && data[key] !== undefined
+      ? axisCloneStoreValue(data[key])
+      : defaultValue;
+  }
+
+  has(key) {
+    if (typeof key !== 'string' || key.includes('.')) return super.has(key);
+    return Object.prototype.hasOwnProperty.call(this._axisCachedData(), key);
+  }
+}
 const os = require('os');
 const { exec, execFile } = require('child_process');
 const { promisify } = require('util');
@@ -688,7 +757,16 @@ function broadcastSystemUiThemeChanged() {
 }
 
 try {
-  nativeTheme.on('updated', () => broadcastSystemUiThemeChanged());
+  nativeTheme.on('updated', () => {
+    broadcastSystemUiThemeChanged();
+    if (process.platform === 'win32') {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) {
+          applyVibrancyToWindow(w);
+        }
+      }
+    }
+  });
 } catch (_) {}
 
 try {
@@ -1059,9 +1137,7 @@ function allocateProfileId(displayName) {
 function getProfileStore(profileId) {
   const id = sanitizeProfileId(profileId);
   if (axisProfileStores.has(id)) {
-    const existing = axisProfileStores.get(id);
-    initializeProfileDefaults(id, existing);
-    return existing;
+    return axisProfileStores.get(id);
   }
   const profileStore = new Store({ name: `profile-${id}` });
   if (id === AXIS_DEFAULT_PROFILE_ID) {
@@ -1102,6 +1178,10 @@ function initializeProfileDefaults(profileId, profileStore) {
     transparentSites: false,
     siteThemeColor: false,
     linkPreview: true,
+    navGestureEnabled: true,
+    navGestureSensitivity: 100,
+    navPinchZoomEnabled: true,
+    profileSwipeEnabled: true,
     vaultAutofillEnabled: true,
     windowChromeLight: 50,
     sidebarZoom: 100,
@@ -1126,6 +1206,7 @@ function initializeProfileDefaults(profileId, profileStore) {
     ntpWidgetBackgrounds: true,
     ntpShowSettingsShortcut: true,
     ntpShowWidgetsEditButton: true,
+    newTabMode: 'page',
     aiFeaturesEnabled: true,
     ntpGreetingName: 'User',
     unpinnedClearMode: 'never',
@@ -1134,6 +1215,11 @@ function initializeProfileDefaults(profileId, profileStore) {
     ambientMuteWhenTabAudio: true,
     ambientAudioPreset: 'rain',
     ambientAudioVolume: 48,
+    screenTimeEnabled: false,
+    screenTimeLog: {},
+    screenTimeLimits: {},
+    screenTimeLimitBaselines: {},
+    screenTimeLimitsInSeconds: true,
     uiLanguage: (() => {
       try {
         return AxisI18n.sanitizeLocale(app.getLocale()) || 'en';
@@ -1144,19 +1230,21 @@ function initializeProfileDefaults(profileId, profileStore) {
     uiFont: 'default'
   };
   // Always fill missing keys (including on older profiles created before a setting existed).
+  const current = s.store;
+  const patch = {};
   for (const [key, value] of Object.entries(defaults)) {
-    if (s.get(key) === undefined) s.set(key, value);
+    if (current[key] === undefined) patch[key] = value;
   }
   // Older builds auto-approved site permissions (Electron’s default). Wipe saved choices
   // once so Allow / Block prompts can appear again.
-  if (s.get('sitePermissionsPromptV3') !== true) {
-    try {
-      s.set('sitePermissionOverrides', {});
-    } catch (_) {}
-    s.set('sitePermissionsPromptV3', true);
-    s.set('sitePermissionsPromptV2', true);
+  if (current.sitePermissionsPromptV3 !== true) {
+    patch.sitePermissionOverrides = {};
+    patch.sitePermissionsPromptV3 = true;
+    patch.sitePermissionsPromptV2 = true;
   }
-  if (!s.get('__profileInitialized')) s.set('__profileInitialized', true);
+  if (!current.__profileInitialized) patch.__profileInitialized = true;
+  if (Object.keys(patch).length) s.set(patch);
+  applyStarterSidebarIfNeeded(profileId, s);
 }
 
 function getProfilePartition(profileId) {
@@ -2789,6 +2877,81 @@ function normalizePermissionOrigin(url) {
   }
 }
 
+const SITE_PERMISSION_KEY_ALIASES = {
+  notification: 'notifications',
+  notifications: 'notifications',
+  idleDetection: 'idle-detection',
+  'idle-detection': 'idle-detection',
+  clipboardRead: 'clipboard-read',
+  'clipboard-read': 'clipboard-read',
+  clipboardSanitizedWrite: 'clipboard-sanitized-write',
+  'clipboard-sanitized-write': 'clipboard-sanitized-write',
+  windowManagement: 'window-management',
+  'window-management': 'window-management',
+  speakerSelection: 'speaker-selection',
+  'speaker-selection': 'speaker-selection',
+  displayCapture: 'display-capture',
+  'display-capture': 'display-capture',
+  storageAccess: 'storage-access',
+  'storage-access': 'storage-access',
+  topLevelStorageAccess: 'top-level-storage-access',
+  'top-level-storage-access': 'top-level-storage-access',
+  pointerlock: 'pointerLock',
+  pointerLock: 'pointerLock',
+  keyboardlock: 'keyboardLock',
+  keyboardLock: 'keyboardLock',
+  midiSysex: 'midiSysex',
+  mediaKeySystem: 'mediaKeySystem',
+  geolocation: 'geolocation',
+  openExternal: 'openExternal',
+  fileSystem: 'fileSystem',
+  midi: 'midi',
+  fullscreen: 'fullscreen',
+  usb: 'usb',
+  hid: 'hid',
+  serial: 'serial',
+  bluetooth: 'bluetooth',
+  sensors: 'sensors',
+  unknown: 'unknown'
+};
+
+function normalizeSitePermissionKey(permission) {
+  const p = String(permission || '').trim();
+  if (!p) return '';
+  return SITE_PERMISSION_KEY_ALIASES[p] || p;
+}
+
+function resolveSitePermissionOrigin(webContents, details, fallbackOrigin) {
+  const candidates = [];
+  if (details && details.securityOrigin) candidates.push(details.securityOrigin);
+  if (details && details.requestingUrl) candidates.push(details.requestingUrl);
+  if (fallbackOrigin) candidates.push(fallbackOrigin);
+  try {
+    const url = webContents && webContents.getURL && webContents.getURL();
+    if (url) candidates.push(url);
+  } catch (_) {}
+  for (const candidate of candidates) {
+    const origin = normalizePermissionOrigin(candidate);
+    if (origin) return origin;
+  }
+  return null;
+}
+
+function lookupStoredSitePermission(site, permission) {
+  if (!site || typeof site !== 'object') return null;
+  const canonical = normalizeSitePermissionKey(permission);
+  const keys = [canonical, String(permission || '')];
+  for (const key of keys) {
+    if (!key) continue;
+    const v = site[key];
+    if (v === 'allow' || v === 'deny') return v;
+  }
+  for (const [k, v] of Object.entries(site)) {
+    if (normalizeSitePermissionKey(k) === canonical && (v === 'allow' || v === 'deny')) return v;
+  }
+  return null;
+}
+
 function cleanSitePermissionOverrides(raw) {
   const out = {};
   if (!raw || typeof raw !== 'object') return out;
@@ -2827,7 +2990,7 @@ function cleanSitePermissionOverrides(raw) {
       if (!allowedKeys.has(k) && !/^[a-zA-Z0-9._-]{1,64}$/.test(k)) continue;
       if (v === 'allow' || v === 'deny') row[k] = v;
     }
-    if (Object.keys(row).length) out[origin] = row;
+    out[origin] = row;
   }
   return out;
 }
@@ -2969,7 +3132,7 @@ function recordSitePermissionDecision(origin, permission, decision, details, pro
   } else if (permission === 'display-capture') {
     site['display-capture'] = decision;
   } else {
-    const key = String(permission || '').trim();
+    const key = normalizeSitePermissionKey(permission);
     if (key) site[key] = decision;
   }
 
@@ -3118,10 +3281,7 @@ function getSitePermissionDecision(origin, permission, profileId = AXIS_DEFAULT_
     return null;
   }
 
-  const key = String(permission || '');
-  const v = site[key];
-  if (v === 'deny' || v === 'allow') return v;
-  return null;
+  return lookupStoredSitePermission(site, permission);
 }
 
 function sendGuestHtmlFullscreenToShell(guestWebContents, active) {
@@ -3161,20 +3321,11 @@ function permissionRequestHandler(webContents, permission, callback, details) {
   };
   try {
     const profileId = getProfileIdFromWebContents(webContents);
-    const requestingUrl =
-      (details && details.requestingUrl) ||
-      (details && details.securityOrigin) ||
-      '';
-    let origin = normalizePermissionOrigin(requestingUrl);
-    if (!origin && details && details.securityOrigin) {
-      origin = normalizePermissionOrigin(details.securityOrigin);
-    }
-    if (!origin) {
-      try {
-        const u = webContents && webContents.getURL && webContents.getURL();
-        origin = normalizePermissionOrigin(u);
-      } catch (_) {}
-    }
+    const origin = resolveSitePermissionOrigin(
+      webContents,
+      details || {},
+      (details && details.requestingUrl) || (details && details.securityOrigin) || ''
+    );
 
     const decided = getSitePermissionDecision(origin, permission, profileId, details);
 
@@ -3251,10 +3402,7 @@ async function ensureOsMediaAccess(permission, details) {
 function permissionCheckHandler(webContents, permission, requestingOrigin, details) {
   try {
     const profileId = getProfileIdFromWebContents(webContents);
-    const origin =
-      normalizePermissionOrigin(requestingOrigin) ||
-      normalizePermissionOrigin(details && details.requestingUrl) ||
-      requestingOrigin;
+    const origin = resolveSitePermissionOrigin(webContents, details || {}, requestingOrigin);
     const decided = getSitePermissionDecision(origin, permission, profileId, details);
   if (decided === 'deny') return false;
   if (decided === 'allow') return true;
@@ -3533,6 +3681,13 @@ function configureSession() {
   try {
     configureAxisSessionInstance(session.fromPartition('incognito'));
   } catch (_) {}
+  try {
+    app.on('session-created', (createdSession) => {
+      try {
+        attachDownloadActivityTracking(createdSession);
+      } catch (_) {}
+    });
+  } catch (_) {}
   // Wipe legacy auto-grants left in the root store (pre-profile migration).
   try {
     if (store.get('sitePermissionsPromptV3') !== true) {
@@ -3546,11 +3701,16 @@ function configureSession() {
   ensureAxisVaultForProfile(AXIS_DEFAULT_PROFILE_ID);
 }
 
-/** In-flight downloads from any Axis session - drives URL-bar ring + popup activity in renderer. */
+/** In-flight downloads from any Axis session - drives URL-bar progress + popup activity in renderer. */
 const axisActiveDownloadItems = new Set();
 const axisDownloadItemMeta = new Map();
+const axisDownloadTrackingSessions = new WeakSet();
 let nextAxisDownloadSessionId = 1;
 let axisDownloadProgressBroadcastTimer = null;
+/** Keep the indicator visible briefly so instant/small downloads still register. */
+const AXIS_DOWNLOAD_UI_MIN_MS = 800;
+let axisDownloadUiActiveUntil = 0;
+let axisDownloadUiHoldTimer = null;
 
 function getAxisAggregateDownloadProgress() {
   let received = 0;
@@ -3568,13 +3728,50 @@ function getAxisAggregateDownloadProgress() {
   return Math.min(1, Math.max(0, received / total));
 }
 
+function axisDownloadUiShouldBeActive() {
+  return axisActiveDownloadItems.size > 0 || Date.now() < axisDownloadUiActiveUntil;
+}
+
+function axisDownloadUiTouch() {
+  axisDownloadUiActiveUntil = Math.max(axisDownloadUiActiveUntil, Date.now() + AXIS_DOWNLOAD_UI_MIN_MS);
+  scheduleAxisDownloadUiHoldTick();
+}
+
+function scheduleAxisDownloadUiHoldTick() {
+  if (axisDownloadUiHoldTimer != null) return;
+  const tick = () => {
+    axisDownloadUiHoldTimer = null;
+    broadcastAxisDownloadActivity();
+    if (axisActiveDownloadItems.size === 0 && Date.now() < axisDownloadUiActiveUntil) {
+      axisDownloadUiHoldTimer = setTimeout(tick, Math.max(40, axisDownloadUiActiveUntil - Date.now()));
+    }
+  };
+  axisDownloadUiHoldTimer = setTimeout(tick, 40);
+}
+
 function broadcastAxisDownloadActivity() {
-  const active = axisActiveDownloadItems.size > 0;
-  const progress = active ? getAxisAggregateDownloadProgress() : null;
+  const hasItems = axisActiveDownloadItems.size > 0;
+  const inPostFinishHold = !hasItems && Date.now() < axisDownloadUiActiveUntil;
+  const active = hasItems;
+  let progress = null;
+  let finished = false;
+  if (hasItems) {
+    progress = getAxisAggregateDownloadProgress();
+  } else if (inPostFinishHold) {
+    finished = true;
+    progress = 1;
+  }
+  const payload = { active, progress, finished };
+  const targets = new Set();
+  if (mainWindow && !mainWindow.isDestroyed()) targets.add(mainWindow.webContents);
   for (const w of BrowserWindow.getAllWindows()) {
     if (w.isDestroyed()) continue;
+    targets.add(w.webContents);
+  }
+  for (const wc of targets) {
+    if (!wc || wc.isDestroyed()) continue;
     try {
-      w.webContents.send('axis-download-activity', { active, progress });
+      wc.send('axis-download-activity', payload);
     } catch (_) {
       /* window gone */
     }
@@ -3586,7 +3783,7 @@ function scheduleAxisDownloadProgressBroadcast() {
   axisDownloadProgressBroadcastTimer = setTimeout(() => {
     axisDownloadProgressBroadcastTimer = null;
     broadcastAxisDownloadActivity();
-  }, 80);
+  }, 40);
 }
 
 // ---------------------------------------------------------------------------
@@ -3654,9 +3851,8 @@ function axisNormalizeBlockedResourceType(resourceType) {
   return 'misc';
 }
 
-function axisBumpBlockedItem(list, entry, max = 48) {
-  const host = String((entry && entry.host) || '').trim();
-  if (!host) return Array.isArray(list) ? list.slice() : [];
+function axisBumpBlockedItem(list, entry, max = 250) {
+  const host = String((entry && entry.host) || '').trim() || '(unknown)';
   const category = entry.category === 'ads' || entry.category === 'trackers' ? entry.category : 'other';
   const type = String((entry && entry.type) || 'misc');
   const next = Array.isArray(list) ? list.slice() : [];
@@ -4372,6 +4568,37 @@ function addWordToAllSpellCheckerDictionaries(word) {
   return added;
 }
 
+/** Heuristic: window.open / target=_blank to a file URL should download, not spawn a guest tab. */
+function axisIsLikelyDownloadUrl(url) {
+  try {
+    const u = new URL(String(url || ''));
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const path = u.pathname.toLowerCase();
+    if (
+      /\.(zip|rar|7z|tar|gz|bz2|xz|dmg|pkg|exe|msi|deb|rpm|apk|ipa|pdf|doc|docx|xls|xlsx|ppt|pptx|csv|txt|json|xml|mp3|mp4|m4a|wav|flac|avi|mkv|mov|webm|png|jpe?g|gif|webp|svg|ico|bin|iso|torrent|crx|xpi|wasm|woff2?|ttf|otf|eot|apk)$/i.test(
+        path
+      )
+    ) {
+      return true;
+    }
+    if (/\/download(?:s)?(?:\/|$|\?)/i.test(path)) return true;
+    if (u.searchParams.has('download')) return true;
+    if (u.searchParams.get('export') === 'download') return true;
+    if (u.searchParams.has('response-content-disposition')) return true;
+    if (/[?&]attachment(?:=|$|&)/i.test(u.search)) return true;
+    if (/[?&]dl(?:=|$|&)/i.test(u.search)) return true;
+  } catch (_) {
+    /* ignore */
+  }
+  return false;
+}
+
+function axisShouldHandleAsDownloadNotNewTab(details) {
+  if (!details) return false;
+  if (details.disposition === 'save-to-disk') return true;
+  return axisIsLikelyDownloadUrl(details.url);
+}
+
 /**
  * Chrome Web Store / Mozilla AMO “Add” buttons often start a guest download of `.crx` / `.xpi`.
  * Cancel so files don’t land in Downloads - Axis installs via main-process fetch + Install in Axis.
@@ -4391,8 +4618,15 @@ function axisShouldCancelChromeExtensionPackageDownload(item) {
   return false;
 }
 
+function axisSignalDownloadActivitySoon() {
+  axisDownloadUiTouch();
+  broadcastAxisDownloadActivity();
+}
+
 function attachDownloadActivityTracking(sess) {
   if (!sess || typeof sess.on !== 'function') return;
+  if (axisDownloadTrackingSessions.has(sess)) return;
+  axisDownloadTrackingSessions.add(sess);
   sess.on('will-download', (event, item) => {
     if (axisShouldCancelChromeExtensionPackageDownload(item)) {
       try {
@@ -4407,6 +4641,7 @@ function attachDownloadActivityTracking(sess) {
       startedAt: Date.now(),
       axisId: nextAxisDownloadSessionId++
     });
+    axisDownloadUiTouch();
     const onUpdated = () => scheduleAxisDownloadProgressBroadcast();
     item.on('updated', onUpdated);
     item.once('done', () => {
@@ -4415,6 +4650,7 @@ function attachDownloadActivityTracking(sess) {
       } catch (_) {}
       axisActiveDownloadItems.delete(item);
       axisDownloadItemMeta.delete(item);
+      axisDownloadUiTouch();
       broadcastAxisDownloadActivity();
     });
     broadcastAxisDownloadActivity();
@@ -4452,6 +4688,42 @@ function listAxisActiveDownloads() {
   return out;
 }
 
+/** Native caption button row height (Win11 overlay); keep in sync with `styles.css` `--axis-win-titlebar-height`. */
+const AXIS_WIN_TITLE_BAR_HEIGHT = 48;
+
+function axisWin32ShellMaterial() {
+  if (process.platform !== 'win32') return 'acrylic';
+  try {
+    const parts = String(os.release() || '').split('.');
+    const build = parseInt(parts[2], 10) || 0;
+    if (build >= 22000) return 'mica';
+  } catch (_) {}
+  return 'acrylic';
+}
+
+/** Win32 shell material from Settings ▸ Window transparency (0 = opaque, no DWM glass). */
+function axisWin32MaterialForChromeLight(rawN) {
+  const n = Number(rawN);
+  const v = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 50;
+  if (v <= 0) return 'none';
+  const base = axisWin32ShellMaterial();
+  if (base === 'mica') return 'mica';
+  return 'acrylic';
+}
+
+function getAxisWin32TitleBarChromeOptions(symbolColor = '#d6d6d6') {
+  return {
+    backgroundMaterial: axisWin32ShellMaterial(),
+    titleBarStyle: 'hidden',
+    roundedCorners: true,
+    titleBarOverlay: {
+      color: '#00000000',
+      symbolColor,
+      height: AXIS_WIN_TITLE_BAR_HEIGHT
+    }
+  };
+}
+
 /** macOS vibrancy / Win32 acrylic for browser + Settings chrome from `windowChromeLight`. */
 function applyVibrancyToWindow(browserWindow) {
   if (!browserWindow || browserWindow.isDestroyed()) return;
@@ -4470,7 +4742,9 @@ function applyVibrancyToWindow(browserWindow) {
   const raw = getProfileStore(profileId).get('windowChromeLight', 50);
   const n = Number(raw);
   const solidChrome = Number.isFinite(n) ? n <= 0 : false;
-  const opaqueBg = '#000000';
+  const uiTheme = getProfileStore(profileId).get('uiTheme', 'dark');
+  const opaqueBg =
+    uiTheme === 'light' && !browserWindow.__axisIsIncognito ? '#f3f3f5' : '#0e0e10';
 
   if (process.platform === 'darwin') {
   try {
@@ -4489,16 +4763,18 @@ function applyVibrancyToWindow(browserWindow) {
 
   if (process.platform === 'win32') {
     try {
-      if (solidChrome) {
+      const material = axisWin32MaterialForChromeLight(raw);
+      if (material === 'none') {
         browserWindow.setBackgroundMaterial('none');
         browserWindow.setBackgroundColor(opaqueBg);
       } else {
-        browserWindow.setBackgroundMaterial('acrylic');
+        browserWindow.setBackgroundMaterial(material);
         browserWindow.setBackgroundColor('#00000000');
       }
     } catch (_) {
       /* ignore */
     }
+    applyWindowsTitleBarOverlay(browserWindow);
   }
 }
 
@@ -4527,6 +4803,120 @@ const AXIS_MACOS_BROWSER_WINDOW_SHAPE =
   process.platform === 'darwin'
     ? { trafficLightPosition: { x: MACOS_TRAFFIC_LIGHT_INSET, y: MACOS_TRAFFIC_LIGHT_INSET } }
     : {};
+
+const AXIS_BROWSER_SHELL_WEB_PREFERENCES = {
+  nodeIntegration: false,
+  contextIsolation: true,
+  sandbox: true,
+  webviewTag: true,
+  preload: path.join(__dirname, 'preload.js'),
+  backgroundThrottling: false,
+  offscreen: false,
+  experimentalFeatures: true,
+  v8CacheOptions: 'code',
+  spellcheck: false,
+  webSecurity: true,
+  webgl: true,
+  enableBlinkFeatures:
+    'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn'
+};
+
+function getAxisBrowserShellWindowChromeOptions() {
+  if (process.platform === 'darwin') {
+    return {
+      titleBarStyle: 'hiddenInset',
+      vibrancy: 'under-window',
+      visualEffectState: 'active',
+      ...AXIS_MACOS_BROWSER_WINDOW_SHAPE
+    };
+  }
+  if (process.platform === 'win32') {
+    return {
+      autoHideMenuBar: true,
+      thickFrame: true,
+      ...getAxisWin32TitleBarChromeOptions('#d6d6d6')
+    };
+  }
+  return {};
+}
+
+function getAxisBrowserShellWindowOptions(overrides = {}) {
+  const webPreferences = {
+    ...AXIS_BROWSER_SHELL_WEB_PREFERENCES,
+    ...(overrides.webPreferences || {})
+  };
+  const { webPreferences: _omit, ...rest } = overrides;
+  return {
+    width: 1200,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    icon: APP_ICON_PATH,
+    frame: false,
+    show: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    ...getAxisBrowserShellWindowChromeOptions(),
+    ...rest,
+    webPreferences
+  };
+}
+
+function applyWindowsTitleBarOverlay(browserWindow) {
+  if (process.platform !== 'win32' || !browserWindow || browserWindow.isDestroyed()) return;
+  try {
+    const profileId = sanitizeProfileId(browserWindow.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+    const stored = getProfileStore(profileId).get('uiTheme', 'dark');
+    const isLight = stored === 'light';
+    browserWindow.setTitleBarOverlay({
+      color: '#00000000',
+      symbolColor: isLight ? '#1c1c1c' : '#d6d6d6',
+      height: AXIS_WIN_TITLE_BAR_HEIGHT
+    });
+  } catch (_) {}
+}
+
+/** Keep Win32 caption colors/icons coherent after maximize / fullscreen. */
+function attachWindowsTitleBarOverlayReflow(browserWindow) {
+  if (process.platform !== 'win32' || !browserWindow) return;
+  const refresh = () => {
+    if (browserWindow.isDestroyed()) return;
+    applyWindowsTitleBarOverlay(browserWindow);
+  };
+  browserWindow.on('maximize', refresh);
+  browserWindow.on('unmaximize', refresh);
+  browserWindow.on('enter-full-screen', refresh);
+  browserWindow.on('leave-full-screen', refresh);
+}
+
+/** Win32: hide the legacy application menu bar (Alt); keep accelerators via auto-hide menu. */
+function applyWindowsShellWindowPolicy(browserWindow) {
+  if (process.platform !== 'win32' || !browserWindow || browserWindow.isDestroyed()) return;
+  try {
+    browserWindow.setAutoHideMenuBar(true);
+    browserWindow.setMenuBarVisibility(false);
+  } catch (_) {}
+}
+
+/** Native OS quit prompt (macOS + Windows). Linux keeps in-renderer confirmation. */
+function axisQuitFromUserAction() {
+  isUserQuitting = true;
+  if (process.platform === 'darwin' || process.platform === 'win32') {
+    if (showNativeQuitDialog()) {
+      void finishConfirmedQuit();
+    } else {
+      isUserQuitting = false;
+      isQuitConfirmed = false;
+    }
+    return;
+  }
+  const w = getActiveAxisWindow();
+  if (w && !w.isDestroyed()) {
+    w.webContents.send('request-quit');
+  } else {
+    void finishConfirmedQuit();
+  }
+}
 
 function getBrowserWindowClientWidth(browserWindow) {
   try {
@@ -4573,18 +4963,55 @@ function attachMacTrafficLightResize(browserWindow) {
   browserWindow.on('leave-full-screen', schedule);
 }
 
-/** Tell the shell to sync guest webview bounds on every frame while the OS window is dragging. */
+/**
+ * macOS Electron 29+: uncapped live-resize events outrun the compositor; cap to ~60Hz so
+ * shell layout and OOPIF webview guests stay in sync (see electron/electron#36280).
+ */
+function attachMacWindowResizePace(browserWindow) {
+  if (process.platform !== 'darwin' || !browserWindow) return;
+  let prev = 0;
+  browserWindow.on('will-resize', (event, newBounds) => {
+    event.preventDefault();
+    const now = performance.now();
+    if (now - prev < 1000 / 60) return;
+    prev = now;
+    try {
+      if (!browserWindow.isDestroyed()) browserWindow.setBounds(newBounds);
+    } catch (_) {}
+  });
+}
+
+/** Shell: disable animated chrome during OS resize; one guest layout sync when the drag ends. */
 function attachWebviewHostResizeSignals(browserWindow) {
   if (!browserWindow) return;
-  const send = (channel) => {
+  let settleTimer = null;
+  const sendActive = (active) => {
     if (browserWindow.isDestroyed()) return;
     try {
-      browserWindow.webContents.send(channel);
+      browserWindow.webContents.send('axis-host-resize-active', !!active);
     } catch (_) {}
   };
-  browserWindow.on('will-resize', () => send('axis-host-resize-live'));
-  browserWindow.on('resize', () => send('axis-host-resize-live'));
-  browserWindow.on('resized', () => send('axis-host-resize-settled'));
+  const sendSettled = () => {
+    if (browserWindow.isDestroyed()) return;
+    try {
+      browserWindow.webContents.send('axis-host-resize-settled');
+    } catch (_) {}
+  };
+  const finishResize = () => {
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
+    sendActive(false);
+    sendSettled();
+  };
+  browserWindow.on('will-resize', () => sendActive(true));
+  browserWindow.on('resize', () => {
+    sendActive(true);
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(finishResize, 96);
+  });
+  browserWindow.on('resized', finishResize);
 }
 
 /** Tell the shell when OS fullscreen hides traffic lights so sidebar chrome can lift. */
@@ -4663,12 +5090,212 @@ function shortcutUsesArrowKey(accel) {
 /** Per-profile shortcut maps - rebuilt only when shortcuts change. */
 const axisShortcutCacheByProfile = new Map();
 
+function broadcastShortcutMapToGuests(profileId = null) {
+  const { webContents } = require('electron');
+  const targetPid = profileId != null ? sanitizeProfileId(profileId) : null;
+  for (const wc of webContents.getAllWebContents()) {
+    if (!wc || wc.isDestroyed()) continue;
+    if (!isAxisWebviewGuestContents(wc)) continue;
+    const pid = getProfileIdForWebContents(wc);
+    if (targetPid && pid !== targetPid) continue;
+    try {
+      wc.send('axis-shortcut-map', getShortcuts(pid));
+    } catch (_) {}
+  }
+}
+
 function invalidateShortcutCache(profileId = null) {
   if (profileId == null) {
     axisShortcutCacheByProfile.clear();
-    return;
+  } else {
+    axisShortcutCacheByProfile.delete(sanitizeProfileId(profileId));
   }
-  axisShortcutCacheByProfile.delete(sanitizeProfileId(profileId));
+  broadcastShortcutMapToGuests(profileId);
+}
+
+function sanitizeCustomUserShortcut(item) {
+  if (!item || typeof item !== 'object') return null;
+  const id =
+    String(item.id || '')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+      .slice(0, 48) || `c${Date.now().toString(36)}`;
+  const name = String(item.name || 'Shortcut').trim().slice(0, 80) || 'Shortcut';
+  const allowed = getAllowedCustomShortcutActions();
+  const { builderStepsToActions } = require('./axis-shortcut-builder.js');
+  let builderSteps = Array.isArray(item.builderSteps) ? item.builderSteps : null;
+  let steps = [];
+  if (builderSteps && builderSteps.length) {
+    steps = builderStepsToActions(builderSteps).filter((s) => allowed.has(s));
+  }
+  if (!steps.length && Array.isArray(item.steps)) {
+    for (const step of item.steps) {
+      if (typeof step === 'string' && allowed.has(step)) {
+        steps.push(step);
+        continue;
+      }
+      if (step && step.verb && step.target) {
+        const actions = builderStepsToActions([step]).filter((s) => allowed.has(s));
+        if (actions[0]) steps.push(actions[0]);
+      }
+    }
+  }
+  const legacy = String(item.command || item.action || '').trim();
+  if (!steps.length && legacy && allowed.has(legacy)) steps = [legacy];
+  if (!steps.length) return null;
+  if (!builderSteps || !builderSteps.length) {
+    const { actionToBuilderStep } = require('./axis-shortcut-builder.js');
+    builderSteps = steps.map((s) => actionToBuilderStep(s));
+  }
+  const keysRaw = String(item.keys || item.accel || '').trim();
+  const keys = keysRaw ? normalizeAccelerator(keysRaw) : '';
+  return { id, name, kind: 'macro', steps, builderSteps, keys, command: steps[0] };
+}
+
+/** Safe atomic browser actions users may chain in custom shortcuts. */
+function getAllowedCustomShortcutActions() {
+  return new Set(AXIS_SHORTCUT_ALLOWED_IDS);
+}
+
+function axisGuestNavigationHistory(contents) {
+  if (!contents || contents.isDestroyed?.()) return null;
+  try {
+    const nav = contents.navigationHistory;
+    if (nav && typeof nav.canGoBack === 'function') return nav;
+  } catch (_) {}
+  return contents;
+}
+
+function axisGuestCanGoBack(contents) {
+  const nav = axisGuestNavigationHistory(contents);
+  if (!nav) return false;
+  try {
+    return !!nav.canGoBack();
+  } catch (_) {
+    return false;
+  }
+}
+
+function axisGuestCanGoForward(contents) {
+  const nav = axisGuestNavigationHistory(contents);
+  if (!nav) return false;
+  try {
+    return !!nav.canGoForward();
+  } catch (_) {
+    return false;
+  }
+}
+
+function axisGuestGoBack(contents) {
+  const nav = axisGuestNavigationHistory(contents);
+  if (!nav) return false;
+  try {
+    nav.goBack();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function axisGuestGoForward(contents) {
+  const nav = axisGuestNavigationHistory(contents);
+  if (!nav) return false;
+  try {
+    nav.goForward();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function axisNavigateGuestHistory(contents, direction) {
+  if (!contents || contents.isDestroyed?.()) return false;
+  if (direction !== 'back' && direction !== 'forward') return false;
+  if (direction === 'back') {
+    if (!axisGuestCanGoBack(contents)) return false;
+    return axisGuestGoBack(contents);
+  }
+  if (!axisGuestCanGoForward(contents)) return false;
+  return axisGuestGoForward(contents);
+}
+
+function axisNotifyNavGestureFeedback(contents, direction) {
+  if (direction !== 'back' && direction !== 'forward') return;
+  const win = getBrowserWindowForWebContents(contents);
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.webContents.send('axis-host-nav-gesture-feedback', direction);
+  } catch (_) {}
+}
+
+function listCustomUserShortcuts(profileId) {
+  const raw = getProfileStore(sanitizeProfileId(profileId)).get('keyboardCustomShortcuts', []);
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => sanitizeCustomUserShortcut(item)).filter(Boolean);
+}
+
+const CUSTOM_TRACKPAD_GESTURE_TYPES = new Set([
+  'swipe-left',
+  'swipe-right',
+  'swipe-up',
+  'swipe-down',
+  'pinch-in',
+  'pinch-out'
+]);
+
+function sanitizeCustomTrackpadGesture(item) {
+  if (!item || typeof item !== 'object') return null;
+  const id =
+    String(item.id || '')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+      .slice(0, 48) || `g${Date.now().toString(36)}`;
+  const name = String(item.name || 'Gesture').trim().slice(0, 80) || 'Gesture';
+  let gesture = String(item.gesture || '').trim();
+  const { sanitizeStoredTrace } = require('./axis-gesture-trace.js');
+  const gestureTrace = sanitizeStoredTrace(item.gestureTrace, { minPoints: 2 });
+  if (gestureTrace) {
+    if (!gesture || !CUSTOM_TRACKPAD_GESTURE_TYPES.has(gesture)) {
+      gesture = `trace:${id}`;
+    }
+  } else if (!CUSTOM_TRACKPAD_GESTURE_TYPES.has(gesture)) {
+    return null;
+  }
+  const allowed = getAllowedCustomShortcutActions();
+  const { builderStepsToActions } = require('./axis-shortcut-builder.js');
+  let builderSteps = Array.isArray(item.builderSteps) ? item.builderSteps : null;
+  let steps = [];
+  if (builderSteps && builderSteps.length) {
+    steps = builderStepsToActions(builderSteps).filter((s) => allowed.has(s));
+  }
+  if (!steps.length && Array.isArray(item.steps)) {
+    for (const step of item.steps) {
+      if (typeof step === 'string' && allowed.has(step)) {
+        steps.push(step);
+        continue;
+      }
+      if (step && step.verb && step.target) {
+        const actions = builderStepsToActions([step]).filter((s) => allowed.has(s));
+        if (actions[0]) steps.push(actions[0]);
+      }
+    }
+  }
+  const legacy = String(item.command || item.action || '').trim();
+  if (!steps.length && legacy && allowed.has(legacy)) steps = [legacy];
+  if (!steps.length) return null;
+  if (!builderSteps || !builderSteps.length) {
+    const { actionToBuilderStep } = require('./axis-shortcut-builder.js');
+    builderSteps = steps.map((s) => actionToBuilderStep(s));
+  }
+  const out = { id, name, kind: 'macro', gesture, steps, builderSteps, command: steps[0] };
+  if (gestureTrace) out.gestureTrace = gestureTrace;
+  return out;
+}
+
+function listCustomTrackpadGestures(profileId) {
+  const raw = getProfileStore(sanitizeProfileId(profileId)).get('customTrackpadGestures', []);
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => sanitizeCustomTrackpadGesture(item)).filter(Boolean);
 }
 
 function buildShortcutCacheEntry(profileId) {
@@ -4697,11 +5324,14 @@ function buildShortcutCacheEntry(profileId) {
       }
     }
   }
+  for (const cs of listCustomUserShortcuts(pid)) {
+    if (cs.keys) map[`custom:${cs.id}`] = cs.keys;
+  }
   const byAccel = new Map();
   for (const [action, binding] of Object.entries(map)) {
     if (binding) byAccel.set(binding, action);
   }
-  const entry = { map, byAccel };
+  const entry = { map, byAccel, customShortcuts: listCustomUserShortcuts(pid) };
   axisShortcutCacheByProfile.set(pid, entry);
   return entry;
 }
@@ -4762,6 +5392,19 @@ function getProfileIdForWebContents(contents) {
   return sanitizeProfileId(win.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
 }
 
+function isAxisWebviewGuestContents(contents) {
+  if (!contents) return false;
+  try {
+    const type = typeof contents.getType === 'function' ? contents.getType() : '';
+    if (type === 'webview') return true;
+    const host = contents.hostWebContents;
+    if (host && !host.isDestroyed?.()) return true;
+    const win = BrowserWindow.fromWebContents(contents);
+    if (win && !win.isDestroyed() && contents !== win.webContents) return true;
+  } catch (_) {}
+  return false;
+}
+
 function dispatchBrowserShortcutFromContents(contents, action) {
   const win = getBrowserWindowForWebContents(contents);
   if (!win || win.isDestroyed()) return;
@@ -4784,27 +5427,77 @@ function attachAxisArrowShortcutHandler(contents) {
   try {
     type = typeof contents.getType === 'function' ? contents.getType() : '';
   } catch (_) {}
-  if (type !== 'window' && type !== 'webview') return;
+  const isWebviewGuest = isAxisWebviewGuestContents(contents);
+  if (type !== 'window' && !isWebviewGuest) return;
   contents.__axisArrowShortcutAttached = true;
+
+  if (isWebviewGuest) {
+    contents.on('focus', () => {
+      try {
+        contents.setIgnoreMenuShortcuts(true);
+      } catch (_) {}
+      try {
+        broadcastShortcutMapToGuests(getProfileIdForWebContents(contents));
+      } catch (_) {}
+    });
+    contents.on('blur', () => {
+      try {
+        contents.setIgnoreMenuShortcuts(false);
+      } catch (_) {}
+    });
+  }
+
   contents.on('before-input-event', (event, input) => {
     if (!input || input.type !== 'keyDown') return;
-    // Plain typing must not touch shortcut tables (huge win with many guest webviews).
-    if (!input.control && !input.alt && !input.meta) return;
+    if (shortcutCaptureSenderId && contents.id === shortcutCaptureSenderId) {
+      event.preventDefault();
+      try {
+        if (input.key === 'Escape') {
+          contents.send('axis-shortcut-capture-key', { cancel: true });
+          return;
+        }
+        const accelerator = acceleratorFromInputEvent(input);
+        contents.send('axis-shortcut-capture-key', {
+          accelerator: accelerator || null,
+          key: input.key,
+          code: input.code,
+          control: !!input.control,
+          alt: !!input.alt,
+          shift: !!input.shift,
+          meta: !!input.meta
+        });
+      } catch (_) {}
+      return;
+    }
+    // Settings is recording / editing bindings — never steal chords there.
+    if (axisShortcutCaptureSuspended) return;
+    try {
+      const win = BrowserWindow.fromWebContents(contents);
+      if (win && !win.isDestroyed() && win.__axisIsSettingsWindow) return;
+    } catch (_) {}
+    if (isSettingsGuestWebContents(contents)) return;
     const accel = acceleratorFromInputEvent(input);
     if (!accel) return;
     const profileId = getProfileIdForWebContents(contents);
     const action = findShortcutActionForAccelerator(accel, profileId);
+    // Only intercept keys that are explicitly bound (incl. single-key remaps like "T").
     if (!action) return;
 
-    let contentsType = '';
-    try {
-      contentsType = typeof contents.getType === 'function' ? contents.getType() : '';
-    } catch (_) {}
+    const isWebviewGuest = isAxisWebviewGuestContents(contents);
 
-    // Cmd+Z → Axis undo when the window has a pending sidebar/tab undo.
-    if (action === 'recover-tab') {
-      const win = getBrowserWindowForWebContents(contents);
-      if (contentsType === 'webview' && (!win || !win.__axisUndoPending)) {
+    if (isWebviewGuest) {
+      if (action === 'recover-tab') {
+        const win = getBrowserWindowForWebContents(contents);
+        if (win && win.__axisUndoPending) {
+          event.preventDefault();
+          dispatchBrowserShortcutFromContents(contents, action);
+        }
+        return;
+      }
+      if (
+        input.isAutoRepeat &&
+        (action === 'next-profile' || action === 'previous-profile')
+      ) {
         return;
       }
       event.preventDefault();
@@ -4812,7 +5505,16 @@ function attachAxisArrowShortcutHandler(contents) {
       return;
     }
 
-    if (!shortcutUsesArrowKey(accel)) return;
+    // Cmd+Z → Axis undo when the window has a pending sidebar/tab undo.
+    if (action === 'recover-tab') {
+      const win = getBrowserWindowForWebContents(contents);
+      if (!win || !win.__axisUndoPending) {
+        return;
+      }
+      event.preventDefault();
+      dispatchBrowserShortcutFromContents(contents, action);
+      return;
+    }
 
     /* One profile step per keypress - key repeat must not queue another switch. */
     if (
@@ -4826,6 +5528,35 @@ function attachAxisArrowShortcutHandler(contents) {
     dispatchBrowserShortcutFromContents(contents, action);
   });
 }
+
+// Register global shortcuts (works in all Axis windows, including incognito)
+// Mapped Axis chords are handled in before-input (and guest preload capture); unmapped keys go to sites.
+let axisShortcutCaptureSuspended = false;
+let axisShortcutCaptureSuspendDepth = 0;
+/** WebContents id currently recording a shortcut remap (0 = none). */
+let shortcutCaptureSenderId = 0;
+let shortcutCaptureEpoch = 0;
+const shortcutCaptureEpochById = new Map();
+/** When true, createMenu builds without accelerators so chords can be recorded. */
+let axisMenuAcceleratorsSuspended = false;
+
+function setMenuAcceleratorsSuspended(suspended) {
+  const next = !!suspended;
+  if (axisMenuAcceleratorsSuspended === next) return;
+  axisMenuAcceleratorsSuspended = next;
+  try {
+    createMenu();
+  } catch (_) {}
+}
+
+const registerShortcuts = () => {
+  // Intentionally empty: chrome shortcuts use before-input.
+  // Keep the function so focus/blur and settings reset paths stay stable.
+};
+
+const unregisterShortcuts = () => {
+  globalShortcut.unregisterAll();
+};
 
 // Default keyboard shortcuts
 const getDefaultShortcuts = () => {
@@ -4875,8 +5606,7 @@ const getDefaultShortcuts = () => {
     'go-back': process.platform === 'darwin' ? 'Cmd+[' : 'Alt+Left',
     'go-forward': process.platform === 'darwin' ? 'Cmd+]' : 'Alt+Right',
     'hard-reload': `${cmdOrCtrl}+Shift+R`,
-    'add-to-favorites':
-      process.platform === 'darwin' ? `${cmdOrCtrl}+Shift+D` : `${cmdOrCtrl}+Shift+D`
+    'add-to-favorites': `${cmdOrCtrl}+Shift+D`
   };
 };
 
@@ -4972,13 +5702,13 @@ function openOrFocusProfileWindowById(profileId, senderWebContents = null) {
   if (senderWebContents && !senderWebContents.isDestroyed()) {
     win = BrowserWindow.fromWebContents(senderWebContents);
   }
-  if (!win || win.isDestroyed() || win.__axisIsIncognito === true) {
+  if (!win || win.isDestroyed() || win.__axisIsIncognito === true || win.__axisIsSettingsWindow) {
     win = BrowserWindow.getFocusedWindow();
   }
   const normalWins = BrowserWindow.getAllWindows().filter(
-    (w) => w && !w.isDestroyed() && w.__axisIsIncognito !== true
+    (w) => w && !w.isDestroyed() && w.__axisIsIncognito !== true && !w.__axisIsSettingsWindow
   );
-  if (!win || win.isDestroyed() || win.__axisIsIncognito === true) {
+  if (!win || win.isDestroyed() || win.__axisIsIncognito === true || win.__axisIsSettingsWindow) {
     win = normalWins[0] || null;
   }
   if (win && !win.isDestroyed()) {
@@ -5072,40 +5802,6 @@ function buildProfilesSubmenu() {
   return items;
 }
 
-// Register global shortcuts (works in all Axis windows, including incognito)
-const registerShortcuts = () => {
-  const shortcuts = getShortcuts();
-
-    Object.entries(shortcuts).forEach(([action, key]) => {
-    if (action === 'find') return;
-    // Cmd/Ctrl+A must be handled in the renderer so URL bar and other shell fields keep native select-all.
-    if (action === 'select-all') {
-      const norm = (key || '').replace(/\s/g, '').toLowerCase();
-      if (norm === 'cmd+a' || norm === 'ctrl+a') return;
-    }
-    // Cmd/Ctrl+Z is owned by the Edit menu + before-input (avoid fighting globalShortcut).
-    if (action === 'recover-tab') return;
-    if (!key || typeof key !== 'string') return;
-    const normalized = normalizeAccelerator(key);
-    // Arrow combos are handled in-window - macOS globalShortcut often misses laptop arrow keys.
-    if (shortcutUsesArrowKey(normalized)) return;
-    try {
-      globalShortcut.register(normalized, () => {
-        const win = getActiveAxisWindow();
-        if (win) {
-          win.webContents.send('browser-shortcut', action);
-        }
-      });
-    } catch (error) {
-      console.error(`Failed to register shortcut ${normalized} for action ${action}:`, error);
-    }
-  });
-};
-
-const unregisterShortcuts = () => {
-  globalShortcut.unregisterAll();
-};
-
 // Apply consolidated Chromium/Electron performance flags as early as possible
 (function applyPerformanceFlags() {
   /* Ambient bed audio runs in the shell renderer; settings changes arrive via IPC
@@ -5178,8 +5874,8 @@ function attachAxisHostNavigationGestures(browserWindow) {
   if (!browserWindow || typeof browserWindow.on !== 'function') return;
   browserWindow.on('swipe', (_event, direction) => {
     if (browserWindow.isDestroyed()) return;
-    if (direction === 'right') browserWindow.webContents.send('axis-host-nav-gesture', 'forward');
-    else if (direction === 'left') browserWindow.webContents.send('axis-host-nav-gesture', 'back');
+    if (direction === 'right') browserWindow.webContents.send('axis-host-nav-gesture', 'back');
+    else if (direction === 'left') browserWindow.webContents.send('axis-host-nav-gesture', 'forward');
   });
 
   browserWindow.on('app-command', (_event, cmd) => {
@@ -5215,38 +5911,11 @@ function createWindow(options = {}) {
   rememberLastActiveProfile(profileId);
   const profileName = getProfileName(profileId);
   // Create the browser window with optimized settings
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    title: profileName === 'Personal' ? 'Axis Browser' : `Axis - ${profileName}`,
-    icon: APP_ICON_PATH,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      webviewTag: true,
-      preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: true,
-      offscreen: false,
-      experimentalFeatures: true,
-      v8CacheOptions: 'code',
-      spellcheck: false,
-      webSecurity: true,
-      webgl: true,
-      enableBlinkFeatures:
-        'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn'
-    },
-    titleBarStyle: 'hiddenInset',
-    frame: false,
-    show: false,
-    transparent: true,
-    backgroundColor: '#00000000',
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
-  });
+  const win = new BrowserWindow(
+    getAxisBrowserShellWindowOptions({
+      title: profileName === 'Personal' ? 'Axis Browser' : `Axis - ${profileName}`
+    })
+  );
 
   attachAxisHostNavigationGestures(win);
 
@@ -5254,8 +5923,10 @@ function createWindow(options = {}) {
     win.__axisSidebarRight = false;
     attachMacTrafficLightResize(win);
   }
+  attachMacWindowResizePace(win);
   attachWebviewHostResizeSignals(win);
   attachFullscreenShellSignals(win);
+  attachWindowsTitleBarOverlayReflow(win);
   win.__axisIsIncognito = false;
   win.__axisProfileId = profileId;
   win.__axisProfileName = profileName;
@@ -5274,10 +5945,21 @@ function createWindow(options = {}) {
       });
     }
     applyVibrancyToWindow(win);
+    applyWindowsShellWindowPolicy(win);
     win.show();
     win.focus();
-    // Show window controls by default (sidebar is visible)
-    win.setWindowButtonVisibility(true);
+    if (process.platform === 'darwin') {
+      // Show traffic lights by default (sidebar is visible)
+      win.setWindowButtonVisibility(true);
+    }
+    if (process.platform === 'win32' && !win.isDestroyed()) {
+      setTimeout(() => {
+        if (!win.isDestroyed()) {
+          applyVibrancyToWindow(win);
+          applyWindowsTitleBarOverlay(win);
+        }
+      }, 150);
+    }
     // Give the shell a beat to paint before adblock/extension work competes for CPU.
     setTimeout(() => {
       if (win.isDestroyed()) return;
@@ -5305,10 +5987,15 @@ function createWindow(options = {}) {
       return;
     }
     
-    // For actual quit actions (non-macOS), confirmation is sent from main via request-quit
     if (!isQuitConfirmed && isUserQuitting) {
       e.preventDefault();
-      if (win && !win.isDestroyed()) {
+      if (process.platform === 'darwin' || process.platform === 'win32') {
+        if (showNativeQuitDialog()) {
+          void finishConfirmedQuit();
+        } else {
+          isUserQuitting = false;
+        }
+      } else if (win && !win.isDestroyed()) {
         win.webContents.send('request-quit');
       }
     }
@@ -5444,7 +6131,12 @@ function openSettingsWindow(section = null, profileIdHint = null) {
           ...AXIS_MACOS_BROWSER_WINDOW_SHAPE
         }
       : process.platform === 'win32'
-        ? { frame: false, backgroundMaterial: 'acrylic' }
+        ? {
+            frame: false,
+            autoHideMenuBar: true,
+            thickFrame: true,
+            ...getAxisWin32TitleBarChromeOptions('#d6d6d6')
+          }
         : { frame: false }),
     webPreferences: {
       nodeIntegration: false,
@@ -5467,6 +6159,7 @@ function openSettingsWindow(section = null, profileIdHint = null) {
     win.__axisSidebarRight = false;
     attachMacTrafficLightResize(win);
   }
+  attachWindowsTitleBarOverlayReflow(win);
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
@@ -5492,15 +6185,16 @@ function openSettingsWindow(section = null, profileIdHint = null) {
         if (!win.isDestroyed()) positionMacTrafficLights(win, false);
       });
     }
-    if (process.platform === 'win32' && !win.isDestroyed()) {
-      try {
-        win.setBackgroundMaterial('acrylic');
-      } catch (_) {}
-    }
     applyVibrancyToWindow(win);
+    applyWindowsShellWindowPolicy(win);
     win.show();
     win.focus();
     if (isDarwin) win.setWindowButtonVisibility(true);
+    if (process.platform === 'win32' && !win.isDestroyed()) {
+      setTimeout(() => {
+        if (!win.isDestroyed()) applyVibrancyToWindow(win);
+      }, 150);
+    }
     try {
       createMenu(profileId);
     } catch (_) {}
@@ -5532,8 +6226,10 @@ function openSettingsInBrowserTab(section = null) {
   openSettingsWindow(sectionHint, profileHint);
 }
 
-function menuAccel(key) {
-  return key && typeof key === 'string' ? key : undefined;
+function menuAccel(_key) {
+  // Do not attach Menu accelerators for chrome shortcuts. They steal keys from
+  // focused websites. Shortcuts are handled via before-input (shell) and guest fallback.
+  return undefined;
 }
 
 /** Open a URL in a new tab in the main Axis window (not the system browser). */
@@ -5657,38 +6353,11 @@ function isSafePublicHttpsUrl(url) {
 /** Open http(s) URL in a new normal browser window (secondary window; does not replace mainWindow). */
 function openUrlInNewBrowserWindow(url) {
   if (!isSafeHttpUrl(url)) return;
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    title: 'Axis Browser',
-    icon: APP_ICON_PATH,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      webviewTag: true,
-      preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: true,
-      offscreen: false,
-      experimentalFeatures: true,
-      v8CacheOptions: 'code',
-      spellcheck: false,
-      webSecurity: true,
-      webgl: true,
-      enableBlinkFeatures:
-        'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn'
-    },
-    titleBarStyle: 'hiddenInset',
-    frame: false,
-    show: false,
-    transparent: true,
-    backgroundColor: '#00000000',
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
-  });
+  const win = new BrowserWindow(
+    getAxisBrowserShellWindowOptions({
+      title: 'Axis Browser'
+    })
+  );
 
   attachAxisHostNavigationGestures(win);
 
@@ -5696,6 +6365,9 @@ function openUrlInNewBrowserWindow(url) {
     win.__axisSidebarRight = false;
     attachMacTrafficLightResize(win);
   }
+  attachWebviewHostResizeSignals(win);
+  attachFullscreenShellSignals(win);
+  attachWindowsTitleBarOverlayReflow(win);
 
   win.webContents.once('did-finish-load', () => {
     setTimeout(() => {
@@ -5732,8 +6404,16 @@ function openUrlInNewBrowserWindow(url) {
       });
     }
     applyVibrancyToWindow(win);
+    applyWindowsShellWindowPolicy(win);
     win.show();
-    win.setWindowButtonVisibility(true);
+    if (process.platform === 'darwin') {
+      win.setWindowButtonVisibility(true);
+    }
+    if (process.platform === 'win32' && !win.isDestroyed()) {
+      setTimeout(() => {
+        if (!win.isDestroyed()) applyVibrancyToWindow(win);
+      }, 150);
+    }
   });
 }
 
@@ -5824,40 +6504,41 @@ function createMenu(profileIdHint) {
   // never the Settings "editing" profile id passed as a write hint.
   syncMenuLocale(getMenuLocaleProfileId());
   const shortcuts = getShortcuts(profileIdHint || getMenuLocaleProfileId());
-  const closeTabShortcut = menuAccel(shortcuts['close-tab']);
-  const settingsShortcut = menuAccel(shortcuts['settings']);
-  const newTabShortcut = menuAccel(shortcuts['new-tab']);
-  const refreshShortcut = menuAccel(shortcuts['refresh']);
-  const toggleSidebarShortcut = menuAccel(shortcuts['toggle-sidebar']);
-  const historyShortcut = menuAccel(shortcuts['history']);
-  const downloadsShortcut = menuAccel(shortcuts['downloads']);
-  const toggleChatShortcut = menuAccel(shortcuts['toggle-chat']);
-  const toggleMuteTabShortcut = menuAccel(shortcuts['toggle-mute-tab']);
-  const findShortcut = menuAccel(shortcuts['find']);
-  const selectAllShortcut = menuAccel(shortcuts['select-all']);
-  const pasteMatchStyleShortcut = menuAccel(shortcuts['paste-match-style']);
-  const printShortcut = menuAccel(shortcuts['print']);
-  const focusUrlShortcut = menuAccel(shortcuts['focus-url']);
-  const recoverTabShortcut = menuAccel(shortcuts['recover-tab']);
-  const zoomInShortcut = menuAccel(shortcuts['zoom-in']);
-  const zoomOutShortcut = menuAccel(shortcuts['zoom-out']);
-  const resetZoomShortcut = menuAccel(shortcuts['reset-zoom']);
-  const pinTabShortcut = menuAccel(shortcuts['pin-tab']);
-  const duplicateTabShortcut = menuAccel(shortcuts['duplicate-tab']);
-  const clearHistoryShortcut = menuAccel(shortcuts['clear-history']);
-  const copyUrlShortcut = menuAccel(shortcuts['copy-url']);
-  const copyUrlMarkdownShortcut = menuAccel(shortcuts['copy-url-markdown']);
-  const nextTabShortcut = menuAccel(shortcuts['next-tab']);
-  const previousTabShortcut = menuAccel(shortcuts['previous-tab']);
-  const goBackShortcut = menuAccel(shortcuts['go-back']);
-  const goForwardShortcut = menuAccel(shortcuts['go-forward']);
-  const hardReloadShortcut = menuAccel(shortcuts['hard-reload']);
+  const accelOk = !axisMenuAcceleratorsSuspended;
+  const closeTabShortcut = accelOk ? menuAccel(shortcuts['close-tab']) : undefined;
+  const settingsShortcut = accelOk ? menuAccel(shortcuts['settings']) : undefined;
+  const newTabShortcut = accelOk ? menuAccel(shortcuts['new-tab']) : undefined;
+  const refreshShortcut = accelOk ? menuAccel(shortcuts['refresh']) : undefined;
+  const toggleSidebarShortcut = accelOk ? menuAccel(shortcuts['toggle-sidebar']) : undefined;
+  const historyShortcut = accelOk ? menuAccel(shortcuts['history']) : undefined;
+  const downloadsShortcut = accelOk ? menuAccel(shortcuts['downloads']) : undefined;
+  const toggleChatShortcut = accelOk ? menuAccel(shortcuts['toggle-chat']) : undefined;
+  const toggleMuteTabShortcut = accelOk ? menuAccel(shortcuts['toggle-mute-tab']) : undefined;
+  const findShortcut = accelOk ? menuAccel(shortcuts['find']) : undefined;
+  const selectAllShortcut = accelOk ? menuAccel(shortcuts['select-all']) : undefined;
+  const pasteMatchStyleShortcut = accelOk ? menuAccel(shortcuts['paste-match-style']) : undefined;
+  const printShortcut = accelOk ? menuAccel(shortcuts['print']) : undefined;
+  const focusUrlShortcut = accelOk ? menuAccel(shortcuts['focus-url']) : undefined;
+  const recoverTabShortcut = accelOk ? menuAccel(shortcuts['recover-tab']) : undefined;
+  const zoomInShortcut = accelOk ? menuAccel(shortcuts['zoom-in']) : undefined;
+  const zoomOutShortcut = accelOk ? menuAccel(shortcuts['zoom-out']) : undefined;
+  const resetZoomShortcut = accelOk ? menuAccel(shortcuts['reset-zoom']) : undefined;
+  const pinTabShortcut = accelOk ? menuAccel(shortcuts['pin-tab']) : undefined;
+  const duplicateTabShortcut = accelOk ? menuAccel(shortcuts['duplicate-tab']) : undefined;
+  const clearHistoryShortcut = accelOk ? menuAccel(shortcuts['clear-history']) : undefined;
+  const copyUrlShortcut = accelOk ? menuAccel(shortcuts['copy-url']) : undefined;
+  const copyUrlMarkdownShortcut = accelOk ? menuAccel(shortcuts['copy-url-markdown']) : undefined;
+  const nextTabShortcut = accelOk ? menuAccel(shortcuts['next-tab']) : undefined;
+  const previousTabShortcut = accelOk ? menuAccel(shortcuts['previous-tab']) : undefined;
+  const goBackShortcut = accelOk ? menuAccel(shortcuts['go-back']) : undefined;
+  const goForwardShortcut = accelOk ? menuAccel(shortcuts['go-forward']) : undefined;
+  const hardReloadShortcut = accelOk ? menuAccel(shortcuts['hard-reload']) : undefined;
 
-  const navBackAccel = goBackShortcut || (process.platform === 'darwin' ? 'Cmd+[' : 'Alt+Left');
-  const navForwardAccel = goForwardShortcut || (process.platform === 'darwin' ? 'Cmd+]' : 'Alt+Right');
+  const navBackAccel = undefined;
+  const navForwardAccel = undefined;
 
-  const newWinAccel = process.platform === 'darwin' ? 'Shift+Cmd+N' : 'Ctrl+Shift+N';
-  const newIncognitoAccel = process.platform === 'darwin' ? 'Alt+Cmd+N' : 'Ctrl+Shift+P';
+  const newWinAccel = undefined;
+  const newIncognitoAccel = undefined;
 
   const template = [];
 
@@ -5892,7 +6573,7 @@ function createMenu(profileIdHint) {
         { type: 'separator' },
         {
           label: uiT('app.quit', { name: appName }),
-          accelerator: 'Cmd+Q',
+          ...(accelOk ? { accelerator: 'Cmd+Q' } : {}),
           click: () => {
             const win = getActiveAxisWindow();
             if (win && !win.isDestroyed()) {
@@ -5916,12 +6597,10 @@ function createMenu(profileIdHint) {
     },
     {
       label: uiT('chrome.newWindow'),
-      accelerator: newWinAccel,
       click: () => createWindow({ useNewWindowRules: true })
     },
     {
       label: uiT('chrome.newIncognitoWindow'),
-      accelerator: newIncognitoAccel,
       click: () => createIncognitoWindow()
     },
     { type: 'separator' },
@@ -5946,16 +6625,8 @@ function createMenu(profileIdHint) {
           { type: 'separator' },
           {
             label: uiT('menu.quit'),
-            accelerator: 'Ctrl+Q',
-            click: () => {
-              isUserQuitting = true;
-              const w = getActiveAxisWindow();
-              if (w && !w.isDestroyed()) {
-                w.webContents.send('request-quit');
-              } else {
-                app.quit();
-              }
-            }
+            ...(accelOk ? { accelerator: 'Ctrl+Q' } : {}),
+            click: () => axisQuitFromUserAction()
           }
         ]
       : [])
@@ -5964,7 +6635,6 @@ function createMenu(profileIdHint) {
   const editSubmenu = [
     {
       label: uiT('menu.undo'),
-      ...(recoverTabShortcut ? { accelerator: recoverTabShortcut } : { accelerator: 'CmdOrCtrl+Z' }),
       click: () => sendBrowserShortcut('recover-tab')
     },
     { role: 'redo' },
@@ -6077,12 +6747,10 @@ function createMenu(profileIdHint) {
   const viewSubmenu = [
     {
       label: uiT('menu.back'),
-      accelerator: navBackAccel,
       click: () => sendBrowserShortcut('go-back')
     },
     {
       label: uiT('menu.forward'),
-      accelerator: navForwardAccel,
       click: () => sendBrowserShortcut('go-forward')
     },
     {
@@ -6131,7 +6799,7 @@ function createMenu(profileIdHint) {
     {
       id: 'axis-enter-fullscreen',
       label: uiT('menu.enterFullscreen'),
-      accelerator: process.platform === 'darwin' ? 'Ctrl+Command+F' : 'F11',
+      ...(accelOk ? { accelerator: process.platform === 'darwin' ? 'Ctrl+Command+F' : 'F11' } : {}),
       // macOS: do not use `role: 'togglefullscreen'` - it duplicates the OS-injected View item.
       click: () => {
         const win = BrowserWindow.getFocusedWindow();
@@ -6161,12 +6829,10 @@ function createMenu(profileIdHint) {
       ? [
           {
             label: uiT('chrome.newWindow'),
-            accelerator: 'Shift+Cmd+N',
             click: () => createWindow({ useNewWindowRules: true })
           },
           {
             label: uiT('chrome.newIncognitoWindow'),
-            accelerator: 'Alt+Cmd+N',
             click: () => createIncognitoWindow()
           },
           { type: 'separator' }
@@ -6185,7 +6851,6 @@ function createMenu(profileIdHint) {
     },
     {
       label: uiT('menu.closeAllWindows'),
-      accelerator: process.platform === 'darwin' ? 'Alt+Cmd+W' : 'Ctrl+Shift+W',
       click: () => {
         BrowserWindow.getAllWindows().forEach((w) => {
           if (!w.isDestroyed()) w.close();
@@ -6274,40 +6939,13 @@ function createIncognitoWindow(initialUrl = null) {
   const incognitoSession = session.fromPartition('incognito');
   syncIncognitoChromeProportionsFromActiveProfile();
   
-  const incognitoWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    title: 'Axis - Incognito',
-    icon: APP_ICON_PATH,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      webviewTag: true,
-      preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: true,
-      offscreen: false,
-      experimentalFeatures: true,
-      enableBlinkFeatures:
-        'CSSColorSchemeUARendering,CSSContainerQueries,EnableThrottleForegroundTimers,WebGPU,WebGPUDawn',
-      v8CacheOptions: 'code',
-      spellcheck: false,
-      webSecurity: true,
-      webgl: true
+  const incognitoWindow = new BrowserWindow(
+    getAxisBrowserShellWindowOptions({
+      title: 'Axis - Incognito'
       // Shell: default session (same as normal windows) so IPC e.g. set-window-title works
       // reliably; private browsing stays in <webview partition="incognito"> (renderer).
-    },
-    titleBarStyle: 'hiddenInset',
-    frame: false,
-    show: false,
-    transparent: true,
-    backgroundColor: '#00000000',
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    ...(process.platform === 'darwin' ? AXIS_MACOS_BROWSER_WINDOW_SHAPE : {})
-  });
+    })
+  );
   incognitoWindow.__axisIsIncognito = true;
   incognitoWindow.__axisProfileId = 'incognito';
   incognitoWindow.__axisProfileName = 'Incognito';
@@ -6319,8 +6957,10 @@ function createIncognitoWindow(initialUrl = null) {
     incognitoWindow.__axisSidebarRight = false;
     attachMacTrafficLightResize(incognitoWindow);
   }
+  attachMacWindowResizePace(incognitoWindow);
   attachWebviewHostResizeSignals(incognitoWindow);
   attachFullscreenShellSignals(incognitoWindow);
+  attachWindowsTitleBarOverlayReflow(incognitoWindow);
 
   if (initialUrl && isSafeHttpUrl(initialUrl)) {
     incognitoWindow.webContents.once('did-finish-load', () => {
@@ -6344,7 +6984,13 @@ function createIncognitoWindow(initialUrl = null) {
       });
     }
     applyVibrancyToWindow(incognitoWindow);
+    applyWindowsShellWindowPolicy(incognitoWindow);
     incognitoWindow.show();
+    if (process.platform === 'win32' && !incognitoWindow.isDestroyed()) {
+      setTimeout(() => {
+        if (!incognitoWindow.isDestroyed()) applyVibrancyToWindow(incognitoWindow);
+      }, 150);
+    }
     setTimeout(() => {
       if (incognitoWindow.isDestroyed()) return;
       try {
@@ -6481,14 +7127,19 @@ process.on('unhandledRejection', (reason) => {
 });
 
 app.whenReady().then(async () => {
+  try {
+    axisGuestPreloadBundleCache.clear();
+    fs.rmSync(path.join(app.getPath('userData'), 'guest-preload'), { recursive: true, force: true });
+  } catch (_) {}
+  initAxisFileDragGhostIcon();
   axisSessionLastExitClean = wasLastAxisSessionCleanExit();
   markAxisSessionRunning();
+  scheduleDailyActivePing(store);
   app.on('web-contents-created', (_event, contents) => {
     contents.setMaxListeners(0);
     attachAxisArrowShortcutHandler(contents);
 
-    let isGuest = false;
-    try { isGuest = typeof contents.getType === 'function' && contents.getType() === 'webview'; } catch (_) {}
+    const isGuest = isAxisWebviewGuestContents(contents);
 
     // Cache the freshest `context-menu` params on EVERY webContents (guest or host).
     // The <webview> DOM `context-menu` event in the renderer can arrive with
@@ -6524,8 +7175,18 @@ app.whenReady().then(async () => {
       installAxisPageSecurityOnWebContents(contents);
     } catch (_) {}
 
+    try {
+      attachDownloadActivityTracking(contents.session);
+    } catch (_) {}
+
+    try {
+      contents.on('will-navigate', (_event, navUrl) => {
+        if (axisIsLikelyDownloadUrl(navUrl)) axisSignalDownloadActivitySoon();
+      });
+    } catch (_) {}
+
     // <webview> guests: stop Electron from opening a blank Axis BrowserWindow
-    // for window.open() / target=_blank (file downloads, etc.).
+    // for window.open() / target=_blank. File downloads must not become guest tabs.
     contents.setWindowOpenHandler((details) => {
       const url = details && details.url;
       if (typeof url === 'string' && url) {
@@ -6537,6 +7198,20 @@ app.whenReady().then(async () => {
             (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null);
           setImmediate(() => {
             void openAxisExtensionPageUrl(url, pid, owner || undefined).catch(() => {});
+          });
+          return { action: 'deny' };
+        }
+        if (axisShouldHandleAsDownloadNotNewTab(details)) {
+          axisSignalDownloadActivitySoon();
+          setImmediate(() => {
+            try {
+              if (contents && !contents.isDestroyed?.() && typeof contents.downloadURL === 'function') {
+                contents.downloadURL(url);
+                axisSignalDownloadActivitySoon();
+              }
+            } catch (_) {
+              /* ignore */
+            }
           });
           return { action: 'deny' };
         }
@@ -6608,6 +7283,10 @@ app.whenReady().then(async () => {
           isQuitConfirmed = true;
           isUserQuitting = true;
           await finishConfirmedQuit();
+        },
+        getDismissedUpdateVersion: () => store.get('updateDismissedVersion', ''),
+        setDismissedUpdateVersion: (version) => {
+          store.set('updateDismissedVersion', String(version || '').trim());
         }
       });
     } catch (_) {}
@@ -6658,7 +7337,9 @@ function showNativeQuitDialog() {
     defaultId: 0,
     cancelId: 0,
     message: uiT('app.quitAsk'),
-    detail: uiT('app.quitDetail')
+    detail: uiT('app.quitDetail'),
+    noLink: true,
+    normalizeAccessKeys: true
   });
   return response === 1;
 }
@@ -6681,12 +7362,42 @@ async function persistSessionBeforeQuit() {
         true
       );
       if (payload && payload.incognito === false) {
-        const profileId = sanitizeProfileId(win.__axisProfileId || AXIS_DEFAULT_PROFILE_ID);
+        const profileId = sanitizeProfileId(
+          payload.profileId || win.__axisProfileId || AXIS_DEFAULT_PROFILE_ID
+        );
         const s = getProfileStore(profileId);
         if (payload.tabGroups != null) s.set('tabGroups', payload.tabGroups);
         if (payload.pinnedTabs != null) s.set('pinnedTabs', payload.pinnedTabs);
         if (payload.unpinnedTabs != null) s.set('unpinnedTabs', payload.unpinnedTabs);
+        if (payload.pinnedSidebarOrder != null) {
+          s.set('pinnedSidebarOrder', payload.pinnedSidebarOrder);
+        }
         s.set('unpinnedTabsRecovery', []);
+
+        const parked = Array.isArray(payload.parkedProfiles) ? payload.parkedProfiles : [];
+        for (const row of parked) {
+          try {
+            const pid = sanitizeProfileId(row && row.profileId);
+            if (!pid || pid === profileId) continue;
+            persistOutgoingProfileStore(pid, {
+              sessionPayload: {
+                incognito: false,
+                tabGroups: row.tabGroups,
+                pinnedTabs: row.pinnedTabs,
+                unpinnedTabs: row.unpinnedTabs,
+                pinnedSidebarOrder: row.pinnedSidebarOrder,
+                clearUnpinnedRecovery: true
+              },
+              pinnedTabs: row.pinnedTabs,
+              tabGroups: row.tabGroups,
+              unpinnedTabs: row.unpinnedTabs,
+              pinnedSidebarOrder: row.pinnedSidebarOrder,
+              favoritesPayload: row.favoritesPayload
+            });
+          } catch (parkErr) {
+            console.error('persistSessionBeforeQuit parked profile:', parkErr);
+          }
+        }
       }
     } catch (err) {
       console.error('persistSessionBeforeQuit:', err);
@@ -6809,10 +7520,57 @@ exit 1
   }
 }
 
+/** Per-profile/site grace after a successful autofill auth (5 minutes). */
+const vaultFillAuthGraceUntil = new Map();
+
+function vaultFillAuthGraceKey(profileId, originLike) {
+  const pid = sanitizeProfileId(profileId);
+  let host = '*';
+  if (originLike) {
+    try {
+      const raw = String(originLike).trim();
+      host = (raw.includes('://') ? new URL(raw).hostname : raw.split('/')[0])
+        .replace(/^www\./i, '')
+        .toLowerCase();
+    } catch (_) {
+      host = String(originLike || '*')
+        .replace(/^www\./i, '')
+        .toLowerCase();
+    }
+  }
+  if (!host) host = '*';
+  return `${pid}:${host}`;
+}
+
+function vaultFillAuthRecentlyGranted(profileId, originLike) {
+  const key = vaultFillAuthGraceKey(profileId, originLike);
+  const until = vaultFillAuthGraceUntil.get(key);
+  if (!until) return false;
+  if (Date.now() >= until) {
+    vaultFillAuthGraceUntil.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function markVaultFillAuthGranted(profileId, originLike) {
+  vaultFillAuthGraceUntil.set(
+    vaultFillAuthGraceKey(profileId, originLike),
+    Date.now() + 5 * 60 * 1000
+  );
+}
+
+async function axisVerifyDeviceOwnerForAutofill(profileId, originLike, reason) {
+  if (vaultFillAuthRecentlyGranted(profileId, originLike)) return true;
+  const ok = await axisVerifyDeviceOwner(reason);
+  if (ok) markVaultFillAuthGranted(profileId, originLike);
+  return ok;
+}
+
 /**
  * Require real OS owner verification for vault secrets.
  * Never accept a bare "Continue" click as authentication.
- * Each sensitive action must authenticate - no unlock grace window.
+ * Settings / reveal paths always authenticate — autofill uses axisVerifyDeviceOwnerForAutofill.
  */
 async function axisVerifyDeviceOwner(reason) {
   const text =
@@ -6863,17 +7621,29 @@ async function axisVerifyDeviceOwner(reason) {
   return ok;
 }
 
+let axisTouchIdAvailableCache = null;
+
+/** canPromptTouchID is a ~150ms LocalAuthentication round trip; vault status is polled on every tab/profile switch. */
+function axisTouchIdAvailable() {
+  if (process.platform !== 'darwin') return false;
+  const now = Date.now();
+  if (axisTouchIdAvailableCache && now - axisTouchIdAvailableCache.at < 60000) {
+    return axisTouchIdAvailableCache.value;
+  }
+  let value = false;
+  try {
+    value =
+      typeof systemPreferences.canPromptTouchID === 'function' &&
+      systemPreferences.canPromptTouchID();
+  } catch (_) {}
+  axisTouchIdAvailableCache = { at: now, value };
+  return value;
+}
+
 function vaultStatusPayload(profileId = AXIS_DEFAULT_PROFILE_ID) {
   const pid = sanitizeProfileId(profileId);
   ensureAxisVaultForProfile(pid).ensureLoaded();
-  let touchIdAvailable = false;
-  if (process.platform === 'darwin') {
-    try {
-      touchIdAvailable =
-        typeof systemPreferences.canPromptTouchID === 'function' &&
-        systemPreferences.canPromptTouchID();
-    } catch (_) {}
-  }
+  const touchIdAvailable = axisTouchIdAvailable();
   return {
     configured: true,
     unlocked: true,
@@ -7190,13 +7960,20 @@ function assertVaultFillAllowedForSender(event, savedOrigin) {
   }
 }
 
-ipcMain.handle('axis-vault-get-login-for-fill', async (event, id) => {
+ipcMain.handle('axis-vault-get-login-for-fill', async (event, id, opts) => {
   try {
+    const profileId = getProfileIdFromWebContents(event?.sender);
+    const login = ensureAxisVaultFromEvent(event).getLogin(id);
     if (!isGuestWebContents(event?.sender)) {
-      const ok = await axisVerifyDeviceOwner('Fill saved login');
+      const graceOrigin =
+        (opts && opts.pageOrigin) || login.origin || getWebContentsPageOrigin(event?.sender);
+      const ok = await axisVerifyDeviceOwnerForAutofill(
+        profileId,
+        graceOrigin || login.origin,
+        'Fill saved login'
+      );
       if (!ok) return null;
     }
-    const login = ensureAxisVaultFromEvent(event).getLogin(id);
     if (!assertVaultFillAllowedForSender(event, login.origin)) {
       return null;
     }
@@ -7212,12 +7989,21 @@ ipcMain.handle('axis-vault-get-login-for-fill', async (event, id) => {
   }
 });
 
-ipcMain.handle('axis-vault-get-card-for-fill', async (event, id) => {
+ipcMain.handle('axis-vault-get-card-for-fill', async (event, id, opts) => {
   try {
     if (!event?.sender || event.sender.isDestroyed()) return null;
     const isGuest = isGuestWebContents(event.sender);
+    const profileId = getProfileIdFromWebContents(event.sender);
     if (!isGuest) {
-      const ok = await axisVerifyDeviceOwner('Fill saved card');
+      const graceOrigin =
+        (opts && opts.pageOrigin) ||
+        getWebContentsPageOrigin(event.sender) ||
+        getWindowFromSender(event.sender)?.webContents?.getURL?.();
+      const ok = await axisVerifyDeviceOwnerForAutofill(
+        profileId,
+        graceOrigin,
+        'Fill saved card'
+      );
       if (!ok) return null;
     } else {
       // Guests may only fill after autofill listed this card id for this page.
@@ -7334,12 +8120,21 @@ ipcMain.handle('axis-vault-delete-address', async (event, id) => {
   return true;
 });
 
-ipcMain.handle('axis-vault-get-address-for-fill', async (event, id) => {
+ipcMain.handle('axis-vault-get-address-for-fill', async (event, id, opts) => {
   try {
     if (!event?.sender || event.sender.isDestroyed()) return null;
     const isGuest = isGuestWebContents(event.sender);
+    const profileId = getProfileIdFromWebContents(event.sender);
     if (!isGuest) {
-      const ok = await axisVerifyDeviceOwner('Fill saved address');
+      const graceOrigin =
+        (opts && opts.pageOrigin) ||
+        getWebContentsPageOrigin(event.sender) ||
+        getWindowFromSender(event.sender)?.webContents?.getURL?.();
+      const ok = await axisVerifyDeviceOwnerForAutofill(
+        profileId,
+        graceOrigin,
+        'Fill saved address'
+      );
       if (!ok) return null;
     } else {
       if (!guestVaultFillSessionAllows(event.sender, id)) return null;
@@ -7553,15 +8348,29 @@ ipcMain.handle('axis-close-settings-window', (event) => {
   return true;
 });
 
+/** Close this browser window only (used by Cmd+W when no website tab is open). */
+ipcMain.handle('close-browser-window', (event) => {
+  const win = getWindowFromSender(event?.sender) || BrowserWindow.getFocusedWindow() || getActiveAxisWindow();
+  if (!win || win.isDestroyed()) return false;
+  if (win.__axisIsSettingsWindow) {
+    win.close();
+    return true;
+  }
+  win.close();
+  return true;
+});
+
 const AXIS_SETTINGS_SECTION_IDS = new Set([
   'customization',
   'newtab',
   'ai',
   'history',
   'shortcuts',
+  'gestures',
   'permissions',
   'extensions',
   'vault',
+  'screentime',
   'incognito'
 ]);
 
@@ -7571,6 +8380,10 @@ const AXIS_INCOGNITO_WRITABLE_SETTINGS = new Set([
   'blockAds',
   'javascriptEnabled',
   'linkPreview',
+  'navGestureEnabled',
+  'navGestureSensitivity',
+  'navPinchZoomEnabled',
+  'profileSwipeEnabled',
   'searchEngine',
   'httpsOnlyMode',
   'alwaysShowFullUrl',
@@ -7784,6 +8597,10 @@ function getIncognitoSettingsDefaults() {
     transparentSites: false,
     siteThemeColor: false,
     linkPreview: true,
+    navGestureEnabled: true,
+    navGestureSensitivity: 100,
+    navPinchZoomEnabled: true,
+    profileSwipeEnabled: true,
     vaultAutofillEnabled: false,
     windowChromeLight: 50,
     sidebarZoom: 100,
@@ -8020,6 +8837,134 @@ ipcMain.handle('set-site-permission-overrides', (event, obj) => {
   return cleaned;
 });
 
+function cookieDomainKey(domain) {
+  return String(domain || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\./, '');
+}
+
+function cookieMatchesDomain(cookieDomain, siteDomain) {
+  const cd = cookieDomainKey(cookieDomain);
+  const sd = cookieDomainKey(siteDomain);
+  if (!cd || !sd) return false;
+  return cd === sd || cd.endsWith(`.${sd}`) || sd.endsWith(`.${cd}`);
+}
+
+function cookieRemovalUrl(cookie) {
+  const host = cookieDomainKey(cookie.domain);
+  const path = cookie.path || '/';
+  const scheme = cookie.secure ? 'https' : 'http';
+  return `${scheme}://${host}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+async function listProfileCookieSites(profileId) {
+  const pid = sanitizeProfileId(profileId);
+  if (!pid || pid === 'incognito') return [];
+  const sess = getAxisExtensionSession(pid);
+  const cookies = await sess.cookies.get({});
+  const map = new Map();
+  for (const c of cookies) {
+    const dom = cookieDomainKey(c.domain);
+    if (!dom) continue;
+    map.set(dom, (map.get(dom) || 0) + 1);
+  }
+  return Array.from(map.entries())
+    .map(([domain, count]) => ({ domain, count }))
+    .sort((a, b) => b.count - a.count || a.domain.localeCompare(b.domain))
+    .slice(0, 400);
+}
+
+function serializeProfileCookie(c) {
+  if (!c || typeof c.name !== 'string') return null;
+  const exp = Number(c.expirationDate);
+  return {
+    name: c.name,
+    value: typeof c.value === 'string' ? c.value : '',
+    domain: c.domain || '',
+    path: c.path || '/',
+    secure: !!c.secure,
+    httpOnly: !!c.httpOnly,
+    sameSite: c.sameSite || 'unspecified',
+    session: !exp || exp <= 0,
+    expirationDate: exp > 0 ? exp : null,
+  };
+}
+
+async function listProfileCookiesForDomain(profileId, domain) {
+  const pid = sanitizeProfileId(profileId);
+  if (!pid || pid === 'incognito') return [];
+  const sess = getAxisExtensionSession(pid);
+  const target = cookieDomainKey(domain);
+  if (!target) return [];
+  const cookies = await sess.cookies.get({});
+  return cookies
+    .filter((c) => cookieMatchesDomain(c.domain, target))
+    .map(serializeProfileCookie)
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+}
+
+async function clearProfileCookiesForDomain(profileId, domain) {
+  const pid = sanitizeProfileId(profileId);
+  if (!pid || pid === 'incognito') return { removed: 0 };
+  const sess = getAxisExtensionSession(pid);
+  const target = cookieDomainKey(domain);
+  if (!target) return { removed: 0 };
+  const cookies = await sess.cookies.get({});
+  let removed = 0;
+  for (const c of cookies) {
+    if (!cookieMatchesDomain(c.domain, target)) continue;
+    try {
+      await sess.cookies.remove(cookieRemovalUrl(c), c.name);
+      removed += 1;
+    } catch (_) {}
+  }
+  return { removed };
+}
+
+ipcMain.handle('get-profile-cookie-sites', async (event) => {
+  const pid = getProfileIdForEvent(event);
+  if (pid === 'incognito') return [];
+  try {
+    return await listProfileCookieSites(pid);
+  } catch (_) {
+    return [];
+  }
+});
+
+ipcMain.handle('get-profile-cookies-for-domain', async (event, domain) => {
+  const pid = getProfileIdForEvent(event);
+  if (pid === 'incognito') return [];
+  try {
+    return await listProfileCookiesForDomain(pid, domain);
+  } catch (_) {
+    return [];
+  }
+});
+
+ipcMain.handle('clear-profile-cookies-for-domain', async (event, domain) => {
+  const pid = getProfileIdForEvent(event);
+  if (pid === 'incognito') return { removed: 0 };
+  try {
+    return await clearProfileCookiesForDomain(pid, domain);
+  } catch (_) {
+    return { removed: 0 };
+  }
+});
+
+ipcMain.handle('clear-profile-cookies-all', async (event) => {
+  const pid = getProfileIdForEvent(event);
+  if (pid === 'incognito') return { ok: false };
+  try {
+    const sess = getAxisExtensionSession(pid);
+    await sess.clearStorageData({ storages: ['cookies'] });
+    return { ok: true };
+  } catch (_) {
+    return { ok: false };
+  }
+});
+
 ipcMain.on('axis-site-permission-response', (_event, payload) => {
   const requestId = payload && typeof payload.requestId === 'string' ? payload.requestId : '';
   const pending = requestId ? pendingSitePermissionPrompts.get(requestId) : null;
@@ -8098,22 +9043,24 @@ function persistOutgoingProfileStore(profileId, captured) {
     console.warn('persist-outgoing-profile: refusing empty overwrite for profile', pid);
     return { ok: false, error: 'refusing empty overwrite' };
   }
+  const patch = {};
   if (sessionPayload && !sessionPayload.incognito) {
-    if (sessionPayload.tabGroups != null) store.set('tabGroups', sessionPayload.tabGroups);
-    if (sessionPayload.pinnedTabs != null) store.set('pinnedTabs', sessionPayload.pinnedTabs);
-    if (sessionPayload.unpinnedTabs != null) store.set('unpinnedTabs', sessionPayload.unpinnedTabs);
+    if (sessionPayload.tabGroups != null) patch.tabGroups = sessionPayload.tabGroups;
+    if (sessionPayload.pinnedTabs != null) patch.pinnedTabs = sessionPayload.pinnedTabs;
+    if (sessionPayload.unpinnedTabs != null) patch.unpinnedTabs = sessionPayload.unpinnedTabs;
     if (sessionPayload.pinnedSidebarOrder != null) {
-      store.set('pinnedSidebarOrder', sessionPayload.pinnedSidebarOrder);
+      patch.pinnedSidebarOrder = sessionPayload.pinnedSidebarOrder;
     }
-    if (sessionPayload.clearUnpinnedRecovery === true) store.set('unpinnedTabsRecovery', []);
+    if (sessionPayload.clearUnpinnedRecovery === true) patch.unpinnedTabsRecovery = [];
   }
-  if (pinnedTabs != null) store.set('pinnedTabs', pinnedTabs);
-  if (tabGroups != null) store.set('tabGroups', tabGroups);
-  if (unpinnedTabs != null) store.set('unpinnedTabs', unpinnedTabs);
-  if (pinnedSidebarOrder != null) store.set('pinnedSidebarOrder', pinnedSidebarOrder);
+  if (pinnedTabs != null) patch.pinnedTabs = pinnedTabs;
+  if (tabGroups != null) patch.tabGroups = tabGroups;
+  if (unpinnedTabs != null) patch.unpinnedTabs = unpinnedTabs;
+  if (pinnedSidebarOrder != null) patch.pinnedSidebarOrder = pinnedSidebarOrder;
   if (favoritesPayload != null) {
-    store.set('favorites', normalizeFavoritesStoreList(favoritesPayload));
+    patch.favorites = normalizeFavoritesStoreList(favoritesPayload);
   }
+  if (Object.keys(patch).length) store.set(patch);
   /* Do not broadcast settings-updated here: the window is mid profile-switch and still
      reports the outgoing profile id, which can race and reload partial sidebar state. */
   return { ok: true };
@@ -8359,10 +9306,24 @@ ipcMain.handle('set-settings-batch', (event, patch) => {
   const s = getSettingsStoreForEvent(event);
   let touchedAdblock = false;
   let sidebarNext = null;
+  const existingPinned = s.get('pinnedTabs');
+  const existingGroups = s.get('tabGroups');
+  const hadSidebarPins =
+    (Array.isArray(existingPinned) && existingPinned.length > 0) ||
+    (Array.isArray(existingGroups) && existingGroups.length > 0);
   for (const [key, value] of Object.entries(patch)) {
     if (AXIS_BATCH_SKIP_KEYS.has(key)) continue;
     if (key === 'sidebarPosition') {
       sidebarNext = setGlobalSidebarPosition(value);
+      continue;
+    }
+    if (
+      hadSidebarPins &&
+      (key === 'pinnedTabs' || key === 'tabGroups') &&
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      console.warn('set-settings-batch: refusing empty overwrite of', key, 'for profile', pid);
       continue;
     }
     const storeValue = key === 'aiProviders' ? sealAiProvidersForDisk(value) : value;
@@ -8453,7 +9414,7 @@ ipcMain.handle('axis-get-adblock-stats', (event, opts = {}) => {
     pageByOtherType: toTypeRows(byOtherType),
     recentHosts: recentHosts.slice(0, 10),
     recentOtherHosts: recentOtherHosts.slice(0, 8),
-    blockedItems: blockedItems.slice(0, 48).map((row) => ({
+    blockedItems: blockedItems.slice(0, 250).map((row) => ({
       host: String(row.host || ''),
       category: row.category === 'ads' || row.category === 'trackers' ? row.category : 'other',
       type: String(row.type || 'misc'),
@@ -8649,14 +9610,59 @@ ipcMain.handle('install-extension-from-web-store', async (event, rawInput) => {
   return { canceled: false, ...out };
 });
 
+const AXIS_GUEST_PRELOAD_MODULES = [
+  'axis-gesture-physics.js',
+  'webview-preload-nav-gestures.js',
+  'webview-preload-fullscreen.js',
+  'webview-preload-media-recovery.js',
+  'webview-preload-link-preview.js',
+  'webview-preload-perf.js',
+  'webview-preload-url-theme.js',
+  'webview-preload-cws.js',
+  'webview-preload-vault.js',
+  'webview-preload-shortcuts.js'
+];
+const axisGuestPreloadBundleCache = new Map();
+
+/**
+ * Guest tabs run with sandbox=true, where preload `require()` only resolves built-in
+ * modules — `require('./x.js')` throws and kills the whole preload. Flatten every
+ * module into one file so each runs in its own scope with only `require('electron')`.
+ */
+function getAxisGuestPreloadBundlePath(name, { includeVault }) {
+  const fallback = path.join(__dirname, `${name}.js`);
+  try {
+    const parts = ["'use strict';"];
+    for (const file of AXIS_GUEST_PRELOAD_MODULES) {
+      if (!includeVault && file === 'webview-preload-vault.js') continue;
+      let src;
+      try {
+        src = fs.readFileSync(path.join(__dirname, file), 'utf8');
+      } catch (_) {
+        continue;
+      }
+      parts.push(`// ${file}\n;(function () {\ntry {\n${src}\n} catch (e) { console.warn('[axis preload] ${file}', e); }\n})();`);
+    }
+    const dir = path.join(app.getPath('userData'), 'guest-preload');
+    fs.mkdirSync(dir, { recursive: true });
+    const out = path.join(dir, `${name}.js`);
+    fs.writeFileSync(out, parts.join('\n\n'), 'utf8');
+    axisGuestPreloadBundleCache.set(name, out);
+    return out;
+  } catch (err) {
+    console.warn('Failed to build guest preload bundle', err);
+    return fallback;
+  }
+}
+
 /** Absolute path for `<webview preload>` - Chrome Web Store click bridge. */
 ipcMain.handle('get-webview-cws-preload-path', () =>
-  path.join(__dirname, 'webview-preload-bundle.js')
+  getAxisGuestPreloadBundlePath('webview-preload-bundle', { includeVault: true })
 );
 
 /** Lighter guest preload without vault credential listeners (saves RAM on normal pages). */
 ipcMain.handle('get-webview-light-preload-path', () =>
-  path.join(__dirname, 'webview-preload-light.js')
+  getAxisGuestPreloadBundlePath('webview-preload-light', { includeVault: false })
 );
 
 ipcMain.handle('install-extension-crx', async (event) => {
@@ -8723,14 +9729,253 @@ ipcMain.handle('reset-shortcuts', (event) => {
   return getDefaultShortcuts();
 });
 
+ipcMain.handle('axis-guest-history-nav', (event, direction) => {
+  const contents = event.sender;
+  if (!isAxisWebviewGuestContents(contents)) return false;
+  const ok = axisNavigateGuestHistory(contents, direction);
+  if (ok) axisNotifyNavGestureFeedback(contents, direction);
+  return ok;
+});
+
+ipcMain.handle('axis-active-tab-history-nav', (event, direction, guestWebContentsId) => {
+  if (direction !== 'back' && direction !== 'forward') return false;
+  const id = Number(guestWebContentsId) || 0;
+  if (id <= 0) return false;
+  let contents = null;
+  try {
+    const { webContents } = require('electron');
+    contents = webContents.fromId(id);
+  } catch (_) {}
+  if (!contents || contents.isDestroyed?.()) return false;
+  const ok = axisNavigateGuestHistory(contents, direction);
+  if (ok) axisNotifyNavGestureFeedback(contents, direction);
+  return ok;
+});
+
+ipcMain.handle('get-custom-shortcuts', (event) => listCustomUserShortcuts(getProfileIdForEvent(event)));
+
+ipcMain.handle('set-custom-shortcuts', (event, list) => {
+  const pid = getProfileIdForEvent(event);
+  const next = (Array.isArray(list) ? list : [])
+    .map((item) => sanitizeCustomUserShortcut(item))
+    .filter(Boolean);
+  getProfileStore(pid).set('keyboardCustomShortcuts', next);
+  invalidateShortcutCache(pid);
+  broadcastSettingsUpdated(pid);
+  return next;
+});
+
+ipcMain.handle('get-custom-gestures', (event) => listCustomTrackpadGestures(getProfileIdForEvent(event)));
+
+ipcMain.handle('set-custom-gestures', (event, list) => {
+  const pid = getProfileIdForEvent(event);
+  const next = (Array.isArray(list) ? list : [])
+    .map((item) => sanitizeCustomTrackpadGesture(item))
+    .filter(Boolean);
+  getProfileStore(pid).set('customTrackpadGestures', next);
+  broadcastSettingsUpdated(pid);
+  return next;
+});
+
+ipcMain.handle('begin-shortcut-capture', (event) => {
+  const epoch = ++shortcutCaptureEpoch;
+  const sender = event.sender;
+  shortcutCaptureEpochById.set(sender.id, epoch);
+  shortcutCaptureSenderId = sender.id;
+  axisShortcutCaptureSuspended = true;
+  setMenuAcceleratorsSuspended(true);
+  try {
+    sender.setIgnoreMenuShortcuts(true);
+  } catch (_) {}
+  return epoch;
+});
+
+ipcMain.handle('end-shortcut-capture', (event, epoch) => {
+  if (epoch == null) return false;
+  const sender = event.sender;
+  const current = shortcutCaptureEpochById.get(sender.id);
+  if (current !== epoch) return false;
+  shortcutCaptureEpochById.delete(sender.id);
+  try {
+    sender.setIgnoreMenuShortcuts(false);
+  } catch (_) {}
+  if (sender.id === shortcutCaptureSenderId) shortcutCaptureSenderId = 0;
+  if (!shortcutCaptureSenderId) {
+    axisShortcutCaptureSuspended = false;
+    setMenuAcceleratorsSuspended(false);
+  }
+  return true;
+});
+
 // Temporarily disable/enable shortcuts (e.g., when recording a new shortcut)
 ipcMain.handle('disable-shortcuts', () => {
+  axisShortcutCaptureSuspendDepth += 1;
+  axisShortcutCaptureSuspended = true;
   unregisterShortcuts();
   return true;
 });
 
 ipcMain.handle('enable-shortcuts', () => {
-  registerShortcuts();
+  axisShortcutCaptureSuspendDepth = Math.max(0, axisShortcutCaptureSuspendDepth - 1);
+  if (axisShortcutCaptureSuspendDepth === 0) {
+    axisShortcutCaptureSuspended = false;
+    registerShortcuts();
+  }
+  return true;
+});
+
+function axisScreenTimeDateKey(ts = Date.now()) {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function pruneScreenTimeLog(log) {
+  const out = log && typeof log === 'object' && !Array.isArray(log) ? { ...log } : {};
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  for (const key of Object.keys(out)) {
+    const t = Date.parse(`${key}T12:00:00`);
+    if (!Number.isFinite(t) || t < cutoff) delete out[key];
+  }
+  return out;
+}
+
+function recordScreenTimeTick(profileId, domain, seconds) {
+  const pid = sanitizeProfileId(profileId);
+  if (!pid || pid === 'incognito') return false;
+  const dom = String(domain || '').trim().toLowerCase().replace(/^www\./, '');
+  const sec = Math.max(0, Math.min(3600, Math.floor(Number(seconds) || 0)));
+  if (!dom || sec <= 0) return false;
+  const store = getProfileStore(pid);
+  const log = pruneScreenTimeLog(store.get('screenTimeLog') || {});
+  const dayKey = axisScreenTimeDateKey();
+  if (!log[dayKey]) log[dayKey] = { total: 0, domains: {}, hours: {} };
+  if (!log[dayKey].hours || typeof log[dayKey].hours !== 'object') log[dayKey].hours = {};
+  log[dayKey].total = (Number(log[dayKey].total) || 0) + sec;
+  log[dayKey].domains[dom] = (Number(log[dayKey].domains[dom]) || 0) + sec;
+  const hourKey = String(new Date().getHours());
+  log[dayKey].hours[hourKey] = (Number(log[dayKey].hours[hourKey]) || 0) + sec;
+  store.set('screenTimeLog', log);
+  return true;
+}
+
+const SCREEN_TIME_LIMIT_MAX_SEC = 24 * 3600;
+
+function migrateScreenTimeLimitsToSeconds(store) {
+  if (!store || store.get('screenTimeLimitsInSeconds')) return;
+  const limits = store.get('screenTimeLimits') || {};
+  const out = {};
+  for (const [domain, value] of Object.entries(limits)) {
+    const dom = String(domain || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^www\./, '');
+    const min = Math.floor(Number(value) || 0);
+    if (!dom || min <= 0) continue;
+    out[dom] = Math.min(SCREEN_TIME_LIMIT_MAX_SEC, min * 60);
+  }
+  store.set('screenTimeLimits', out);
+  store.set('screenTimeLimitsInSeconds', true);
+}
+
+function normalizeScreenTimeLimits(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [domain, seconds] of Object.entries(raw)) {
+    const dom = String(domain || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^www\./, '');
+    const sec = Math.floor(Number(seconds) || 0);
+    if (!dom || sec <= 0) continue;
+    out[dom] = Math.min(SCREEN_TIME_LIMIT_MAX_SEC, sec);
+  }
+  return out;
+}
+
+ipcMain.handle('get-screen-time-stats', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { enabled: false, days: [], topDomains: [] };
+  const pid = getProfileIdForEvent(event);
+  if (pid === 'incognito') return { enabled: false, days: [], topDomains: [] };
+  const store = getProfileStore(pid);
+  const enabled = !!store.get('screenTimeEnabled');
+  const log = pruneScreenTimeLog(store.get('screenTimeLog') || {});
+  const days = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    const key = axisScreenTimeDateKey(d.getTime());
+    const entry = log[key] || { total: 0, domains: {} };
+    const dayDomains = entry.domains && typeof entry.domains === 'object' ? entry.domains : {};
+    const dayTop = Object.entries(dayDomains)
+      .map(([domain, total]) => ({ domain, total: Number(total) || 0 }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 8);
+    days.push({
+      date: key,
+      total: Number(entry.total) || 0,
+      topDomains: dayTop
+    });
+  }
+  const todayKey = axisScreenTimeDateKey();
+  const todayEntry = log[todayKey] || { total: 0, domains: {}, hours: {} };
+  const todayDomains = todayEntry.domains || {};
+  const topDomains = Object.entries(todayDomains)
+    .map(([domain, total]) => ({ domain, total: Number(total) || 0 }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 8);
+  const hours = [];
+  const hourMap = todayEntry.hours && typeof todayEntry.hours === 'object' ? todayEntry.hours : {};
+  for (let h = 0; h < 24; h++) {
+    hours.push(Number(hourMap[String(h)]) || 0);
+  }
+  migrateScreenTimeLimitsToSeconds(store);
+  const limits = normalizeScreenTimeLimits(store.get('screenTimeLimits') || {});
+  const rawBaselines = store.get('screenTimeLimitBaselines') || {};
+  const limitBaselines = {};
+  if (rawBaselines && typeof rawBaselines === 'object') {
+    for (const [domain, seconds] of Object.entries(rawBaselines)) {
+      const dom = String(domain || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^www\./, '');
+      const sec = Math.max(0, Math.floor(Number(seconds) || 0));
+      if (dom) limitBaselines[dom] = sec;
+    }
+  }
+  const domainUsage = {};
+  for (const [domain, total] of Object.entries(todayDomains)) {
+    domainUsage[domain] = Number(total) || 0;
+  }
+  return {
+    enabled,
+    days,
+    hours,
+    topDomains,
+    todayTotal: Number(todayEntry.total) || 0,
+    limits,
+    limitBaselines,
+    domainUsage
+  };
+});
+
+ipcMain.handle('record-screen-time-tick', (event, payload) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
+  const pid = getProfileIdForEvent(event);
+  if (pid === 'incognito') return false;
+  const domain = payload?.domain;
+  const seconds = payload?.seconds;
+  return recordScreenTimeTick(pid, domain, seconds);
+});
+
+ipcMain.handle('clear-screen-time-data', (event) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return false;
+  const store = getProfileStore(getProfileIdForEvent(event));
+  store.set('screenTimeLog', {});
+  store.set('screenTimeLimitBaselines', {});
   return true;
 });
 
@@ -8971,6 +10216,82 @@ ipcMain.handle('show-item-in-folder', async (event, filePath) => {
   }
 });
 
+function axisGuessMimeFromName(fileName = '') {
+  const ext = path.extname(String(fileName || '')).toLowerCase();
+  const map = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif',
+    '.txt': 'text/plain',
+    '.md': 'text/markdown',
+    '.json': 'application/json',
+    '.csv': 'text/csv',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+function axisIsAiChatImagePath(fileName = '') {
+  return /\.(jpe?g|png|gif|webp|bmp|svg|ico|tiff?|tif|avif|heic|heif|jfif|pjpeg|apng)$/i.test(
+    String(fileName || '')
+  );
+}
+
+function axisIsAiChatTextPath(fileName = '') {
+  return /\.(txt|md|markdown|csv|tsv|json|jsonl|xml|ya?ml|toml|ini|cfg|conf|config|log|env|html?|css|scss|less|js|mjs|cjs|jsx|ts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|sh|zsh|bash|sql|lua|r|dart|vue|svelte|graphql|gql|proto|tf|hcl|dockerfile|makefile|cmake|tex|bib|rst|properties|gradle|plist|zig|v|sv|asm|s|patch|diff|ipynb|lock|gitignore|editorconfig|prettierrc|eslintrc|npmrc|nvmrc|rtf)$/i.test(
+    String(fileName || '')
+  );
+}
+
+function axisIsTrustedAiChatAttachmentPath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return false;
+  let resolved;
+  try {
+    resolved = path.resolve(filePath);
+  } catch (_) {
+    return false;
+  }
+  if (isPathInsideAxisLibraryRoots(resolved)) return true;
+  try {
+    const dl = path.resolve(app.getPath('downloads'));
+    if (resolved === dl || resolved.startsWith(dl + path.sep)) return true;
+  } catch (_) {}
+  return false;
+}
+
+ipcMain.handle('read-ai-chat-attachment-path', async (event, filePath) => {
+  try {
+    if (!assertTrustedAxisIpcOrNull(event)) return null;
+    if (!filePath || typeof filePath !== 'string') return null;
+    const resolved = path.resolve(filePath);
+    if (!axisIsTrustedAiChatAttachmentPath(resolved)) return null;
+    const st = await fs.promises.stat(resolved).catch(() => null);
+    if (!st || !st.isFile()) return null;
+    const name = path.basename(resolved).slice(0, 120);
+    if (axisIsAiChatImagePath(name)) {
+      if (st.size > 15 * 1024 * 1024) return { ok: false, error: 'Image too large (max 15 MB).' };
+      const buf = await fs.promises.readFile(resolved);
+      const mimeType = axisGuessMimeFromName(name);
+      return { ok: true, kind: 'blob', name, mimeType, base64: buf.toString('base64') };
+    }
+    if (axisIsAiChatTextPath(name)) {
+      if (st.size > 2 * 1024 * 1024) return { ok: false, error: 'File too large (max 2 MB).' };
+      const text = await fs.promises.readFile(resolved, 'utf8');
+      if (text.includes('\u0000')) return { ok: false, error: `${name} is not a text file.` };
+      return { ok: true, kind: 'text', name, text };
+    }
+    return { ok: false, error: 'Unsupported file type.' };
+  } catch (error) {
+    console.error('read-ai-chat-attachment-path failed:', error);
+    return { ok: false, error: 'Could not read file.' };
+  }
+});
+
 // Incognito window (optional initial URL to open in a new tab)
 ipcMain.handle('open-incognito-window', (event, url) => {
   createIncognitoWindow(typeof url === 'string' && url.length > 0 ? url : null);
@@ -9019,10 +10340,13 @@ ipcMain.handle('axis-window-get-fullscreen', (event) => {
   return !!win.isFullScreen();
 });
 
-ipcMain.handle('open-external-url', async (_event, url) => {
-  if (typeof url !== 'string' || !/^https:\/\//i.test(url.trim())) return false;
+ipcMain.handle('open-external-url', async (event, url) => {
+  if (!event?.sender || event.sender.isDestroyed()) return false;
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!/^https:\/\/[^\s<>"']+$/i.test(trimmed)) return false;
   try {
-    await shell.openExternal(url.trim());
+    await shell.openExternal(trimmed);
     return true;
   } catch (e) {
     console.error('open-external-url failed:', e);
@@ -9037,8 +10361,11 @@ ipcMain.handle('get-axis-session-recovery', () => ({
 ipcMain.handle('get-profile-bootstrap', (_event, profileId) => {
   const id = sanitizeProfileId(profileId || AXIS_DEFAULT_PROFILE_ID);
   const profileStore = getProfileStore(id);
+  const settings = redactSettingsSecretsForExport(
+    mergeGlobalSettingsIntoProfileSettings(profileStore.store)
+  );
   return {
-    settings: mergeGlobalSettingsIntoProfileSettings(profileStore.store),
+    settings,
     pinnedTabs: profileStore.get('pinnedTabs', []),
     tabGroups: profileStore.get('tabGroups', []),
     unpinnedTabs: profileStore.get('unpinnedTabs', []),
@@ -9905,13 +11232,17 @@ ipcMain.handle('save-image-from-url', async (event, payload) => {
   try {
     const guest = guestId > 0 ? webContents.fromId(guestId) : null;
     if (guest && !guest.isDestroyed()) {
+      axisSignalDownloadActivitySoon();
       guest.downloadURL(url);
+      axisSignalDownloadActivitySoon();
       return { ok: true };
     }
     const win = BrowserWindow.fromWebContents(event.sender);
     const wc = win && !win.isDestroyed() ? win.webContents : null;
     if (wc && !wc.isDestroyed()) {
+      axisSignalDownloadActivitySoon();
       wc.downloadURL(url);
+      axisSignalDownloadActivitySoon();
       return { ok: true };
     }
     return { ok: false, error: 'no-webcontents' };
@@ -10151,6 +11482,12 @@ ipcMain.handle('show-tab-context-menu', async (event, x, y, tabInfo) => {
       event.sender.send('tab-context-menu-action', 'show-ancestry');
     }
   });
+  template.push({
+    label: uiT('menu.siteStyle'),
+    click: () => {
+      event.sender.send('tab-context-menu-action', 'site-style');
+    }
+  });
   template.push({ type: 'separator' });
   template.push({
     label: uiT('menu.closeTab'),
@@ -10193,6 +11530,22 @@ ipcMain.handle('show-favorite-context-menu', async (event, _x, _y, info) => {
       }
     });
   }
+  template.push(
+    { type: 'separator' },
+    {
+      label: uiT('menu.tabAncestry'),
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'show-ancestry');
+      }
+    },
+    {
+      label: uiT('menu.siteStyle'),
+      click: () => {
+        event.sender.send('favorite-context-menu-action', 'site-style');
+      }
+    },
+    { type: 'separator' }
+  );
   template.push(
     {
       label: uiT('menu.duplicateFavorite'),
@@ -10321,35 +11674,55 @@ ipcMain.handle('get-downloads-from-folder', async (event) => {
     let files = [];
     try {
       const dirFiles = await fs.promises.readdir(downloadsPath, { withFileTypes: true });
-      
-      for (const file of dirFiles) {
-        if (file.name.startsWith('.')) continue;
-        
-        const fullPath = path.join(downloadsPath, file.name);
-        
-        try {
-          const stats = await fs.promises.stat(fullPath);
-          if (!file.isDirectory()) {
-            files.push({
-              name: file.name,
-              path: fullPath,
-              mtime: stats.mtime,
-              size: stats.size
-            });
-          }
-        } catch (statError) {
-          continue;
-        }
-      }
+      const entries = await Promise.all(
+        dirFiles
+          .filter((file) => !file.name.startsWith('.') && !file.isDirectory())
+          .map(async (file) => {
+            const fullPath = path.join(downloadsPath, file.name);
+            try {
+              const stats = await fs.promises.stat(fullPath);
+              if (stats.isDirectory()) return null;
+              return { name: file.name, path: fullPath, mtime: stats.mtime, size: stats.size };
+            } catch (_) {
+              return null;
+            }
+          })
+      );
+      files = entries.filter(Boolean);
     } catch (readError) {
       console.error('Failed to read Downloads folder:', readError);
     }
     
     files.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
-    return files.slice(0, 5);
+    return files;
   } catch (error) {
     console.error('Failed to get downloads from folder:', error);
     return [];
+  }
+});
+
+/** Images dragged out of a web page arrive as URLs; the shell origin cannot read them cross-origin. */
+ipcMain.handle('fetch-ai-chat-image-url', async (event, rawUrl) => {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false };
+  let u;
+  try {
+    u = new URL(String(rawUrl || '').trim());
+  } catch (_) {
+    return { ok: false };
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return { ok: false };
+  if (u.username || u.password || isBlockedFetchHostname(u.hostname)) return { ok: false };
+  try {
+    const res = await net.fetch(u.href, { method: 'GET', redirect: 'follow', headers: { Accept: 'image/*' } });
+    if (!res.ok) return { ok: false };
+    const mimeType = String(res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!mimeType.startsWith('image/')) return { ok: false };
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length || buf.length > 8 * 1024 * 1024) return { ok: false };
+    const name = decodeURIComponent(u.pathname.split('/').pop() || '') || 'image';
+    return { ok: true, mimeType, base64: buf.toString('base64'), name: name.slice(0, 120) };
+  } catch (_) {
+    return { ok: false };
   }
 });
 
@@ -10462,6 +11835,32 @@ function scaleNativeImageToMax(icon, maxDim) {
   }
 }
 
+/** Small on-disk drag ghost (32px) — created once; never use the app logo or dragged file. */
+let axisFileDragGhostIconPath = null;
+
+function initAxisFileDragGhostIcon() {
+  if (axisFileDragGhostIconPath) {
+    try {
+      if (fs.existsSync(axisFileDragGhostIconPath)) return axisFileDragGhostIconPath;
+    } catch (_) {}
+  }
+  const icon = getGuaranteedDragFallbackIcon();
+  if (!icon || icon.isEmpty()) return null;
+  try {
+    const dir = path.join(app.getPath('userData'), 'axis-cache');
+    fs.mkdirSync(dir, { recursive: true });
+    axisFileDragGhostIconPath = path.join(dir, 'file-drag-ghost.png');
+    fs.writeFileSync(axisFileDragGhostIconPath, icon.toPNG());
+    return axisFileDragGhostIconPath;
+  } catch (_) {
+    return null;
+  }
+}
+
+function getAxisFileDragGhostIconPath() {
+  return axisFileDragGhostIconPath || initAxisFileDragGhostIcon();
+}
+
 /** Never empty - startDrag with an empty icon is skipped and looks like drag is broken */
 function getGuaranteedDragFallbackIcon() {
   const dataUrl =
@@ -10561,23 +11960,69 @@ ipcMain.handle('cache-drag-icons', async (event, paths) => {
   );
 });
 
-// Native file drag (must run synchronously during HTML dragstart - use on/send, not handle/invoke)
-ipcMain.on('start-file-drag', (event, filePath) => {
+function axisNotifyDownloadsFileDragComplete(sender, filePath) {
   try {
-    if (!assertTrustedAxisIpcOrNull(event)) return;
-    if (!filePath || typeof filePath !== 'string') return;
-    if (!isPathInsideAxisLibraryRoots(filePath)) return;
+    if (!sender || sender.isDestroyed()) return;
+    const payload = { filePath: filePath || null };
+    const win = BrowserWindow.fromWebContents(sender);
+    if (win && !win.isDestroyed()) {
+      try {
+        const pt = screen.getCursorScreenPoint();
+        const bounds = win.getContentBounds();
+        payload.clientX = pt.x - bounds.x;
+        payload.clientY = pt.y - bounds.y;
+      } catch (_) {}
+    }
+    sender.send('axis-downloads-file-drag-complete', payload);
+  } catch (_) {}
+}
 
-    let icon = getDragPreviewIconSync(filePath);
-    if (!icon || icon.isEmpty()) icon = getGuaranteedDragFallbackIcon();
-
-    event.sender.startDrag({
-      file: filePath,
-      icon
-    });
-  } catch (error) {
-    console.error('Failed to start file drag:', error);
+function axisRunTrustedFileDrag(event, filePath) {
+  if (!assertTrustedAxisIpcOrNull(event)) return { ok: false };
+  const sender = event.sender;
+  if (!filePath || typeof filePath !== 'string') {
+    axisNotifyDownloadsFileDragComplete(sender, null);
+    return { ok: false };
   }
+  let resolved;
+  try {
+    resolved = path.resolve(filePath);
+  } catch (_) {
+    axisNotifyDownloadsFileDragComplete(sender, null);
+    return { ok: false };
+  }
+  if (!isPathInsideAxisLibraryRoots(resolved) && !axisIsTrustedAiChatAttachmentPath(resolved)) {
+    axisNotifyDownloadsFileDragComplete(sender, resolved);
+    return { ok: false };
+  }
+
+  const cached = dragIconCache.get(filePath) || dragIconCache.get(resolved);
+  const icon = cached && !cached.isEmpty() ? cached : getAxisFileDragGhostIconPath();
+  if (!icon) {
+    axisNotifyDownloadsFileDragComplete(sender, resolved);
+    return { ok: false };
+  }
+
+  try {
+    if (!sender.isDestroyed()) sender.send('axis-file-drag-began', resolved);
+  } catch (_) {}
+  // Blocks the main process until drop on macOS; renderer uses IPC complete to restore UI.
+  sender.startDrag({ file: resolved, icon });
+  axisNotifyDownloadsFileDragComplete(sender, resolved);
+  const win = BrowserWindow.fromWebContents(sender);
+  if (win && !win.isDestroyed()) {
+    setImmediate(() => {
+      try {
+        if (!win.isDestroyed()) win.focus();
+      } catch (_) {}
+    });
+  }
+  return { ok: true };
+}
+
+ipcMain.handle('start-file-drag', (event, filePath) => axisRunTrustedFileDrag(event, filePath));
+ipcMain.on('start-file-drag', (event, filePath) => {
+  axisRunTrustedFileDrag(event, filePath);
 });
 
 // Downloads popup - native macOS menu showing recent files from Downloads folder
