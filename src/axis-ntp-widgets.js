@@ -547,7 +547,37 @@
         }
     }
 
-    function clockfaceSvg(kind) {
+    function handAngles(now = new Date(), timeZone) {
+        try {
+            const opts = {
+                hour: 'numeric',
+                minute: 'numeric',
+                second: 'numeric',
+                hour12: false
+            };
+            if (timeZone) opts.timeZone = timeZone;
+            const parts = new Intl.DateTimeFormat('en-US', opts).formatToParts(now);
+            const n = (type) => Number(parts.find((p) => p.type === type)?.value || 0);
+            let h = n('hour') % 12;
+            const m = n('minute');
+            const s = n('second');
+            return {
+                hour: h * 30 + m * 0.5 + s * (0.5 / 60),
+                minute: m * 6 + s * 0.1
+            };
+        } catch (_) {
+            const d = now instanceof Date ? now : new Date();
+            const h = d.getHours() % 12;
+            const m = d.getMinutes();
+            const s = d.getSeconds();
+            return {
+                hour: h * 30 + m * 0.5 + s * (0.5 / 60),
+                minute: m * 6 + s * 0.1
+            };
+        }
+    }
+
+    function clockfaceSvg(kind, angles = null) {
         const common = 'class="ntp-w-clockface-svg" viewBox="0 0 48 48" fill="none" aria-hidden="true"';
         if (kind === 'globe') {
             return `<svg ${common}>
@@ -555,9 +585,13 @@
   <path d="M10 24h28M24 10c4.2 3.8 6.5 8.6 6.5 14S28.2 34.2 24 38c-4.2-3.8-6.5-8.6-6.5-14S19.8 13.8 24 10z" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
 </svg>`;
         }
+        const a = angles || { hour: 0, minute: 0 };
         return `<svg ${common}>
   <circle cx="24" cy="24" r="14" stroke="currentColor" stroke-width="2.6"/>
-  <path d="M24 16v9l6 3.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <g class="ntp-w-clock-hands" transform="translate(24 24)">
+    <line class="ntp-w-clock-hand ntp-w-clock-hand--hour" x1="0" y1="0" x2="0" y2="-8" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" transform="rotate(${Number(a.hour) || 0})"/>
+    <line class="ntp-w-clock-hand ntp-w-clock-hand--minute" x1="0" y1="0" x2="0" y2="-11" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" transform="rotate(${Number(a.minute) || 0})"/>
+  </g>
 </svg>`;
     }
 
@@ -572,11 +606,12 @@
                 : d === 'xs'
                   ? parts.weekday
                   : `${parts.weekday}, ${parts.date}`;
+        const angles = handAngles(new Date());
         return shellHtml(
             widget,
             `<div class="ntp-w-clockface ntp-w-clockface--local${sizeCls}">
   <div class="ntp-w-clockface-cluster">
-    <div class="ntp-w-clockface-icon">${clockfaceSvg('clock')}</div>
+    <div class="ntp-w-clockface-icon">${clockfaceSvg('clock', angles)}</div>
     <div class="ntp-w-clockface-copy">
       <span class="ntp-w-clockface-place">${escapeHtml(wt('ntp.widget.local', 'Local'))}</span>
       <span class="ntp-w-clockface-time ntp-w-clock-time">${escapeHtml(parts.time)}</span>
@@ -621,12 +656,13 @@
             metaBits.length > 0
                 ? `<span class="ntp-w-clockface-meta ntp-w-world-date">${escapeHtml(metaBits.join(' · '))}</span>`
                 : '';
+        const angles = handAngles(new Date(), tz);
 
         return shellHtml(
             widget,
             `<div class="ntp-w-clockface ntp-w-clockface--world${sizeCls}" data-timezone="${escapeHtml(tz)}">
   <div class="ntp-w-clockface-cluster">
-    <div class="ntp-w-clockface-icon">${clockfaceSvg('globe')}</div>
+    <div class="ntp-w-clockface-icon">${clockfaceSvg('clock', angles)}</div>
     <div class="ntp-w-clockface-copy">
       <span class="ntp-w-clockface-place ntp-w-world-city">${escapeHtml(city)}</span>
       <span class="ntp-w-clockface-time ntp-w-world-time">${escapeHtml(parts.time)}</span>
@@ -2143,6 +2179,7 @@
         shiftCalendarMonth,
         clockParts,
         worldClockParts,
+        handAngles,
         fetchWeather,
         fetchAirQuality,
         fetchMarkets,
