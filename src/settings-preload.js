@@ -19,6 +19,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
   getSitePermissionOverrides: () => ipcRenderer.invoke('get-site-permission-overrides'),
+  getProfileCookieSites: () => ipcRenderer.invoke('get-profile-cookie-sites'),
+  getProfileCookiesForDomain: (domain) => ipcRenderer.invoke('get-profile-cookies-for-domain', domain),
+  clearProfileCookiesForDomain: (domain) => ipcRenderer.invoke('clear-profile-cookies-for-domain', domain),
+  clearProfileCookiesAll: () => ipcRenderer.invoke('clear-profile-cookies-all'),
   setSitePermissionOverrides: (obj) => ipcRenderer.invoke('set-site-permission-overrides', obj),
   getSettingsEditingContext: () => ipcRenderer.invoke('get-settings-editing-context'),
   setSettingsEditingProfile: (profileId) =>
@@ -35,6 +39,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchTickers: (query, limit) => ipcRenderer.invoke('axis-search-tickers', query, limit),
 
   getHistory: () => ipcRenderer.invoke('get-history'),
+  getScreenTimeStats: () => ipcRenderer.invoke('get-screen-time-stats'),
+  clearScreenTimeData: () => ipcRenderer.invoke('clear-screen-time-data'),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
   deleteHistoryItem: (id) => ipcRenderer.invoke('delete-history-item', id),
 
@@ -69,8 +75,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDefaultShortcuts: () => ipcRenderer.invoke('get-default-shortcuts'),
   setShortcuts: (shortcuts) => ipcRenderer.invoke('set-shortcuts', shortcuts),
   resetShortcuts: () => ipcRenderer.invoke('reset-shortcuts'),
+  getCustomShortcuts: () => ipcRenderer.invoke('get-custom-shortcuts'),
+  setCustomShortcuts: (list) => ipcRenderer.invoke('set-custom-shortcuts', list),
+  getCustomGestures: () => ipcRenderer.invoke('get-custom-gestures'),
+  setCustomGestures: (list) => ipcRenderer.invoke('set-custom-gestures', list),
   disableShortcuts: () => ipcRenderer.invoke('disable-shortcuts'),
   enableShortcuts: () => ipcRenderer.invoke('enable-shortcuts'),
+  beginShortcutCapture: () => ipcRenderer.invoke('begin-shortcut-capture'),
+  endShortcutCapture: (epoch) => ipcRenderer.invoke('end-shortcut-capture', epoch),
+  onShortcutCaptureKey: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('axis-shortcut-capture-key', handler);
+    return () => ipcRenderer.removeListener('axis-shortcut-capture-key', handler);
+  },
 
   onSettingsUpdated: (callback) =>
     ipcRenderer.on('settings-updated', (_event, data) => callback(data)),
