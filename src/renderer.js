@@ -203,6 +203,20 @@ function getShortcutEditorActions() {
         { action: 'toggle-chat', labelKey: 'shortcut.openChat' },
         { action: 'settings', labelKey: 'shortcut.openSettings' },
         { action: 'clear-history', labelKey: 'shortcut.clearHistory' },
+        { action: 'stop-loading', label: 'Stop loading' },
+        { action: 'toggle-notes', label: 'Toggle notes' },
+        { action: 'toggle-extensions', label: 'Toggle extensions' },
+        { action: 'toggle-adblock', label: 'Toggle ad blocker' },
+        { action: 'open-incognito-window', label: 'New incognito window' },
+        { action: 'copy-title', label: 'Copy page title' },
+        { action: 'open-settings-newtab', label: 'New tab settings' },
+        { action: 'open-settings-vault', label: 'Passwords & cards settings' },
+        { action: 'open-settings-extensions', label: 'Extensions settings' },
+        { action: 'open-settings-permissions', label: 'Site permissions settings' },
+        { action: 'open-settings-profiles', label: 'Profiles settings' },
+        { action: 'tab-volume-up', label: 'Tab volume up' },
+        { action: 'tab-volume-down', label: 'Tab volume down' },
+        { action: 'toggle-tab-mono', label: 'Toggle tab mono audio' },
         ...Array.from({ length: 9 }, (_, i) => ({
             action: `switch-tab-${i + 1}`,
             label: `Switch to tab ${i + 1}`
@@ -328,7 +342,8 @@ const AXIS_SETTINGS_SECTION_IDS = new Set([
     'shortcuts',
     'permissions',
     'extensions',
-    'vault'
+    'vault',
+    'screentime'
 ]);
 
 /** Allowlisted settings section id for IPC (never embed arbitrary strings in guest JS). */
@@ -446,6 +461,8 @@ class AxisBrowser {
         this.isBenchmarking = false; // suppress non-critical work on Speedometer
         this.isWebviewLoading = false; // Track if webview is currently loading
         this.spotlightSelectedIndex = -1; // Track selected suggestion index
+        this._spotlightOpen = false;
+        this._spotlightFromNewTab = false;
         this.NEWTAB_URL = 'axis://newtab'; // Custom new tab page (replaces spotlight)
         /** Tab id whose new-tab / AI chat state is currently painted in the shared `#new-tab-page` overlay. */
         this._ntpUiBoundTabId = null;
@@ -468,6 +485,11 @@ class AxisBrowser {
         this._sidebarChatImages = [];
         this._newTabChatImages = [];
         this._aiChatMaxImages = 4;
+        this._aiChatFileInputAccept =
+            'image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.ico,.tif,.tiff,.avif,.heic,.heif,.jfif,.apng,.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.env,.html,.htm,.css,.scss,.less,.js,.mjs,.cjs,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.kt,.kts,.swift,.c,.h,.cc,.cpp,.hpp,.cs,.php,.sh,.zsh,.bash,.sql,.lua,.r,.dart,.vue,.svelte,.graphql,.gql,.proto,.tf,.hcl,.dockerfile,.makefile,.cmake,.tex,.bib,.rst,.properties,.gradle,.plist,.zig,.v,.sv,.asm,.patch,.diff,.ipynb,.lock,.gitignore,.editorconfig,.prettierrc,.eslintrc,.npmrc,.nvmrc,.rtf,text/*,application/json,application/xml,application/x-yaml';
+        this._aiModelCatalog = [];
+        this._aiModelCatalogLoading = false;
+        this._aiModelMenuOpen = false;
         /** Whether the AI chat panel is open, keyed by normalized tab id (per-tab UI state). */
         this.aiChatPanelOpenByTabId = new Map();
         this.aiChatApiKey = ''; // Groq API key for chat
@@ -517,6 +539,8 @@ class AxisBrowser {
         this._linkStatusDockRight = false;
         this._linkStatusInDockZone = false;
         this._linkStatusDockLeaveTimer = null;
+        this._linkStatusDockResetTimer = null;
+        this._linkStatusChipHovered = false;
         this._settingsUpdatedRaf = null;
         this._ambientAudioCtx = null;
         this._ambientAudioChain = null;
@@ -563,6 +587,7 @@ class AxisBrowser {
         // Setup URL bar functionality
         this.setupUrlBar();
         this.setupLinkStatusBar();
+        this.setupHostNavGestures();
 
         // Listen for messages from embedded note pages
         this.messageHandler = (event) => this.onEmbeddedMessage(event);
@@ -647,15 +672,32 @@ class AxisBrowser {
             sidebarMediaPrevBtn: document.getElementById('sidebar-media-prev-btn'),
             sidebarMediaPlayBtn: document.getElementById('sidebar-media-play-btn'),
             sidebarMediaNextBtn: document.getElementById('sidebar-media-next-btn'),
-            sidebarMediaVolBtn: document.getElementById('sidebar-media-vol-btn')
+            sidebarMediaVolBtn: document.getElementById('sidebar-media-vol-btn'),
+            sidebarMediaVolWrap: document.getElementById('sidebar-media-vol-wrap')
         };
+        this._audioMixerTabId = null;
+        this._audioMixerVideoIndex = null;
+        this._audioMixerAnchor = null;
+        this._screenTimeActiveSince = null;
+        this._screenTimeDomainUsageToday = {};
+        this._screenTimeLimitDismissed = new Set();
+        this._screenTimeLimitBaselines = {};
+        this._screenTimeLimitShownFor = null;
+        this._screenTimeLimitResumeFor = null;
+        this._screenTimeLimitHideTimer = null;
+        this.elements.screenTimeLimitOverlay = document.getElementById('screen-time-limit-overlay');
+        this.elements.screenTimeLimitTitle = document.getElementById('screen-time-limit-title');
+        this.elements.screenTimeLimitMessage = document.getElementById('screen-time-limit-message');
+        this.elements.screenTimeLimitContinue = document.getElementById('screen-time-limit-continue');
+        this._sidebarHoverPeek = false;
         this.elements.profileSwitcherList = document.getElementById('profile-switcher-list');
         this.elements.profileMenuAdd = document.getElementById('profile-menu-add');
     }
 
     async init() {
         // Load settings + shortcut cache in parallel (faster first interaction)
-        await Promise.all([this.loadSettings(), this.refreshShortcutCache()]);
+        await Promise.all([this.loadSettings(), this.refreshShortcutCache(), this._loadCustomTrackpadGestures()]);
+        this._syncLinkPreviewLayout();
         try {
             const recovery = await window.electronAPI.getAxisSessionRecovery?.();
             this._lastSessionExitClean = recovery?.lastExitClean !== false;
@@ -726,8 +768,19 @@ class AxisBrowser {
         const initialUiTheme = this.isLightUiTheme() ? 'light' : 'dark';
         document.documentElement.setAttribute('data-ui-theme', initialUiTheme);
 
-        if (window.electronAPI?.platform === 'darwin') {
+        const shellPlatform = window.electronAPI?.platform;
+        if (shellPlatform === 'darwin') {
             document.documentElement.classList.add('platform-darwin');
+        } else if (shellPlatform === 'win32') {
+            document.documentElement.classList.add('platform-win32');
+            document.documentElement.classList.add('axis-shell-win32');
+            try {
+                document.documentElement.style.setProperty('--axis-win-titlebar-height', '48px');
+                document.documentElement.style.setProperty('--axis-win-caption-inset', '152px');
+            } catch (_) {}
+            this.syncWindowsFrostShellClass?.();
+        } else if (shellPlatform === 'linux') {
+            document.documentElement.classList.add('platform-linux');
         }
         
         if (this.isIncognitoWindow) {
@@ -795,11 +848,16 @@ class AxisBrowser {
         this.ensureProfileSwipeChrome?.();
         this.setupProfileSwipeGestures?.();
         this.setupEventListeners();
+        this._setupUrlBarButtonPressFeedback();
+        this._startDownloadActivityWatcher();
         this.setupSidebarMediaDockListeners();
+        this._bindTabAudioMixerUi();
+        this._initScreenTimeTracking();
         this.setupUpdateBanner();
         this.setupFullscreenChrome();
         this.setupSiteHtmlFullscreenSync();
         this.setupNewTabPage();
+        this.setupSpotlightSearch();
         this.setupTabSearch();
         this.setupLoadingScreen();
         this.setupSidebarResize();
@@ -986,6 +1044,12 @@ class AxisBrowser {
         ) {
             return true;
         }
+        if (
+            this._pipHandoffTabId != null &&
+            this._normalizeTabMapKey(this._pipHandoffTabId) === nid
+        ) {
+            return true;
+        }
         return false;
     }
 
@@ -1063,6 +1127,7 @@ class AxisBrowser {
                 webview.executeJavaScript(
                     `(function(){
                 if (window.__axisMediaPausedByAxis) return;
+                if (window.documentPictureInPicture && documentPictureInPicture.window) return;
                 const pipEl = document.pictureInPictureElement;
                 const nodes = document.querySelectorAll('video,audio');
                 const paused = [];
@@ -1169,6 +1234,14 @@ class AxisBrowser {
             if (!this.settings) {
                 this.settings = {};
             }
+            if (this.settings.screenTimeLimits) {
+                this.settings.screenTimeLimits = this._normalizeScreenTimeLimitsMap(
+                    this.settings.screenTimeLimits
+                );
+            }
+            if (this.settings.screenTimeLimitBaselines && typeof this.settings.screenTimeLimitBaselines === 'object') {
+                this._screenTimeLimitBaselines = { ...this.settings.screenTimeLimitBaselines };
+            }
         } catch (error) {
             console.error('Failed to load settings:', error);
             this.settings = {
@@ -1180,6 +1253,7 @@ class AxisBrowser {
         }
         this.applyUiLanguage(this.settings?.uiLanguage);
         this.applyUiFont(this.settings?.uiFont);
+        this._syncNavGestureConfigToAllWebviews();
     }
 
     /**
@@ -1358,13 +1432,17 @@ class AxisBrowser {
         try { this.updateNewTabHero?.(); } catch (_) {}
         if (!skipNtpWidgets) {
         try {
+            const localeChanged = this._ntpWidgetsLocale !== next;
+            this._ntpWidgetsLocale = next;
             const catalog = document.getElementById('ntp-widget-catalog');
             if (catalog) delete catalog.dataset.built;
             this._buildNtpWidgetCatalog?.();
             // Drop cached weather/AQ/markets so labels re-render in the new language.
-            try {
-                this._ntpFetchCache?.clear?.();
-            } catch (_) {}
+            if (localeChanged) {
+                try {
+                    this._ntpFetchCache?.clear?.();
+                } catch (_) {}
+            }
             this._ntpWidgetStructureKeyCached = '';
             this.renderNtpWidgets?.({ force: true });
             try {
@@ -1373,7 +1451,7 @@ class AxisBrowser {
                 const applyGen = (this._uiLanguageApplyGen = (this._uiLanguageApplyGen || 0) + 1);
                 layout
                     .filter((w) => api?.isAsyncType?.(w.type))
-                    .forEach((w) => void this._hydrateNtpWidget?.(w, { force: true }));
+                    .forEach((w) => void this._hydrateNtpWidget?.(w, { force: localeChanged }));
                 // Localize world-clock city labels (no network weather fetch).
                 void (async () => {
                     try {
@@ -1527,6 +1605,7 @@ class AxisBrowser {
             this.updateNewTabHero();
         }
         this._onboarding?.syncTheme?.();
+        this._syncLinkPreviewConfigToAllWebviews();
     }
 
     async saveSetting(key, value) {
@@ -1828,6 +1907,12 @@ class AxisBrowser {
      * Fully hide non-active webviews. (Do not use a 0.3-opacity “stack”: Chromium/Electron composites
      * multiple guests so inactive pages visibly bleed through the active tab when glass mode is off.)
      */
+    _webviewZoomStageForGuest(wv) {
+        if (!wv) return null;
+        const parent = wv.parentElement;
+        return parent?.classList?.contains('axis-webview-zoom-stage') ? parent : null;
+    }
+
     _styleInactiveTabWebview(wv) {
         if (!wv) return;
         wv.style.opacity = '0';
@@ -1836,6 +1921,181 @@ class AxisBrowser {
         wv.style.zIndex = '0';
         wv.classList.add('inactive');
         wv.style.willChange = '';
+        const stage = this._webviewZoomStageForGuest(wv);
+        if (stage) {
+            stage.style.visibility = 'hidden';
+            stage.style.pointerEvents = 'none';
+            stage.style.zIndex = '0';
+        }
+    }
+
+    /** Best URL for chrome/overlay (tab.url can lag; inactive guests often report about:blank). */
+    _resolveTabDisplayUrl(tab) {
+        if (!tab) return '';
+        let url = String(tab.url || '').trim();
+        if (url === this.NEWTAB_URL) return this.NEWTAB_URL;
+        const hist = tab.history;
+        if (Array.isArray(hist) && hist.length) {
+            const idx =
+                typeof tab.historyIndex === 'number' && tab.historyIndex >= 0
+                    ? tab.historyIndex
+                    : hist.length - 1;
+            const fromHist = hist[idx] ?? hist[hist.length - 1];
+            if (
+                fromHist &&
+                fromHist !== 'about:blank' &&
+                fromHist !== this.NEWTAB_URL &&
+                !/^axis:/i.test(fromHist) &&
+                (url === 'about:blank' || !url)
+            ) {
+                url = fromHist;
+            }
+        }
+        const wv = tab.webview;
+        if (wv && !wv.classList.contains('inactive')) {
+            try {
+                const src = String(wv.getURL() || '').trim();
+                if (
+                    src &&
+                    src !== 'about:blank' &&
+                    src !== this.NEWTAB_URL &&
+                    !src.startsWith('axis:')
+                ) {
+                    url = src;
+                }
+            } catch (_) {}
+        }
+        return url;
+    }
+
+    _demoteNonActiveWebviews(activeWv) {
+        const protect = new Set(
+            [this.pipWebview, this._crossProfileMediaGuest?.webview, this._sidebarMediaDock?.webview].filter(
+                Boolean
+            )
+        );
+        const container = document.getElementById('webviews-container');
+        if (container) {
+            for (const wv of container.querySelectorAll('webview')) {
+                if (wv === activeWv || protect.has(wv) || wv.dataset?.axisDeferredDestroy === '1') continue;
+                this._styleInactiveTabWebview(wv);
+            }
+        }
+        if (!activeWv) return;
+        activeWv.classList.remove('inactive');
+        activeWv.classList.remove('axis-profile-webview-suspended');
+        const stage = this._webviewZoomStageForGuest(activeWv);
+        if (stage) {
+            stage.style.visibility = 'visible';
+            stage.style.pointerEvents = 'auto';
+            stage.style.zIndex = '1';
+        }
+        try {
+            activeWv.style.removeProperty('opacity');
+            activeWv.style.removeProperty('visibility');
+            activeWv.style.removeProperty('pointer-events');
+        } catch (_) {}
+        activeWv.style.opacity = '1';
+        activeWv.style.visibility = 'visible';
+        activeWv.style.pointerEvents = 'auto';
+        activeWv.style.zIndex = '3';
+    }
+
+    /** Close stray URL-bar overlays and ensure exactly one guest receives pointer events. */
+    _ensureActiveWebviewInteractable() {
+        const tid = this._normalizeTabMapKey(this.currentTab);
+        const tab = tid != null ? this.tabs.get(tid) : null;
+        const displayUrl = this._resolveTabDisplayUrl(tab);
+        if (tab && displayUrl && displayUrl !== tab.url && displayUrl !== this.NEWTAB_URL) {
+            tab.url = displayUrl;
+            this.tabs.set(tid, tab);
+        }
+        const isNtp = displayUrl === this.NEWTAB_URL;
+        const isSettings = this._isSettingsTab(tab);
+        const isRealSite =
+            tab &&
+            displayUrl &&
+            displayUrl !== this.NEWTAB_URL &&
+            displayUrl !== 'about:blank' &&
+            !isSettings &&
+            !String(displayUrl).startsWith('axis:');
+
+        const ntp = document.getElementById('new-tab-page');
+        if (ntp) {
+            if (isNtp) {
+                ntp.classList.remove('hidden');
+                ntp.style.removeProperty('pointer-events');
+            } else {
+                ntp.classList.add('hidden');
+                ntp.style.pointerEvents = 'none';
+            }
+        }
+
+        const legacyWebview = document.getElementById('webview');
+        if (legacyWebview) {
+            legacyWebview.style.pointerEvents = 'none';
+            legacyWebview.style.opacity = '0';
+            legacyWebview.style.visibility = 'hidden';
+        }
+
+        const overlayPairs = [
+            ['downloads-popup', 'downloads-popup-backdrop', 'downloads-popup-open'],
+            ['url-bar-zoom-panel', 'url-bar-zoom-panel-backdrop', 'url-bar-zoom-panel-open'],
+            ['extensions-menu-panel', 'extensions-menu-backdrop', 'extensions-menu-open'],
+            ['security-panel', 'security-panel-backdrop', 'security-panel-open'],
+            ['adblock-panel', 'adblock-panel-backdrop', 'adblock-panel-open']
+        ];
+        for (const [panelId, backdropId, bodyClass] of overlayPairs) {
+            const panel = document.getElementById(panelId);
+            const hidden = !panel || panel.classList.contains('hidden');
+            const backdrop = document.getElementById(backdropId);
+            if (hidden) {
+                backdrop?.classList.add('hidden');
+                backdrop?.setAttribute('aria-hidden', 'true');
+                try {
+                    backdrop?.style.setProperty('pointer-events', 'none');
+                } catch (_) {}
+                document.body.classList.remove(bodyClass);
+            }
+        }
+
+        const wv = tab?.webview;
+        if (!wv) {
+            if (!isNtp) {
+                const ntpOnly = document.getElementById('new-tab-page');
+                if (ntpOnly) {
+                    ntpOnly.classList.add('hidden');
+                    ntpOnly.style.pointerEvents = 'none';
+                }
+            }
+            return;
+        }
+        if (isNtp) {
+            this._demoteNonActiveWebviews(wv);
+            wv.style.pointerEvents = 'none';
+            wv.style.zIndex = '1';
+            return;
+        }
+        this._demoteNonActiveWebviews(wv);
+        if (isRealSite || isSettings) {
+            wv.style.pointerEvents = 'auto';
+            wv.style.zIndex = '3';
+        }
+        try {
+            this._syncWebPanelVisualState();
+        } catch (_) {}
+    }
+
+    _hostChromeHasTextFocus() {
+        const ae = document.activeElement;
+        if (!ae || ae === document.body) return false;
+        if (ae.closest?.('#webview-url-bar')) return true;
+        if (ae.closest?.('#ai-chat-panel')) return true;
+        if (ae.closest?.('#new-tab-page')) return true;
+        if (ae.closest?.('#spotlight-search')) return true;
+        const tag = (ae.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+        return !!ae.isContentEditable;
     }
 
     async flushTransparentSitesForWebview(webview) {
@@ -1922,8 +2182,27 @@ class AxisBrowser {
         if (tid == null) return;
         const prev = this._normalizeTabMapKey(prevTabId);
         if (prev != null && prev !== tid) {
+            const handoff =
+                this._pipHandoffTabId != null &&
+                this._normalizeTabMapKey(this._pipHandoffTabId) === prev;
+            if (handoff) return;
             const prevTab = this.tabs.get(prev);
             if (prevTab?.webview) this._styleInactiveTabWebview(prevTab.webview);
+        }
+    }
+
+    /** New-tab overlay replaces the guest layer — hide every webview immediately. */
+    _hideAllWebviewsForNewTabPage() {
+        const container = document.getElementById('webviews-container');
+        if (!container) return;
+        const protect = new Set(
+            [this.pipWebview, this._crossProfileMediaGuest?.webview, this._sidebarMediaDock?.webview].filter(
+                Boolean
+            )
+        );
+        for (const wv of Array.from(container.querySelectorAll('webview'))) {
+            if (protect.has(wv) || wv.dataset?.axisDeferredDestroy === '1') continue;
+            this._styleInactiveTabWebview(wv);
         }
     }
 
@@ -2226,6 +2505,7 @@ class AxisBrowser {
             this._finishNewTabAiChatLayout();
             page.classList.add('ntp-ai-chat-mode');
             this._applyNewTabPageChrome();
+            this._applyAiChatPanelChrome();
             this.syncNewTabInputChrome();
             if (this.currentTab != null) {
                 this.applyNewTabTabChrome(this.currentTab);
@@ -2248,6 +2528,7 @@ class AxisBrowser {
         });
         page.classList.add('ntp-ai-chat-mode');
         this._applyNewTabPageChrome();
+        this._applyAiChatPanelChrome();
         this.syncNewTabInputChrome();
         await new Promise((resolve) => setTimeout(resolve, 420));
         page.classList.remove('ntp-ai-chat-entering');
@@ -2371,6 +2652,16 @@ class AxisBrowser {
         const input = document.getElementById('new-tab-input');
         const btn = document.getElementById('new-tab-send-btn');
         if (!btn || !input) return;
+        const icon = btn.querySelector('i');
+        if (this._aiChatStreaming) {
+            btn.disabled = false;
+            btn.classList.remove('is-disabled');
+            btn.classList.add('is-stop');
+            if (icon) icon.className = 'fas fa-square';
+            return;
+        }
+        btn.classList.remove('is-stop');
+        if (icon) icon.className = 'fas fa-arrow-up';
         const hasImages = (this._newTabChatImages?.length || 0) > 0;
         const canSend = this.isNewTabInChat() && (!!input.value.trim() || hasImages);
         btn.disabled = !canSend;
@@ -2381,6 +2672,19 @@ class AxisBrowser {
         const input = document.getElementById('ai-chat-input');
         const btn = document.getElementById('ai-chat-send');
         if (!btn || !input) return;
+        const icon = btn.querySelector('i');
+        if (this._aiChatStreaming) {
+            btn.disabled = false;
+            btn.classList.remove('is-disabled');
+            btn.classList.add('is-stop');
+            btn.setAttribute('aria-disabled', 'false');
+            btn.title = this.t('common.stop') || 'Stop';
+            if (icon) icon.className = 'fas fa-square';
+            return;
+        }
+        btn.classList.remove('is-stop');
+        if (icon) icon.className = 'fas fa-arrow-up';
+        btn.title = this.t('chrome.sendEnter') || 'Send (Enter)';
         const hasKey = this.hasAiApiKey();
         const hasImages = (this._sidebarChatImages?.length || 0) > 0;
         const hasText = !!input.value.trim();
@@ -2388,6 +2692,317 @@ class AxisBrowser {
         btn.disabled = !canSend;
         btn.setAttribute('aria-disabled', canSend ? 'false' : 'true');
         if (!hasKey) btn.tabIndex = -1;
+    }
+
+    _stopAiChatStream() {
+        if (this._aiChatStreamController) {
+            try {
+                this._aiChatStreamController.abort();
+            } catch (_) {}
+            this._aiChatStreamController = null;
+        }
+        this._aiChatStreaming = false;
+        this.updateSidebarChatSendButtonState();
+        this.updateNewTabSendButtonState();
+    }
+
+    _setAiChatStreaming(on) {
+        this._aiChatStreaming = !!on;
+        this.updateSidebarChatSendButtonState();
+        this.updateNewTabSendButtonState();
+    }
+
+    _chatMessagePlainText(msg) {
+        if (!msg) return '';
+        return String(msg.mainText != null ? msg.mainText : msg.content || '').trim();
+    }
+
+    _chatMessageMetaHtml(messageId, timeLabel, role) {
+        if (role !== 'user') {
+            return `<div class="ai-chat-message-meta"><span class="ai-chat-message-time">${timeLabel}</span></div>`;
+        }
+        const editLabel = this.escapeHtml(this.t('common.edit') || 'Edit');
+        return `<div class="ai-chat-message-meta">
+            <span class="ai-chat-message-time">${timeLabel}</span>
+            <button type="button" class="ai-chat-message-edit" data-edit-message-id="${messageId}" data-edit-scope="sidebar" title="${editLabel}" aria-label="${editLabel}"><i class="fas fa-pen" aria-hidden="true"></i></button>
+        </div>`;
+    }
+
+    cancelInlineChatEdit() {
+        const edit = this._inlineChatEdit;
+        if (!edit) return;
+        const host = edit.host;
+        if (edit.editable) {
+            edit.editable.contentEditable = 'false';
+            edit.editable.classList.remove('ai-chat-message-inline-editing');
+        }
+        if (host && edit.snapshot != null) {
+            host.innerHTML = edit.snapshot;
+        }
+        if (edit.meta && edit.metaSnapshot != null) {
+            edit.meta.innerHTML = edit.metaSnapshot;
+            edit.meta.style.removeProperty('opacity');
+            edit.meta.style.removeProperty('pointer-events');
+            edit.meta.style.removeProperty('visibility');
+            edit.meta.style.removeProperty('transform');
+        }
+        document
+            .querySelectorAll('.ai-chat-message.is-editing, .new-tab-ask-message.is-editing')
+            .forEach((el) => el.classList.remove('is-editing'));
+        this._inlineChatEdit = null;
+    }
+
+    beginEditChatMessage(messageId, scope = 'sidebar') {
+        const id = Number(messageId);
+        if (!Number.isFinite(id)) return;
+        this.cancelInlineChatEdit();
+
+        let host = null;
+        let text = '';
+        let row = null;
+        if (scope === 'ntp') {
+            row = document.querySelector(
+                `#new-tab-ask-messages .new-tab-ask-message.user[data-message-id="${id}"]`
+            );
+            if (!row) return;
+            const bubble = row.querySelector('.new-tab-ask-bubble');
+            if (!bubble) return;
+            text = (bubble.querySelector('.ai-chat-message-body-text')?.textContent || bubble.textContent || '').trim();
+            host = bubble;
+            const metaEl = row.querySelector('.ai-chat-message-meta');
+            this._inlineChatEdit = {
+                id,
+                scope: 'ntp',
+                host,
+                meta: metaEl,
+                snapshot: bubble.innerHTML,
+                metaSnapshot: metaEl ? metaEl.innerHTML : null
+            };
+        } else {
+            const idx = this.aiChatMessages.findIndex((m) => String(m.id) === String(id));
+            if (idx < 0) return;
+            const msg = this.aiChatMessages[idx];
+            if (msg.role !== 'user') return;
+            text = this._chatMessagePlainText(msg);
+            row = document.querySelector(
+                `#ai-chat-messages .ai-chat-message.user[data-message-id="${String(id)}"]`
+            );
+            if (!row) return;
+            host = row.querySelector('.ai-chat-message-content');
+            if (!host) return;
+            const metaEl = row.querySelector('.ai-chat-message-meta');
+            this._inlineChatEdit = {
+                id,
+                scope: 'sidebar',
+                host,
+                meta: metaEl,
+                snapshot: host.innerHTML,
+                metaSnapshot: metaEl ? metaEl.innerHTML : null,
+                idx
+            };
+        }
+
+        row.classList.add('is-editing');
+        const saveLabel = this.escapeHtml(this.t('common.save') || 'Save');
+        const cancelLabel = this.escapeHtml(this.t('common.cancel') || 'Cancel');
+        const hasRich =
+            host.querySelector(
+                '.ai-chat-message-quote, .ai-chat-attached-images, .ai-chat-message-content--with-media'
+            ) != null;
+        let editable = null;
+        if (!hasRich) {
+            editable =
+                host.querySelector('.ai-chat-message-body-text') ||
+                host.querySelector('.ai-chat-message-body');
+            if (!editable) {
+                editable = document.createElement('span');
+                editable.className = 'ai-chat-message-body-text';
+                editable.textContent = text;
+                host.innerHTML = '';
+                host.appendChild(editable);
+            }
+            editable.contentEditable = 'true';
+            editable.classList.add('ai-chat-message-inline-editing');
+            editable.setAttribute('spellcheck', 'true');
+            this._inlineChatEdit.editable = editable;
+        } else {
+            editable = document.createElement('div');
+            editable.className = 'ai-chat-message-body ai-chat-message-inline-editing';
+            editable.contentEditable = 'true';
+            editable.setAttribute('spellcheck', 'true');
+            editable.textContent = text;
+            const snap = host.innerHTML;
+            host.innerHTML = '';
+            host.appendChild(editable);
+            this._inlineChatEdit.snapshot = snap;
+            this._inlineChatEdit.editable = editable;
+        }
+        const meta =
+            row.querySelector('.ai-chat-message-meta') ||
+            row.querySelector('.new-tab-ask-message-meta') ||
+            (() => {
+                const el = document.createElement('div');
+                el.className =
+                    scope === 'ntp' ? 'new-tab-ask-message-meta ai-chat-message-meta' : 'ai-chat-message-meta';
+                const stack = row.querySelector('.ai-chat-message-stack') || row.querySelector('.new-tab-ask-body');
+                (stack || row).appendChild(el);
+                return el;
+            })();
+        meta.innerHTML = `<div class="ai-chat-message-edit-actions">
+            <button type="button" class="ai-chat-edit-cancel" title="${cancelLabel}" aria-label="${cancelLabel}"><i class="fas fa-times" aria-hidden="true"></i></button>
+            <button type="button" class="ai-chat-edit-save" data-edit-message-id="${id}" data-edit-scope="${scope}" title="${saveLabel}" aria-label="${saveLabel}"><i class="fas fa-check" aria-hidden="true"></i></button>
+        </div>`;
+        meta.style.opacity = '1';
+        meta.style.pointerEvents = 'auto';
+        meta.style.visibility = 'visible';
+        meta.style.transform = 'translateY(0)';
+        if (editable) {
+            editable.focus();
+            try {
+                const range = document.createRange();
+                range.selectNodeContents(editable);
+                range.collapse(false);
+                const sel = window.getSelection();
+                sel?.removeAllRanges();
+                sel?.addRange(range);
+            } catch (_) {}
+        }
+    }
+
+    _fitInlineEditTextarea(ta) {
+        if (!ta || ta.tagName !== 'TEXTAREA') return;
+        ta.style.height = '0';
+        ta.style.minHeight = '0';
+        const next = Math.min(200, Math.max(22, ta.scrollHeight));
+        ta.style.height = `${next}px`;
+        ta.style.overflowY = next >= 200 ? 'auto' : 'hidden';
+    }
+
+    async commitInlineChatEdit(messageId, scope = 'sidebar') {
+        const id = Number(messageId);
+        if (!Number.isFinite(id)) return;
+        const edit = this._inlineChatEdit;
+        const host = edit?.host;
+        const editable = edit?.editable;
+        const nextText = String(
+            editable?.textContent ?? host?.querySelector?.('.ai-chat-message-edit-area')?.value ?? ''
+        ).trim();
+        if (!nextText) return;
+
+        this.cancelInlineChatEdit();
+
+        if (scope === 'ntp') {
+            const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+            if (!tab || !Array.isArray(tab.newTabAskHistory)) return;
+            const container = document.getElementById('new-tab-ask-messages');
+            const row = container?.querySelector(`.new-tab-ask-message.user[data-message-id="${id}"]`);
+            const histIdx = Number(row?.dataset?.historyIndex);
+            const userIdx = Number.isFinite(histIdx)
+                ? histIdx
+                : tab.newTabAskHistory.findIndex((m) => m.role === 'user');
+            if (userIdx < 0) return;
+            tab.newTabAskHistory[userIdx].content = nextText;
+            tab.newTabAskHistory = tab.newTabAskHistory.slice(0, userIdx + 1);
+            this.tabs.set(this.currentTab, tab);
+            if (row) {
+                const bubble = row.querySelector('.new-tab-ask-bubble');
+                if (bubble) {
+                    bubble.innerHTML = `<span class="ai-chat-message-body-text">${this.escapeHtml(nextText)}</span>`;
+                }
+                let n = row.nextElementSibling;
+                while (n) {
+                    const rm = n;
+                    n = n.nextElementSibling;
+                    rm.remove();
+                }
+            }
+            this._persistNewTabChatStateIfNeeded();
+
+            const loadingId = Date.now();
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'new-tab-ask-message assistant';
+            loadingDiv.dataset.messageId = String(loadingId);
+            loadingDiv.innerHTML = `
+            <div class="new-tab-ask-avatar assistant" aria-hidden="true"><i class="fas fa-message"></i></div>
+            <div class="new-tab-ask-body">
+                <div class="new-tab-ask-bubble new-tab-ask-bubble-loading" aria-live="polite">
+                    <span class="new-tab-ask-loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                </div>
+            </div>`;
+            container?.appendChild(loadingDiv);
+            const streamUpdate = this._createNtpStreamUpdater(loadingId);
+            this._aiChatStreamController = new AbortController();
+            this._setAiChatStreaming(true);
+            try {
+                const response = await this.getChatAIResponse(nextText, {
+                    history: tab.newTabAskHistory.slice(0, userIdx),
+                    signal: this._aiChatStreamController.signal,
+                    onStream: (chunk) => streamUpdate(chunk, { done: false })
+                });
+                streamUpdate(response, { done: true });
+                tab.newTabAskHistory.push({ role: 'assistant', content: response, id: loadingId });
+                this.tabs.set(this.currentTab, tab);
+                this._persistNewTabChatStateIfNeeded();
+            } catch (error) {
+                const message =
+                    error?.name === 'AbortError'
+                        ? this.t('ai.stopped') || 'Stopped.'
+                        : 'Error: ' + (error?.message || 'Something went wrong');
+                streamUpdate(message, { done: true });
+                this._persistNewTabChatStateIfNeeded();
+            } finally {
+                this._aiChatStreamController = null;
+                this._setAiChatStreaming(false);
+            }
+            return;
+        }
+
+        const idx = this.aiChatMessages.findIndex((m) => String(m.id) === String(id));
+        if (idx < 0) return;
+        const msg = this.aiChatMessages[idx];
+        msg.content = nextText;
+        msg.mainText = nextText;
+        this.aiChatMessages = this.aiChatMessages.slice(0, idx + 1);
+
+        const row = document.querySelector(
+            `#ai-chat-messages .ai-chat-message.user[data-message-id="${String(id)}"]`
+        );
+        if (row) {
+            const body = row.querySelector('.ai-chat-message-body') || row.querySelector('.ai-chat-message-content');
+            if (body) body.textContent = nextText;
+            let n = row.nextElementSibling;
+            while (n) {
+                const rm = n;
+                n = n.nextElementSibling;
+                rm.remove();
+            }
+        }
+        this._persistSidebarChatForTab(this.currentTab);
+
+        const loadingId = this.addChatMessage('assistant', '', true);
+        const streamUpdate = this._createSidebarStreamUpdater(loadingId);
+        this._aiChatStreamController = new AbortController();
+        this._setAiChatStreaming(true);
+        try {
+            const response = await this.getChatAIResponse(nextText, {
+                signal: this._aiChatStreamController.signal,
+                onStream: (text) => streamUpdate(text, { done: false })
+            });
+            streamUpdate(response, { done: true });
+            this._finalizeChatMessage(loadingId, response);
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                streamUpdate(this.t('ai.stopped') || 'Stopped.', { done: true });
+                this._finalizeChatMessage(loadingId, this.t('ai.stopped') || 'Stopped.');
+            } else {
+                const errText = `Error: ${error.message}\n\nPlease try again.`;
+                streamUpdate(errText, { done: true });
+                this._finalizeChatMessage(loadingId, errText);
+            }
+        } finally {
+            this._aiChatStreamController = null;
+            this._setAiChatStreaming(false);
+        }
     }
 
     syncNewTabInputChrome() {
@@ -2399,9 +3014,19 @@ class AxisBrowser {
             input.setAttribute('aria-label', inChat ? this.t('chrome.messageAiAria') : this.t('chrome.searchOrUrlAria'));
         }
         page?.classList.toggle('ntp-in-chat', inChat);
+        if (input?.tagName === 'TEXTAREA') {
+            if (inChat) {
+                input.removeAttribute('rows');
+            } else {
+                input.setAttribute('rows', '1');
+                input.style.height = '';
+            }
+            this._autoGrowComposerInput?.(input);
+        }
         this.updateNewTabSendButtonState();
         this.updateNewTabHero();
         this._syncAiChatImageAttachUi();
+        this._syncAiModelPickerVisibility();
     }
 
     showNewTabAskSetup() {
@@ -2413,6 +3038,10 @@ class AxisBrowser {
     }
 
     performNewTabSearch() {
+        if (this._isSpotlightOpen()) {
+            this.performSpotlightSearch();
+            return;
+        }
         const input = document.getElementById('new-tab-input');
         if (!input?.value?.trim()) return;
         const suggestionsContainer = document.getElementById('new-tab-suggestions');
@@ -2437,6 +3066,41 @@ class AxisBrowser {
         }
         this.hideNewTabAskSetup();
         void this.sendNewTabAskMessage();
+    }
+
+    async triggerSpotlightAskFromSearch() {
+        if (!this.isAiFeaturesEnabled()) return;
+        const input = document.getElementById('spotlight-input');
+        const query = input?.value?.trim();
+        if (!query) return;
+        if (!this.hasAiApiKey()) {
+            document.getElementById('spotlight-ask-setup')?.classList.remove('hidden');
+            return;
+        }
+        this.hideSpotlightAskSetup();
+        this.closeSpotlightSearch();
+
+        const cur = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        const onNtp = cur?.url === this.NEWTAB_URL;
+        if (!onNtp) {
+            const tabId = this.createNewTab(null, {
+                skipSpotlightOverlay: true,
+                skipEnterAnimation: true
+            });
+            if (tabId != null && this._normalizeTabMapKey(this.currentTab) !== tabId) {
+                this.switchToTab(tabId);
+            }
+        } else {
+            this.updateNewTabPageVisibility(true);
+        }
+
+        const ntpInput = document.getElementById('new-tab-input');
+        if (ntpInput) ntpInput.value = query;
+        await this.sendNewTabAskMessage();
+    }
+
+    hideSpotlightAskSetup() {
+        document.getElementById('spotlight-ask-setup')?.classList.add('hidden');
     }
 
     stopAmbientAudio() {
@@ -2908,7 +3572,7 @@ class AxisBrowser {
         // Downloads button - open in-app downloads popup
         el.downloadsBtnFooter?.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.showDownloadsPopup();
+            void this.handleDownloadsButtonClick();
         });
         
         // Sidebar plus button - toggle New tab / New tab group menu
@@ -2950,31 +3614,65 @@ class AxisBrowser {
         });
 
         window.electronAPI?.onAxisDownloadActivity?.((payload) => {
-            const active = !!payload?.active;
-            document.body.classList.toggle('axis-download-activity', active);
-            const dlBtn = document.getElementById('downloads-btn-footer');
-            if (dlBtn) {
-                dlBtn.setAttribute('aria-busy', active ? 'true' : 'false');
-                if (!active) {
-                    document.body.classList.remove('axis-download-indeterminate');
-                    dlBtn.style.removeProperty('--axis-dl-pct');
-                    dlBtn.removeAttribute('title');
-                    dlBtn.setAttribute('title', 'Downloads');
-                } else {
-                    const p = payload.progress;
-                    const hasPct = typeof p === 'number' && Number.isFinite(p);
-                    if (hasPct) {
-                        document.body.classList.remove('axis-download-indeterminate');
-                        dlBtn.style.setProperty('--axis-dl-pct', String(Math.max(0, Math.min(1, p))));
-                    } else {
-                        document.body.classList.add('axis-download-indeterminate');
-                        dlBtn.style.removeProperty('--axis-dl-pct');
-                    }
-                    dlBtn.setAttribute('title', 'Downloading…');
+            if (payload?.active) {
+                this._setDownloadUiState('downloading', payload?.progress);
+            }
+        });
+
+        window.electronAPI?.onDownloadsFileDragComplete?.((payload) => {
+            const path = payload?.filePath || this._axisNativeFileDragPath;
+            if (
+                path &&
+                !this._axisNativeFileDragConsumed &&
+                payload?.clientX != null &&
+                payload?.clientY != null
+            ) {
+                const target = this._axisNativeFileDragAiTargetFromPoint(payload.clientX, payload.clientY);
+                if (target && this.hasAiApiKey() && this.isAiFeaturesEnabled()) {
+                    this._consumeNativeFileDragToAiChat(path, target);
                 }
             }
-            this.scheduleDownloadsPopupRefresh();
+            this._finishNativeFileDragToAiChat();
+            this._ensureDownloadsShellAfterFileDrag();
         });
+        window.electronAPI?.onFileDragBegan?.((filePath) => {
+            this._beginAxisNativeFileDrag(filePath);
+        });
+        window.__axisReleaseDownloadsDrag = () => {
+            this._finishNativeFileDragToAiChat();
+            this._ensureDownloadsShellAfterFileDrag();
+        };
+        if (!this._axisNativeFileDragDropBound) {
+            this._axisNativeFileDragDropBound = true;
+            document.addEventListener(
+                'dragover',
+                (e) => {
+                    if (!this._axisNativeFileDragPath) return;
+                    e.preventDefault();
+                    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+                    const target = this._axisNativeFileDragAiTargetFromEvent(e);
+                    if (target) {
+                        this._axisNativeFileDragAiTarget = target;
+                        this._axisNativeFileDragAiHoverAt = performance.now();
+                    }
+                },
+                true
+            );
+            document.addEventListener(
+                'drop',
+                (e) => {
+                    const path = this._axisNativeFileDragPath;
+                    if (!path) return;
+                    const target = this._axisNativeFileDragAiTargetFromEvent(e);
+                    if (!target) return;
+                    if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled()) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this._consumeNativeFileDragToAiChat(path, target);
+                },
+                true
+            );
+        }
         
         // Clear history button
         const clearHistoryBtn = document.getElementById('clear-history');
@@ -3151,7 +3849,12 @@ class AxisBrowser {
                     break;
                 case 'open-link-new-tab':
                     if (data && data.linkURL) {
-                        this.createNewTab(data.linkURL, { ancestryKind: 'link', ancestryFromContext: true });
+                        this.createNewTab(data.linkURL, {
+                            ancestryKind: 'link',
+                            ancestryFromContext: true,
+                            skipActivate: true,
+                            animateEnter: true
+                        });
                     }
                     break;
                 case 'copy-link':
@@ -3174,6 +3877,7 @@ class AxisBrowser {
                 }
                 case 'save-image':
                     if (data && data.srcURL && window.electronAPI?.saveImageFromUrl) {
+                        this._setDownloadUiState('downloading', null);
                         void window.electronAPI
                             .saveImageFromUrl(data.srcURL, Number(data.guestWebContentsId) || 0)
                             .then((result) => {
@@ -3247,6 +3951,18 @@ class AxisBrowser {
                 case 'print':
                     this.printPage({ fromContextMenu: true });
                     break;
+                case 'site-style': {
+                    const wv = this.getContextMenuWebview();
+                    if (!wv) break;
+                    const ctxInfo = this.webviewContextInfo || {};
+                    let point = null;
+                    if (Number.isFinite(ctxInfo.x) && Number.isFinite(ctxInfo.y)) {
+                        const r = wv.getBoundingClientRect();
+                        point = { x: r.left + ctxInfo.x, y: r.top + ctxInfo.y };
+                    }
+                    this._getSiteStyle()?.open({ webview: wv, point });
+                    break;
+                }
                 case 'inspect': {
                     const inspectWv = this.getContextMenuWebview();
                     if (!inspectWv) break;
@@ -3389,6 +4105,55 @@ class AxisBrowser {
                     this.contextMenuFavoriteId = null;
                     break;
                 }
+                case 'show-ancestry': {
+                    const fav = findFav();
+                    let tabId = fav ? this._normalizeTabMapKey(fav.runtimeTabId) : null;
+                    if (tabId == null || !this.tabs.has(tabId)) {
+                        const url = fav ? this.normalizeFavoriteUrl(fav.url) : '';
+                        if (url) {
+                            for (const [id, tab] of this.tabs) {
+                                if (tab?.url && this.normalizeFavoriteUrl(tab.url) === url) {
+                                    tabId = id;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (tabId != null && this.tabs.has(tabId)) {
+                        this.showTabAncestryPanel(tabId);
+                    } else {
+                        this.showNotification(
+                            this.t('ancestry.empty', 'No trail yet for this tab.'),
+                            'info'
+                        );
+                    }
+                    this.contextMenuFavoriteId = null;
+                    break;
+                }
+                case 'site-style': {
+                    const fav = findFav();
+                    const url = fav ? this.normalizeFavoriteUrl(fav.url) : '';
+                    if (!url) {
+                        this.contextMenuFavoriteId = null;
+                        break;
+                    }
+                    const rt = fav ? this._normalizeTabMapKey(fav.runtimeTabId) : null;
+                    const tab = rt != null ? this.tabs.get(rt) : null;
+                    const favEl =
+                        fav?.id != null
+                            ? document.querySelector(
+                                  `.favorite-item[data-favorite-id="${CSS.escape(String(fav.id))}"]`
+                              )
+                            : null;
+                    this.closeTabAncestryPanel();
+                    this._getSiteStyle()?.open({
+                        webview: tab?.webview,
+                        url,
+                        tabEl: favEl
+                    });
+                    this.contextMenuFavoriteId = null;
+                    break;
+                }
                 case 'update-saved-link': {
                     const fav = findFav();
                     const rt = fav ? this._normalizeTabMapKey(fav.runtimeTabId) : null;
@@ -3438,19 +4203,7 @@ class AxisBrowser {
                 case 'reset-icon': {
                     const fav = findFav();
                     if (fav) {
-                        fav.customIcon = null;
-                        fav.customIconType = null;
-                        const rt = this._normalizeTabMapKey(fav.runtimeTabId);
-                        if (rt != null && this.tabs.has(rt)) {
-                            const tab = this.tabs.get(rt);
-                            tab.customIcon = null;
-                            tab.customIconType = null;
-                            this.tabs.set(rt, tab);
-                            const tabElement = document.querySelector(`[data-tab-id="${rt}"]`);
-                            if (tabElement) this.updateTabIcon(tabElement, rt);
-                        }
-                        this.saveFavorites();
-                        this.renderFavorites();
+                        this._resetFavoriteCustomIcon(fav);
                         this.showNotification(this.t('note.iconReset'), 'success');
                     }
                     this.contextMenuFavoriteId = null;
@@ -3490,25 +4243,17 @@ class AxisBrowser {
                     this.showIconPicker('tab');
                     break;
                 case 'reset-icon':
-                    if (this.contextMenuTabId) {
-                        const tabId = this.contextMenuTabId;
-                        const tab = this.tabs.get(tabId);
+                    if (this.contextMenuTabId != null) {
+                        const tabId = this._normalizeTabMapKey(this.contextMenuTabId);
+                        const tab = tabId != null ? this.tabs.get(tabId) : null;
                         if (tab) {
                             tab.customIcon = null;
                             tab.customIconType = null;
                             this.tabs.set(tabId, tab);
-                            const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+                            const tabElement = this._getTabElement(tabId);
                             if (tabElement) this.updateTabIcon(tabElement, tabId);
                             if (tab.pinned) this._scheduleSavePinnedTabs();
-                            if (tab.isFavoriteTab && tab.favoriteId) {
-                                const fav = this.favorites.find((f) => f.id === tab.favoriteId);
-                                if (fav) {
-                                    fav.customIcon = null;
-                                    fav.customIconType = null;
-                                    this.saveFavorites();
-                                    this.renderFavorites();
-                                }
-                            }
+                            this._syncLinkedFavoriteIconFromTab(tab);
                         }
                     }
                     break;
@@ -3540,6 +4285,17 @@ class AxisBrowser {
                         this.showTabAncestryPanel(this.contextMenuTabId);
                     }
                     break;
+                case 'site-style': {
+                    const id = this._normalizeTabMapKey(this.contextMenuTabId);
+                    const tab = id != null ? this.tabs.get(id) : null;
+                    if (!tab?.webview) break;
+                    this.closeTabAncestryPanel();
+                    this._getSiteStyle()?.open({
+                        webview: tab.webview,
+                        tabEl: this._resolveTabAncestryAnchorEl(id)
+                    });
+                    break;
+                }
             }
         });
         
@@ -3582,7 +4338,9 @@ class AxisBrowser {
                                 tabGroup.iconType = null;
                                 this.tabGroups.set(gid, tabGroup);
                                 this.saveTabGroups();
-                                this.renderTabGroups();
+                                const groupEl = this._findTabGroupElementInProfileScope(gid);
+                                if (groupEl) this.syncTabGroupElementHeader(groupEl, tabGroup);
+                                else this.renderTabGroups();
                             }
                         }
                     }
@@ -3975,7 +4733,12 @@ class AxisBrowser {
         document.getElementById('webpage-open-link-new-tab')?.addEventListener('click', () => {
             const ctx = this.webviewContextInfo || {};
             if (ctx.linkURL) {
-                this.createNewTab(ctx.linkURL, { ancestryKind: 'link', ancestryFromContext: true });
+                this.createNewTab(ctx.linkURL, {
+                    ancestryKind: 'link',
+                    ancestryFromContext: true,
+                    skipActivate: true,
+                    animateEnter: true
+                });
             }
             this.hideWebpageContextMenu();
         });
@@ -4012,6 +4775,7 @@ class AxisBrowser {
                 }
             } catch (_) {}
             if (ctx.srcURL && window.electronAPI?.saveImageFromUrl) {
+                this._setDownloadUiState('downloading', null);
                 await window.electronAPI.saveImageFromUrl(ctx.srcURL, guestWebContentsId);
             }
             this.hideWebpageContextMenu();
@@ -4135,9 +4899,7 @@ class AxisBrowser {
 
         // Listen for close tab accelerator from main process
         window.electronAPI.onCloseTab(() => {
-            if (this.currentTab) {
-                this.closeTab(this.currentTab);
-            }
+            this._handleCloseTabShortcut();
         });
 
         // Listen for quit request from main process
@@ -4156,6 +4918,30 @@ class AxisBrowser {
         window.electronAPI.onAxisHostNavGesture?.((action) => {
             try {
                 this.tryNavigateWithAxisGesture(action);
+            } catch (_) {
+                /* ignore */
+            }
+        });
+
+        window.electronAPI.onAxisHostNavGestureFeedback?.(() => {
+            try {
+                this.updateNavigationButtons();
+            } catch (_) {
+                /* ignore */
+            }
+        });
+
+        window.electronAPI.onAxisGuestLinkPreviewInput?.((payload) => {
+            try {
+                this._handleLinkPreviewMainInput(payload);
+            } catch (_) {
+                /* ignore */
+            }
+        });
+
+        window.electronAPI.onAxisGuestSwipeNav?.((payload) => {
+            try {
+                this._handleGuestSwipeNav(payload);
             } catch (_) {
                 /* ignore */
             }
@@ -4218,7 +5004,8 @@ class AxisBrowser {
             const fromTabId = sourceId ? this._findTabIdByWebContentsId(sourceId) : this.currentTab;
             if (url) {
                 this.createNewTab(url, {
-                    skipEnterAnimation: true,
+                    skipActivate: true,
+                    animateEnter: true,
                     ancestryKind: 'link',
                     fromTabId
                 });
@@ -4273,6 +5060,7 @@ class AxisBrowser {
             if (this.settings?.ambientAudioEnabled === true) {
                 void this.applyAmbientFromSettings();
             }
+            requestAnimationFrame(() => this._ensureActiveWebviewInteractable());
         });
     }
 
@@ -5033,11 +5821,31 @@ class AxisBrowser {
 
     async applySettingsUpdateFromMain(data) {
         try {
+            void this.refreshShortcutCache();
             const prevJs = this._lastJavascriptEnabled;
             const before = this._settingsApplySnapshot();
             // Prefer the value just written (instant) over waiting on another get-settings IPC.
             if (data && typeof data.key === 'string') {
                 this.settings = this.settings || {};
+                if (
+                    data.key === 'screenTimeEnabled' &&
+                    this.settings.screenTimeEnabled &&
+                    data.value === false
+                ) {
+                    this._flushScreenTime({ ignoreEnabled: true });
+                } else if (data.key === 'screenTimeEnabled' && data.value === true) {
+                    this._screenTimeActiveSince = Date.now();
+                } else if (data.key === 'screenTimeLimits') {
+                    const prevLimits = this._normalizeScreenTimeLimitsMap(this.settings?.screenTimeLimits);
+                    data.value = this._normalizeScreenTimeLimitsMap(data.value);
+                    for (const dom of Object.keys(prevLimits)) {
+                        if (!data.value[dom]) this._screenTimeLimitDismissed.delete(dom);
+                    }
+                    void this._refreshScreenTimeUsageCache().then(() => this._checkScreenTimeLimitForCurrentTab());
+                } else if (data.key === 'screenTimeLimitBaselines') {
+                    this._screenTimeLimitBaselines =
+                        data.value && typeof data.value === 'object' ? { ...data.value } : {};
+                }
                 this.settings[data.key] = data.value;
                 if (data.key === 'universalBrowserLanguage') {
                     this.settings.universalBrowserLanguage = !!data.value;
@@ -5152,6 +5960,11 @@ class AxisBrowser {
                 before.ambientPreset !== after.ambientPreset ||
                 before.ambientVol !== after.ambientVol;
             const linkPreviewChanged = before.linkPreview !== after.linkPreview;
+            const navGestureChanged =
+                before.navGestureEnabled !== after.navGestureEnabled ||
+                before.navGestureSensitivity !== after.navGestureSensitivity ||
+                before.navPinchZoomEnabled !== after.navPinchZoomEnabled;
+            const profileSwipeChanged = before.profileSwipeEnabled !== after.profileSwipeEnabled;
             const windowChromeChanged = before.windowChromeLight !== after.windowChromeLight;
             const sidebarZoomChanged = before.sidebarZoom !== after.sidebarZoom;
             const unpinnedClearChanged =
@@ -5174,6 +5987,8 @@ class AxisBrowser {
             if (
                 (ambientChanged ||
                     linkPreviewChanged ||
+                    navGestureChanged ||
+                    profileSwipeChanged ||
                     sidebarZoomChanged ||
                     unpinnedClearChanged ||
                     ntpChanged ||
@@ -5188,6 +6003,7 @@ class AxisBrowser {
             ) {
                 if (ambientChanged) void this.applyAmbientFromSettings();
                 if (linkPreviewChanged) this._applyLinkPreviewSetting();
+                if (navGestureChanged) this._syncNavGestureConfigToAllWebviews();
                 if (sidebarZoomChanged) this.applySidebarZoom();
                 if (unpinnedClearChanged) this._setupUnpinnedClearTimer();
                 if (aiFeaturesChanged) this.applyAiFeaturesVisibility();
@@ -5294,7 +6110,7 @@ class AxisBrowser {
     _normalizeSidebarZoom(raw) {
         const n = Number(raw);
         const v = Number.isFinite(n) ? n : 100;
-        return Math.max(75, Math.min(150, Math.round(v / 5) * 5));
+        return Math.max(75, Math.min(150, Math.round(v)));
     }
 
     _settingsApplySnapshot() {
@@ -5318,6 +6134,13 @@ class AxisBrowser {
             ambientPreset: s.ambientAudioPreset || 'rain',
             ambientVol: Math.max(0, Math.min(100, ambientVol)),
             linkPreview: s.linkPreview !== false,
+            navGestureEnabled: s.navGestureEnabled !== false,
+            navGestureSensitivity: Math.max(
+                50,
+                Math.min(150, Number(s.navGestureSensitivity) || 100)
+            ),
+            navPinchZoomEnabled: s.navPinchZoomEnabled !== false,
+            profileSwipeEnabled: s.profileSwipeEnabled !== false,
             windowChromeLight: this._normalizeWindowChromeLight(s.windowChromeLight),
             sidebarZoom: this._normalizeSidebarZoom(s.sidebarZoom),
             unpinnedClearMode: s.unpinnedClearMode || 'app-close',
@@ -5439,16 +6262,21 @@ class AxisBrowser {
         const siteDisabled = !!stats.siteDisabled;
         const active = globalOn && !siteDisabled;
         const hasSite = !!ctx.pageHostname;
+        const pageBlocked = Number(stats.pageBlocked) || 0;
         const sessionBlocked = Number(stats.totalBlocked) || 0;
-        const sessionCats = stats.sessionByCategory || { ads: 0, trackers: 0, other: 0 };
         const pageCats = stats.pageByCategory || { ads: 0, trackers: 0, other: 0 };
-        const ads = Number(sessionCats.ads) || 0;
-        const trackers = Number(sessionCats.trackers) || 0;
-        const other = Number(sessionCats.other) || 0;
+        const sessionCats = stats.sessionByCategory || { ads: 0, trackers: 0, other: 0 };
+        // On a real site, show this page only. Off-site (new tab, etc.) keep session totals.
+        const heroBlocked = hasSite ? pageBlocked : sessionBlocked;
+        const heroCats = hasSite ? pageCats : sessionCats;
+        const ads = Number(heroCats.ads) || 0;
+        const trackers = Number(heroCats.trackers) || 0;
+        const other = Number(heroCats.other) || 0;
 
         const badge = document.getElementById('adblock-panel-badge');
         const statWrap = document.getElementById('adblock-panel-stat-wrap');
         const pageCount = document.getElementById('adblock-panel-page-count');
+        const pageCountLabel = document.querySelector('#adblock-panel-stat-wrap .adblock-panel-stat-label');
         const statusEl = document.getElementById('adblock-panel-status');
         const globalBtn = document.getElementById('adblock-panel-global-btn');
         const siteBtn = document.getElementById('adblock-panel-site-btn');
@@ -5472,11 +6300,19 @@ class AxisBrowser {
             iconWrap.classList.toggle('adblock-panel-icon-wrap--off', !globalOn);
         }
         if (statWrap) {
-            // Session totals still useful with protection on, even on new-tab / no site.
             statWrap.classList.toggle('hidden', !active);
         }
         if (pageCount) {
-            pageCount.textContent = sessionBlocked.toLocaleString();
+            pageCount.textContent = heroBlocked.toLocaleString();
+        }
+        if (pageCountLabel) {
+            pageCountLabel.textContent = hasSite
+                ? this.t('adblock.blockedThisPage')
+                : this.t('adblock.blockedThisSession');
+            pageCountLabel.setAttribute(
+                'data-i18n',
+                hasSite ? 'adblock.blockedThisPage' : 'adblock.blockedThisSession'
+            );
         }
         const setChip = (id, n) => {
             const el = document.getElementById(id);
@@ -5569,12 +6405,31 @@ class AxisBrowser {
                 [this.t('adblock.cat.trackers'), trackers, 'trackers'],
                 [this.t('adblock.cat.other'), others, 'other'],
             ];
-            breakdown.innerHTML = rows
+            let html = rows
                 .map(
                     ([label, n, cat]) =>
                         `<div class="adblock-fact-row"><dt><span class="adblock-cat-dot adblock-cat-dot--${this.escapeHtml(cat)}"></span>${this.escapeHtml(label)}</dt><dd>${n.toLocaleString()}</dd></div>`
                 )
                 .join('');
+            if (stats.fingerprintProtected || stats.fingerprintProtection) {
+                const fpLabel = this.t('adblock.fingerprint');
+                const fpValue = stats.fingerprintProtected
+                    ? this.t('adblock.fpActive')
+                    : this.t('adblock.fpReady');
+                html += `<div class="adblock-fact-row"><dt>${this.escapeHtml(fpLabel)}</dt><dd>${this.escapeHtml(fpValue)}</dd></div>`;
+            }
+            const typeRows = Array.isArray(stats.pageByType) ? stats.pageByType : [];
+            if (typeRows.length) {
+                html += typeRows
+                    .slice(0, 8)
+                    .map((row) => {
+                        const label = this.escapeHtml(this._adblockTypeLabel(row.type));
+                        const n = Number(row.count) || 0;
+                        return `<div class="adblock-fact-row"><dt>${label}</dt><dd>${n.toLocaleString()}</dd></div>`;
+                    })
+                    .join('');
+            }
+            breakdown.innerHTML = html;
         }
 
         const items = Array.isArray(stats.blockedItems) ? stats.blockedItems : [];
@@ -5664,6 +6519,7 @@ class AxisBrowser {
         }
         this.closeExtensionsMenu();
         this.closeSecurityPanel();
+        this.closeUrlBarZoomPanel();
 
         await this.refreshAdblockPanel();
         this.positionAdblockPanel();
@@ -5804,6 +6660,465 @@ class AxisBrowser {
         } catch (_) {
             this._shortcutCache = {};
         }
+        this._broadcastShortcutMapToWebviews();
+        void this._loadCustomTrackpadGestures();
+    }
+
+    _broadcastShortcutMapToWebviews() {
+        const map = this._shortcutCache || {};
+        for (const tab of this.tabs?.values() || []) {
+            const wv = tab?.webview;
+            if (!wv || typeof wv.send !== 'function') continue;
+            try {
+                wv.send('axis-shortcut-map', map);
+            } catch (_) {}
+        }
+    }
+
+    async _loadCustomTrackpadGestures() {
+        try {
+            const list = (await window.electronAPI.getCustomGestures?.()) || [];
+            this._customTrackpadGestures = list;
+            this._customGestureByType = new Map();
+            this._customTraceGestures = [];
+            for (const item of list) {
+                const g = item?.gesture;
+                if (g && this._customGestureByType && !String(g).startsWith('trace:')) {
+                    this._customGestureByType.set(g, item);
+                }
+            }
+        } catch (_) {
+            this._customTrackpadGestures = [];
+            this._customGestureByType = new Map();
+            this._customTraceGestures = [];
+        }
+    }
+
+    async _runCustomGestureSteps(item) {
+        if (!item) return;
+        const steps = Array.isArray(item.steps)
+            ? item.steps
+            : item.command
+              ? [item.command]
+              : [];
+        if (!steps.length) return;
+        for (let i = 0; i < steps.length; i++) {
+            this.executeBrowserShortcut(steps[i]);
+            if (i < steps.length - 1) {
+                await new Promise((r) => setTimeout(r, 12));
+            }
+        }
+    }
+
+    _tryCustomTrackpadGesture(gestureType) {
+        const item = this._customGestureByType?.get(gestureType);
+        if (!item) return false;
+        void this._runCustomGestureSteps(item);
+        return true;
+    }
+
+    _tryCustomTrackpadGestureFromSamples(samples) {
+        if (!samples?.length) return false;
+        let pinchSum = 0;
+        let maxTap = 0;
+        let maxFingers = 1;
+        for (const s of samples) {
+            pinchSum += Number(s?.pinch) || 0;
+            maxTap = Math.max(maxTap, Number(s?.tap) || 0);
+            maxFingers = Math.max(maxFingers, Number(s?.fingers) || 1);
+        }
+        if (Math.abs(pinchSum) > 36) {
+            const g = pinchSum > 0 ? 'pinch-out' : 'pinch-in';
+            if (this._tryCustomTrackpadGesture(g)) return true;
+        }
+        if (maxTap >= 3 && this._tryCustomTrackpadGesture('triple-tap')) return true;
+        if (maxTap === 2 && this._tryCustomTrackpadGesture('double-tap')) return true;
+        if (maxTap >= 1 && maxFingers >= 2 && this._tryCustomTrackpadGesture('two-finger-tap')) {
+            return true;
+        }
+        if (maxTap === 1 && this._tryCustomTrackpadGesture('tap')) return true;
+        return false;
+    }
+
+    _axisAiChatAttachDragLikely() {
+        if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled()) return false;
+        if (document.getElementById('content-area')?.classList.contains('chat-open')) return true;
+        const ntp = document.getElementById('new-tab-page');
+        if (ntp && !ntp.classList.contains('hidden') && ntp.classList.contains('ntp-ai-chat-mode')) {
+            return true;
+        }
+        return false;
+    }
+
+    _tryCustomGestureTrace(samples) {
+        const api = window.AXIS_GESTURE_TRACE;
+        if (!api || !samples?.length) return false;
+        const sens = Math.max(
+            50,
+            Math.min(150, Number(this.settings?.navGestureSensitivity) || 100)
+        );
+        const threshold = 0.62 * (100 / sens);
+        const matched = api.matchGestureTrace(samples, this._customTraceGestures, threshold);
+        if (!matched) return false;
+        void this._runCustomGestureSteps(matched);
+        return true;
+    }
+
+    _clearWebviewCssZoom(webview) {
+        if (!webview) return;
+        try {
+            webview.classList.remove('axis-guest-visual-zoom-active');
+            webview.style.transform = '';
+            webview.style.transformOrigin = '';
+            webview.style.transition = '';
+        } catch (_) {}
+    }
+
+    _findTabRecordForWebview(webview, tabIdHint) {
+        let tid = tabIdHint != null ? this._normalizeTabMapKey(tabIdHint) : null;
+        if (tid != null) {
+            const direct = this.tabs.get(tid);
+            if (direct) return { tab: direct, tabId: tid };
+        }
+        if (webview) {
+            const fromDataset = this._tabIdForWebview(webview);
+            if (fromDataset != null) {
+                const tab = this.tabs.get(fromDataset);
+                if (tab) return { tab, tabId: fromDataset };
+            }
+            for (const [id, tab] of this.tabs.entries()) {
+                if (tab?.webview === webview) {
+                    return { tab, tabId: this._normalizeTabMapKey(id) ?? id };
+                }
+            }
+        }
+        return { tab: null, tabId: tid };
+    }
+
+    _ensureTabZoomStage(tab, webview) {
+        if (!webview) return null;
+        if (tab?.zoomStage?.isConnected) return tab.zoomStage;
+        const parent = webview.parentElement;
+        if (parent?.classList?.contains('axis-webview-zoom-stage')) {
+            if (tab) tab.zoomStage = parent;
+            return parent;
+        }
+        if (!webview.parentNode) return webview;
+        const stage = document.createElement('div');
+        stage.className = 'axis-webview-zoom-stage';
+        stage.dataset.tabId = String(webview.dataset?.tabId || tab?.id || '');
+        stage.style.cssText =
+            'position:absolute;top:0;left:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;z-index:0;';
+        webview.parentNode.insertBefore(stage, webview);
+        stage.appendChild(webview);
+        if (tab) tab.zoomStage = stage;
+        return stage;
+    }
+
+    _getWebviewZoomFactor(webview) {
+        try {
+            const f = Number(webview?.getZoomFactor?.());
+            return Number.isFinite(f) && f > 0 ? f : 1;
+        } catch (_) {
+            return 1;
+        }
+    }
+
+    _getTabZoomPercent(_tab, webview) {
+        return Math.round(this._getWebviewZoomFactor(webview) * 100);
+    }
+
+    _updateUrlBarZoomIcon(btn, pct) {
+        const icon = btn?.querySelector?.('.url-bar-zoom-icon');
+        if (!icon) return;
+        icon.classList.remove('fa-magnifying-glass-plus', 'fa-magnifying-glass-minus');
+        icon.classList.add(pct < 100 ? 'fa-magnifying-glass-minus' : 'fa-magnifying-glass-plus');
+    }
+
+    _syncUrlBarZoomBadge(tabId) {
+        const btn = document.getElementById('url-bar-zoom-badge');
+        if (!btn) return;
+        const tid = tabId != null ? tabId : this.currentTab;
+        const tab = tid != null ? this.tabs.get(tid) : null;
+        const webview = tab?.webview || this.getActiveWebview();
+        const pct = this._getTabZoomPercent(tab, webview);
+        const label = btn.querySelector('.url-bar-zoom-label');
+        if (label) label.textContent = `${pct}%`;
+        this._updateUrlBarZoomIcon(btn, pct);
+        const zp = document.getElementById('url-bar-zoom-panel');
+        const panelOpen = zp && !zp.classList.contains('hidden');
+        const flashing =
+            document.body.classList.contains('url-bar-zoom-done') ||
+            document.body.classList.contains('url-bar-zoom-leaving');
+        const hovered = !!this._urlBarCenterHovered;
+        const needsZoom = pct !== 100;
+        const show = flashing || panelOpen || (hovered && needsZoom);
+        if (this._urlBarZoomHideDelayTimer) {
+            clearTimeout(this._urlBarZoomHideDelayTimer);
+            this._urlBarZoomHideDelayTimer = null;
+        }
+        if (show) {
+            btn.classList.remove('hidden');
+        } else if (needsZoom) {
+            this._urlBarZoomHideDelayTimer = setTimeout(() => {
+                this._urlBarZoomHideDelayTimer = null;
+                const hoveredNow = !!this._urlBarCenterHovered;
+                const flashingNow =
+                    document.body.classList.contains('url-bar-zoom-done') ||
+                    document.body.classList.contains('url-bar-zoom-leaving');
+                const panelOpenNow = zp && !zp.classList.contains('hidden');
+                if (!hoveredNow && !flashingNow && !panelOpenNow) {
+                    btn.classList.add('hidden');
+                }
+            }, 320);
+        } else {
+            btn.classList.add('hidden');
+        }
+        btn.setAttribute('aria-hidden', show ? 'false' : 'true');
+        btn.dataset.zoomPct = String(pct);
+        const panelPct = document.getElementById('url-bar-zoom-panel-value');
+        if (panelPct) panelPct.textContent = `${pct}%`;
+    }
+
+    _flashUrlBarZoomChange(percentage, zoomDelta = null) {
+        const btn = document.getElementById('url-bar-zoom-badge');
+        if (!btn) return;
+        const label = btn.querySelector('.url-bar-zoom-label');
+        const icon = btn.querySelector('.url-bar-zoom-icon');
+        if (label) label.textContent = `${percentage}%`;
+        if (zoomDelta != null) this._lastUrlBarZoomDelta = zoomDelta;
+        this._updateUrlBarZoomIcon(btn, percentage);
+        btn.classList.remove('hidden');
+        btn.setAttribute('aria-hidden', 'false');
+        if (this._urlBarZoomFlashTimer) {
+            clearTimeout(this._urlBarZoomFlashTimer);
+            this._urlBarZoomFlashTimer = null;
+        }
+        if (this._urlBarZoomLeaveTimer) {
+            clearTimeout(this._urlBarZoomLeaveTimer);
+            this._urlBarZoomLeaveTimer = null;
+        }
+        document.body.classList.remove('url-bar-zoom-leaving');
+        document.body.classList.add('url-bar-zoom-done');
+        btn.classList.remove('is-zoom-pop', 'is-zoom-out', 'is-zoom-restore');
+        if (label) label.classList.remove('is-zoom-pop');
+        this._urlBarZoomFlashTimer = setTimeout(() => {
+            this._urlBarZoomFlashTimer = null;
+            this._endUrlBarZoomFlash(btn, icon);
+        }, 1800);
+        const panelPct = document.getElementById('url-bar-zoom-panel-value');
+        if (panelPct) panelPct.textContent = `${percentage}%`;
+    }
+
+    _endUrlBarZoomFlash(btn, icon) {
+        if (!btn) return;
+        const label = btn.querySelector('.url-bar-zoom-label');
+        if (label) label.classList.remove('is-zoom-pop');
+        document.body.classList.add('url-bar-zoom-leaving');
+        this._urlBarZoomLeaveTimer = setTimeout(() => {
+            document.body.classList.remove('url-bar-zoom-done', 'url-bar-zoom-leaving');
+            this._urlBarZoomLeaveTimer = setTimeout(() => {
+                this._urlBarZoomLeaveTimer = null;
+                this._syncUrlBarZoomBadge(this.currentTab);
+            }, 1000);
+        }, 240);
+    }
+
+    positionUrlBarZoomPanel() {
+        const panel = document.getElementById('url-bar-zoom-panel');
+        const btn = document.getElementById('url-bar-zoom-badge');
+        if (!panel || !btn) return;
+        const rect = btn.getBoundingClientRect();
+        const margin = 8;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+        const popupWidth = Math.min(220, viewportWidth - margin * 2);
+        panel.style.width = `${popupWidth}px`;
+        let left = rect.left - popupWidth / 2 + rect.width / 2;
+        left = Math.max(margin, Math.min(left, viewportWidth - popupWidth - margin));
+        let top = rect.bottom + margin;
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+    }
+
+    /** Close URL-bar anchored popovers when the user clicks into page content. */
+    _dismissUrlBarChromePanels() {
+        const dp = document.getElementById('downloads-popup');
+        if (dp && !dp.classList.contains('hidden')) this.hideDownloadsPopup();
+        const ext = document.getElementById('extensions-menu-panel');
+        if (ext && !ext.classList.contains('hidden')) this.closeExtensionsMenu();
+        const sec = document.getElementById('security-panel');
+        if (sec && !sec.classList.contains('hidden')) this.closeSecurityPanel();
+        const ad = document.getElementById('adblock-panel');
+        if (ad && !ad.classList.contains('hidden')) this.closeAdblockPanel();
+        const zoom = document.getElementById('url-bar-zoom-panel');
+        if (zoom && !zoom.classList.contains('hidden')) this.closeUrlBarZoomPanel();
+    }
+
+    closeUrlBarZoomPanel() {
+        const panel = document.getElementById('url-bar-zoom-panel');
+        const backdrop = document.getElementById('url-bar-zoom-panel-backdrop');
+        if (!panel || panel.classList.contains('hidden')) return;
+        if (this._urlBarZoomPanelCloseTimer) {
+            clearTimeout(this._urlBarZoomPanelCloseTimer);
+            this._urlBarZoomPanelCloseTimer = null;
+        }
+        panel.classList.remove('is-open');
+        panel.classList.add('url-bar-zoom-panel--closing');
+        backdrop?.classList.add('url-bar-zoom-backdrop--out');
+        this._urlBarZoomPanelCloseTimer = setTimeout(() => {
+            this._urlBarZoomPanelCloseTimer = null;
+            panel.classList.add('hidden');
+            panel.classList.remove('url-bar-zoom-panel--closing');
+            if (backdrop) {
+                backdrop.classList.add('hidden');
+                backdrop.classList.remove('url-bar-zoom-backdrop--out');
+                backdrop.setAttribute('aria-hidden', 'true');
+            }
+            document.body.classList.remove('url-bar-zoom-panel-open');
+            document.getElementById('url-bar-zoom-badge')?.setAttribute('aria-expanded', 'false');
+            this._syncUrlBarZoomBadge(this.currentTab);
+        }, 240);
+    }
+
+    toggleUrlBarZoomPanel() {
+        const panel = document.getElementById('url-bar-zoom-panel');
+        if (!panel) return;
+        if (!panel.classList.contains('hidden')) {
+            this.closeUrlBarZoomPanel();
+            return;
+        }
+        this.closeAdblockPanel();
+        this.closeExtensionsMenu();
+        this.closeSecurityPanel();
+        const backdrop = document.getElementById('url-bar-zoom-panel-backdrop');
+        if (backdrop) {
+            backdrop.classList.remove('hidden', 'url-bar-zoom-backdrop--out');
+            backdrop.setAttribute('aria-hidden', 'false');
+        }
+        document.body.classList.add('url-bar-zoom-panel-open');
+        document.getElementById('url-bar-zoom-badge')?.setAttribute('aria-expanded', 'true');
+        panel.classList.remove('hidden', 'url-bar-zoom-panel--closing');
+        this._syncUrlBarZoomBadge(this.currentTab);
+        this.positionUrlBarZoomPanel();
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => panel.classList.add('is-open'));
+        });
+    }
+
+    _setActiveWebviewZoomFactor(factor) {
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+        const prev = this._getWebviewZoomFactor(webview);
+        const next = Math.min(3, Math.max(0.25, Number(factor) || 1));
+        try {
+            this._clearWebviewCssZoom(webview);
+            webview.setZoomFactor(next);
+        } catch (_) {}
+        this._flashUrlBarZoomChange(Math.round(next * 100), next - prev);
+    }
+
+    _resetTabVisualZoom(tabId) {
+        const tid = tabId != null ? tabId : this.currentTab;
+        if (tid == null) return;
+        const tab = this.tabs.get(tid);
+        const webview = tab?.webview;
+        if (webview) this._clearWebviewCssZoom(webview);
+    }
+
+    _applyTabVisualZoom() {}
+
+    _normalizeShortcutKeyToken(key) {
+        if (!key || typeof key !== 'string') return '';
+        if (key === 'ArrowLeft' || key === 'Left') return 'Left';
+        if (key === 'ArrowRight' || key === 'Right') return 'Right';
+        if (key === 'ArrowUp' || key === 'Up') return 'Up';
+        if (key === 'ArrowDown' || key === 'Down') return 'Down';
+        if (key === 'Escape') return 'Esc';
+        if (key === ' ') return 'Space';
+        if (key === '+') return '=';
+        if (key.length === 1) return key.toUpperCase();
+        return key;
+    }
+
+    _normalizeAcceleratorString(accel) {
+        if (!accel || typeof accel !== 'string') return '';
+        const parts = accel.split('+').map((p) => p.trim()).filter(Boolean);
+        const mods = new Set();
+        let key = null;
+        for (const part of parts) {
+            const lower = part.toLowerCase();
+            if (lower === 'cmd' || lower === 'command') mods.add('Cmd');
+            else if (lower === 'commandorcontrol') {
+                mods.add(window.electronAPI?.platform === 'darwin' ? 'Cmd' : 'Ctrl');
+            } else if (lower === 'ctrl' || lower === 'control') mods.add('Ctrl');
+            else if (lower === 'alt' || lower === 'option') mods.add('Alt');
+            else if (lower === 'shift') mods.add('Shift');
+            else key = this._normalizeShortcutKeyToken(part);
+        }
+        const ordered = ['Ctrl', 'Alt', 'Shift', 'Cmd'].filter((m) => mods.has(m));
+        if (!key) return ordered.join('+');
+        return [...ordered, key].join('+');
+    }
+
+    _acceleratorFromGuestShortcutPayload(payload) {
+        if (!payload || typeof payload !== 'object') return null;
+        if (typeof payload.accel === 'string' && payload.accel.trim()) {
+            return this._normalizeAcceleratorString(payload.accel);
+        }
+        const parts = [];
+        if (payload.control) parts.push('Ctrl');
+        if (payload.alt) parts.push('Alt');
+        if (payload.shift) parts.push('Shift');
+        if (window.electronAPI?.platform === 'darwin') {
+            if (payload.meta) parts.push('Cmd');
+        } else if (payload.meta) {
+            parts.push('Ctrl');
+        }
+        const key = this._normalizeShortcutKeyToken(payload.key);
+        if (!key || ['Control', 'Meta', 'Alt', 'Shift'].includes(payload.key)) return null;
+        parts.push(key);
+        return this._normalizeAcceleratorString(parts.join('+'));
+    }
+
+    async _handleGuestShortcutFallback(payload) {
+        try {
+            if (!this._shortcutCache || !Object.keys(this._shortcutCache).length) {
+                await this.refreshShortcutCache();
+            }
+            const accel = this._acceleratorFromGuestShortcutPayload(payload);
+            if (!accel) return;
+            const now = Date.now();
+            if (
+                this._lastGuestShortcutAccel === accel &&
+                now - (this._lastGuestShortcutAt || 0) < 160
+            ) {
+                return;
+            }
+            this._lastGuestShortcutAccel = accel;
+            this._lastGuestShortcutAt = now;
+            let action =
+                typeof payload.action === 'string' && payload.action ? payload.action : null;
+            if (!action) {
+                const cache = this._shortcutCache || {};
+                for (const [name, binding] of Object.entries(cache)) {
+                    if (!binding || binding === '__disabled__') continue;
+                    if (this._normalizeAcceleratorString(String(binding)) === accel) {
+                        action = name;
+                        break;
+                    }
+                }
+            }
+            if (!action) return;
+            if (
+                payload?.isAutoRepeat &&
+                (action === 'next-profile' || action === 'previous-profile')
+            ) {
+                return;
+            }
+            this.executeBrowserShortcut(action);
+        } catch (err) {
+            console.error('axis-shortcut-fallback', err);
+        }
     }
 
     /** True if key event matches the merged "select-all" accelerator (respects user remap / disable). */
@@ -5858,10 +7173,32 @@ class AxisBrowser {
     }
 
     // Execute browser shortcut action (called from main process IPC)
-    executeBrowserShortcut(action) {
+    _handleCloseTabShortcut() {
+        const tid = this._normalizeTabMapKey(this.currentTab);
+        // Only close the actively focused tab. If nothing is open (empty chrome /
+        // currentTab null), close the window - never walk other tabs top-down.
+        if (tid != null && this.tabs.has(tid)) {
+            this.closeTab(tid);
+            return;
+        }
+        try {
+            void window.electronAPI?.closeBrowserWindow?.();
+        } catch (_) {}
+    }
+
+    executeBrowserShortcut(actionOrPayload) {
+        const payload =
+            actionOrPayload && typeof actionOrPayload === 'object'
+                ? actionOrPayload
+                : { action: actionOrPayload };
+        const action = payload.action;
+        if (action && String(action).startsWith('custom:')) {
+            void this._runCustomUserShortcut(String(action).slice(7));
+            return;
+        }
         switch (action) {
             case 'close-tab':
-                if (this.currentTab) this.closeTab(this.currentTab);
+                this._handleCloseTabShortcut();
                 break;
             case 'spotlight-search':
                 this.createNewTab();
@@ -5947,7 +7284,7 @@ class AxisBrowser {
                 this.openSettingsTab('history');
                 break;
             case 'downloads':
-                this.showDownloadsPopup();
+                void this.handleDownloadsButtonClick();
                 break;
             case 'toggle-chat':
                 if (this.isAiFeaturesEnabled()) this.toggleAIChat();
@@ -5985,6 +7322,55 @@ class AxisBrowser {
             case 'reset-zoom':
                 this.resetZoom();
                 break;
+            case 'toggle-notes':
+                void this.toggleNotes();
+                break;
+            case 'toggle-extensions':
+                void this.toggleExtensionsMenu();
+                break;
+            case 'toggle-adblock':
+                void this.toggleAdblockPanel();
+                break;
+            case 'open-incognito-window':
+                window.electronAPI?.openIncognitoWindow?.();
+                break;
+            case 'copy-title': {
+                const tab = this.currentTab ? this.tabs.get(this.currentTab) : null;
+                const title = tab?.title || '';
+                if (title) void navigator.clipboard?.writeText?.(title);
+                break;
+            }
+            case 'open-settings-newtab':
+                void window.electronAPI?.openSettingsWindow?.('newtab');
+                break;
+            case 'open-settings-vault':
+                void window.electronAPI?.openSettingsWindow?.('vault');
+                break;
+            case 'open-settings-extensions':
+                void window.electronAPI?.openSettingsWindow?.('extensions');
+                break;
+            case 'open-settings-permissions':
+                void window.electronAPI?.openSettingsWindow?.('permissions');
+                break;
+            case 'open-settings-profiles':
+                void window.electronAPI?.openSettingsWindow?.('profiles');
+                break;
+            case 'tab-volume-up':
+                if (this.currentTab) this._adjustTabVolume(this.currentTab, 0.1);
+                break;
+            case 'tab-volume-down':
+                if (this.currentTab) this._adjustTabVolume(this.currentTab, -0.1);
+                break;
+            case 'toggle-tab-mono': {
+                if (!this.currentTab) break;
+                const tab = this.tabs.get(this.currentTab);
+                if (!tab) break;
+                const audio = this._ensureTabAudioState(tab);
+                audio.mono = !audio.mono;
+                void this.syncTabAudioToWebview(this.currentTab);
+                this._syncTabAudioSliders(this.currentTab);
+                break;
+            }
             case 'switch-tab-1':
             case 'switch-tab-2':
             case 'switch-tab-3':
@@ -5997,7 +7383,230 @@ class AxisBrowser {
                 const tabIndex = parseInt(action.split('-')[2]) - 1;
                 this.switchToTabByIndex(tabIndex);
                 break;
+            case 'scroll-page-up':
+                this._guestScrollBy(-Math.round(window.innerHeight * 0.88));
+                break;
+            case 'scroll-page-down':
+                this._guestScrollBy(Math.round(window.innerHeight * 0.88));
+                break;
+            case 'scroll-to-top':
+                this._guestRunJs('window.scrollTo({top:0,behavior:"smooth"})');
+                break;
+            case 'scroll-to-bottom':
+                this._guestRunJs(
+                    'window.scrollTo({top:document.documentElement.scrollHeight,behavior:"smooth"})'
+                );
+                break;
+            case 'page-up':
+                this._guestRunJs(
+                    'window.scrollBy({top:-(window.innerHeight||600)*0.92,behavior:"smooth"})'
+                );
+                break;
+            case 'page-down':
+                this._guestRunJs(
+                    'window.scrollBy({top:(window.innerHeight||600)*0.92,behavior:"smooth"})'
+                );
+                break;
+            case 'copy-selection':
+                this._guestRunJs(
+                    '(()=>{const s=window.getSelection?.();if(s&&String(s)||""){try{document.execCommand("copy");}catch(_){}}})()'
+                );
+                break;
+            case 'paste-to-page':
+                this._guestRunJs(
+                    '(()=>{const a=document.activeElement;if(a&&(a.isContentEditable||a.tagName==="INPUT"||a.tagName==="TEXTAREA")){try{document.execCommand("paste");}catch(_){}}})()'
+                );
+                break;
+            case 'toggle-sidebar-position':
+                this.toggleSidebarPosition();
+                break;
+            case 'open-home':
+                this.navigate(this.NEWTAB_URL || 'axis://newtab');
+                break;
+            case 'view-source': {
+                const wv = this.getActiveWebview();
+                if (!wv) break;
+                let src = '';
+                try {
+                    src = wv.getURL() || '';
+                } catch (_) {}
+                if (src && !src.startsWith('view-source:')) {
+                    this.navigate('view-source:' + src);
+                }
+                break;
+            }
+            case 'focus-page': {
+                const wv = this.getActiveWebview();
+                try {
+                    wv?.focus?.();
+                } catch (_) {}
+                break;
+            }
+            case 'reload-all-tabs':
+                for (const [, t] of this.tabs) {
+                    try {
+                        t?.webview?.reload?.();
+                    } catch (_) {}
+                }
+                break;
+            case 'close-other-tabs': {
+                const keep = this._normalizeTabMapKey(this.currentTab);
+                const ids = [...this.tabs.keys()].filter((id) => this._normalizeTabMapKey(id) !== keep);
+                ids.forEach((id) => this.closeTab(id));
+                break;
+            }
+            case 'reopen-closed-tab':
+                this.performTabUndo();
+                break;
+            case 'toggle-fullscreen':
+                this._guestRunJs(
+                    '(()=>{try{if(document.fullscreenElement){document.exitFullscreen?.();return;}document.documentElement.requestFullscreen?.();}catch(_){}})()'
+                );
+                break;
+            case 'open-current-in-new-tab': {
+                const wv = this.getActiveWebview();
+                let url = '';
+                try {
+                    url = wv?.getURL?.() || '';
+                } catch (_) {}
+                if (url) this.createNewTab(url);
+                break;
+            }
+            case 'copy-page-url-and-title': {
+                const tab = this.currentTab ? this.tabs.get(this.currentTab) : null;
+                let url = tab?.url || '';
+                try {
+                    if (!url) url = this.getActiveWebview()?.getURL?.() || '';
+                } catch (_) {}
+                const title = tab?.title || '';
+                const text = title && url ? `${title}\n${url}` : url || title;
+                if (text) void navigator.clipboard?.writeText?.(text);
+                break;
+            }
+            case 'search-selection':
+                this._guestRunJs(
+                    '(()=>{const t=String(window.getSelection?.()?.toString?.()||"").trim();if(!t)return;window.find(t,false,false,true);})()'
+                );
+                break;
+            case 'toggle-ai-chat':
+                if (this.isAiFeaturesEnabled()) this.toggleAIChat();
+                break;
+            case 'open-permissions-settings':
+                this.openSettingsTab('permissions');
+                break;
+            case 'open-gestures-settings':
+                this.openSettingsTab('gestures');
+                break;
+            case 'open-shortcuts-settings':
+                this.openSettingsTab('shortcuts');
+                break;
+            case 'toggle-downloads-panel':
+                this.toggleDownloads();
+                break;
+            case 'toggle-sidebar-plus':
+                this.toggleSidebarPlusMenu();
+                break;
+            case 'toggle-pin-current':
+                this.togglePinCurrentTab();
+                break;
+            case 'close-current-tab':
+                this._handleCloseTabShortcut();
+                break;
+            case 'show-spotlight':
+                this.showSpotlightSearch();
+                break;
+            case 'open-devtools': {
+                const wv = this.getActiveWebview();
+                try {
+                    wv?.openDevTools?.();
+                } catch (_) {}
+                break;
+            }
+            case 'open-settings-ai':
+                this.openSettingsTab('ai');
+                break;
+            case 'open-settings-customization':
+                this.openSettingsTab('customization');
+                break;
+            case 'open-settings-screentime':
+                this.openSettingsTab('screentime');
+                break;
+            case 'open-settings-history':
+                this.openSettingsTab('history');
+                break;
+            case 'guest-cut':
+                this._guestRunJs('(()=>{try{document.execCommand("cut");}catch(_){}})()');
+                break;
+            case 'guest-copy':
+                this._guestRunJs('(()=>{try{document.execCommand("copy");}catch(_){}})()');
+                break;
+            case 'guest-paste':
+                this._guestRunJs(
+                    '(()=>{const a=document.activeElement;if(a&&(a.isContentEditable||a.tagName==="INPUT"||a.tagName==="TEXTAREA")){try{document.execCommand("paste");}catch(_){}}})()'
+                );
+                break;
+            case 'guest-undo':
+                this._guestRunJs('(()=>{try{document.execCommand("undo");}catch(_){}})()');
+                break;
+            case 'guest-redo':
+                this._guestRunJs('(()=>{try{document.execCommand("redo");}catch(_){}})()');
+                break;
+            case 'scroll-line-up':
+                this._guestRunJs('window.scrollBy({top:-40,behavior:"smooth"})');
+                break;
+            case 'scroll-line-down':
+                this._guestRunJs('window.scrollBy({top:40,behavior:"smooth"})');
+                break;
+            case 'scroll-left':
+                this._guestRunJs('window.scrollBy({left:-48,behavior:"smooth"})');
+                break;
+            case 'scroll-right':
+                this._guestRunJs('window.scrollBy({left:48,behavior:"smooth"})');
+                break;
+            case 'toggle-find-bar':
+                this.toggleSearch();
+                break;
+            case 'close-all-popups':
+                this.closeAllPopups();
+                break;
+            default:
+                break;
         }
+    }
+
+    _guestRunJs(code) {
+        const wv = this.getActiveWebview();
+        if (!wv || !code) return;
+        try {
+            wv.executeJavaScript(String(code), true).catch(() => {});
+        } catch (_) {}
+    }
+
+    _guestScrollBy(dy) {
+        const n = Number(dy) || 0;
+        if (!n) return;
+        this._guestRunJs(`window.scrollBy({top:${n},behavior:"smooth"})`);
+    }
+
+    async _runCustomUserShortcut(id) {
+        if (!id) return;
+        try {
+            const list = (await window.electronAPI.getCustomShortcuts?.()) || [];
+            const item = list.find((x) => x && x.id === id);
+            if (!item) return;
+            const steps = Array.isArray(item.steps)
+                ? item.steps
+                : item.command
+                  ? [item.command]
+                  : [];
+            if (!steps.length) return;
+            for (let i = 0; i < steps.length; i++) {
+                this.executeBrowserShortcut(steps[i]);
+                if (i < steps.length - 1) {
+                    await new Promise((r) => setTimeout(r, 60));
+                }
+            }
+        } catch (_) {}
     }
 
     insertTextInInput(input, text) {
@@ -6030,6 +7639,9 @@ class AxisBrowser {
             // Update tabId in case it changed
             webview.dataset.tabId = String(tabId);
             this._ensureWebviewLinkStatusListener(webview, tabId);
+            this.bindWebviewAudioStateListener(tabId, webview);
+            this._bindAudioMixerWebviewDismiss(webview);
+            this._bindUrlBarChromeDismissOnWebviewFocus(webview);
             return;
         }
 
@@ -6170,6 +7782,12 @@ class AxisBrowser {
         const domReadyHandler = () => {
             webview.__axisGuestDocumentReady = true;
             try {
+                webview.send('axis-shortcut-map', this._shortcutCache || {});
+            } catch (_) {}
+            this._syncNavGestureConfigToWebview(webview);
+            this._syncLinkPreviewConfigToWebview(webview);
+            this._getSiteStyle()?.onDocumentReady(webview);
+            try {
                 const wc = webview.getWebContents?.();
                 if (wc && typeof wc.setBackgroundThrottling === 'function' && !wc.isDestroyed?.()) {
                     wc.setBackgroundThrottling(!isActiveTab());
@@ -6194,12 +7812,16 @@ class AxisBrowser {
                 }
             }
             if (!isActiveTab() || this.isBenchmarking) return;
+            if (isActiveTab()) {
+                requestAnimationFrame(() => this._ensureActiveWebviewInteractable());
+            }
         };
         webview.__eventHandlers.domReady = domReadyHandler;
         webview.addEventListener('dom-ready', domReadyHandler);
         
         const didFinishLoadHandler = (event) => {
             clearLoadingTimeout();
+            this._syncNavGestureConfigToWebview(webview);
             // Only hide loading when main frame finishes (avoid hiding on iframe/subframe load)
             const isMainFrame = event == null || event.isMainFrame !== false;
             if (isMainFrame && this.loadingBarTabId === tabId) {
@@ -6229,6 +7851,7 @@ class AxisBrowser {
                     tab.title = currentTitle;
                     }
                 }
+                this._syncTabTitleElement(tabId);
             }
 
             // Reset per-tab retry counters on successful load
@@ -6246,6 +7869,8 @@ class AxisBrowser {
                 () => this.updateTabTitle(),
                 () => this.updateSecurityIndicator(),
             ]);
+
+            if (isActiveTab()) this._checkScreenTimeLimitForCurrentTab();
             
                 this.scheduleTrackPageInHistory(tabId);
 
@@ -6541,6 +8166,7 @@ class AxisBrowser {
                 tab.title = webview.getTitle() || tab.title;
                 }
                 this._updateTabAncestryMeta(tabId, { title: tab.customTitle || tab.title });
+                this._syncTabTitleElement(tabId);
             }
 
             if (!isActiveTab() || this.isBenchmarking) return;
@@ -6660,7 +8286,8 @@ class AxisBrowser {
         this._bindWebviewLinkStatusListener(webview, updateTargetUrlHandler);
         
         const ipcMessageHandler = (event) => {
-            const { channel, args } = event;
+            const channel = event.channel || event.message?.channel;
+            const args = event.args || event.message?.args;
             if (channel === 'axis-guest-html-fullscreen') {
                 const payload = (args && args[0]) || {};
                 let guestId = 0;
@@ -6683,6 +8310,57 @@ class AxisBrowser {
             if (channel === 'axis-nav-gesture') {
                 const dir = args && args[0];
                 this.tryNavigateWithAxisGesture(dir, webview, tabId);
+                return;
+            }
+            if (channel === 'axis-guest-nav-wheel') {
+                if (!isActiveTab()) return;
+                const payload = args && args[0];
+                if (payload && typeof payload.dx === 'number') {
+                    this._handleGuestNavWheelDelta(payload.dx, payload.dy, webview, tabId);
+                }
+                return;
+            }
+            if (channel === 'axis-nav-gesture-animate') {
+                const dir = args && args[0];
+                if (!isActiveTab()) return;
+                if (dir !== 'back' && dir !== 'forward') return;
+                if (!this._canSwipeNavigate(dir, webview)) return;
+                this.updateNavigationButtons();
+                this.runAxisNavigationGesture(dir, () => {});
+                return;
+            }
+            if (channel === 'axis-guest-page-pointerdown') {
+                this._dismissUrlBarChromePanels();
+                return;
+            }
+            if (channel === 'axis-guest-swipe-nav') {
+                const raw = args && args[0];
+                this._handleGuestSwipeNav(
+                    typeof raw === 'string' ? { direction: raw } : raw,
+                    webview,
+                    tabId
+                );
+                return;
+            }
+            if (channel === 'axis-guest-trackpad-trace') {
+                return;
+            }
+            if (channel === 'axis-guest-trackpad-gesture') {
+                const gestureType = args && args[0];
+                if (!gestureType) return;
+                this._handleGuestTrackpadGesture(gestureType, webview, tabId);
+                return;
+            }
+            if (channel === 'axis-link-preview-url') {
+                this._handleLinkStatusTargetUrl(tabKey, args && args[0]);
+                return;
+            }
+            if (channel === 'axis-link-preview-pointer') {
+                this._handleLinkPreviewGuestPointer(tabId, webview, args && args[0]);
+                return;
+            }
+            if (channel === 'axis-link-preview-zone') {
+                this._handleLinkPreviewZone(tabId, args && args[0]);
                 return;
             }
             if (channel === 'axis-url-bar-theme-hint') {
@@ -6757,6 +8435,22 @@ class AxisBrowser {
                 this.routeVaultGuestMessage(channel, payload, webview);
                 return;
             }
+            if (channel === 'axis-shortcut-fallback') {
+                if (!isActiveTab()) return;
+                const payload = args && args[0];
+                if (!payload || typeof payload !== 'object') return;
+                void this._handleGuestShortcutFallback(payload);
+                return;
+            }
+            if (channel === 'axis-shortcut-map-request') {
+                if (!isActiveTab()) return;
+                void this.refreshShortcutCache().then(() => {
+                    try {
+                        webview.send('axis-shortcut-map', this._shortcutCache || {});
+                    } catch (_) {}
+                });
+                return;
+            }
             if (!isActiveTab()) return;
             if (channel === 'settings-message') {
                 this.onEmbeddedMessage({ data: args[0] });
@@ -6783,6 +8477,8 @@ class AxisBrowser {
         webview.__eventHandlers.leaveHtmlFullscreen = leaveHtmlFullscreenHandler;
         webview.addEventListener('enter-html-full-screen', enterHtmlFullscreenHandler);
         webview.addEventListener('leave-html-full-screen', leaveHtmlFullscreenHandler);
+        this._bindAudioMixerWebviewDismiss(webview);
+        this._bindUrlBarChromeDismissOnWebviewFocus(webview);
         
         // Settings tabs persist through their own preload IPC. Do not poll and
         // rewrite Settings controls from the host; that races normal click/change
@@ -6813,6 +8509,12 @@ class AxisBrowser {
             enterHtmlFullscreen: 'enter-html-full-screen',
             leaveHtmlFullscreen: 'leave-html-full-screen',
         };
+
+        if (webview.__axisAudioMixerFocusHandler) {
+            webview.removeEventListener('focus', webview.__axisAudioMixerFocusHandler);
+            webview.__axisAudioMixerFocusHandler = null;
+            webview.__axisAudioMixerFocusBound = false;
+        }
 
         const handlers = webview.__eventHandlers;
         if (handlers) {
@@ -7173,22 +8875,38 @@ class AxisBrowser {
         let secondary, accent, text, textSecondary, textMuted;
 
         if (isDark) {
-            // Dark mode - create lighter variations
-            secondary = this.hslToHex(hsl.h, Math.max(0, hsl.s - 20), Math.min(100, hsl.l + 15));
-            accent = this.hslToHex(hsl.h, Math.min(100, hsl.s + 10), Math.min(100, hsl.l + 25));
+            secondary = this.hslToHex(hsl.h, Math.max(18, hsl.s - 10), Math.min(94, hsl.l + 10));
+            accent = this.hslToHex(hsl.h, Math.min(100, hsl.s + 8), Math.min(96, hsl.l + 18));
             text = '#ffffff';
             textSecondary = 'rgba(255, 255, 255, 0.76)';
             textMuted = 'rgba(255, 255, 255, 0.52)';
         } else {
-            // Light mode - create darker variations
-            secondary = this.hslToHex(hsl.h, Math.max(0, hsl.s - 30), Math.max(0, hsl.l - 20));
-            accent = this.hslToHex(hsl.h, Math.min(100, hsl.s + 15), Math.max(0, hsl.l - 10));
+            secondary = this.hslToHex(hsl.h, Math.max(16, hsl.s - 12), Math.max(10, hsl.l - 10));
+            accent = this.hslToHex(hsl.h, Math.min(100, hsl.s + 10), Math.max(14, hsl.l + 6));
             text = '#111111';
             textSecondary = 'rgba(0, 0, 0, 0.72)';
             textMuted = 'rgba(0, 0, 0, 0.48)';
         }
 
         return { primary, secondary, accent, text, textSecondary, textMuted };
+    }
+
+    _generateSiteAdaptedThemeColors(baseColor) {
+        const hsl = this.hexToHsl(baseColor);
+        const isDark = this.isDarkColor(baseColor);
+        const primary = baseColor;
+        const secondary = this.hslToHex(
+            hsl.h,
+            Math.max(14, hsl.s - 6),
+            isDark ? Math.min(92, hsl.l + 6) : Math.max(12, hsl.l - 4)
+        );
+        const accent = this.hslToHex(
+            hsl.h,
+            Math.min(100, hsl.s + 14),
+            isDark ? Math.min(96, hsl.l + 16) : Math.max(18, hsl.l + 8)
+        );
+        const base = this.generateHarmoniousColors(baseColor);
+        return { ...base, primary, secondary, accent };
     }
 
     generateColorScheme(baseColor) {
@@ -7337,9 +9055,9 @@ class AxisBrowser {
         if (!hex) return false;
         if (this._siteThemeColorActiveHex === hex) return true;
 
-        const colors = this.generateHarmoniousColors(hex);
+        const colors = this._generateSiteAdaptedThemeColors(hex);
         if (this.settings?.gradientEnabled) {
-            colors.gradientColor = this.darkenColor(hex, this.isDarkColor(hex) ? 0.08 : 0.14);
+            colors.gradientColor = this.darkenColor(hex, this.isDarkColor(hex) ? 0.06 : 0.1);
         }
         this._siteThemeColorActiveHex = hex;
         this.applyCustomTheme(colors);
@@ -7415,6 +9133,7 @@ class AxisBrowser {
                 backdrop: chrome.backdropStrong,
             });
         }
+        this.syncWindowsFrostShellClass(chrome);
     }
 
     // Color utility functions
@@ -8399,11 +10118,8 @@ class AxisBrowser {
         }
         body.style.removeProperty('--axis-webview-panel-ring-swipe');
         body.classList.remove('axis-profile-ring-pinned');
-        /* After panel state settles, clear the inline override so normal classes drive the ring. */
-        requestAnimationFrame(() => {
-            if (body.classList.contains('axis-profile-ring-pinned')) return;
-            body.style.removeProperty('--axis-webview-panel-ring');
-        });
+        body.style.removeProperty('--axis-webview-panel-ring');
+        this._syncWebPanelVisualState?.();
     }
 
     /** GPU crossfade between two fixed profile shells - transforms, not stepped recolors. */
@@ -9168,11 +10884,22 @@ class AxisBrowser {
                 mainArea.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
             }
             
+            const winFrosted = this._isWin32Shell() && chrome.t > 0;
             // Remove backgrounds from individual elements to prevent duplication
         if (this.elements?.sidebar) {
-                this.elements.sidebar.style.setProperty('background', 'transparent', 'important');
-                this.elements.sidebar.style.setProperty('backdrop-filter', 'none', 'important');
-                this.elements.sidebar.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+                if (winFrosted) {
+                    this.elements.sidebar.style.setProperty('background', glassSidebarBg, 'important');
+                    this.elements.sidebar.style.setProperty('backdrop-filter', chrome.backdropMain, 'important');
+                    this.elements.sidebar.style.setProperty(
+                        '-webkit-backdrop-filter',
+                        chrome.backdropMain,
+                        'important'
+                    );
+                } else {
+                    this.elements.sidebar.style.setProperty('background', 'transparent', 'important');
+                    this.elements.sidebar.style.setProperty('backdrop-filter', 'none', 'important');
+                    this.elements.sidebar.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+                }
         }
         if (contentArea) {
                 contentArea.style.setProperty('background', 'transparent', 'important');
@@ -9234,6 +10961,7 @@ class AxisBrowser {
             style.setProperty('--axis-ts-urlbar-blur', `${chrome.urlBarBlur}px`);
             style.setProperty('--axis-ts-urlbar-sat', `${chrome.urlBarSat}%`);
         }
+        this.syncWindowsFrostShellClass(chrome);
         
         // Re-enable transitions after theme is applied (use RAF to ensure CSS variables are updated first)
         requestAnimationFrame(() => {
@@ -9310,205 +11038,187 @@ class AxisBrowser {
     }
 
     /**
-     * New tab + AI chat page glass - fixed tint/blur (not tied to Window transparency).
-     * Light mode: white frosted glass. Dark mode: dark frosted glass.
+     * New tab + in-tab Ask chat glass. App light theme keeps the same dark frosted NTP
+     * (white type, dark glass) with only slightly lifted surfaces — not a white card UI.
      */
     getNewTabSurfaceChromeStyle() {
+        const dark = {
+            theme: 'dark',
+            pageBg: 'rgba(20, 22, 30, 0.34)',
+            pageBlur: 32,
+            pageSat: 155,
+            searchBg: 'rgba(24, 26, 34, 0.40)',
+            searchSolidBg: '#0a0a0e',
+            searchSolidBlur: 0,
+            searchBlur: 28,
+            searchSat: 155,
+            toggleBg: 'rgba(255, 255, 255, 0.14)',
+            toggleBlur: 20,
+            toggleSat: 145,
+            askBg: 'rgba(18, 20, 28, 0.36)',
+            askBlur: 28,
+            askSat: 152,
+            chatPanelBorder: 'rgba(255, 255, 255, 0.08)',
+            chatPanelText: 'rgba(255, 255, 255, 0.96)',
+            chatPanelTextMuted: 'rgba(255, 255, 255, 0.58)',
+            chatHoverBg: 'rgba(255, 255, 255, 0.12)',
+            chatSurfaceBg: 'rgba(255, 255, 255, 0.06)',
+            chatSurfaceStrongBg: 'rgba(255, 255, 255, 0.12)',
+            chatInputFooterBg: 'transparent',
+            chatComposerBg: 'rgba(255, 255, 255, 0.035)',
+            chatComposerInset: 'none',
+            chatMenuBg: 'rgba(20, 22, 28, 0.98)',
+            chatUserBubbleBg: 'rgba(255, 255, 255, 0.12)',
+            chatUserBubbleBorder: 'rgba(255, 255, 255, 0.1)',
+            chatAssistantBubbleBg: 'rgba(255, 255, 255, 0.06)',
+            chatQuoteBg: 'rgba(0, 0, 0, 0.22)',
+            chatQuoteBorder: 'rgba(255, 255, 255, 0.38)',
+            chatScrollbarThumb: 'rgba(255, 255, 255, 0.14)',
+            chatMdCodeBg: 'rgba(255, 255, 255, 0.12)',
+            chatMdPreBg: 'rgba(0, 0, 0, 0.28)',
+            chatMdPreText: 'rgba(255, 255, 255, 0.92)',
+            chatMdLink: 'rgba(255, 255, 255, 0.92)',
+            chatMdMarker: 'rgba(255, 255, 255, 0.48)',
+            chatMdQuoteBg: 'rgba(255, 255, 255, 0.05)',
+            chatMdHr: 'rgba(255, 255, 255, 0.14)',
+            chatDropOutline: 'rgba(255, 255, 255, 0.24)',
+            chatBtnBg: 'rgba(255, 255, 255, 0.08)',
+            chatBtnBgHover: 'rgba(255, 255, 255, 0.14)',
+            chatBtnBorder: 'rgba(255, 255, 255, 0.1)',
+            chatNtpComposerGradient: 'transparent',
+            chatNtpAskText: 'rgba(255, 255, 255, 0.94)',
+            chatNtpAskLoading: 'rgba(255, 255, 255, 0.48)',
+            ntpInk: 'rgba(255, 255, 255, 0.9)',
+            ntpInkStrong: '#fff',
+            ntpInkMuted: 'rgba(255, 255, 255, 0.58)',
+            ntpInkFaint: 'rgba(255, 255, 255, 0.48)',
+            ntpInkLabel: 'rgba(255, 255, 255, 0.52)',
+            ntpTextShadow: '0 1px 3px rgba(0, 0, 0, 0.45)',
+            ntpIconBg: 'rgba(255, 255, 255, 0.1)',
+            ntpWidgetRing: 'rgba(255, 255, 255, 0.18)',
+            ntpWidgetRingHover: 'rgba(255, 255, 255, 0.3)',
+            ntpWidgetEditBg: 'rgba(255, 255, 255, 0.06)',
+            ntpWidgetBg: 'rgba(255, 255, 255, 0.075)',
+            ntpFocusInner: 'rgba(14, 16, 22, 0.5)',
+            ntpBtnBg: 'rgba(255, 255, 255, 0.14)',
+            ntpBtnBgHover: 'rgba(255, 255, 255, 0.22)',
+            ntpEditBtn: 'rgba(255, 255, 255, 0.54)',
+            ntpEditBtnHover: 'rgba(255, 255, 255, 0.92)',
+            ntpDoneBtnBg: 'rgba(255, 255, 255, 0.92)',
+            ntpDoneBtnBgHover: '#ffffff',
+            ntpDoneBtnFg: '#111111',
+            composerSendBg: 'rgba(255, 255, 255, 0.9)',
+            composerSendFg: '#0a0b0e',
+            composerSendBgHover: '#ffffff',
+            composerSendDisabledBg: 'rgba(255, 255, 255, 0.07)',
+            composerSendDisabledFg: 'rgba(255, 255, 255, 0.22)',
+            ntpDlBarBg: 'rgba(255, 255, 255, 0.14)',
+            ntpGreeting: 'rgba(255, 255, 255, 0.96)',
+            ntpInput: 'rgba(255, 255, 255, 0.96)',
+            ntpPlaceholder: 'rgba(255, 255, 255, 0.44)',
+            ntpLinkAccent: '#c8ddff',
+            ntpSuggestionHover: 'rgba(255, 255, 255, 0.08)',
+            ntpSuggestionActive: 'rgba(255, 255, 255, 0.11)',
+            chromeBorder: 'rgba(255, 255, 255, 0.16)',
+            chromeDivider: 'rgba(255, 255, 255, 0.14)',
+            ntpChromeShadow: 'none',
+            ntpOptInBg: 'rgba(28, 30, 38, 0.72)',
+            ntpOptInBgHover: 'rgba(36, 38, 48, 0.86)',
+            ntpOptInBorder: 'rgba(255, 255, 255, 0.18)',
+            ntpOptInBorderHover: 'rgba(255, 255, 255, 0.26)',
+            ntpOptInColor: 'rgba(255, 255, 255, 0.84)',
+            ntpOptInColorHover: '#ffffff',
+            ntpAddStripBg: '#14161c',
+            ntpAddStripBorder: 'rgba(255, 255, 255, 0.12)',
+            ntpAddStripShadow: '0 10px 28px rgba(0, 0, 0, 0.38)',
+            ntpWidgetRemoveBg: 'rgba(0, 0, 0, 0.42)',
+            ntpWidgetRemoveColor: 'rgba(255, 255, 255, 0.9)',
+            ntpWidgetRemoveHoverBg: 'rgba(200, 60, 50, 0.75)',
+            ntpWidgetRemoveHoverColor: 'rgba(255, 255, 255, 0.95)',
+            ntpResizeGrip: 'rgba(255, 255, 255, 0.72)',
+            ntpDropPreviewBorder: 'rgba(255, 255, 255, 0.48)',
+        };
+        if (!this.isLightUiTheme()) return dark;
+        return {
+            ...dark,
+            pageBg: 'rgba(34, 36, 46, 0.26)',
+            searchBg: 'rgba(32, 34, 44, 0.44)',
+            searchSolidBg: '#111318',
+            askBg: 'rgba(28, 30, 40, 0.34)',
+            ntpWidgetBg: 'rgba(255, 255, 255, 0.09)',
+            ntpWidgetRing: 'rgba(255, 255, 255, 0.2)',
+            ntpWidgetRingHover: 'rgba(255, 255, 255, 0.32)',
+            ntpWidgetEditBg: 'rgba(255, 255, 255, 0.08)',
+            chromeBorder: 'rgba(255, 255, 255, 0.18)',
+            chromeDivider: 'rgba(255, 255, 255, 0.14)',
+            ntpOptInBg: 'rgba(38, 40, 50, 0.76)',
+            ntpOptInBgHover: 'rgba(46, 48, 58, 0.88)',
+            ntpAddStripBg: '#181a22',
+            ntpBtnBg: 'rgba(255, 255, 255, 0.16)',
+            ntpBtnBgHover: 'rgba(255, 255, 255, 0.24)',
+        };
+    }
+
+    /** Sidebar AI panel only — solid black (dark) / white (light). */
+    getSidebarAiChatChromeStyle() {
         const lightUi = this.isLightUiTheme();
+        const ntp = this.getNewTabSurfaceChromeStyle();
         if (lightUi) {
             return {
+                ...ntp,
                 theme: 'light',
-                pageBg: 'rgba(255, 255, 255, 0.94)',
-                pageBlur: 32,
-                pageSat: 155,
-                searchBg: 'rgba(255, 255, 255, 0.98)',
-                searchSolidBg: '#ffffff',
-                searchSolidBlur: 0,
-                searchBlur: 28,
-                searchSat: 155,
-                toggleBg: 'rgba(255, 255, 255, 0.72)',
-                toggleBlur: 20,
-                toggleSat: 145,
-                askBg: 'rgba(255, 255, 255, 0.88)',
-                askBlur: 28,
-                askSat: 152,
                 aiPanelBg: '#ffffff',
                 aiPanelBlur: 0,
                 aiPanelSat: 100,
                 chatPanelBorder: 'rgba(0, 0, 0, 0.08)',
-                chatPanelText: 'rgba(0, 0, 0, 0.9)',
-                chatPanelTextMuted: 'rgba(0, 0, 0, 0.5)',
+                chatPanelText: 'rgba(0, 0, 0, 0.88)',
+                chatPanelTextMuted: 'rgba(0, 0, 0, 0.48)',
                 chatPanelShadow: '-6px 0 24px rgba(0, 0, 0, 0.08)',
-                chatHoverBg: 'rgba(0, 0, 0, 0.06)',
-                chatSurfaceBg: 'rgba(0, 0, 0, 0.04)',
-                chatSurfaceStrongBg: 'rgba(0, 0, 0, 0.07)',
-                chatInputFooterBg: 'rgba(0, 0, 0, 0.03)',
-                chatComposerBg: 'rgba(255, 255, 255, 0.92)',
-                chatComposerInset: 'inset 0 1px 0 rgba(255, 255, 255, 1)',
+                chatHoverBg: 'rgba(0, 0, 0, 0.05)',
+                chatSurfaceBg: 'rgba(0, 0, 0, 0.03)',
+                chatSurfaceStrongBg: 'rgba(0, 0, 0, 0.06)',
+                chatComposerBg: 'rgba(0, 0, 0, 0.02)',
+                chatMenuBg: '#ffffff',
                 chatUserBubbleBg: 'rgba(0, 0, 0, 0.06)',
                 chatUserBubbleBorder: 'rgba(0, 0, 0, 0.08)',
-                chatAssistantBubbleBg: 'rgba(0, 0, 0, 0.04)',
-                chatQuoteBg: 'rgba(0, 0, 0, 0.05)',
-                chatQuoteBorder: 'rgba(0, 0, 0, 0.22)',
-                chatScrollbarThumb: 'rgba(0, 0, 0, 0.12)',
+                chatAssistantBubbleBg: 'rgba(0, 0, 0, 0.03)',
+                chatQuoteBg: 'rgba(0, 0, 0, 0.04)',
+                chatQuoteBorder: 'rgba(0, 0, 0, 0.18)',
+                chatScrollbarThumb: 'rgba(0, 0, 0, 0.16)',
                 chatMdCodeBg: 'rgba(0, 0, 0, 0.06)',
                 chatMdPreBg: 'rgba(0, 0, 0, 0.05)',
-                chatMdPreText: 'rgba(0, 0, 0, 0.88)',
-                chatMdLink: '#2563eb',
-                chatMdMarker: 'rgba(0, 0, 0, 0.4)',
-                chatMdQuoteBg: 'rgba(0, 0, 0, 0.04)',
+                chatMdPreText: 'rgba(0, 0, 0, 0.82)',
+                chatMdLink: 'rgba(0, 0, 0, 0.82)',
+                chatMdMarker: 'rgba(0, 0, 0, 0.38)',
+                chatMdQuoteBg: 'rgba(0, 0, 0, 0.03)',
                 chatMdHr: 'rgba(0, 0, 0, 0.1)',
-                chatDropOutline: 'rgba(0, 0, 0, 0.22)',
-                chatBtnBg: 'rgba(0, 0, 0, 0.06)',
-                chatBtnBgHover: 'rgba(0, 0, 0, 0.1)',
-                chatBtnBorder: 'rgba(0, 0, 0, 0.1)',
-                chatResizeHandle: 'rgba(0, 0, 0, 0.15)',
-                chatNtpComposerGradient:
-                    'linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.55) 35%, rgba(255, 255, 255, 0.92) 100%)',
-                chatNtpAskText: 'rgba(0, 0, 0, 0.9)',
-                chatNtpAskLoading: 'rgba(0, 0, 0, 0.45)',
-                ntpInk: 'rgba(0, 0, 0, 0.88)',
-                ntpInkStrong: 'rgba(0, 0, 0, 0.92)',
-                ntpInkMuted: 'rgba(0, 0, 0, 0.52)',
-                ntpInkFaint: 'rgba(0, 0, 0, 0.42)',
-                ntpInkLabel: 'rgba(0, 0, 0, 0.5)',
-                ntpTextShadow: 'none',
-                ntpIconBg: 'rgba(0, 0, 0, 0.06)',
-                ntpWidgetRing: 'rgba(0, 0, 0, 0.12)',
-                ntpWidgetRingHover: 'rgba(0, 0, 0, 0.2)',
-                ntpWidgetEditBg: 'rgba(0, 0, 0, 0.03)',
-                ntpWidgetBg: 'rgba(0, 0, 0, 0.06)',
-                ntpFocusInner: 'rgba(255, 255, 255, 0.9)',
-                ntpBtnBg: 'rgba(0, 0, 0, 0.06)',
-                ntpBtnBgHover: 'rgba(0, 0, 0, 0.1)',
-                ntpEditBtn: 'rgba(0, 0, 0, 0.5)',
-                ntpEditBtnHover: 'rgba(0, 0, 0, 0.88)',
-                ntpDoneBtnBg: 'rgba(29, 29, 31, 0.92)',
-                ntpDoneBtnBgHover: '#1d1d1f',
-                ntpDoneBtnFg: '#ffffff',
-                ntpDlBarBg: 'rgba(0, 0, 0, 0.08)',
-                ntpGreeting: 'rgba(0, 0, 0, 0.88)',
-                ntpInput: 'rgba(0, 0, 0, 0.9)',
-                ntpPlaceholder: 'rgba(0, 0, 0, 0.42)',
-                ntpLinkAccent: '#2563eb',
-                ntpSuggestionHover: 'rgba(0, 0, 0, 0.04)',
-                ntpSuggestionActive: 'rgba(0, 0, 0, 0.07)',
-                chromeBorder: 'rgba(0, 0, 0, 0.1)',
-                chromeDivider: 'rgba(0, 0, 0, 0.06)',
-                ntpChromeShadow: '0 14px 44px rgba(0, 0, 0, 0.1)',
-                ntpOptInBg: 'rgba(255, 255, 255, 0.96)',
-                ntpOptInBgHover: '#ffffff',
-                ntpOptInBorder: 'rgba(0, 0, 0, 0.1)',
-                ntpOptInBorderHover: 'rgba(0, 0, 0, 0.14)',
-                ntpOptInColor: 'rgba(0, 0, 0, 0.72)',
-                ntpOptInColorHover: 'rgba(0, 0, 0, 0.88)',
-                ntpAddStripBg: '#ffffff',
-                ntpAddStripBorder: 'rgba(0, 0, 0, 0.1)',
-                ntpAddStripShadow: '0 10px 28px rgba(0, 0, 0, 0.1)',
-                ntpWidgetRemoveBg: 'rgba(0, 0, 0, 0.07)',
-                ntpWidgetRemoveColor: 'rgba(0, 0, 0, 0.72)',
-                ntpWidgetRemoveHoverBg: 'rgba(220, 50, 45, 0.88)',
-                ntpWidgetRemoveHoverColor: '#ffffff',
-                ntpResizeGrip: 'rgba(0, 0, 0, 0.45)',
-                ntpDropPreviewBorder: 'rgba(0, 0, 0, 0.32)',
+                chatDropOutline: 'rgba(0, 0, 0, 0.16)',
+                chatBtnBg: 'rgba(0, 0, 0, 0.05)',
+                chatBtnBgHover: 'rgba(0, 0, 0, 0.08)',
+                chatBtnBorder: 'rgba(0, 0, 0, 0.08)',
+                chatResizeHandle: 'rgba(0, 0, 0, 0.18)',
+                composerSendBg: 'rgba(0, 0, 0, 0.86)',
+                composerSendFg: '#ffffff',
+                composerSendBgHover: 'rgba(0, 0, 0, 0.94)',
+                composerSendDisabledBg: 'rgba(0, 0, 0, 0.06)',
+                composerSendDisabledFg: 'rgba(0, 0, 0, 0.22)',
             };
         }
         return {
+            ...ntp,
             theme: 'dark',
-            pageBg: 'rgba(10, 11, 14, 0.20)',
-            pageBlur: 32,
-            pageSat: 155,
-            searchBg: 'rgba(12, 13, 17, 0.26)',
-            searchSolidBg: '#000',
-            searchSolidBlur: 0,
-            searchBlur: 28,
-            searchSat: 155,
-            toggleBg: 'rgba(255, 255, 255, 0.1)',
-            toggleBlur: 20,
-            toggleSat: 145,
-            askBg: 'rgba(10, 11, 14, 0.24)',
-            askBlur: 28,
-            askSat: 152,
             aiPanelBg: '#000000',
             aiPanelBlur: 0,
             aiPanelSat: 100,
-            chatPanelBorder: 'rgba(255, 255, 255, 0.1)',
-            chatPanelText: 'rgba(255, 255, 255, 0.96)',
-            chatPanelTextMuted: 'rgba(255, 255, 255, 0.55)',
-            chatPanelShadow: '-6px 0 24px rgba(0, 0, 0, 0.22)',
-            chatHoverBg: 'rgba(255, 255, 255, 0.1)',
-            chatSurfaceBg: 'rgba(255, 255, 255, 0.04)',
-            chatSurfaceStrongBg: 'rgba(255, 255, 255, 0.1)',
-            chatInputFooterBg: 'rgba(0, 0, 0, 0.15)',
-            chatComposerBg: 'rgba(255, 255, 255, 0.04)',
-            chatComposerInset: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
-            chatUserBubbleBg: 'rgba(255, 255, 255, 0.1)',
-            chatUserBubbleBorder: 'rgba(255, 255, 255, 0.08)',
-            chatAssistantBubbleBg: 'rgba(255, 255, 255, 0.05)',
-            chatQuoteBg: 'rgba(0, 0, 0, 0.25)',
-            chatQuoteBorder: 'rgba(255, 255, 255, 0.35)',
-            chatScrollbarThumb: 'rgba(255, 255, 255, 0.12)',
-            chatMdCodeBg: 'rgba(255, 255, 255, 0.1)',
-            chatMdPreBg: 'rgba(0, 0, 0, 0.35)',
-            chatMdPreText: 'rgba(255, 255, 255, 0.92)',
-            chatMdLink: 'rgba(255, 255, 255, 0.92)',
-            chatMdMarker: 'rgba(255, 255, 255, 0.45)',
-            chatMdQuoteBg: 'rgba(255, 255, 255, 0.04)',
-            chatMdHr: 'rgba(255, 255, 255, 0.12)',
-            chatDropOutline: 'rgba(255, 255, 255, 0.22)',
-            chatBtnBg: 'rgba(255, 255, 255, 0.06)',
-            chatBtnBgHover: 'rgba(255, 255, 255, 0.12)',
-            chatBtnBorder: 'rgba(255, 255, 255, 0.08)',
+            chatPanelShadow: '-6px 0 24px rgba(0, 0, 0, 0.35)',
+            chatMenuBg: '#0a0a0a',
             chatResizeHandle: 'rgba(255, 255, 255, 0.2)',
-            chatNtpComposerGradient:
-                'linear-gradient(180deg, transparent 0%, rgba(6, 6, 8, 0.28) 35%, rgba(6, 6, 8, 0.52) 100%)',
-            chatNtpAskText: 'rgba(255, 255, 255, 0.94)',
-            chatNtpAskLoading: 'rgba(255, 255, 255, 0.45)',
-            ntpInk: 'rgba(255, 255, 255, 0.88)',
-            ntpInkStrong: '#fff',
-            ntpInkMuted: 'rgba(255, 255, 255, 0.55)',
-            ntpInkFaint: 'rgba(255, 255, 255, 0.45)',
-            ntpInkLabel: 'rgba(255, 255, 255, 0.5)',
-            ntpTextShadow: '0 1px 3px rgba(0, 0, 0, 0.55)',
-            ntpIconBg: 'rgba(255, 255, 255, 0.08)',
-            ntpWidgetRing: 'rgba(255, 255, 255, 0.16)',
-            ntpWidgetRingHover: 'rgba(255, 255, 255, 0.28)',
-            ntpWidgetEditBg: 'rgba(255, 255, 255, 0.04)',
-            ntpWidgetBg: 'rgba(255, 255, 255, 0.045)',
-            ntpFocusInner: 'rgba(12, 14, 20, 0.55)',
-            ntpBtnBg: 'rgba(255, 255, 255, 0.12)',
-            ntpBtnBgHover: 'rgba(255, 255, 255, 0.2)',
-            ntpEditBtn: 'rgba(255, 255, 255, 0.5)',
-            ntpEditBtnHover: 'rgba(255, 255, 255, 0.9)',
-            ntpDoneBtnBg: 'rgba(255, 255, 255, 0.92)',
-            ntpDoneBtnBgHover: '#ffffff',
-            ntpDoneBtnFg: '#111111',
-            ntpDlBarBg: 'rgba(255, 255, 255, 0.12)',
-            ntpGreeting: 'rgba(255, 255, 255, 0.96)',
-            ntpInput: 'rgba(255, 255, 255, 0.96)',
-            ntpPlaceholder: 'rgba(255, 255, 255, 0.42)',
-            ntpLinkAccent: '#c8ddff',
-            ntpSuggestionHover: 'rgba(255, 255, 255, 0.06)',
-            ntpSuggestionActive: 'rgba(255, 255, 255, 0.09)',
-            chromeBorder: 'rgba(255, 255, 255, 0.14)',
-            chromeDivider: 'rgba(255, 255, 255, 0.08)',
-            ntpChromeShadow: 'none',
-            ntpOptInBg: 'rgba(20, 22, 30, 0.65)',
-            ntpOptInBgHover: 'rgba(30, 32, 42, 0.8)',
-            ntpOptInBorder: 'rgba(255, 255, 255, 0.16)',
-            ntpOptInBorderHover: 'rgba(255, 255, 255, 0.24)',
-            ntpOptInColor: 'rgba(255, 255, 255, 0.82)',
-            ntpOptInColorHover: '#ffffff',
-            ntpAddStripBg: '#000000',
-            ntpAddStripBorder: 'rgba(255, 255, 255, 0.1)',
-            ntpAddStripShadow: '0 10px 28px rgba(0, 0, 0, 0.45)',
-            ntpWidgetRemoveBg: 'rgba(0, 0, 0, 0.45)',
-            ntpWidgetRemoveColor: 'rgba(255, 255, 255, 0.9)',
-            ntpWidgetRemoveHoverBg: 'rgba(200, 60, 50, 0.75)',
-            ntpWidgetRemoveHoverColor: 'rgba(255, 255, 255, 0.95)',
-            ntpResizeGrip: 'rgba(255, 255, 255, 0.7)',
-            ntpDropPreviewBorder: 'rgba(255, 255, 255, 0.45)',
         };
+    }
+
+    getAiChatChromeStyleForContext(el) {
+        if (el?.closest?.('#ai-chat-panel')) return this.getSidebarAiChatChromeStyle();
+        return this.getNewTabSurfaceChromeStyle();
     }
 
     _applyNewTabSurfaceChromeVars() {
@@ -9629,6 +11339,7 @@ class AxisBrowser {
             ['--chat-surface-strong-bg', sc.chatSurfaceStrongBg],
             ['--chat-input-footer-bg', sc.chatInputFooterBg],
             ['--chat-composer-bg', sc.chatComposerBg],
+            ['--chat-menu-bg', sc.chatMenuBg],
             ['--chat-composer-inset', sc.chatComposerInset],
             ['--chat-user-bubble-bg', sc.chatUserBubbleBg],
             ['--chat-user-bubble-border', sc.chatUserBubbleBorder],
@@ -9651,6 +11362,11 @@ class AxisBrowser {
             ['--chat-ntp-composer-gradient', sc.chatNtpComposerGradient],
             ['--chat-ntp-ask-text', sc.chatNtpAskText],
             ['--chat-ntp-ask-loading', sc.chatNtpAskLoading],
+            ['--composer-send-bg', sc.composerSendBg],
+            ['--composer-send-fg', sc.composerSendFg],
+            ['--composer-send-bg-hover', sc.composerSendBgHover],
+            ['--composer-send-disabled-bg', sc.composerSendDisabledBg],
+            ['--composer-send-disabled-fg', sc.composerSendDisabledFg],
         ];
     }
 
@@ -9663,22 +11379,44 @@ class AxisBrowser {
     }
 
     _applyAiChatPanelChrome() {
-        const sc = this.getNewTabSurfaceChromeStyle();
-        const targets = [
+        const ntpSc = this.getNewTabSurfaceChromeStyle();
+        const sidebarSc = this.getSidebarAiChatChromeStyle();
+        const ntpTargets = [
             document.documentElement,
             document.querySelector('.webview-container'),
-            document.getElementById('ai-chat-panel'),
             document.getElementById('new-tab-page'),
         ].filter(Boolean);
-        for (const el of targets) {
-            this._applyAiChatChromeVarsTo(el, sc);
+        for (const el of ntpTargets) {
+            this._applyAiChatChromeVarsTo(el, ntpSc);
+            el.style.removeProperty('--chat-panel-bg');
+            el.style.removeProperty('--chat-panel-blur');
+            el.style.removeProperty('--chat-panel-sat');
+            el.style.removeProperty('--chat-panel-shadow');
+            el.style.removeProperty('--chat-resize-handle');
         }
         const panel = document.getElementById('ai-chat-panel');
         if (panel) {
-            panel.dataset.chatTheme = sc.theme || 'dark';
+            this._applyAiChatChromeVarsTo(panel, sidebarSc);
+            panel.dataset.chatTheme = sidebarSc.theme || 'dark';
             panel.style.removeProperty('background');
             panel.style.removeProperty('backdrop-filter');
             panel.style.removeProperty('-webkit-backdrop-filter');
+        }
+        const ntp = document.getElementById('new-tab-page');
+        const ntpChatView = document.getElementById('new-tab-ai-chat-view');
+        const ntpVisualTheme = ntpSc.theme || 'dark';
+        if (ntp) {
+            ntp.dataset.chatTheme = ntpVisualTheme;
+            ntp.dataset.ntpTheme = ntpVisualTheme;
+            ntp.style.removeProperty('--chat-panel-bg');
+            if (ntp.classList.contains('ntp-ai-chat-mode')) {
+                this._applyAiChatChromeVarsTo(ntp, ntpSc);
+            }
+        }
+        if (ntpChatView) {
+            this._applyAiChatChromeVarsTo(ntpChatView, ntpSc);
+            ntpChatView.dataset.chatTheme = ntpVisualTheme;
+            ntpChatView.style.removeProperty('--chat-panel-bg');
         }
     }
 
@@ -9715,14 +11453,18 @@ class AxisBrowser {
         const u = String(tab.url || '');
         const isSettings =
             u === 'axis://settings' || !!tab.isSettings;
+        const displayUrl = this._resolveTabDisplayUrl(tab);
         const isRealSite =
-            u &&
-            u !== 'about:blank' &&
-            u !== this.NEWTAB_URL &&
+            displayUrl &&
+            displayUrl !== 'about:blank' &&
+            displayUrl !== this.NEWTAB_URL &&
             !isSettings &&
-            !u.startsWith('axis:note://') &&
-            !/^axis:/i.test(u);
-        const guestActive = tab.webview && !tab.webview.classList.contains('inactive');
+            !displayUrl.startsWith('axis:note://') &&
+            !/^axis:/i.test(displayUrl);
+        const guestActive =
+            tab.webview &&
+            (!tab.webview.classList.contains('inactive') ||
+                this._normalizeTabMapKey(this.currentTab) === this._normalizeTabMapKey(tab.id));
 
         body.classList.toggle(
             'panel-settings',
@@ -9731,6 +11473,8 @@ class AxisBrowser {
 
         if (isRealSite && guestActive) {
             body.classList.add('panel-site');
+            const canvas = document.body.style.getPropertyValue('--axis-webview-canvas')?.trim();
+            this._syncWebviewCanvasColor(canvas || null);
         } else {
             body.classList.add('panel-idle');
             if (!isRealSite) this._clearWebviewCanvasColor();
@@ -9872,6 +11616,19 @@ class AxisBrowser {
             newTabAskBlur,
             newTabAskSat,
         };
+        if (window.electronAPI?.platform === 'win32' && tSlider > 0) {
+            const boostBlur = (b) => Math.min(64, Math.round(b * 1.12));
+            chrome.blurMain = boostBlur(chrome.blurMain);
+            chrome.blurStrong = boostBlur(chrome.blurStrong);
+            chrome.urlBarBlur = boostBlur(chrome.urlBarBlur);
+            chrome.backdropMain = backdropFor(chrome.blurMain, chrome.satMain);
+            chrome.backdropStrong = backdropFor(chrome.blurStrong, satStrong);
+            chrome.urlBarBackdrop = backdropFor(chrome.urlBarBlur, chrome.urlBarSat);
+            // Let DWM Mica/Acrylic show through the shell tint (Windows has no vibrancy under-window).
+            chrome.glassAlpha = Math.max(0.1, glassAlpha * 0.52);
+            chrome.slideOutAlpha = Math.max(0.55, slideOutAlpha * 0.88);
+            chrome.popupAlpha = Math.max(0.22, popupAlpha * 0.75);
+        }
         return chrome;
     }
 
@@ -10103,13 +11860,11 @@ class AxisBrowser {
         } catch (_) {}
         // Let Electron use its real Chromium version in the UA string;
         // hardcoding an old Chrome version can cause sites to refuse loading.
-        webview.setAttribute('autosize', 'true');
         webview.style.cssText = `
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
+            display: inline-flex;
+            flex: 1 1 auto;
+            min-width: 0;
+            min-height: 0;
             width: 100%;
             height: 100%;
             opacity: 0;
@@ -10118,18 +11873,73 @@ class AxisBrowser {
             z-index: 0;
         `;
 
-        container.appendChild(webview);
+        const stage = document.createElement('div');
+        stage.className = 'axis-webview-zoom-stage';
+        stage.dataset.tabId = String(tabId);
+        stage.style.cssText =
+            'position:absolute;top:0;left:0;right:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;z-index:0;';
+        stage.appendChild(webview);
+        container.appendChild(stage);
+        const tabRec = this.tabs.get(tabId);
+        if (tabRec) {
+            tabRec.zoomStage = stage;
+            this.tabs.set(tabId, tabRec);
+        }
         this.setupWebviewEventListeners(webview, tabId);
+        this._syncNavGestureConfigToWebview(webview);
+        this._syncLinkPreviewConfigToWebview(webview);
         return webview;
     }
 
     /** Reattach an existing guest in `#webviews-container` when the Map lost `tab.webview`. */
+    _profileDomKey() {
+        return String(this.profileId || 'personal')
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '-');
+    }
+
+    _webviewMatchesProfileSession(webview) {
+        if (!webview) return false;
+        const pid = this._profileDomKey();
+        const wvPid = String(webview.dataset?.axisProfile || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '-');
+        if (wvPid && wvPid !== pid) return false;
+        try {
+            const part = webview.getAttribute('partition') || '';
+            if (part && part !== this.getSessionPartition()) return false;
+        } catch (_) {
+            return false;
+        }
+        return true;
+    }
+
+    _orphanMisassignedWebview(webview) {
+        if (!webview) return;
+        try {
+            webview.dataset.axisProfile = `orphan-${Date.now()}`;
+            delete webview.dataset.tabId;
+            webview.classList.add('inactive', 'axis-profile-webview-suspended');
+            webview.style.setProperty('visibility', 'hidden', 'important');
+            webview.style.setProperty('pointer-events', 'none', 'important');
+            webview.style.setProperty('opacity', '0', 'important');
+            webview.src = 'about:blank';
+        } catch (_) {}
+    }
+
     _findTabWebviewInContainer(tabId) {
         const container = document.getElementById('webviews-container');
         if (!container) return null;
         const want = String(tabId);
+        const pid = this._profileDomKey();
         for (const wv of container.querySelectorAll('webview')) {
-            if (String(wv.dataset.tabId) === want) return wv;
+            if (String(wv.dataset.tabId) !== want) continue;
+            const wvPid = String(wv.dataset?.axisProfile || '')
+                .toLowerCase()
+                .replace(/[^a-z0-9_-]/g, '-');
+            if (wvPid && wvPid !== pid) continue;
+            if (!this._webviewMatchesProfileSession(wv)) continue;
+            return wv;
         }
         return null;
     }
@@ -10196,20 +12006,206 @@ class AxisBrowser {
         return true;
     }
 
+    _axisNativeFileDragAiTargetFromElement(el) {
+        if (!el?.closest) return null;
+        if (
+            el.closest(
+                '#ai-chat-panel, #ai-chat-messages, #ai-chat-input-container, #ai-chat-composer-chrome, .ai-chat-composer-chrome'
+            )
+        ) {
+            return 'sidebar';
+        }
+        if (
+            el.closest(
+                '#new-tab-ai-chat-view, #new-tab-ask-messages, #new-tab-composer-chrome, #new-tab-search-wrapper, #new-tab-ai-composer, .new-tab-composer-chrome'
+            )
+        ) {
+            return this._isOnNewTabPage() ? 'newtab' : null;
+        }
+        return null;
+    }
+
+    _axisNativeFileDragAiTargetFromEvent(e) {
+        if (!e) return null;
+        let el = e.target;
+        if (typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+            try {
+                const hit = document.elementFromPoint(e.clientX, e.clientY);
+                if (hit) el = hit;
+            } catch (_) {}
+        }
+        return this._axisNativeFileDragAiTargetFromElement(el);
+    }
+
+    _axisNativeFileDragAiTargetFromPoint(clientX, clientY) {
+        if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+        try {
+            const el = document.elementFromPoint(clientX, clientY);
+            return this._axisNativeFileDragAiTargetFromElement(el);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    _axisNativeFileDragTrackPointer(e) {
+        if (!this._axisNativeFileDragPath) return;
+        if (typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+            this._axisNativeFileDragLastX = e.clientX;
+            this._axisNativeFileDragLastY = e.clientY;
+        }
+        const target = this._axisNativeFileDragAiTargetFromEvent(e);
+        if (target) {
+            this._axisNativeFileDragAiTarget = target;
+            this._axisNativeFileDragAiHoverAt = performance.now();
+        }
+    }
+
+    _axisNativeFileDragPointerUp(e) {
+        if (!this._axisNativeFileDragPath || this._axisNativeFileDragConsumed) return;
+        const target =
+            this._axisNativeFileDragAiTargetFromEvent(e) ||
+            this._axisNativeFileDragAiTargetFromPoint(
+                this._axisNativeFileDragLastX,
+                this._axisNativeFileDragLastY
+            ) ||
+            this._axisNativeFileDragAiTarget;
+        if (target && this.hasAiApiKey() && this.isAiFeaturesEnabled()) {
+            this._consumeNativeFileDragToAiChat(this._axisNativeFileDragPath, target);
+        }
+    }
+
+    _bindAxisNativeFileDragPointerTracking() {
+        if (this._axisNativeFileDragPointerBound) return;
+        this._axisNativeFileDragPointerBound = true;
+        this._onAxisNativeFileDragPointerMove = (e) => this._axisNativeFileDragTrackPointer(e);
+        this._onAxisNativeFileDragPointerUp = (e) => this._axisNativeFileDragPointerUp(e);
+        document.addEventListener('mousemove', this._onAxisNativeFileDragPointerMove, true);
+        document.addEventListener('mouseup', this._onAxisNativeFileDragPointerUp, true);
+    }
+
+    _unbindAxisNativeFileDragPointerTracking() {
+        if (!this._axisNativeFileDragPointerBound) return;
+        document.removeEventListener('mousemove', this._onAxisNativeFileDragPointerMove, true);
+        document.removeEventListener('mouseup', this._onAxisNativeFileDragPointerUp, true);
+        this._axisNativeFileDragPointerBound = false;
+        this._onAxisNativeFileDragPointerMove = null;
+        this._onAxisNativeFileDragPointerUp = null;
+    }
+
+    _beginAxisNativeFileDrag(filePath) {
+        if (!filePath || typeof filePath !== 'string') return;
+        this._axisNativeFileDragPath = filePath;
+        this._axisNativeFileDragAiTarget = null;
+        this._axisNativeFileDragAiHoverAt = 0;
+        this._axisNativeFileDragLastX = null;
+        this._axisNativeFileDragLastY = null;
+        this._axisNativeFileDragConsumed = false;
+        document.body.classList.add('axis-native-file-drag');
+        this._bindAxisNativeFileDragPointerTracking();
+    }
+
+    _clearAxisNativeFileDrag() {
+        this._unbindAxisNativeFileDragPointerTracking();
+        this._axisNativeFileDragPath = null;
+        this._axisNativeFileDragAiTarget = null;
+        this._axisNativeFileDragAiHoverAt = 0;
+        this._axisNativeFileDragLastX = null;
+        this._axisNativeFileDragLastY = null;
+        this._axisNativeFileDragConsumed = false;
+        document.body.classList.remove('axis-native-file-drag');
+    }
+
+    _consumeNativeFileDragToAiChat(filePath, target) {
+        if (!filePath || !target || this._axisNativeFileDragConsumed) return;
+        if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled()) return;
+        this._axisNativeFileDragConsumed = true;
+        void this._ingestAiChatPaths([filePath], target).finally(() => this._clearAxisNativeFileDrag());
+    }
+
+    /** macOS native startDrag often skips HTML5 drop — attach when drag ends over chat. */
+    _finishNativeFileDragToAiChat() {
+        if (this._axisNativeFileDragConsumed) {
+            this._clearAxisNativeFileDrag();
+            return;
+        }
+        const path = this._axisNativeFileDragPath;
+        let target = this._axisNativeFileDragAiTarget;
+        const hoveredRecently = performance.now() - (this._axisNativeFileDragAiHoverAt || 0) < 4000;
+        if (!target && this._axisNativeFileDragLastX != null && this._axisNativeFileDragLastY != null) {
+            target = this._axisNativeFileDragAiTargetFromPoint(
+                this._axisNativeFileDragLastX,
+                this._axisNativeFileDragLastY
+            );
+        }
+        if (path && target && hoveredRecently) {
+            this._consumeNativeFileDragToAiChat(path, target);
+            return;
+        }
+        this._clearAxisNativeFileDrag();
+    }
+
+    async _ingestAiChatPaths(paths, target = 'sidebar') {
+        const out = [];
+        for (const filePath of paths) {
+            const payload = await window.electronAPI?.readAiChatAttachmentPath?.(filePath);
+            if (!payload?.ok) {
+                if (payload?.error) this._flashAiChatAttachNotice(target, payload.error);
+                continue;
+            }
+            if (payload.kind === 'blob') {
+                const bytes = Uint8Array.from(atob(payload.base64), (c) => c.charCodeAt(0));
+                out.push(new File([bytes], payload.name, { type: payload.mimeType || 'application/octet-stream' }));
+            } else if (payload.kind === 'text') {
+                out.push(new File([payload.text], payload.name, { type: 'text/plain' }));
+            }
+        }
+        if (out.length) {
+            await this._addAiChatDroppedFiles(out, target);
+        } else if (paths.length) {
+            this._flashAiChatAttachNotice(target, 'Could not attach that file.');
+        }
+    }
+
     _scheduleWebviewHostBoundsLiveSync() {
-        if (document.body.classList.contains('axis-site-html-fullscreen')) {
-            return;
-        }
-        const contentArea = document.getElementById('content-area');
-        if (contentArea?.classList.contains('chat-sliding') || document.body.classList.contains('axis-chat-sliding')) {
-            return;
-        }
-        this._webviewHostBoundsLastLiveAt = performance.now();
         if (!this._webviewHostBoundsTracking) {
             this._webviewHostBoundsTracking = true;
             document.body.classList.add('host-resizing');
+            this._ensureWebviewHostBoundsObserver();
         }
+        this._webviewHostBoundsLastLiveAt = performance.now();
+        this._queueWebviewHostBoundsNudge();
         this._armWebviewHostBoundsIdleFallback();
+    }
+
+    _ensureWebviewHostBoundsObserver() {
+        const container = document.getElementById('webviews-container');
+        if (!container || this._webviewHostBoundsRo || typeof ResizeObserver === 'undefined') {
+            return;
+        }
+        this._webviewHostBoundsRo = new ResizeObserver(() => this._queueWebviewHostBoundsNudge());
+        this._webviewHostBoundsRo.observe(container);
+    }
+
+    _releaseWebviewHostBoundsObserver() {
+        if (!this._webviewHostBoundsRo) return;
+        try {
+            this._webviewHostBoundsRo.disconnect();
+        } catch (_) {}
+        this._webviewHostBoundsRo = null;
+    }
+
+    _queueWebviewHostBoundsNudge() {
+        if (this._webviewHostBoundsLiveRaf) return;
+        this._webviewHostBoundsLiveRaf = requestAnimationFrame(() => {
+            this._webviewHostBoundsLiveRaf = 0;
+            if (
+                !document.body.classList.contains('axis-window-resizing') &&
+                !document.body.classList.contains('host-resizing')
+            ) {
+                return;
+            }
+            this._nudgeWebviewGuestLayout();
+        });
     }
 
     _armWebviewHostBoundsIdleFallback() {
@@ -10219,12 +12215,12 @@ class AxisBrowser {
         this._webviewHostBoundsIdleTimer = setTimeout(() => {
             this._webviewHostBoundsIdleTimer = null;
             if (!this._webviewHostBoundsTracking) return;
-            if (performance.now() - (this._webviewHostBoundsLastLiveAt || 0) < 160) {
+            if (performance.now() - (this._webviewHostBoundsLastLiveAt || 0) < 220) {
                 this._armWebviewHostBoundsIdleFallback();
                 return;
             }
             this._finishWebviewHostBoundsTracking();
-        }, 160);
+        }, 220);
     }
 
     _finishWebviewHostBoundsTracking() {
@@ -10234,15 +12230,16 @@ class AxisBrowser {
         }
         if (!this._webviewHostBoundsTracking) return;
         this._webviewHostBoundsTracking = false;
-        document.body.classList.remove('host-resizing');
+        if (this._hostResizeBoundsRaf) {
+            cancelAnimationFrame(this._hostResizeBoundsRaf);
+            this._hostResizeBoundsRaf = 0;
+        }
+        this._releaseWebviewHostBoundsObserver();
+        document.body.classList.remove('axis-window-resizing', 'host-resizing');
 
-        if (!this._hasVisibleWebGuest()) return;
-
-        this._nudgeWebviewGuestLayout();
         requestAnimationFrame(() => {
+            if (!this._hasVisibleWebGuest()) return;
             this._nudgeWebviewGuestLayout();
-            this._syncGuestWindowResizeEvent();
-            this._maybeRebindStaleGuestLayout();
         });
     }
 
@@ -10373,25 +12370,24 @@ class AxisBrowser {
     }
 
     /**
-     * Guest `<webview>` resize is handled by Chromium (`autosize`). During drags we only
-     * disable shell transitions (`host-resizing`); JS must not rewrite guest bounds each frame.
-     * After the drag ends we rebind the guest once so real sites catch up.
+     * OS window resize: disable shell transitions; nudge OOPIF webview layout on container changes.
+     * Do not force absolute sizing on `<webview>` — Electron requires internal `display:flex` on the tag.
      */
     setupWebviewGuestResizeSync() {
-        const onHostBoundsChange = () => this._scheduleWebviewHostBoundsLiveSync();
-
-        const container = document.getElementById('webviews-container');
-        try {
-            if (typeof ResizeObserver !== 'undefined' && container) {
-                new ResizeObserver(onHostBoundsChange).observe(container);
-            }
-        } catch (_) {}
-        window.addEventListener('resize', onHostBoundsChange, { passive: true });
-        window.electronAPI?.onHostResizeLive?.(() => this._scheduleWebviewHostBoundsLiveSync());
-        window.electronAPI?.onHostResizeSettled?.(() => this._finishWebviewHostBoundsTracking());
-        queueMicrotask(() => {
-            this._nudgeWebviewGuestLayout();
-            this._syncGuestWindowResizeEvent();
+        window.electronAPI?.onHostResizeActive?.((active) => {
+            if (!active) return;
+            document.body.classList.add('axis-window-resizing', 'host-resizing');
+            this._ensureWebviewHostBoundsObserver();
+            this._queueWebviewHostBoundsNudge();
+        });
+        window.electronAPI?.onHostResizeSettled?.(() => {
+            this._releaseWebviewHostBoundsObserver();
+            document.body.classList.remove('axis-window-resizing', 'host-resizing');
+            requestAnimationFrame(() => this._nudgeWebviewGuestLayout());
+        });
+        window.addEventListener('resize', () => {
+            if (!document.body.classList.contains('axis-window-resizing')) return;
+            this._queueWebviewHostBoundsNudge();
         });
     }
 
@@ -10458,6 +12454,12 @@ class AxisBrowser {
             return this._findSettingsTabId();
         }
 
+        if (!effectiveUrl && this._usesSpotlightNewTab() && !options.skipSpotlightOverlay) {
+            this._playNewTabButtonFeedback();
+            this._openSpotlightOverlay({ fromNewTabShortcut: true });
+            return this.currentTab;
+        }
+
         const tabId = this._createUniqueTabId();
         const tabElement = document.createElement('div');
         tabElement.className = 'tab';
@@ -10482,7 +12484,7 @@ class AxisBrowser {
             <div class="tab-content">
                 <div class="tab-left">
                     ${iconHTML}
-                    <span class="tab-audio-indicator" style="display: none;"><i class="fas fa-volume-up"></i></span>
+                    ${this._tabAudioWrapHtml(tabId)}
                     <span class="tab-title">New Tab</span>
                 </div>
                 <div class="tab-right">
@@ -10506,8 +12508,12 @@ class AxisBrowser {
             webview: null,
             isMuted: false,
             isPlayingAudio: false,
+            audio: window.AxisTabAudio?.ensureTabState
+                ? window.AxisTabAudio.ensureTabState({ audio: null })
+                : { volume: 1, mono: false, eq: 'off' },
             ancestry: []
         };
+        if (window.AxisTabAudio?.ensureTabState) window.AxisTabAudio.ensureTabState(tabData);
 
         tabData.ancestry = this._buildTabAncestryForNewTab(tabData, effectiveUrl, options);
         
@@ -10535,6 +12541,10 @@ class AxisBrowser {
         // Set up tab event listeners
         this.setupTabEventListeners(tabElement, tabId);
 
+        if (!effectiveUrl) {
+            this._playNewTabButtonFeedback();
+        }
+
         // Only reset new tab page when opening a brand-new tab (not when returning to an existing one)
         this._resetNewTabPageOnShow =
             !options.preserveNewTabState && (!effectiveUrl || effectiveUrl === this.NEWTAB_URL);
@@ -10559,7 +12569,14 @@ class AxisBrowser {
             const restoredTab = this.tabs.get(tabId);
             if (restoredTab) {
                 restoredTab.url = effectiveUrl;
+                const provisionalTitle = this._tabProvisionalTitleFromUrl(effectiveUrl);
+                if (provisionalTitle && !restoredTab.customTitle) {
+                    restoredTab.title = provisionalTitle;
+                }
                 this.tabs.set(tabId, restoredTab);
+                if (provisionalTitle) {
+                    this._syncTabTitleElement(tabId);
+                }
                 const wv = restoredTab.webview;
                 if (wv && effectiveUrl !== this.NEWTAB_URL && effectiveUrl !== 'axis://settings') {
                     wv.src = effectiveUrl;
@@ -10612,13 +12629,16 @@ class AxisBrowser {
     updatePinnedTabClosedState(tabId) {
         const tab = this.tabs.get(tabId);
         if (!tab || !tab.pinned) return;
-        
-        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+
+        const tabElement =
+            this._getTabElement?.(tabId) ||
+            this._findTabElementInProfileScope?.(tabId) ||
+            document.querySelector(`[data-tab-id="${tabId}"]`);
         if (!tabElement) return;
-        
+
         // Tab is closed if it has no webview
         const isClosed = !tab.webview;
-        
+
         if (isClosed) {
             tabElement.classList.add('closed');
             tab.closed = true;
@@ -10626,12 +12646,17 @@ class AxisBrowser {
             tabElement.classList.remove('closed');
             tab.closed = false;
         }
-        
+
         this.tabs.set(tabId, tab);
 
-        const h = tabElement._pinnedCloseHandlers;
-        if (h && typeof h.updateIcon === 'function') {
-            h.updateIcon();
+        const closeBtn = tabElement.querySelector('.tab-close');
+        if (closeBtn) {
+            closeBtn.innerHTML = this._tabCloseGlyphHtml(isClosed ? 'x' : 'minus');
+        }
+        if (!tabElement._pinnedCloseHandlers) {
+            this.setupPinnedTabCloseButton(tabElement, tabId);
+        } else if (typeof tabElement._pinnedCloseHandlers.updateIcon === 'function') {
+            tabElement._pinnedCloseHandlers.updateIcon();
         }
     }
     
@@ -10683,13 +12708,18 @@ class AxisBrowser {
     setupTabEventListeners(tabElement, tabId) {
         // Tab click
         tabElement.addEventListener('click', (e) => {
-            if (!e.target.closest('.tab-close') && !e.target.closest('.tab-audio-indicator')) {
+            if (!e.target.closest('.tab-close') && !e.target.closest('.tab-audio-wrap')) {
+                const cur = this._normalizeTabMapKey(this.currentTab);
+                const next = this._normalizeTabMapKey(tabId);
+                if (cur !== next) {
+                    this._playSidebarItemPress(tabElement);
+                }
                 this.switchToTab(tabId);
             }
         });
 
         tabElement.addEventListener('dblclick', (e) => {
-            if (e.target.closest('.tab-close') || e.target.closest('.tab-audio-indicator')) return;
+            if (e.target.closest('.tab-close') || e.target.closest('.tab-audio-wrap')) return;
             const titleElement = tabElement.querySelector('.tab-title');
             if (!titleElement) return;
             e.preventDefault();
@@ -10724,15 +12754,13 @@ class AxisBrowser {
             }
         }
         
-        // Audio indicator click - toggle mute
-        const audioIndicator = tabElement.querySelector('.tab-audio-indicator');
-        if (audioIndicator) {
-            audioIndicator.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.toggleTabMute(tabId);
+        const audioWrap = tabElement.querySelector('.tab-audio-wrap');
+        if (audioWrap) {
+            audioWrap.addEventListener('click', (e) => {
+                if (e.target.closest('.tab-audio-indicator, .axis-audio-slider, .axis-audio-toggle')) {
+                    e.stopPropagation();
+                }
             });
-            // Add cursor pointer style
-            audioIndicator.style.cursor = 'pointer';
         }
 
         // Tab right-click for context menu
@@ -10776,7 +12804,11 @@ class AxisBrowser {
             return;
         }
 
+        this._flushScreenTime();
         const prevCur = this._normalizeTabMapKey(this.currentTab);
+        if (prevCur != null && tabId != null && prevCur !== tabId) {
+            this._resetTabVisualZoom(prevCur);
+        }
         if (prevCur === tabId && !fromProfileSwitch) {
             return;
         }
@@ -10821,6 +12853,10 @@ class AxisBrowser {
         }
 
         const prevTabId = prevCur;
+        if (prevTabId != null && prevTabId !== tabId && this._isSpotlightOpen()) {
+            this.closeSpotlightSearch();
+        }
+        const switchingToNtp = tab?.url === this.NEWTAB_URL;
         try {
             void window.electronAPI?.setSettingsUiActive?.(!!this._isSettingsTab(tab));
         } catch (_) {}
@@ -10829,36 +12865,36 @@ class AxisBrowser {
             const prevTab = this.tabs.get(prevTabId);
             if (prevTab?.webview) {
                 deferSuspendForPipTabId = prevTabId;
-                this._voidGuestTask(
-                    this.checkAndShowPIP(prevTabId, prevTab.webview).finally(() => {
-                        const cur = this._normalizeTabMapKey(this.currentTab);
-                        if (cur === prevTabId) return;
-                        if (this._shouldKeepBackgroundMediaAlive(prevTabId)) return;
-                        const t = this.tabs.get(prevTabId);
-                        if (t?.webview) this._suspendInactiveTabGuest(t.webview, t, prevTabId);
-                    })
-                );
+                this._pipHandoffTabId = prevTabId;
+                const wv = prevTab.webview;
+                const finishPipHandoff = () => {
+                    this._pipHandoffTabId = null;
+                    const cur = this._normalizeTabMapKey(this.currentTab);
+                    if (cur === prevTabId) return;
+                    const t = this.tabs.get(prevTabId);
+                    if (!t?.webview) return;
+                    if (!this._shouldKeepBackgroundMediaAlive(prevTabId)) {
+                        this._styleInactiveTabWebview(t.webview);
+                        this._suspendInactiveTabGuest(t.webview, t, prevTabId);
+                    }
+                };
+                const runPipHandoff = () => {
+                    this._voidGuestTask(
+                        this.checkAndShowPIP(prevTabId, wv, { leaveTab: true }).finally(finishPipHandoff)
+                    );
+                };
+                runPipHandoff();
             }
             const prevTabElement = this._getTabElement(prevTabId);
             if (prevTabElement) prevTabElement.classList.remove('active');
         }
 
-        // Demote previous webview before the active tab paints (avoid O(n) over all guests)
-        if (!opts.deferGuestChores) {
-            this._purgeStaleWebviewsInContainer();
-            this._prepareWebviewsForTabSwitch(tabId, prevTabId);
-            this._syncWebviewBackgroundThrottling(tabId, deferSuspendForPipTabId, prevTabId);
-        } else {
-            this._prepareWebviewsForTabSwitch(tabId, prevTabId);
-            const capturedPrev = prevTabId;
-            const capturedPip = deferSuspendForPipTabId;
-            const capturedCur = tabId;
-            this._deferTabSidebarGuestChores(() => {
-                if (this._normalizeTabMapKey(this.currentTab) !== capturedCur) return;
-                this._purgeStaleWebviewsInContainer();
-                this._syncWebviewBackgroundThrottling(capturedCur, capturedPip, capturedPrev);
-            }, 160);
-        }
+        // Demote previous webview before the active tab paints (avoid O(n) over all guests).
+        // New-tab has no guest — always hide webviews synchronously so the previous page never flashes through.
+        this._purgeStaleWebviewsInContainer();
+        if (switchingToNtp) this._hideAllWebviewsForNewTabPage();
+        else this._prepareWebviewsForTabSwitch(tabId, prevTabId);
+        this._syncWebviewBackgroundThrottling(tabId, deferSuspendForPipTabId, prevTabId);
         
         // Hide PIP if switching back to the tab that has PIP
         if (this.pipTabId === tabId) {
@@ -10868,6 +12904,8 @@ class AxisBrowser {
         // CRITICAL: Update current tab immediately (must be before updateEmptyState so empty state hides)
         this.currentTab = tabId;
         this._recordTabActivation(tabId);
+        if (switchingToNtp) this.updateNewTabPageVisibility(true);
+        this._checkScreenTimeLimitForCurrentTab();
         this.updateEmptyState();
         // Instant: do not play open/close slide when applying another tab's remembered chat state
         this.syncAIChatPanelForCurrentTab({ animate: false });
@@ -10889,7 +12927,11 @@ class AxisBrowser {
             // Ensure webview exists - create if missing
             let webviewCreatedThisSwitch = false;
             if (!tab.webview) {
-                const reclaimed = this._findTabWebviewInContainer(tabId);
+                let reclaimed = this._findTabWebviewInContainer(tabId);
+                if (reclaimed && !this._webviewMatchesProfileSession(reclaimed)) {
+                    this._orphanMisassignedWebview(reclaimed);
+                    reclaimed = null;
+                }
                 if (reclaimed) {
                     tab.webview = reclaimed;
                     this.tabs.set(tabId, tab);
@@ -10931,8 +12973,18 @@ class AxisBrowser {
                     && this._tabGuestSessionEstablished(tab, currentSrc)
                     && !this._isSettingsTab(tab);
                 // If tab says new-tab but webview has navigated to a real page (e.g. user searched from new tab), sync tab.url so we show the page, not the overlay
-                const isWebviewRealPage = currentSrc && currentSrc !== 'about:blank' && currentSrc.trim() !== '' && currentSrc !== this.NEWTAB_URL && !currentSrc.startsWith('axis:');
-                if (tab.url === this.NEWTAB_URL && isWebviewRealPage) {
+                const isWebviewRealPage =
+                    currentSrc &&
+                    currentSrc !== 'about:blank' &&
+                    currentSrc.trim() !== '' &&
+                    currentSrc !== this.NEWTAB_URL &&
+                    !currentSrc.startsWith('axis:');
+                if (
+                    !fromProfileSwitch &&
+                    tab.url === this.NEWTAB_URL &&
+                    isWebviewRealPage &&
+                    this._webviewMatchesProfileSession(webview)
+                ) {
                     tab.url = currentSrc;
                     this.tabs.set(tabId, tab);
                 }
@@ -11015,11 +13067,14 @@ class AxisBrowser {
                     webview.style.removeProperty('opacity');
                     webview.style.removeProperty('visibility');
                     webview.style.removeProperty('pointer-events');
-                    webview.style.removeProperty('background');
                 } catch (_) {}
+                this._syncWebviewCanvasColor(
+                    this.settings?.themeColor ||
+                        document.documentElement.style.getPropertyValue('--axis-webview-canvas') ||
+                        'rgb(24, 24, 26)'
+                );
                 if (tab.url === this.NEWTAB_URL) {
-                    webview.style.opacity = '1';
-                    webview.style.visibility = 'visible';
+                    this._styleInactiveTabWebview(webview);
                     webview.style.pointerEvents = 'none';
                     webview.style.zIndex = '1';
                 } else {
@@ -11028,9 +13083,19 @@ class AxisBrowser {
                     webview.style.pointerEvents = 'auto';
                     webview.style.zIndex = '2';
                     webview.style.zIndex = '2';
+                    requestAnimationFrame(() => {
+                        try {
+                            webview.focus();
+                        } catch (_) {}
+                    });
                 }
-                
+                this._clearWebviewCssZoom(webview);
+                this._syncUrlBarZoomBadge(tabId);
+
                 this.elements.webview = webview;
+                if (tab.url !== this.NEWTAB_URL) {
+                    this._resumeActiveTabGuest(webview, tab);
+                }
                 this._applyTabMuteState(tabId);
                 if (tab.isFavoriteTab) {
                     requestAnimationFrame(() => this._forceGuestLayoutSync());
@@ -11048,11 +13113,13 @@ class AxisBrowser {
             this._syncWebPanelVisualState();
         }
 
+        this._ensureActiveWebviewInteractable();
+
         const prevWasFavorite =
             prevCur != null && !!this.tabs.get(prevCur)?.isFavoriteTab;
         const nowFavorite = !!tab?.isFavoriteTab;
 
-        if (prevWasFavorite || nowFavorite) {
+        if (prevWasFavorite || nowFavorite || this.favorites.length) {
             this._syncFavoriteTabsUi();
         }
 
@@ -11066,8 +13133,16 @@ class AxisBrowser {
                 this._urlBarInstantThemeTabSwitch = true;
                 this.elements?.webviewUrlBar?.classList.add('url-bar--instant-theme');
             }
-            this._nudgeWebviewGuestLayout();
-            this._syncGuestWindowResizeEvent();
+            const motionBusy = document.body.classList.contains('axis-tab-sidebar-motion');
+            if (!motionBusy) {
+                this._nudgeWebviewGuestLayout();
+                this._syncGuestWindowResizeEvent();
+            } else {
+                this._deferTabSidebarGuestChores(() => {
+                    this._nudgeWebviewGuestLayout();
+                    this._syncGuestWindowResizeEvent();
+                }, 200);
+            }
             if (tab?.webview && tab.url) {
                 this._scheduleGuestVideoRecovery(tab.webview, tab.url);
                 if (!this.isBenchmarking && /^https?:/i.test(tab.url)) {
@@ -11145,6 +13220,16 @@ class AxisBrowser {
             if (adblockPanel && !adblockPanel.classList.contains('hidden')) {
                 void this.refreshAdblockPanel();
             }
+            this._ensureActiveWebviewInteractable();
+            if (
+                switchedDifferentTab &&
+                tab?.webview &&
+                tab.url !== this.NEWTAB_URL &&
+                !this._hostChromeHasTextFocus() &&
+                !document.getElementById('content-area')?.classList.contains('chat-open')
+            ) {
+                this._focusActiveWebviewGuest();
+            }
         });
     }
 
@@ -11166,6 +13251,7 @@ class AxisBrowser {
             const value = e.target.value;
             const hasQuery = !!value.trim();
             throttledUpdate(value.trim());
+            this._autoGrowComposerInput(input);
             this.updateNewTabSendButtonState();
             if (ntpHadQuery !== hasQuery) {
                 ntpHadQuery = hasQuery;
@@ -11186,10 +13272,15 @@ class AxisBrowser {
             }
 
             if (e.key === 'Enter') {
-                e.preventDefault();
                 if (this.isNewTabInChat()) {
+                    if (e.shiftKey) {
+                        this._autoGrowComposerInput(input);
+                        return;
+                    }
+                    e.preventDefault();
                     void this.sendNewTabAskMessage();
                 } else {
+                    e.preventDefault();
                     const items = suggestionsContainer.querySelectorAll('.spotlight-suggestion-item');
                     if (this.spotlightSelectedIndex >= 0 && items[this.spotlightSelectedIndex]) {
                         items[this.spotlightSelectedIndex].click();
@@ -11526,6 +13617,36 @@ class AxisBrowser {
         this._syncNtpHeroAnchor();
     };
 
+    /** Abort in-progress widget drag/resize so fixed ghosts never stick on screen. */
+    _abortNtpWidgetInteraction() {
+        if (typeof this._ntpClearActiveDrag === 'function') {
+            try {
+                this._ntpClearActiveDrag();
+            } catch (_) {}
+        }
+        if (typeof this._ntpClearActiveResize === 'function') {
+            try {
+                this._ntpClearActiveResize();
+            } catch (_) {}
+        }
+        document.querySelectorAll('.ntp-widget-ghost').forEach((el) => {
+            try {
+                el.remove();
+            } catch (_) {}
+        });
+        document.querySelectorAll('.ntp-widget-dragging').forEach((el) => {
+            el.classList.remove('ntp-widget-dragging');
+        });
+        document.querySelectorAll('.ntp-widget-resizing').forEach((el) => {
+            el.classList.remove('ntp-widget-resizing');
+        });
+        const grid = document.getElementById('ntp-widgets-grid');
+        const section = document.getElementById('new-tab-widgets-section');
+        grid?.classList.remove('ntp-widgets-dragging', 'ntp-widgets-resizing');
+        section?.classList.remove('ntp-widgets-layout-active');
+        this._ntpClearDropPreview(grid);
+    }
+
     setNtpEditMode(editing) {
         this._ntpEditMode = !!editing;
         const section = document.getElementById('new-tab-widgets-section');
@@ -11539,8 +13660,8 @@ class AxisBrowser {
         }
         this._syncNtpNewTabChrome();
         if (!this._ntpEditMode) {
+            this._abortNtpWidgetInteraction();
             this.setNtpPickerOpen(false);
-            this._ntpClearDropPreview(document.getElementById('ntp-widgets-grid'));
         }
     }
 
@@ -11871,9 +13992,16 @@ class AxisBrowser {
             }
             state.pointerId = null;
             if (state.ghost) {
-                state.ghost.remove();
+                try {
+                    state.ghost.remove();
+                } catch (_) {}
                 state.ghost = null;
             }
+            document.querySelectorAll('.ntp-widget-ghost').forEach((el) => {
+                try {
+                    el.remove();
+                } catch (_) {}
+            });
             state.active?.classList.remove('ntp-widget-dragging');
             state.active = null;
             state.widgetId = null;
@@ -11881,6 +14009,7 @@ class AxisBrowser {
             section.classList.remove('ntp-widgets-layout-active');
             this._ntpClearDropPreview(grid);
         };
+        this._ntpClearActiveDrag = clearDrag;
 
         grid.addEventListener('pointerdown', (e) => {
             if (!section.classList.contains('ntp-widgets-editing')) return;
@@ -11889,6 +14018,7 @@ class AxisBrowser {
             const card = e.target.closest('.ntp-widget');
             if (!card) return;
             e.preventDefault();
+            clearDrag();
             state.active = card;
             state.widgetId = card.dataset.widgetId;
             state.lastX = e.clientX;
@@ -11925,34 +14055,45 @@ class AxisBrowser {
             };
 
             const detach = () => {
-                card.removeEventListener('pointermove', onMove);
-                card.removeEventListener('pointerup', onUp);
-                card.removeEventListener('pointercancel', onCancel);
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                window.removeEventListener('pointercancel', onCancel);
+                window.removeEventListener('lostpointercapture', onLostCapture);
             };
 
             const onUp = (ev) => {
                 detach();
                 stopDragLoop();
-                if (!state.widgetId) return;
-                state.lastX = ev.clientX;
-                state.lastY = ev.clientY;
-                const cell = this._ntpPointerToCell(state.lastX, state.lastY);
-                const layout = this.getNtpWidgetLayout();
-                const wid = state.widgetId;
-                const w = layout.find((x) => x.id === wid);
-                const clamped = w
-                    ? this._ntpClampPlace(cell.col, cell.row, w.colSpan, w.rowSpan)
-                    : cell;
-                let moved = api.moveWidget(layout, wid, clamped.col, clamped.row, this._ntpMaxVisibleWidgetRows());
-                moved = this._ntpClampLayoutToVisible(moved).layout;
-                this._ntpWidgetLayout = moved;
-                void this.saveNtpWidgetLayout(moved);
-                clearDrag();
-                this._applyNtpLayoutToGrid(moved, { animate: true });
-                this._applyNtpWidgetSizeClasses(moved);
+                try {
+                    if (!state.widgetId) return;
+                    state.lastX = ev.clientX;
+                    state.lastY = ev.clientY;
+                    const cell = this._ntpPointerToCell(state.lastX, state.lastY);
+                    const layout = this.getNtpWidgetLayout();
+                    const wid = state.widgetId;
+                    const w = layout.find((x) => x.id === wid);
+                    const clamped = w
+                        ? this._ntpClampPlace(cell.col, cell.row, w.colSpan, w.rowSpan)
+                        : cell;
+                    let moved = api.moveWidget(layout, wid, clamped.col, clamped.row, this._ntpMaxVisibleWidgetRows());
+                    moved = this._ntpClampLayoutToVisible(moved).layout;
+                    this._ntpWidgetLayout = moved;
+                    void this.saveNtpWidgetLayout(moved);
+                    clearDrag();
+                    this._applyNtpLayoutToGrid(moved, { animate: true });
+                    this._applyNtpWidgetSizeClasses(moved);
+                } catch (_) {
+                    clearDrag();
+                }
             };
 
             const onCancel = () => {
+                detach();
+                clearDrag();
+            };
+
+            const onLostCapture = () => {
+                if (!state.widgetId) return;
                 detach();
                 clearDrag();
             };
@@ -11973,9 +14114,10 @@ class AxisBrowser {
             state.ghost.style.top = `${e.clientY - ghost.offsetHeight / 2}px`;
             state.dragRaf = requestAnimationFrame(paintDrag);
 
-            card.addEventListener('pointermove', onMove);
-            card.addEventListener('pointerup', onUp);
-            card.addEventListener('pointercancel', onCancel);
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+            window.addEventListener('pointercancel', onCancel);
+            window.addEventListener('lostpointercapture', onLostCapture);
         });
     }
 
@@ -12007,6 +14149,7 @@ class AxisBrowser {
             grid.classList.remove('ntp-widgets-resizing');
             section.classList.remove('ntp-widgets-layout-active');
         };
+        this._ntpClearActiveResize = clearResize;
 
         grid.addEventListener('pointerdown', (e) => {
             if (!section.classList.contains('ntp-widgets-editing')) return;
@@ -12017,6 +14160,7 @@ class AxisBrowser {
             if (!card) return;
             e.preventDefault();
             e.stopPropagation();
+            clearResize();
             const widgetId = card.dataset.widgetId;
             const layout = this.getNtpWidgetLayout();
             const w = layout.find((x) => x.id === widgetId);
@@ -12082,51 +14226,56 @@ class AxisBrowser {
             };
 
             const detach = () => {
-                card.removeEventListener('pointermove', onMove);
-                card.removeEventListener('pointerup', onUp);
-                card.removeEventListener('pointercancel', onCancel);
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                window.removeEventListener('pointercancel', onCancel);
+                window.removeEventListener('lostpointercapture', onLostCapture);
             };
 
             const onUp = (ev) => {
                 detach();
                 stopResizeLoop();
-                if (!state.widgetId) return;
-                state.lastX = ev.clientX;
-                state.lastY = ev.clientY;
-                const m = this._ntpGridMetrics();
-                const layoutNow = this.getNtpWidgetLayout();
-                const wNow = layoutNow.find((x) => x.id === state.widgetId);
-                if (!wNow || !m) {
+                try {
+                    if (!state.widgetId) return;
+                    state.lastX = ev.clientX;
+                    state.lastY = ev.clientY;
+                    const m = this._ntpGridMetrics();
+                    const layoutNow = this.getNtpWidgetLayout();
+                    const wNow = layoutNow.find((x) => x.id === state.widgetId);
+                    if (!wNow || !m) {
+                        clearResize();
+                        return;
+                    }
+                    const span = api.spanFromPointer(
+                        wNow,
+                        state.lastX,
+                        state.lastY,
+                        m.rect,
+                        m.colW,
+                        m.rowH,
+                        m.gap
+                    );
+                    const maxRows = this._ntpMaxVisibleWidgetRows();
+                    const maxRowSpan = Math.max(1, maxRows - wNow.row + 1);
+                    let resized = api.resizeWidget(
+                        layoutNow,
+                        state.widgetId,
+                        span.colSpan,
+                        Math.min(span.rowSpan, maxRowSpan)
+                    );
+                    resized = this._ntpClampLayoutToVisible(resized).layout;
+                    const wid = state.widgetId;
+                    const wFinal = resized.find((x) => x.id === wid);
+                    this._ntpWidgetLayout = resized;
+                    void this.saveNtpWidgetLayout(resized);
                     clearResize();
-                    return;
-                }
-                const span = api.spanFromPointer(
-                    wNow,
-                    state.lastX,
-                    state.lastY,
-                    m.rect,
-                    m.colW,
-                    m.rowH,
-                    m.gap
-                );
-                const maxRows = this._ntpMaxVisibleWidgetRows();
-                const maxRowSpan = Math.max(1, maxRows - wNow.row + 1);
-                let resized = api.resizeWidget(
-                    layoutNow,
-                    state.widgetId,
-                    span.colSpan,
-                    Math.min(span.rowSpan, maxRowSpan)
-                );
-                resized = this._ntpClampLayoutToVisible(resized).layout;
-                const wid = state.widgetId;
-                const wFinal = resized.find((x) => x.id === wid);
-                this._ntpWidgetLayout = resized;
-                void this.saveNtpWidgetLayout(resized);
-                clearResize();
-                this._applyNtpLayoutToGrid(resized);
-                this._applyNtpWidgetSizeClasses(resized);
-                if (wFinal && this._ntpWidgetNeedsResizeRefresh(wFinal.type)) {
-                    this._refreshNtpWidgetAt(wid);
+                    this._applyNtpLayoutToGrid(resized);
+                    this._applyNtpWidgetSizeClasses(resized);
+                    if (wFinal && this._ntpWidgetNeedsResizeRefresh(wFinal.type)) {
+                        this._refreshNtpWidgetAt(wid);
+                    }
+                } catch (_) {
+                    clearResize();
                 }
             };
 
@@ -12140,6 +14289,11 @@ class AxisBrowser {
                 this._applyNtpLayoutToGrid(this.getNtpWidgetLayout());
             };
 
+            const onLostCapture = () => {
+                if (!state.widgetId) return;
+                onCancel();
+            };
+
             try {
                 card.setPointerCapture(e.pointerId);
             } catch (_) {}
@@ -12148,9 +14302,10 @@ class AxisBrowser {
             section.classList.add('ntp-widgets-layout-active');
             state.resizeRaf = requestAnimationFrame(paintResize);
 
-            card.addEventListener('pointermove', onMove);
-            card.addEventListener('pointerup', onUp);
-            card.addEventListener('pointercancel', onCancel);
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+            window.addEventListener('pointercancel', onCancel);
+            window.addEventListener('lostpointercapture', onLostCapture);
         });
     }
 
@@ -12983,6 +15138,8 @@ class AxisBrowser {
     _paintNtpClockDom() {
         const api = this._ntpWidgetsApi();
         if (!api?.clockParts) return;
+        const now = new Date();
+        const angles = api.handAngles ? api.handAngles(now) : null;
         this.getNtpWidgetLayout()
             .filter((w) => (api.resolveType(w.type) || w.type) === 'clock')
             .forEach((w) => {
@@ -13008,12 +15165,21 @@ class AxisBrowser {
                               ? parts.weekday
                               : `${parts.weekday}, ${parts.date}`;
                 });
+                if (angles) {
+                    card
+                        .querySelector('.ntp-w-clock-hand--hour')
+                        ?.setAttribute('transform', `rotate(${angles.hour})`);
+                    card
+                        .querySelector('.ntp-w-clock-hand--minute')
+                        ?.setAttribute('transform', `rotate(${angles.minute})`);
+                }
             });
     }
 
     _paintNtpWorldclockDom() {
         const api = this._ntpWidgetsApi();
         if (!api?.worldClockParts) return;
+        const now = new Date();
         this.getNtpWidgetLayout()
             .filter((w) => (api.resolveType(w.type) || w.type) === 'worldclock')
             .forEach((w) => {
@@ -13059,6 +15225,15 @@ class AxisBrowser {
                         String(w.config?.placeLabel || '').split(',')[0].trim();
                     if (name) el.textContent = name;
                 });
+                if (api.handAngles) {
+                    const angles = api.handAngles(now, tz);
+                    card
+                        .querySelector('.ntp-w-clock-hand--hour')
+                        ?.setAttribute('transform', `rotate(${angles.hour})`);
+                    card
+                        .querySelector('.ntp-w-clock-hand--minute')
+                        ?.setAttribute('transform', `rotate(${angles.minute})`);
+                }
             });
     }
 
@@ -13168,9 +15343,31 @@ class AxisBrowser {
         return host;
     }
 
-    async updateNewTabSuggestions(query) {
-        const container = document.getElementById('new-tab-suggestions');
+    async updateNewTabSuggestions(query, surface = 'ntp') {
+        const isSpotlight = surface === 'spotlight';
+        const container = isSpotlight
+            ? document.getElementById('spotlight-suggestions')
+            : document.getElementById('new-tab-suggestions');
         if (!container) return;
+
+        if (isSpotlight) {
+            if (!query.trim()) {
+                this._spotlightSuggestionsSeq = (this._spotlightSuggestionsSeq || 0) + 1;
+                this._clearSpotlightSuggestions();
+                return;
+            }
+            this._spotlightSuggestionsClearGen = (this._spotlightSuggestionsClearGen || 0) + 1;
+            if (this._spotlightSuggestionsCloseTimer) {
+                clearTimeout(this._spotlightSuggestionsCloseTimer);
+                this._spotlightSuggestionsCloseTimer = null;
+            }
+            const seq = (this._spotlightSuggestionsSeq = (this._spotlightSuggestionsSeq || 0) + 1);
+            const suggestions = await this.generateAdvancedSuggestions(query);
+            if (seq !== this._spotlightSuggestionsSeq) return;
+            this.updateNewTabSuggestionsContent(container, suggestions, query, { isSpotlight: true });
+            return;
+        }
+
         const host = this._ensureNtpSuggestionsStructure(container);
         if (!host) return;
 
@@ -13220,9 +15417,18 @@ class AxisBrowser {
         this.updateNewTabSuggestionsContent(container, suggestions, query);
     }
 
-    _appendNewTabActionRows(container, query) {
+    _appendSuggestSectionDivider(container) {
+        const divider = document.createElement('div');
+        divider.className = 'axis-suggest-section-divider';
+        divider.setAttribute('aria-hidden', 'true');
+        container.appendChild(divider);
+        return divider;
+    }
+
+    _appendNewTabActionRows(container, query, opts = {}) {
         const q = (query || '').trim();
-        if (!q || this.isNewTabInChat()) return;
+        const isSpotlight = opts.isSpotlight === true;
+        if (!q || (!isSpotlight && this.isNewTabInChat())) return;
         const short = q.length > 52 ? `${q.slice(0, 49)}…` : q;
         const aiOn = this.isAiFeaturesEnabled() && this.settings?.ntpAiSearchEnabled !== false;
 
@@ -13241,17 +15447,105 @@ class AxisBrowser {
             container.appendChild(el);
         };
 
-        addRow('new-tab-action-search', 'fa-magnifying-glass', this.t('common.search'), () => this.performNewTabSearch());
+        addRow(
+            'new-tab-action-search',
+            'fa-magnifying-glass',
+            this.t('common.search'),
+            () => (isSpotlight ? this.performSpotlightSearch() : this.performNewTabSearch())
+        );
         if (aiOn) {
-            addRow('new-tab-action-ask', 'fa-message', this.t('ntp.askAi'), () => this.triggerNewTabAskFromSearch());
+            addRow(
+                'new-tab-action-ask',
+                'fa-message',
+                this.t('ntp.askAi'),
+                () => (isSpotlight ? this.triggerSpotlightAskFromSearch() : this.triggerNewTabAskFromSearch())
+            );
         }
     }
 
-    updateNewTabSuggestionsContent(container, suggestions, query = '') {
+    updateNewTabSuggestionsContent(container, suggestions, query = '', opts = {}) {
+        const isSpotlight = opts.isSpotlight === true;
+        this.spotlightSelectedIndex = -1;
+
+        if (isSpotlight) {
+            const inner = this._ensureSpotlightSuggestionsInner(container);
+            inner.replaceChildren();
+            const frag = document.createDocumentFragment();
+            this._appendNewTabActionRows(frag, query, { isSpotlight: true });
+            const selectedEngine = this.selectedSearchEngine;
+            if (suggestions?.length) {
+                suggestions.slice(0, 6).forEach((s, i) => {
+                    const el = document.createElement('div');
+                    el.className = 'spotlight-suggestion-item';
+                    el.setAttribute('data-index', i);
+                    let faviconUrl = null;
+                    let iconHtml = '';
+                    let fallbackIconHtml = '';
+                    if (s.isTab && s.tabId != null) {
+                        const tid = this._normalizeTabMapKey(s.tabId) ?? s.tabId;
+                        const tab = this.tabs.get(tid);
+                        if (tab?.url === this.NEWTAB_URL) {
+                            const inChat = this.isTabInNtpAiChat(tid);
+                            const fa = inChat ? 'fas fa-message' : 'fas fa-search';
+                            fallbackIconHtml = `<i class="${this.escapeHtml(fa)}" aria-hidden="true"></i>`;
+                        } else {
+                            faviconUrl =
+                                (tab ? this.resolveTabFaviconForData(tab, tid) : null) ||
+                                (s.url ? this.getFaviconUrl(s.url) : null);
+                            iconHtml = faviconUrl
+                                ? `<img src="${this.escapeHtmlAttribute(faviconUrl)}" alt="" class="spotlight-favicon" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />`
+                                : '';
+                            fallbackIconHtml = faviconUrl
+                                ? `<i class="${this.escapeHtml(s.icon || 'fas fa-globe')}" style="display:none;" aria-hidden="true"></i>`
+                                : `<i class="${this.escapeHtml(s.icon || 'fas fa-globe')}" aria-hidden="true"></i>`;
+                        }
+                    } else if (s.url || s.isHistory || s.isUrl) {
+                        faviconUrl = this.getFaviconUrl(s.url);
+                        iconHtml = faviconUrl
+                            ? `<img src="${this.escapeHtmlAttribute(faviconUrl)}" alt="" class="spotlight-favicon" onerror="this.style.display='none';this.nextElementSibling.style.display='inline';" />`
+                            : '';
+                        fallbackIconHtml = faviconUrl
+                            ? `<i class="${this.escapeHtml(s.icon || 'fas fa-globe')}" style="display:none;" aria-hidden="true"></i>`
+                            : `<i class="${this.escapeHtml(s.icon || 'fas fa-globe')}" aria-hidden="true"></i>`;
+                    } else {
+                        fallbackIconHtml = `<i class="${this.escapeHtml(s.icon || 'fas fa-search')}" aria-hidden="true"></i>`;
+                    }
+                    el.innerHTML = `
+                <div class="spotlight-suggestion-icon">${iconHtml}${fallbackIconHtml}</div>
+                <div class="spotlight-suggestion-text">${this.escapeHtml(s.text)}</div>
+                ${(s.isTab && s.tabId != null) ? `<div class="spotlight-suggestion-action">${this.escapeHtml(this.t('chrome.goToTab'))}</div>` : ''}
+            `;
+                    el.addEventListener('click', () => this.performSuggestionAction(s, selectedEngine, false));
+                    frag.appendChild(el);
+                });
+            }
+            inner.appendChild(frag);
+            const open = inner.children.length > 0;
+            container.classList.remove('hiding');
+            if (open) {
+                const wasShown = container.classList.contains('show');
+                if (!wasShown) {
+                    container.classList.remove('show');
+                    void container.offsetHeight;
+                    requestAnimationFrame(() => {
+                        if (!inner.children.length) return;
+                        container.classList.add('show');
+                        container.setAttribute('aria-hidden', 'false');
+                    });
+                } else {
+                    container.classList.add('show');
+                    container.setAttribute('aria-hidden', 'false');
+                }
+            } else {
+                container.classList.remove('show');
+                container.setAttribute('aria-hidden', 'true');
+            }
+            return;
+        }
+
         const host = this._ntpSuggestionsHost(container);
         if (!host) return;
         container.classList.remove('new-tab-suggestions-closing');
-        this.spotlightSelectedIndex = -1;
 
         const frag = document.createDocumentFragment();
         this._appendNewTabActionRows(frag, query);
@@ -13314,17 +15608,35 @@ class AxisBrowser {
 
     async sendNewTabAskMessage() {
         if (!this.isAiFeaturesEnabled()) return;
+        if (this._aiChatStreaming) {
+            this._stopAiChatStream();
+            return;
+        }
         const input = document.getElementById('new-tab-input');
         const messagesContainer = document.getElementById('new-tab-ask-messages');
         if (!input || !messagesContainer) return;
 
-        const text = input.value.trim();
-        const images = (this._newTabChatImages || []).map((img) => ({
-            mimeType: img.mimeType,
-            base64: img.base64,
-            dataUrl: img.dataUrl,
-            name: img.name
-        }));
+        const mainText = input.value.trim();
+        const attachments = this._newTabChatImages || [];
+        const images = attachments
+            .filter((img) => img.kind !== 'file')
+            .map((img) => ({
+                mimeType: img.mimeType,
+                base64: img.base64,
+                dataUrl: img.dataUrl,
+                name: img.name
+            }));
+        const fileChips = attachments
+            .filter((a) => a.kind === 'file')
+            .map((a) => ({ kind: 'file', name: a.name }));
+        let text = mainText;
+        let quoteForDisplay = null;
+        if (this.newTabQuotedText) {
+            quoteForDisplay = this.newTabQuotedText;
+            text = this.newTabQuotedText + (mainText ? '\n\n' + mainText : '');
+            this.clearNewTabQuote();
+        }
+        text = this._withAiChatFileContext(text, attachments);
         if (!text && !images.length) return;
 
         if (!this.hasAiApiKey()) {
@@ -13347,6 +15659,7 @@ class AxisBrowser {
         }
 
         input.value = '';
+        this._autoGrowComposerInput(input);
         this._newTabChatImages = [];
         this._syncAiChatImageAttachUi();
 
@@ -13356,14 +15669,25 @@ class AxisBrowser {
             this.syncNewTabInputChrome();
         }
 
-        const imagesHtml = this._buildUserMessageImagesHtml(images);
-        const bubbleInner = imagesHtml + (text ? this.escapeHtml(text) : '');
+        const imagesHtml = this._buildUserMessageImagesHtml([...images, ...fileChips]);
+        const quoteHtml = quoteForDisplay
+            ? `<div class="ai-chat-message-quote">${this._buildChatQuoteBlockHtml(quoteForDisplay)}</div>`
+            : '';
+        const bubbleInner = quoteHtml + imagesHtml + (mainText ? this.escapeHtml(mainText) : '');
+        const userMsgId = Date.now();
+        const userTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const userDiv = document.createElement('div');
         userDiv.className = 'new-tab-ask-message user';
+        userDiv.dataset.messageId = String(userMsgId);
+        const ntpMeta = this._chatMessageMetaHtml(userMsgId, userTime, 'user').replace(
+            'data-edit-scope="sidebar"',
+            'data-edit-scope="ntp"'
+        );
         userDiv.innerHTML = `
             <div class="new-tab-ask-avatar user" aria-hidden="true"><i class="fas fa-user"></i></div>
             <div class="new-tab-ask-body">
-                <div class="new-tab-ask-bubble">${bubbleInner}</div>
+                <div class="new-tab-ask-bubble"><span class="ai-chat-message-body-text">${bubbleInner}</span></div>
+                ${ntpMeta}
             </div>
         `;
         this._markChatMessageEnter(userDiv, 'ntp-ask-message-enter');
@@ -13373,8 +15697,10 @@ class AxisBrowser {
         const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
         if (tab) {
             if (!Array.isArray(tab.newTabAskHistory)) tab.newTabAskHistory = [];
-            tab.newTabAskHistory.push({ role: 'user', content: text });
+            const histIdx = tab.newTabAskHistory.length;
+            tab.newTabAskHistory.push({ role: 'user', content: text, id: userMsgId });
             this.tabs.set(this.currentTab, tab);
+            userDiv.dataset.historyIndex = String(histIdx);
         }
         this._persistNewTabChatStateIfNeeded();
 
@@ -13395,78 +15721,92 @@ class AxisBrowser {
         this._scrollNewTabAskMessagesToBottom();
         this._focusNewTabInput();
 
+        const streamUpdate = this._createNtpStreamUpdater(loadingId);
+        this._aiChatStreamController = new AbortController();
+        this._setAiChatStreaming(true);
         try {
             const history = tab ? tab.newTabAskHistory : this._getNewTabAskHistoryForTab(this.currentTab);
-            const response = await this.getChatAIResponse(text, { history, images });
-            const updated = messagesContainer.querySelector(
-                ".new-tab-ask-message.assistant[data-message-id=\"" + loadingId + "\"]"
-            );
-            if (updated) {
-                updated.innerHTML = `
-                    <div class="new-tab-ask-avatar assistant" aria-hidden="true"><i class="fas fa-message"></i></div>
-                    <div class="new-tab-ask-body">
-                        <div class="new-tab-ask-bubble">${this.formatAiChatMarkdown(response)}</div>
-                    </div>
-                `;
-            }
+            const response = await this.getChatAIResponse(text, {
+                history,
+                images,
+                signal: this._aiChatStreamController.signal,
+                onStream: (chunk) => streamUpdate(chunk, { done: false })
+            });
+            streamUpdate(response, { done: true });
             if (tab) {
-                tab.newTabAskHistory.push({ role: 'assistant', content: response });
+                tab.newTabAskHistory.push({ role: 'assistant', content: response, id: loadingId });
                 this.tabs.set(this.currentTab, tab);
             }
-            this._scrollNewTabAskMessagesToBottom();
             this._persistNewTabChatStateIfNeeded();
         } catch (error) {
+            const message =
+                error?.name === 'AbortError'
+                    ? this.t('ai.stopped') || 'Stopped.'
+                    : 'Error: ' + (error && error.message ? error.message : 'Something went wrong');
+            streamUpdate(message, { done: true });
             const updated = messagesContainer.querySelector(
-                ".new-tab-ask-message.assistant[data-message-id=\"" + loadingId + "\"]"
+                ".new-tab-ask-message.assistant[data-message-id=\"" + loadingId + "\"] .new-tab-ask-bubble"
             );
-            if (updated) {
-                const message = 'Error: ' + (error && error.message ? error.message : 'Something went wrong');
-                updated.innerHTML = `
-                    <div class="new-tab-ask-avatar assistant" aria-hidden="true"><i class="fas fa-message"></i></div>
-                    <div class="new-tab-ask-body">
-                        <div class="new-tab-ask-bubble new-tab-ask-bubble-error">${this.escapeHtml(message)}</div>
-                    </div>
-                `;
-            }
-            this._scrollNewTabAskMessagesToBottom();
+            if (error?.name !== 'AbortError') updated?.classList.add('new-tab-ask-bubble-error');
             this._persistNewTabChatStateIfNeeded();
         } finally {
+            this._aiChatStreamController = null;
+            this._setAiChatStreaming(false);
             this._focusNewTabInput();
         }
     }
 
     performSuggestionAction(suggestion, selectedEngine, isNewTabPage) {
+        const isSpotlight = this._isSpotlightOpen();
+        const spotlightNewTab = isSpotlight && this._spotlightFromNewTab;
+        const navigateInPlace = isNewTabPage || (isSpotlight && !spotlightNewTab);
+        const openFromSpotlight = (url, opts = {}) => {
+            if (!url) return;
+            if (spotlightNewTab) {
+                this.closeSpotlightSearch();
+                this.createNewTab(url, { ...opts, skipSpotlightOverlay: true });
+            } else if (navigateInPlace) {
+                this.navigate(url);
+                if (isSpotlight) this.closeSpotlightSearch();
+            } else {
+                this.createNewTab(url, opts);
+                if (isSpotlight) this.closeSpotlightSearch();
+            }
+        };
         if (suggestion.isTab) {
             if (suggestion.tabId != null) {
                 this.switchToTab(suggestion.tabId);
+                if (isSpotlight) this.closeSpotlightSearch();
             } else if (suggestion.isPlaceholder) {
                 this.createNewTab();
+                if (isSpotlight) this.closeSpotlightSearch();
             }
         } else if (suggestion.isNote && suggestion.noteId) {
             this.openNoteAsTab(suggestion.noteId);
+            if (isSpotlight) this.closeSpotlightSearch();
         } else if (suggestion.isSearch) {
             const url = this.getSearchUrl(suggestion.searchQuery, selectedEngine);
             const opts = { ancestryKind: 'search', searchQuery: suggestion.searchQuery };
-            isNewTabPage ? this.navigate(url) : this.createNewTab(url, opts);
+            openFromSpotlight(url, opts);
         } else if (suggestion.isHistory) {
             const url = selectedEngine ? this.getSearchUrl(suggestion.text || suggestion.url, selectedEngine) : suggestion.url;
             const histOpts = selectedEngine
                 ? { ancestryKind: 'search', searchQuery: suggestion.text || suggestion.url }
                 : { ancestryKind: 'history' };
-            isNewTabPage ? this.navigate(url) : this.createNewTab(url, histOpts);
+            openFromSpotlight(url, histOpts);
         } else if (suggestion.isCompletion) {
             const url = this.getSearchUrl(suggestion.searchQuery, selectedEngine);
-            isNewTabPage
-                ? this.navigate(url)
-                : this.createNewTab(url, { ancestryKind: 'search', searchQuery: suggestion.searchQuery });
+            openFromSpotlight(url, { ancestryKind: 'search', searchQuery: suggestion.searchQuery });
         } else if (suggestion.isUrl) {
             const url = selectedEngine ? this.getSearchUrl(suggestion.text || suggestion.url, selectedEngine) : suggestion.url;
             const urlOpts = selectedEngine
                 ? { ancestryKind: 'search', searchQuery: suggestion.text || suggestion.url }
                 : {};
-            isNewTabPage ? this.navigate(url) : this.createNewTab(url, urlOpts);
+            openFromSpotlight(url, urlOpts);
         } else {
-            const input = document.getElementById('new-tab-input');
+            const input = isSpotlight
+                ? document.getElementById('spotlight-input')
+                : document.getElementById('new-tab-input');
             if (input) input.value = suggestion.text;
         }
     }
@@ -13497,6 +15837,7 @@ class AxisBrowser {
         chatView?.classList.add('hidden');
         page?.classList.remove('ntp-ai-chat-mode', 'ntp-ai-chat-entering', 'ntp-ai-chat-exiting');
         this._newTabChatImages = [];
+        this.clearNewTabQuote?.();
         this.mountNewTabSearchBarToStart();
         this.setNewTabAiChatChromeVisible(false);
         this.hideNewTabAskSetup();
@@ -13613,6 +15954,27 @@ class AxisBrowser {
         return this.customTabIconHtml(tabGroup.icon, iconType, { group: true });
     }
 
+    _tabAudioMixerMarkup() {
+        return `<span class="axis-audio-mixer tab-audio-mixer" aria-hidden="true">
+                    <input type="range" class="axis-audio-slider" min="0" max="100" value="100" aria-label="Volume">
+                    <button type="button" class="axis-audio-toggle" aria-label="Mute or full volume" title="Mute or full volume">
+                        <i class="fas fa-volume-high" aria-hidden="true"></i>
+                    </button>
+                </span>`;
+    }
+
+    _tabAudioWrapHtml(tabId) {
+        return `<span class="tab-audio-wrap" data-audio-wrap="${tabId}">
+                    <button type="button" class="tab-audio-indicator" aria-label="Tab audio"><i class="fas fa-volume-up"></i></button>
+                    ${this._tabAudioMixerMarkup()}
+                </span>`;
+    }
+
+    _ensureTabAudioMixerMarkup(wrap) {
+        if (!wrap || wrap.querySelector('.axis-audio-mixer')) return;
+        wrap.insertAdjacentHTML('beforeend', this._tabAudioMixerMarkup());
+    }
+
     escapeHtmlAttribute(value) {
         return String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     }
@@ -13672,28 +16034,53 @@ class AxisBrowser {
         }
     }
 
-    _buildNewTabAskMessageHtml(role, content) {
+    _normalizeNewTabAskHistory(history) {
+        if (!Array.isArray(history)) return [];
+        const base = Date.now();
+        return history.map((m, i) => {
+            if (!m || (m.role !== 'user' && m.role !== 'assistant')) return null;
+            return {
+                role: m.role,
+                content: m.content != null ? String(m.content) : '',
+                id: m.id != null ? m.id : base + i
+            };
+        }).filter(Boolean);
+    }
+
+    _buildNewTabAskMessageHtml(role, content, opts = {}) {
         const isUser = role === 'user';
         const avatarClass = isUser ? 'user' : 'assistant';
         const avatarIcon = isUser ? 'fa-user' : 'fa-message';
+        const messageId = opts.id != null ? String(opts.id) : '';
         const bubble = isUser
-            ? this.escapeHtml(String(content || ''))
+            ? `<span class="ai-chat-message-body-text">${this.escapeHtml(String(content || ''))}</span>`
             : this.formatAiChatMarkdown(content);
+        const time =
+            opts.time ||
+            new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const meta =
+            isUser && messageId
+                ? this._chatMessageMetaHtml(messageId, time, 'user').replace(
+                      'data-edit-scope="sidebar"',
+                      'data-edit-scope="ntp"'
+                  )
+                : '';
+        const idAttr = messageId ? ` data-message-id="${this.escapeHtml(messageId)}"` : '';
         return `
-            <div class="new-tab-ask-message ${avatarClass}">
+            <div class="new-tab-ask-message ${avatarClass}"${idAttr}>
                 <div class="new-tab-ask-avatar ${avatarClass}" aria-hidden="true"><i class="fas ${avatarIcon}"></i></div>
                 <div class="new-tab-ask-body">
                     <div class="new-tab-ask-bubble">${bubble}</div>
+                    ${meta}
                 </div>
             </div>
         `;
     }
 
     _buildNewTabAskMessagesHtmlFromHistory(history) {
-        if (!Array.isArray(history) || !history.length) return '';
-        return history
-            .map((m) => this._buildNewTabAskMessageHtml(m.role, m.content))
-            .join('');
+        const list = this._normalizeNewTabAskHistory(history);
+        if (!list.length) return '';
+        return list.map((m) => this._buildNewTabAskMessageHtml(m.role, m.content, { id: m.id })).join('');
     }
 
     _ensureNewTabPageStateFromTabData(tabId) {
@@ -13803,10 +16190,16 @@ class AxisBrowser {
                   ? tab.newTabAskHistory
                   : [];
         const inChat = this._hasNewTabAiChatState(state, tab);
+        const normalizedHistory = history.length ? this._normalizeNewTabAskHistory(history) : [];
         let askMessagesHtml = state.askMessagesHtml || '';
-        if (inChat && !String(askMessagesHtml).trim() && history.length) {
-            askMessagesHtml = this._buildNewTabAskMessagesHtmlFromHistory(history);
+        if (inChat && normalizedHistory.length) {
+            askMessagesHtml = this._buildNewTabAskMessagesHtmlFromHistory(normalizedHistory);
             state.askMessagesHtml = askMessagesHtml;
+            state.askMessageHistory = normalizedHistory.map((m) => ({
+                role: m.role,
+                content: m.content,
+                id: m.id
+            }));
             state.inChat = true;
             tab.newTabPageState = state;
         }
@@ -13826,15 +16219,26 @@ class AxisBrowser {
         if (askMessages) {
             askMessages.classList.add('ntp-ask-instant-scroll');
             askMessages.innerHTML = askMessagesHtml;
+            if (inChat && !normalizedHistory.length) {
+                const fromDom = this._normalizeNewTabAskHistory(this._extractNewTabAskHistoryFromDom());
+                if (fromDom.length) {
+                    askMessages.innerHTML = this._buildNewTabAskMessagesHtmlFromHistory(fromDom);
+                    tab.newTabAskHistory = fromDom;
+                }
+            }
             askMessages.querySelectorAll('.ntp-ask-message-enter').forEach((el) => {
                 el.classList.remove('ntp-ask-message-enter');
             });
             askMessages.classList.toggle('hidden', !inChat);
         }
-        if (history.length) {
-            tab.newTabAskHistory = history.map((m) => ({ role: m.role, content: m.content }));
+        if (normalizedHistory.length) {
+            tab.newTabAskHistory = normalizedHistory.map((m) => ({
+                role: m.role,
+                content: m.content,
+                id: m.id
+            }));
         } else {
-            tab.newTabAskHistory = this._extractNewTabAskHistoryFromDom();
+            tab.newTabAskHistory = this._normalizeNewTabAskHistory(this._extractNewTabAskHistoryFromDom());
         }
         this.tabs.set(tabId, tab);
         if (inChat) {
@@ -14417,6 +16821,7 @@ class AxisBrowser {
             duration,
             delay: delay || 0,
             easing: easing || 'cubic-bezier(0.22, 1, 0.36, 1)',
+            // Hold end frame until _clearTabMotionInlineStyles cancels - avoids a 0-height flash.
             fill: 'forwards'
         };
     }
@@ -14454,12 +16859,9 @@ class AxisBrowser {
         tabElement.style.maxHeight = 'none';
         tabElement.style.opacity = '1';
         tabElement.style.willChange = 'height, margin-bottom';
+        // Content is position:absolute in CSS - keep it pinned; don't fight with flex align.
         if (inner) {
-            inner.style.height = '32px';
-            inner.style.minHeight = '32px';
-            inner.style.boxSizing = 'border-box';
             inner.style.willChange = 'opacity';
-            inner.style.transform = 'translateZ(0)';
         }
         return { h, inner };
     }
@@ -14467,7 +16869,7 @@ class AxisBrowser {
     _clearTabMotionInlineStyles(tabElement) {
         if (!tabElement) return;
         try {
-            tabElement.getAnimations?.({ subtree: true })?.forEach((a) => {
+            tabElement.getAnimations?.()?.forEach((a) => {
                 try {
                     a.cancel();
                 } catch (_) {}
@@ -14486,6 +16888,7 @@ class AxisBrowser {
         tabElement.style.willChange = '';
         tabElement.style.transform = '';
         tabElement.style.transformOrigin = '';
+        tabElement.style.alignItems = '';
         tabElement.style.removeProperty('transition');
         const inner = tabElement.querySelector('.tab-content');
         if (inner) {
@@ -14496,6 +16899,13 @@ class AxisBrowser {
             inner.style.minHeight = '';
             inner.style.overflow = '';
             inner.style.boxSizing = '';
+            inner.style.display = '';
+            inner.style.alignItems = '';
+            inner.style.position = '';
+            inner.style.left = '';
+            inner.style.right = '';
+            inner.style.top = '';
+            inner.style.bottom = '';
         }
     }
 
@@ -14523,7 +16933,7 @@ class AxisBrowser {
         const gap = this._tabListGapPx(tabElement);
 
         try {
-            tabElement.getAnimations?.({ subtree: true })?.forEach((a) => {
+            tabElement.getAnimations?.()?.forEach((a) => {
                 try {
                     a.cancel();
                 } catch (_) {}
@@ -14560,7 +16970,7 @@ class AxisBrowser {
                 { height: '0px', marginBottom: `${-gap}px` }
             ],
             finish,
-            150,
+            120,
             0,
             closeEase
         );
@@ -14570,7 +16980,7 @@ class AxisBrowser {
                 inner,
                 [{ opacity: 1 }, { opacity: 0 }],
                 () => {},
-                110,
+                90,
                 0,
                 'cubic-bezier(0.4, 0.0, 1, 1)'
             );
@@ -14587,7 +16997,7 @@ class AxisBrowser {
 
         this._beginTabSidebarMotion();
         try {
-            tabElement.getAnimations?.({ subtree: true })?.forEach((a) => {
+            tabElement.getAnimations?.()?.forEach((a) => {
                 try {
                     a.cancel();
                 } catch (_) {}
@@ -14626,7 +17036,7 @@ class AxisBrowser {
                     { height: `${targetH}px`, marginBottom: '0px' }
                 ],
                 clear,
-                155,
+                125,
                 0,
                 openEase
             );
@@ -14645,12 +17055,12 @@ class AxisBrowser {
         requestAnimationFrame(start);
     }
 
-    /** Centered SVG × / minus - thin strokes, slightly larger mark in the same hit target. */
+    /** Centered SVG × / minus - visible stroke under tab compositing. */
     _tabCloseGlyphHtml(kind = 'x') {
         if (kind === 'minus') {
-            return '<svg class="tab-close-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>';
+            return '<svg class="tab-close-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><line x1="3.5" y1="8" x2="12.5" y2="8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>';
         }
-        return '<svg class="tab-close-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M4.25 4.25l7.5 7.5M11.75 4.25l-7.5 7.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>';
+        return '<svg class="tab-close-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M4.25 4.25l7.5 7.5M11.75 4.25l-7.5 7.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
     }
 
     _tabCloseButtonHtml(extraAttrs = '') {
@@ -14709,6 +17119,21 @@ class AxisBrowser {
             return;
         }
         this.renderFavorites();
+    }
+
+    /** Tiny press pulse for sidebar tabs / favorites (visible on select, not only :active). */
+    _playSidebarItemPress(el) {
+        if (!el || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
+        el.classList.remove('axis-press');
+        // Restart animation if it was already playing
+        void el.offsetWidth;
+        el.classList.add('axis-press');
+        const done = () => {
+            el.classList.remove('axis-press');
+            el.removeEventListener('animationend', done);
+        };
+        el.addEventListener('animationend', done);
+        setTimeout(done, 180);
     }
 
     /** Toggle `.active` on favorite chips without rebuilding the row (preserves accent colors). */
@@ -14813,6 +17238,7 @@ class AxisBrowser {
             content: m.content,
             timestamp: m.timestamp,
             ...(m.images?.length ? { images: m.images } : {}),
+            ...(m.files?.length ? { files: m.files } : {}),
             ...(m.quote != null ? { quote: m.quote } : {}),
             ...(m.mainText != null ? { mainText: m.mainText } : {})
         }));
@@ -14833,30 +17259,35 @@ class AxisBrowser {
         const list = Array.isArray(messages) ? messages : [];
         if (instant) chatMessages.classList.add('ai-chat-instant-scroll');
         chatMessages.innerHTML = '';
-        for (const m of list) {
+        for (let i = 0; i < list.length; i++) {
+            const m = list[i];
             if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
+            if (m.id == null) m.id = Date.now() + i;
             const content = m.content != null ? String(m.content) : '';
             if (!content.trim() && !(m.images && m.images.length)) continue;
             const messageDiv = document.createElement('div');
             messageDiv.className = `ai-chat-message ${m.role}`;
-            if (m.id != null) messageDiv.dataset.messageId = String(m.id);
+            messageDiv.dataset.messageId = String(m.id);
             const time = m.timestamp
                 ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             let contentHtml;
+            const media = [...(m.images || []), ...(m.files || [])];
             if (m.role === 'user' && m.quote != null && m.quote !== '') {
-                const imagesHtml = this._buildUserMessageImagesHtml?.(m.images) || '';
+                const imagesHtml = this._buildUserMessageImagesHtml?.(media) || '';
                 const bodyDisplay = this.escapeHtml((m.mainText != null ? m.mainText : '').trim());
                 contentHtml = `
                     <div class="ai-chat-message-content">
-                        <div class="ai-chat-message-quote">${this.escapeHtml(m.quote)}</div>
+                        <div class="ai-chat-message-quote">${this._buildChatQuoteBlockHtml(m.quote)}</div>
                         ${imagesHtml}
                         ${bodyDisplay ? `<div class="ai-chat-message-body">${bodyDisplay}</div>` : ''}
                     </div>
                 `;
             } else if (m.role === 'user') {
-                const imagesHtml = this._buildUserMessageImagesHtml?.(m.images) || '';
-                const bodyDisplay = this.escapeHtml(content.trim());
+                const imagesHtml = this._buildUserMessageImagesHtml?.(media) || '';
+                const bodyDisplay = this.escapeHtml(
+                    (m.files?.length && m.mainText != null ? String(m.mainText) : content).trim()
+                );
                 if (imagesHtml) {
                     contentHtml = `
                     <div class="ai-chat-message-content ai-chat-message-content--with-media">
@@ -14872,9 +17303,12 @@ class AxisBrowser {
                     <div class="ai-chat-message-content">${this.formatAiChatMarkdown(content)}</div>
                 `;
             }
-            messageDiv.innerHTML = contentHtml + `<div class="ai-chat-message-time">${time}</div>`;
+            messageDiv.innerHTML =
+                `<div class="ai-chat-message-stack">${contentHtml}${this._chatMessageMetaHtml(m.id, time, m.role)}</div>`;
             chatMessages.appendChild(messageDiv);
         }
+        this.aiChatMessages = list;
+        if (this.currentTab != null) this._persistSidebarChatForTab(this.currentTab);
         chatMessages.scrollTop = chatMessages.scrollHeight;
         if (instant) {
             requestAnimationFrame(() => chatMessages.classList.remove('ai-chat-instant-scroll'));
@@ -14909,6 +17343,7 @@ class AxisBrowser {
             if (fav && this._normalizeTabMapKey(fav.runtimeTabId) === tid) {
                 fav.runtimeTabId = null;
             }
+            this._syncFavoriteActiveHighlight();
         }
 
         if (this._sidebarMediaDock && this._normalizeTabMapKey(this._sidebarMediaDock.tabId) === tid) {
@@ -15535,7 +17970,6 @@ class AxisBrowser {
                 try {
                     webview.style.removeProperty('opacity');
                     webview.style.removeProperty('visibility');
-                    webview.style.removeProperty('background');
                 } catch (_) {}
                 webview.style.opacity = '1';
                 webview.style.visibility = 'visible';
@@ -15580,6 +18014,75 @@ class AxisBrowser {
         }
         this.updateNavigationButtons();
         this.updateUrlBar(webview || null, { skipExtractTheme: true });
+        requestAnimationFrame(() => this._ensureActiveWebviewInteractable());
+    }
+
+    _webviewNavigationHistory(webview) {
+        if (!webview) return null;
+        try {
+            const wc = webview.getWebContents?.();
+            if (wc?.navigationHistory) return wc.navigationHistory;
+        } catch (_) {}
+        return webview;
+    }
+
+    _webviewCanGoBack(webview) {
+        const nav = this._webviewNavigationHistory(webview);
+        if (!nav) return false;
+        try {
+            return !!nav.canGoBack();
+        } catch (_) {
+            return false;
+        }
+    }
+
+    _webviewCanGoForward(webview) {
+        const nav = this._webviewNavigationHistory(webview);
+        if (!nav) return false;
+        try {
+            return !!nav.canGoForward();
+        } catch (_) {
+            return false;
+        }
+    }
+
+    _webviewGoBack(webview) {
+        const nav = this._webviewNavigationHistory(webview);
+        if (!nav) return false;
+        try {
+            nav.goBack();
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    _webviewGoForward(webview) {
+        const nav = this._webviewNavigationHistory(webview);
+        if (!nav) return false;
+        try {
+            nav.goForward();
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /** True when a swipe in this direction can actually move history. */
+    _canSwipeNavigate(direction, webview) {
+        const w = webview || this.getActiveWebview();
+        if (!w) return false;
+        if (direction === 'back') {
+            if (this._webviewCanGoBack(w)) return true;
+            const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+            return !!(tab?.history?.length > 1 && tab.historyIndex > 0);
+        }
+        if (direction === 'forward') {
+            if (this._webviewCanGoForward(w)) return true;
+            const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+            return !!(tab?.history?.length > 1 && tab.historyIndex < tab.history.length - 1);
+        }
+        return false;
     }
 
     /**
@@ -15590,72 +18093,146 @@ class AxisBrowser {
         const webview = this.getActiveWebview();
         if (!webview || !this.currentTab || !this.tabs.has(this.currentTab)) return;
 
-        if (direction === 'back') {
-            try {
-                if (webview.canGoBack()) {
-                    webview.goBack();
-                    this.updateNavigationButtons();
-                    return;
-                }
-            } catch (_) {
-                /* fall through */
-            }
-            this.goBack();
-            return;
-        }
+        const tab = this.tabs.get(this.currentTab);
+        if (tab && (tab.isSettings || tab.url === 'axis://settings')) return;
 
-        try {
-            if (webview.canGoForward()) {
-                webview.goForward();
-                this.updateNavigationButtons();
-                return;
-            }
-        } catch (_) {
-            /* fall through */
+        let moved = false;
+        if (direction === 'back') moved = this._webviewGoBack(webview);
+        else if (direction === 'forward') moved = this._webviewGoForward(webview);
+        if (!moved) {
+            const js = direction === 'back' ? 'history.back()' : 'history.forward()';
+            try {
+                webview.executeJavaScript(js, true).catch(() => {});
+            } catch (_) {}
         }
-        this.goForward();
+        this.updateNavigationButtons();
     }
 
     /**
-     * Unified back/forward from guest `axis-nav-gesture` (optional `webview` / `tabId` must match the active tab)
-     * or from main-process `axis-host-nav-gesture` (omit guest args).
+     * Unified back/forward from guest swipe, host BrowserWindow swipe, or tab-history fallback.
      */
-    tryNavigateWithAxisGesture(direction, webview, tabId) {
+    axisPerformSwipeNav(direction, webview, tabId) {
         if (direction !== 'back' && direction !== 'forward') return;
+        if (this.settings?.navGestureEnabled === false) return;
+        const now = Date.now();
+        if (now < (this._axisSwipeNavLockUntil || 0)) return;
+        this._axisSwipeNavLockUntil = now + 520;
         if (!this.currentTab) return;
-        if (tabId != null && String(tabId) !== String(this.currentTab)) return;
 
-        const w = this.getActiveWebview();
+        const w = webview || this.getActiveWebview();
         if (!w) return;
-        if (webview != null && webview !== w) return;
+        if (!this._canSwipeNavigate(direction, w)) return;
+        const activeWv = this.getActiveWebview();
+        const isActiveGuest = activeWv && w === activeWv;
+        if (!isActiveGuest && tabId != null && String(tabId) !== String(this.currentTab)) return;
+        if (webview != null && activeWv && webview !== activeWv) return;
 
-        const t = this.tabs.get(this.currentTab);
-        const synthBack =
-            t && t.history && t.history.length > 1 && t.historyIndex != null && t.historyIndex > 0;
-        const synthFwd =
-            t &&
-            t.history &&
-            t.history.length > 1 &&
-            t.historyIndex != null &&
-            t.historyIndex < t.history.length - 1;
+        const tab = this.tabs.get(this.currentTab);
+        if (tab && (tab.isSettings || tab.url === 'axis://settings')) return;
 
-        let canChromiumBack = false;
-        let canChromiumFwd = false;
+        this.runAxisNavigationGesture(direction, () => {
+            void this._performSwipeNavigation(direction, w);
+        });
+    }
+
+    async _performSwipeNavigation(direction, webview) {
+        if (!webview) return;
+        let moved = false;
         try {
-            canChromiumBack = w.canGoBack();
-            canChromiumFwd = w.canGoForward();
-        } catch (_) {
-            /* guest may transiently throw - treat as no native stack */
+            const guestId = webview.getWebContentsId?.();
+            if (guestId && window.electronAPI?.navigateActiveTabHistory) {
+                moved = !!(await window.electronAPI.navigateActiveTabHistory(direction, guestId));
+            }
+        } catch (_) {}
+        if (!moved) {
+            if (direction === 'back') moved = this._webviewGoBack(webview);
+            else if (direction === 'forward') moved = this._webviewGoForward(webview);
         }
+        this.updateNavigationButtons();
+        this._syncGuestNavGestureReset(webview);
+        const refocus = () => {
+            try {
+                webview.focus();
+            } catch (_) {}
+            this._focusActiveWebviewGuest();
+        };
+        refocus();
+        requestAnimationFrame(refocus);
+        setTimeout(refocus, 48);
+        setTimeout(refocus, 160);
+    }
 
-        if (direction === 'back' && !synthBack && !canChromiumBack) return;
-        if (direction === 'forward' && !synthFwd && !canChromiumFwd) return;
+    _syncGuestNavGestureReset(webview) {
+        if (!webview || typeof webview.send !== 'function') return;
+        try {
+            webview.send('axis-nav-gesture-reset');
+        } catch (_) {}
+    }
 
-        if (direction === 'back') {
-            this.runAxisNavigationGesture('back', () => this.axisNavigateAfterGesture('back'));
-        } else {
-            this.runAxisNavigationGesture('forward', () => this.axisNavigateAfterGesture('forward'));
+    _handleGuestNavWheelDelta(dx, dy, webview, tabId) {
+        if (this.settings?.navGestureEnabled !== false) return;
+        dx = Number(dx) || 0;
+        dy = Number(dy) || 0;
+        if (!dx || Math.abs(dx) < Math.abs(dy) * 0.82) return;
+        if (!this._guestNavWheelState) {
+            this._guestNavWheelState = { back: 0, forward: 0, last: 0, cooldown: 0 };
         }
+        const st = this._guestNavWheelState;
+        const now = Date.now();
+        if (now < st.cooldown) return;
+        const sens = Math.max(50, Math.min(150, Number(this.settings?.navGestureSensitivity) || 100));
+        const thresh = Math.round(26 * (100 / sens));
+        if (now - st.last > 160) {
+            st.back = 0;
+            st.forward = 0;
+        }
+        st.last = now;
+        if (dx < 0) st.back += -dx;
+        else if (dx > 0) st.forward += dx;
+        if (st.back >= thresh) {
+            st.back = 0;
+            st.forward = 0;
+            st.cooldown = now + 220;
+            this.tryNavigateWithAxisGesture('back', webview, tabId);
+        } else if (st.forward >= thresh) {
+            st.back = 0;
+            st.forward = 0;
+            st.cooldown = now + 220;
+            this.tryNavigateWithAxisGesture('forward', webview, tabId);
+        }
+    }
+
+    _handleGuestSwipeNav(payload, webview, tabId) {
+        const direction = payload && payload.direction;
+        if (direction !== 'back' && direction !== 'forward') return;
+        const gestureType = direction === 'back' ? 'swipe-left' : 'swipe-right';
+        if (this._tryCustomTrackpadGesture(gestureType)) return;
+        const navOn = this.settings?.navGestureEnabled !== false;
+        if (!navOn) return;
+        this.axisPerformSwipeNav(direction, webview, tabId ?? this.currentTab);
+    }
+
+    _handleGuestTrackpadGesture(gestureType, webview, tabId) {
+        if (!gestureType) return;
+        if (this._tryCustomTrackpadGesture(gestureType)) return;
+        const navOn = this.settings?.navGestureEnabled !== false;
+        if (navOn && (gestureType === 'swipe-left' || gestureType === 'swipe-right')) {
+            this.axisPerformSwipeNav(
+                gestureType === 'swipe-left' ? 'back' : 'forward',
+                webview,
+                tabId ?? this.currentTab
+            );
+            return;
+        }
+        if (gestureType === 'swipe-left') {
+            this.axisPerformSwipeNav('back', webview, tabId ?? this.currentTab);
+        } else if (gestureType === 'swipe-right') {
+            this.axisPerformSwipeNav('forward', webview, tabId ?? this.currentTab);
+        }
+    }
+
+    tryNavigateWithAxisGesture(direction, webview, tabId) {
+        this.axisPerformSwipeNav(direction, webview, tabId);
     }
 
     /** Trackpad swipe (guest preload): slide webviews + edge arrow, then `navigate()` (`goBack` / `goForward`). */
@@ -15680,14 +18257,7 @@ class AxisBrowser {
                 'axis-nav--forward-in'
             );
             this._axisNavGestureBusy = false;
-            const qDir = this._axisNavGestureQueuedDirection;
             this._axisNavGestureQueuedDirection = null;
-            if (qDir === 'back' || qDir === 'forward')
-                queueMicrotask(() =>
-                    qDir === 'back'
-                        ? this.tryNavigateWithAxisGesture('back')
-                        : this.tryNavigateWithAxisGesture('forward')
-                );
         };
 
         if (!stack) {
@@ -15758,8 +18328,8 @@ class AxisBrowser {
             this.updateNavigationButtons();
         } else {
             // Fallback to webview navigation
-            if (webview.canGoBack()) {
-                webview.goBack();
+            if (this._webviewCanGoBack(webview)) {
+                this._webviewGoBack(webview);
                 this.updateNavigationButtons();
             }
         }
@@ -15784,8 +18354,8 @@ class AxisBrowser {
             this.updateNavigationButtons();
         } else {
             // Fallback to webview navigation
-            if (webview.canGoForward()) {
-                webview.goForward();
+            if (this._webviewCanGoForward(webview)) {
+                this._webviewGoForward(webview);
                 this.updateNavigationButtons();
             }
         }
@@ -16057,6 +18627,28 @@ class AxisBrowser {
         return t;
     }
 
+    _tabProvisionalTitleFromUrl(url) {
+        try {
+            const u = new URL(String(url || ''));
+            if (u.protocol === 'http:' || u.protocol === 'https:') {
+                return u.hostname.replace(/^www\./i, '') || null;
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    _syncTabTitleElement(tabId) {
+        const tab = this.tabs.get(tabId);
+        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
+        if (!tab || !tabElement) return;
+        const title = tab.customTitle || tab.title || 'New Tab';
+        const titleElement = tabElement.querySelector('.tab-title');
+        if (titleElement && titleElement.textContent !== title) {
+            titleElement.textContent = title;
+        }
+        this.updateTabTooltip(tabId);
+    }
+
     updateTabTitle() {
         const webview = this.getActiveWebview() || this.elements?.webview;
         if (!webview) {
@@ -16202,7 +18794,7 @@ class AxisBrowser {
             <div class="tab-content">
                 <div class="tab-left">
                     ${this.customTabIconHtml('fa-cog', 'fa')}
-                    <span class="tab-audio-indicator" style="display: none;"><i class="fas fa-volume-up"></i></span>
+                    ${this._tabAudioWrapHtml(tabId)}
                     <span class="tab-title">Settings</span>
                 </div>
                 <div class="tab-right">
@@ -16605,6 +19197,7 @@ class AxisBrowser {
                         this.applyInternalShellUrlBarStyle();
                     }
                     this.applyNewTabCustomization();
+                    this._syncLinkPreviewConfigToAllWebviews();
                 } else if (key === 'linkPreview') {
                     this._applyLinkPreviewSetting();
                 }
@@ -17543,30 +20136,59 @@ class AxisBrowser {
     }
 
     renameTab(tabId, titleElement, options = {}) {
+        if (!titleElement || titleElement.tagName === 'INPUT') return;
+        if (titleElement.classList.contains('tab-title--rename-ghost')) return;
         const currentTitle = titleElement.textContent;
         const tabElement = titleElement.closest('.tab');
+        const leftEl = titleElement.closest('.tab-left') || titleElement.parentNode;
         const deferBlurMs = Math.max(0, Number(options.deferBlurMs) || 0);
-        
+
         const input = document.createElement('input');
         input.type = 'text';
         input.value = currentTitle;
-        input.className = 'tab-title';
+        input.className = 'tab-title tab-title-rename-input';
         input.setAttribute('aria-label', this.t('chrome.renameTabAria'));
 
-        if (titleElement && titleElement.parentNode) {
-            titleElement.parentNode.replaceChild(input, titleElement);
+        titleElement.classList.add('tab-title--rename-ghost');
+        titleElement.setAttribute('aria-hidden', 'true');
+        if (leftEl) {
+            if (getComputedStyle(leftEl).position === 'static') {
+                leftEl.style.position = 'relative';
+            }
+            leftEl.appendChild(input);
+            const place = () => {
+                input.style.left = `${titleElement.offsetLeft}px`;
+                input.style.top = `${titleElement.offsetTop}px`;
+                input.style.width = `${Math.max(titleElement.offsetWidth, 48)}px`;
+                input.style.height = `${Math.max(titleElement.offsetHeight, 15)}px`;
+            };
+            place();
+            requestAnimationFrame(place);
         }
         tabElement?.classList.add('tab-renaming');
 
         let finished = false;
+        const pinScroll = () => {
+            try {
+                if (leftEl) leftEl.scrollLeft = 0;
+                if (tabElement) tabElement.scrollLeft = 0;
+                const content = tabElement?.querySelector?.('.tab-content');
+                if (content) content.scrollLeft = 0;
+            } catch (_) {}
+        };
         const focusRenameInput = () => {
             if (finished) return;
+            try {
+                input.focus({ preventScroll: true });
+                input.select();
+                pinScroll();
+            } catch (e) {
                 try {
                     input.focus();
-                input.select();
-                } catch (e) {
-                    // Ignore focus errors
-                }
+                    input.select();
+                    pinScroll();
+                } catch (_) {}
+            }
         };
         requestAnimationFrame(focusRenameInput);
 
@@ -17574,6 +20196,11 @@ class AxisBrowser {
             input.removeEventListener('blur', onBlur);
             input.removeEventListener('keydown', onKeydown);
             tabElement?.classList.remove('tab-renaming');
+            titleElement.classList.remove('tab-title--rename-ghost');
+            titleElement.removeAttribute('aria-hidden');
+            if (leftEl && leftEl.style.position === 'relative') {
+                leftEl.style.position = '';
+            }
         };
 
         const commitRename = () => {
@@ -17581,10 +20208,8 @@ class AxisBrowser {
             finished = true;
             detach();
             const newTitle = input.value.trim() || currentTitle;
-            const newTitleElement = document.createElement('span');
-            newTitleElement.className = 'tab-title';
-            newTitleElement.textContent = newTitle;
-            if (input.parentNode) input.parentNode.replaceChild(newTitleElement, input);
+            if (input.parentNode) input.parentNode.removeChild(input);
+            titleElement.textContent = newTitle;
             const tab = this.tabs.get(tabId);
             if (tab) {
                 const previousTitle = tab.title || currentTitle;
@@ -17606,10 +20231,8 @@ class AxisBrowser {
             if (finished) return;
             finished = true;
             detach();
-            const restored = document.createElement('span');
-            restored.className = 'tab-title';
-            restored.textContent = currentTitle;
-            if (input.parentNode) input.parentNode.replaceChild(restored, input);
+            if (input.parentNode) input.parentNode.removeChild(input);
+            titleElement.textContent = currentTitle;
         };
 
         let blurArmed = deferBlurMs === 0;
@@ -17640,29 +20263,57 @@ class AxisBrowser {
 
     renameTabGroup(tabGroupId, titleElement, options = {}) {
         if (!titleElement || titleElement.tagName === 'INPUT') return;
+        if (titleElement.classList.contains('tab-title--rename-ghost')) return;
         const currentTitle = titleElement.textContent;
         const tabGroupElement = titleElement.closest('.tab-group');
+        const leftEl = titleElement.closest('.tab-left') || titleElement.parentNode;
         const deferBlurMs = Math.max(0, Number(options.deferBlurMs) || 0);
 
         const input = document.createElement('input');
         input.type = 'text';
         input.value = currentTitle;
-        input.className = 'tab-title';
+        input.className = 'tab-title tab-title-rename-input';
         input.setAttribute('aria-label', this.t('chrome.renameGroupAria'));
 
-        if (titleElement.parentNode) {
-            titleElement.parentNode.replaceChild(input, titleElement);
+        titleElement.classList.add('tab-title--rename-ghost');
+        titleElement.setAttribute('aria-hidden', 'true');
+        if (leftEl) {
+            if (getComputedStyle(leftEl).position === 'static') {
+                leftEl.style.position = 'relative';
+            }
+            leftEl.appendChild(input);
+            const place = () => {
+                input.style.left = `${titleElement.offsetLeft}px`;
+                input.style.top = `${titleElement.offsetTop}px`;
+                input.style.width = `${Math.max(titleElement.offsetWidth, 48)}px`;
+                input.style.height = `${Math.max(titleElement.offsetHeight, 15)}px`;
+            };
+            place();
+            requestAnimationFrame(place);
         }
         tabGroupElement?.classList.add('tab-renaming');
 
         let finished = false;
+        const pinScroll = () => {
+            try {
+                if (leftEl) leftEl.scrollLeft = 0;
+                if (tabGroupElement) tabGroupElement.scrollLeft = 0;
+                const content = tabGroupElement?.querySelector?.(':scope > .tab-content');
+                if (content) content.scrollLeft = 0;
+            } catch (_) {}
+        };
         const focusRenameInput = () => {
             if (finished) return;
             try {
-                input.focus();
+                input.focus({ preventScroll: true });
                 input.select();
+                pinScroll();
             } catch (e) {
-                // Ignore focus errors
+                try {
+                    input.focus();
+                    input.select();
+                    pinScroll();
+                } catch (_) {}
             }
         };
         requestAnimationFrame(focusRenameInput);
@@ -17671,6 +20322,11 @@ class AxisBrowser {
             input.removeEventListener('blur', onBlur);
             input.removeEventListener('keydown', onKeydown);
             tabGroupElement?.classList.remove('tab-renaming');
+            titleElement.classList.remove('tab-title--rename-ghost');
+            titleElement.removeAttribute('aria-hidden');
+            if (leftEl && leftEl.style.position === 'relative') {
+                leftEl.style.position = '';
+            }
         };
 
         const commitRename = () => {
@@ -17678,10 +20334,8 @@ class AxisBrowser {
             finished = true;
             detach();
             const newTitle = input.value.trim() || currentTitle;
-            const newTitleElement = document.createElement('span');
-            newTitleElement.className = 'tab-title';
-            newTitleElement.textContent = newTitle;
-            if (input.parentNode) input.parentNode.replaceChild(newTitleElement, input);
+            if (input.parentNode) input.parentNode.removeChild(input);
+            titleElement.textContent = newTitle;
             const gKey = this.findTabGroupKey(tabGroupId);
             const tabGroup = gKey != null ? this.tabGroups.get(gKey) : null;
             if (tabGroup) {
@@ -17703,12 +20357,16 @@ class AxisBrowser {
             if (finished) return;
             finished = true;
             detach();
-            const restored = document.createElement('span');
-            restored.className = 'tab-title';
-            restored.textContent = currentTitle;
-            if (input.parentNode) input.parentNode.replaceChild(restored, input);
+            if (input.parentNode) input.parentNode.removeChild(input);
+            titleElement.textContent = currentTitle;
         };
 
+        let blurArmed = deferBlurMs === 0;
+        if (deferBlurMs > 0) {
+            setTimeout(() => {
+                blurArmed = true;
+            }, deferBlurMs);
+        }
         const onBlur = () => {
             if (!blurArmed) return;
             commitRename();
@@ -17722,17 +20380,8 @@ class AxisBrowser {
                 cancelRename();
             }
         };
-        let blurArmed = deferBlurMs === 0;
-        const armBlur = () => {
-            if (deferBlurMs > 0) {
-                setTimeout(() => {
-                    blurArmed = true;
-                }, deferBlurMs);
-            }
-        };
         input.addEventListener('blur', onBlur);
         input.addEventListener('keydown', onKeydown);
-        armBlur();
     }
 
 
@@ -17841,21 +20490,19 @@ class AxisBrowser {
     async refreshExtensionStoreListingUi(currentUrl, webview = null) {
         const ctx = axisParseStoreListingContext(currentUrl);
         const el = this.elements;
+        // URL-bar download shortcut removed; keep Extensions menu / Settings install paths.
+        if (el?.urlBarCwsInstall) {
+            el.urlBarCwsInstall.classList.add('hidden');
+            el.urlBarCwsInstall.setAttribute('aria-hidden', 'true');
+            el.urlBarCwsInstall.classList.remove('url-bar-cws-install--installed');
+        }
         if (!ctx) {
             this._cancelExtensionStoreListingUiRetries();
             if (el?.axisStoreInstallHostBar) {
                 el.axisStoreInstallHostBar.classList.add('hidden');
                 el.axisStoreInstallHostBar.classList.remove('axis-store-install-host-bar--shown');
             }
-            if (el?.urlBarCwsInstall) {
-                el.urlBarCwsInstall.classList.remove('url-bar-cws-install--installed');
-            }
             return null;
-        }
-
-        if (el?.urlBarCwsInstall) {
-            el.urlBarCwsInstall.classList.remove('hidden');
-            el.urlBarCwsInstall.setAttribute('aria-hidden', 'false');
         }
 
         if (el?.axisStoreInstallHostBar && !this._extensionInstallUiActive) {
@@ -18160,76 +20807,125 @@ class AxisBrowser {
         }
     }
     
-    // Update audio indicator for a tab (show/hide speaker icon)
-    updateTabAudioIndicator(tabId, isPlaying) {
-        const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
-        if (!tabElement) return;
-        
+    _applyTabAudioIndicatorToElement(tabElement, tab, isPlaying) {
+        const wrap = tabElement.querySelector('.tab-audio-wrap');
         const audioIndicator = tabElement.querySelector('.tab-audio-indicator');
-        if (!audioIndicator) return;
-        
-        const tab = this.tabs.get(tabId);
+        if (!wrap || !audioIndicator) return;
+        this._ensureTabAudioMixerMarkup(wrap);
         const icon = audioIndicator.querySelector('i');
-        
-        // Show muted icon if tab is muted (regardless of playing state)
-        if (tab && tab.isMuted) {
-            audioIndicator.style.display = 'inline-flex';
-            audioIndicator.classList.add('muted');
-            audioIndicator.title = this.t('chrome.tabMuted');
-            if (icon) {
-                icon.className = 'fas fa-volume-mute';
-            }
+        const audio = tab ? this._ensureTabAudioState(tab) : { volume: 1 };
+        const tabKey = tab ? this._normalizeTabMapKey(tab.id ?? tabElement?.dataset?.tabId) : null;
+        const mixerOpenHere = tabKey != null && this._audioMixerTabId === tabKey;
+        if (mixerOpenHere) {
+            this._syncAudioMixerPanel(tabKey);
+        }
+        const showIndicator = !!isPlaying || mixerOpenHere;
+        if (!showIndicator) {
+            wrap.classList.remove('is-active');
+            audioIndicator.classList.remove('muted');
             return;
         }
-        
-        // Show playing indicator if audio is playing
-        if (isPlaying) {
-            audioIndicator.style.display = 'inline-flex';
+        wrap.classList.add('is-active');
+        if (tab && tab.isMuted) {
+            audioIndicator.classList.add('muted');
+            audioIndicator.title = this.t('chrome.tabMuted');
+            if (icon) icon.className = 'fas fa-volume-mute';
+        } else {
             audioIndicator.classList.remove('muted');
             audioIndicator.title = this.t('chrome.playingAudio');
-            if (icon) {
-                icon.className = 'fas fa-volume-up';
-            }
-        } else {
-            audioIndicator.style.display = 'none';
-            audioIndicator.classList.remove('muted');
+            if (icon) icon.className = 'fas fa-volume-up';
         }
     }
-    
-    // Event-driven audio indicator - no per-tab polling (polling kept background pages hot and leaked RAM).
+
+    // Update audio indicator for a tab (show/hide speaker icon)
+    updateTabAudioIndicator(tabId, isPlaying) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (id == null) return;
+        const tab = this.tabs.get(id);
+        const poolId = this._axisProfileDomPoolId(this.profileId);
+        const roots = [
+            document.getElementById('tabs-container'),
+            document.getElementById('tab-element-pool'),
+            document.getElementById(poolId)
+        ].filter(Boolean);
+        let updated = false;
+        for (const root of roots) {
+            root.querySelectorAll(`[data-tab-id="${id}"]`).forEach((tabElement) => {
+                updated = true;
+                this._applyTabAudioIndicatorToElement(tabElement, tab, isPlaying);
+            });
+        }
+        if (!updated) {
+            const fallback = this._getTabElement(id);
+            if (fallback) this._applyTabAudioIndicatorToElement(fallback, tab, isPlaying);
+        }
+    }
+
     bindWebviewAudioStateListener(tabId, webview) {
-        if (!webview || webview.__axisAudioStateBound) return;
+        if (!webview) return;
+        const tabKey = this._normalizeTabMapKey(tabId);
+        if (tabKey == null) return;
+        webview.__axisAudioTabId = tabKey;
         const syncAudible = () => {
-                const tab = this.tabs.get(tabId);
-            if (!tab || !webview) return;
-                let isAudible = false;
-            try {
-                if (typeof webview.isCurrentlyAudible === 'function') {
-                    isAudible = !!webview.isCurrentlyAudible();
+            if (webview.__axisAudibleSyncPending) return;
+            webview.__axisAudibleSyncPending = true;
+            void (async () => {
+                try {
+                    const key = webview.__axisAudioTabId ?? tabKey;
+                    const tab = this.tabs.get(key);
+                    if (!tab || !webview) return;
+                    let isAudible = false;
+                    try {
+                        if (typeof webview.isCurrentlyAudible === 'function') {
+                            isAudible = !!webview.isCurrentlyAudible();
+                        }
+                    } catch (_) {}
+                    if (isAudible) {
+                        try {
+                            const playing = await webview.executeJavaScript(
+                                `(function(){var list=document.querySelectorAll('video,audio');for(var i=0;i<list.length;i++){var el=list[i];if(!el.paused&&!el.muted&&el.volume>0)return true;}return false;})()`,
+                                true
+                            );
+                            isAudible = !!playing;
+                        } catch (_) {
+                            isAudible = false;
+                        }
+                    }
+                    const changed = tab.isPlayingAudio !== isAudible;
+                    if (changed) tab.isPlayingAudio = isAudible;
+                    if (changed) this.updateTabAudioIndicator(key, isAudible);
+                    if (changed && this._normalizeTabMapKey(this.currentTab) === key) {
+                        this.applyAmbientFromSettings();
+                    }
+                } finally {
+                    webview.__axisAudibleSyncPending = false;
                 }
-            } catch (_) {}
-                if (tab.isPlayingAudio !== isAudible) {
-                    tab.isPlayingAudio = isAudible;
-                    this.updateTabAudioIndicator(tabId, isAudible);
-                if (this._normalizeTabMapKey(this.currentTab) === tabId) {
-                    this.applyAmbientFromSettings();
-                }
-            }
+            })();
         };
-        const bind = () => {
-            if (webview.__axisAudioStateBound) return;
+        const bindWc = () => {
             try {
                 const wc = webview.getWebContents?.();
-                if (!wc || typeof wc.on !== 'function' || wc.isDestroyed?.()) return;
-                wc.on('audio-state-changed', syncAudible);
-                webview.__axisAudioStateBound = true;
-                webview.__axisAudioStateHandler = syncAudible;
-                webview.__axisAudioStateWc = wc;
+                if (!wc || typeof wc.on !== 'function' || wc.isDestroyed?.()) return false;
+                if (!webview.__axisAudioStateBound) {
+                    wc.on('audio-state-changed', syncAudible);
+                    webview.__axisAudioStateBound = true;
+                    webview.__axisAudioStateHandler = syncAudible;
+                    webview.__axisAudioStateWc = wc;
+                }
                 syncAudible();
-            } catch (_) {}
+                return true;
+            } catch (_) {
+                return false;
+            }
         };
-        bind();
-        webview.addEventListener('dom-ready', bind, { once: true });
+        bindWc();
+        webview.addEventListener('dom-ready', () => {
+            bindWc();
+            void this.syncTabAudioToWebview(tabKey);
+        });
+        if (!webview.__axisAudiblePoll) {
+            webview.__axisAudiblePoll = setInterval(syncAudible, 200);
+        }
         webview.addEventListener('destroyed', () => this.stopAudioDetection(webview), { once: true });
     }
 
@@ -18244,6 +20940,10 @@ class AxisBrowser {
         if (webview.__audioCheckInterval) {
             clearInterval(webview.__audioCheckInterval);
             webview.__audioCheckInterval = null;
+        }
+        if (webview.__axisAudiblePoll) {
+            clearInterval(webview.__axisAudiblePoll);
+            webview.__axisAudiblePoll = null;
         }
         if (webview.__axisAudioStateHandler && webview.__axisAudioStateWc) {
             try {
@@ -18423,11 +21123,21 @@ class AxisBrowser {
     }
     
     // Recompute whether the pinned/unpinned separator should be visible based on current DOM
+    _isSidebarFullscreen() {
+        return (
+            document.body.classList.contains('axis-window-fullscreen') ||
+            document.body.classList.contains('axis-site-html-fullscreen') ||
+            !!document.fullscreenElement
+        );
+    }
+
     updatePinnedSeparatorVisibility() {
         const tabsContainer = this.elements.tabsContainer;
         const separator = this.elements.tabsSeparator;
         const floatingClear = this.elements.clearUnpinnedFloatingBtn;
         if (!tabsContainer || !separator) return;
+
+        const hideFloatingClear = this._isSidebarFullscreen();
         
         const children = Array.from(tabsContainer.children);
         const sepIndex = children.indexOf(separator);
@@ -18437,7 +21147,7 @@ class AxisBrowser {
                 .slice(Math.max(0, sepIndex + 1))
                 .some((el) => this._isPinnedUnpinnedSidebarTabNode(el));
             if (floatingClear) {
-                floatingClear.classList.toggle('hidden', !hasUnpinnedDom);
+                floatingClear.classList.toggle('hidden', hideFloatingClear || !hasUnpinnedDom);
             }
             return;
         }
@@ -18451,7 +21161,7 @@ class AxisBrowser {
         
         separator.style.display = hasPinnedDom ? 'block' : 'none';
         if (floatingClear) {
-            floatingClear.classList.toggle('hidden', hasPinnedDom || !hasUnpinnedDom);
+            floatingClear.classList.toggle('hidden', hideFloatingClear || hasPinnedDom || !hasUnpinnedDom);
         }
     }
 
@@ -18773,12 +21483,20 @@ class AxisBrowser {
 
     _syncFavoriteTabsUi() {
         if (this.isIncognitoWindow) return;
+        this._relinkFavoriteRuntimeTabs();
+        this._syncFavoriteActiveHighlight();
         const hasFavoriteRuntime =
             this.favorites.some((f) => this._normalizeTabMapKey(f.runtimeTabId) != null) ||
             Array.from(this.tabs.values()).some((t) => t?.isFavoriteTab);
-        if (!hasFavoriteRuntime) return;
-        this._relinkFavoriteRuntimeTabs();
-        this.renderFavorites();
+        if (!hasFavoriteRuntime && !this.favorites.length) return;
+        // Keep chips in sync (active outline) without forcing a full rebuild every switch
+        // unless favorite runtime tabs exist / favorites row is empty.
+        const grid = this.elements?.favoritesGrid;
+        if (!grid?.querySelector('.favorite-item') && this.favorites.length) {
+            this.renderFavorites();
+            return;
+        }
+        this._lastFavoritesRenderTabId = this._normalizeTabMapKey(this.currentTab);
     }
 
     createFavoriteRuntimeTab(favorite) {
@@ -18827,7 +21545,7 @@ class AxisBrowser {
             }
         }
         this.switchToTab(tabId);
-        this.renderFavorites();
+        this._syncFavoriteActiveHighlight();
     }
 
     async removeFavorite(favoriteId) {
@@ -18912,9 +21630,149 @@ class AxisBrowser {
         return this._sidebarMediaFallbackAccent(url || '', false);
     }
 
+    _patchFavoriteChipIcon(favorite) {
+        if (!favorite) return;
+        const grid = this.elements?.favoritesGrid;
+        const chip = grid?.querySelector(`[data-favorite-id="${favorite.id}"]`);
+        if (!chip) {
+            this.renderFavorites();
+            return;
+        }
+        const wrap = chip.querySelector('.favorite-icon-wrap');
+        if (wrap) wrap.innerHTML = this.getFavoriteIconHtml(favorite);
+        this._applyFavoriteItemAccentColor(chip, favorite);
+        this._syncFavoriteActiveHighlight();
+    }
+
+    _clearFavoriteAccentCache(favorite) {
+        if (!favorite?.customIcon) return;
+        const cacheKey = `custom:${favorite.customIconType || 'fa'}:${favorite.customIcon}`;
+        this._favoriteAccentCache.delete(cacheKey);
+    }
+
+    _syncLinkedFavoriteIconFromTab(tab) {
+        if (!tab?.isFavoriteTab || !tab.favoriteId) return;
+        const fav = this.favorites.find((f) => f.id === tab.favoriteId);
+        if (!fav) return;
+        this._clearFavoriteAccentCache(fav);
+        fav.customIcon = tab.customIcon || null;
+        fav.customIconType = tab.customIcon ? tab.customIconType || null : null;
+        this.saveFavorites();
+        this._patchFavoriteChipIcon(fav);
+    }
+
+    _resetFavoriteCustomIcon(favorite) {
+        if (!favorite) return;
+        this._clearFavoriteAccentCache(favorite);
+        favorite.customIcon = null;
+        favorite.customIconType = null;
+        const rt = this._normalizeTabMapKey(favorite.runtimeTabId);
+        if (rt != null && this.tabs.has(rt)) {
+            const tab = this.tabs.get(rt);
+            tab.customIcon = null;
+            tab.customIconType = null;
+            this.tabs.set(rt, tab);
+            const tabElement = this._getTabElement(rt);
+            if (tabElement) this.updateTabIcon(tabElement, rt);
+        }
+        this.saveFavorites();
+        this._patchFavoriteChipIcon(favorite);
+    }
+
+    _isFavoriteCustomEmoji(customIcon, customIconType) {
+        const icon = String(customIcon || '').trim();
+        if (!icon) return false;
+        const type = String(customIconType || '').toLowerCase();
+        return type === 'emoji' || (!type && /\p{Extended_Pictographic}/u.test(icon));
+    }
+
+    _dominantColorFromEmoji(emoji) {
+        const text = String(emoji || '').trim();
+        if (!text) return null;
+        try {
+            const size = 72;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            if (!ctx) return null;
+            ctx.clearRect(0, 0, size, size);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const fontSize = Math.round(size * 0.64);
+            ctx.font = `${fontSize}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+            ctx.fillText(text, size / 2, size / 2);
+            const data = ctx.getImageData(0, 0, size, size).data;
+            const buckets = new Map();
+            for (let i = 0; i < data.length; i += 4) {
+                const pr = data[i];
+                const pg = data[i + 1];
+                const pb = data[i + 2];
+                const pa = data[i + 3];
+                if (pa < 72) continue;
+                const max = Math.max(pr, pg, pb);
+                const min = Math.min(pr, pg, pb);
+                const sat = max === 0 ? 0 : (max - min) / max;
+                if (sat < 0.14) continue;
+                const key = ((pr >> 3) << 10) | ((pg >> 3) << 5) | (pb >> 3);
+                let bucket = buckets.get(key);
+                if (!bucket) {
+                    bucket = { count: 0, r: 0, g: 0, b: 0, sat: 0 };
+                    buckets.set(key, bucket);
+                }
+                bucket.count += 1;
+                bucket.r += pr;
+                bucket.g += pg;
+                bucket.b += pb;
+                bucket.sat += sat;
+            }
+            if (!buckets.size) return null;
+            const entries = [];
+            for (const bucket of buckets.values()) {
+                entries.push({
+                    count: bucket.count,
+                    r: Math.round(bucket.r / bucket.count),
+                    g: Math.round(bucket.g / bucket.count),
+                    b: Math.round(bucket.b / bucket.count),
+                    sat: bucket.sat / bucket.count
+                });
+            }
+            entries.sort((a, b) => b.count - a.count || b.sat - a.sat);
+            const pick = entries[0];
+            return pick ? { r: pick.r, g: pick.g, b: pick.b } : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    _isFavoriteCustomFaIcon(favorite) {
+        return !!(
+            favorite?.customIcon &&
+            !this._isFavoriteCustomEmoji(favorite.customIcon, favorite.customIconType)
+        );
+    }
+
+    _applyFavoriteShellInkAccent(item) {
+        if (!item) return;
+        item.style.setProperty('--favorite-accent-rgb', 'var(--shell-ink-rgb)');
+    }
+
     async _resolveFavoriteAccentColor(favorite, domImg) {
         if (favorite?.customIcon) {
-            return this._favoriteAccentFallback(favorite.url);
+            const cacheKey = `custom:${favorite.customIconType || 'fa'}:${favorite.customIcon}`;
+            if (this._favoriteAccentCache.has(cacheKey)) {
+                return this._favoriteAccentCache.get(cacheKey);
+            }
+            let accent = null;
+            if (this._isFavoriteCustomEmoji(favorite.customIcon, favorite.customIconType)) {
+                accent = this._dominantColorFromEmoji(favorite.customIcon);
+            } else if (this._isFavoriteCustomFaIcon(favorite)) {
+                this._favoriteAccentCache.set(cacheKey, null);
+                return null;
+            }
+            if (!accent) accent = this._favoriteAccentFallback(favorite.url);
+            this._favoriteAccentCache.set(cacheKey, accent);
+            return accent;
         }
         const cacheKey = favorite?.favicon || favorite?.url;
         if (cacheKey && this._favoriteAccentCache.has(cacheKey)) {
@@ -18945,7 +21803,17 @@ class AxisBrowser {
         const cacheKey = favorite.favicon || favorite.url;
 
         if (favorite.customIcon) {
+            if (this._isFavoriteCustomFaIcon(favorite)) {
+                this._applyFavoriteShellInkAccent(item);
+                return;
+            }
             apply(this._favoriteAccentFallback(favorite.url));
+            void this._resolveFavoriteAccentColor(favorite, null).then((accent) => {
+                if (item.isConnected) {
+                    apply(accent);
+                    if (item.classList.contains('active')) this._syncFavoriteActiveHighlight();
+                }
+            });
             return;
         }
         if (cacheKey && this._favoriteAccentCache.has(cacheKey)) {
@@ -18959,7 +21827,10 @@ class AxisBrowser {
         const domImg = item.querySelector('img.favorite-favicon');
         const extract = () => {
             void this._resolveFavoriteAccentColor(favorite, domImg).then((accent) => {
-                if (item.isConnected) apply(accent);
+                if (item.isConnected) {
+                    apply(accent);
+                    if (item.classList.contains('active')) this._syncFavoriteActiveHighlight();
+                }
             });
         };
         if (!domImg) {
@@ -18997,7 +21868,14 @@ class AxisBrowser {
                 <span class="favorite-icon-wrap">${this.getFavoriteIconHtml(favorite)}</span>
             `;
             this._applyFavoriteItemAccentColor(item, favorite);
-            item.addEventListener('click', () => this.navigateFavorite(favorite));
+            item.addEventListener('click', () => {
+                const activeTabId = this._normalizeTabMapKey(this.currentTab);
+                const favTab = this._normalizeTabMapKey(favorite.runtimeTabId);
+                if (activeTabId == null || favTab !== activeTabId) {
+                    this._playSidebarItemPress(item);
+                }
+                this.navigateFavorite(favorite);
+            });
             item.addEventListener('contextmenu', (e) => {
                 void this.showFavoriteContextMenu(e, favorite);
             });
@@ -19303,6 +22181,8 @@ class AxisBrowser {
             this._pinnedTabsSaveTimer = null;
         }
         const pinnedTabs = this._collectPinnedTabsPayload();
+        const storedPins = Array.isArray(this.settings?.pinnedTabs) ? this.settings.pinnedTabs : [];
+        if (!pinnedTabs.length && storedPins.length > 0) return;
         const pinnedSidebarOrder = this._rememberPinnedSidebarOrder();
         this.settings.pinnedTabs = pinnedTabs;
         if (pinnedSidebarOrder?.length) {
@@ -19355,7 +22235,7 @@ class AxisBrowser {
                     <div class="tab-content">
                         <div class="tab-left">
                             ${iconHTML}
-                            <span class="tab-audio-indicator" style="display: none;"><i class="fas fa-volume-up"></i></span>
+                            ${this._tabAudioWrapHtml(tabId)}
                             <span class="tab-title">${this.escapeHtml(displayTitle)}</span>
                         </div>
                         <div class="tab-right">
@@ -19433,9 +22313,27 @@ class AxisBrowser {
         search.addEventListener('input', (e) => filter(e.target.value));
     }
 
+    _pinSidebarFromPeek() {
+        const sidebar = document.getElementById('sidebar');
+        if (!sidebar) return;
+        this._sidebarHoverPeek = false;
+        this._cancelSidebarPeekHide?.();
+        this._clearSidebarSlideOutState(sidebar);
+        sidebar.classList.remove('hidden');
+        if (window.electronAPI?.setWindowButtonVisibility) {
+            window.electronAPI.setWindowButtonVisibility(true);
+        }
+        this.syncMacOSTrafficLayout();
+    }
+
     toggleSidebar() {
         const sidebar = document.getElementById('sidebar');
         if (!sidebar) return;
+
+        if (this._sidebarHoverPeek) {
+            this._pinSidebarFromPeek();
+            return;
+        }
 
         const closing = !sidebar.classList.contains('hidden');
         if (closing) {
@@ -19445,15 +22343,9 @@ class AxisBrowser {
             }
         }
 
-        /* Exit hover slide-over mode cleanly so fixed/keyframe state never leaks into the docked bar */
-        sidebar.classList.remove('slide-out', 'slide-out-closing');
+        /* Exit hover peek / slide-over mode cleanly so fixed/keyframe state never leaks into the docked bar */
+        this._clearSidebarSlideOutState(sidebar);
         sidebar.style.animation = '';
-        sidebar.style.removeProperty('background');
-        sidebar.style.removeProperty('backdrop-filter');
-        sidebar.style.removeProperty('-webkit-backdrop-filter');
-        sidebar.style.removeProperty('box-shadow');
-        sidebar.style.removeProperty('transform');
-        sidebar.style.removeProperty('--sidebar-reveal-width');
 
         sidebar.classList.toggle('hidden');
 
@@ -19524,6 +22416,32 @@ class AxisBrowser {
             this._notifySettingsTabWebviewsStoreUpdated();
         });
         this.syncMacOSTrafficLayout();
+        this.syncWindowsShellChromeLayout();
+    }
+
+    /** Win32: reserve top inset when the sidebar is under the native caption buttons. */
+    syncWindowsShellChromeLayout() {
+        if (window.electronAPI?.platform !== 'win32') return;
+        document.documentElement.classList.toggle('axis-win-sidebar-right', this.isSidebarRight());
+    }
+
+    _isWin32Shell() {
+        return window.electronAPI?.platform === 'win32';
+    }
+
+    /** Win32: native Mica/Acrylic + CSS frost share the window transparency slider. */
+    syncWindowsFrostShellClass(chrome) {
+        if (!this._isWin32Shell()) return;
+        const frosted = (this.getShellChromeTransmissionT?.() ?? 0) > 0;
+        const root = document.documentElement;
+        root.classList.toggle('axis-win-frosted', frosted);
+        const style = root.style;
+        const c = chrome || this.getShellChromeStyle?.();
+        if (c) {
+            style.setProperty('--axis-shell-backdrop-main', c.backdropMain || 'none');
+            style.setProperty('--axis-shell-backdrop-strong', c.backdropStrong || 'none');
+            style.setProperty('--axis-shell-backdrop-url', c.urlBarBackdrop || 'none');
+        }
     }
 
     /** macOS: move window controls to top-right when sidebar is right (matches left layout mirrored). */
@@ -19560,6 +22478,7 @@ class AxisBrowser {
             if (contextText) contextText.textContent = this.t('menu.moveSidebarRight');
         }
         this.syncMacOSTrafficLayout();
+        this.syncWindowsShellChromeLayout();
         if (typeof this._syncSidebarResizeHandleLayout === 'function') {
             this._syncSidebarResizeHandleLayout();
         }
@@ -19582,107 +22501,201 @@ class AxisBrowser {
         const section = container.closest('.tabs-section') || container.parentElement;
         if (!section) return;
 
-        let thumb = section.querySelector(':scope > .tabs-sb-overlay');
-        if (!thumb) {
-            thumb = document.createElement('div');
-            thumb.className = 'tabs-sb-overlay';
-            thumb.setAttribute('aria-hidden', 'true');
-            section.appendChild(thumb);
+        let scrollport = container.parentElement;
+        if (!scrollport?.classList.contains('tabs-scrollport')) {
+            scrollport = document.createElement('div');
+            scrollport.className = 'tabs-scrollport';
+            container.parentNode.insertBefore(scrollport, container);
+            scrollport.appendChild(container);
         }
 
-        const IDLE_MS = 900;
-        const FADE_MS = 360;
-        let hideTimer = null;
-        let fadeTimer = null;
+        const sidebarEl = section.closest('#sidebar') || section;
+        scrollport.querySelector(':scope > .tabs-sb-track')?.remove();
+        section.querySelector(':scope > .tabs-sb-track')?.remove();
+        section.querySelector(':scope > .tabs-sb-overlay')?.remove();
+        container.querySelector(':scope > .tabs-sb-track')?.remove();
 
-        const clearTimers = () => {
-            if (hideTimer) {
-                clearTimeout(hideTimer);
-                hideTimer = null;
-            }
-            if (fadeTimer) {
-                clearTimeout(fadeTimer);
-                fadeTimer = null;
-            }
+        let track = sidebarEl.querySelector(':scope > .tabs-sb-track');
+        let thumb = track?.querySelector('.tabs-sb-thumb');
+        if (!track) {
+            track = document.createElement('div');
+            track.className = 'tabs-sb-track';
+            track.setAttribute('aria-hidden', 'true');
+            sidebarEl.appendChild(track);
+        }
+        if (!thumb) {
+            thumb = document.createElement('div');
+            thumb.className = 'tabs-sb-thumb';
+            track.appendChild(thumb);
+        }
+
+        const syncTrackSlot = () => {
+            const sidebarRect = sidebarEl.getBoundingClientRect();
+            const portRect = scrollport.getBoundingClientRect();
+            const inset = 6;
+            const top = Math.max(0, portRect.top - sidebarRect.top + inset);
+            const height = Math.max(0, portRect.height - inset * 2);
+            track.style.top = `${top}px`;
+            track.style.height = `${height}px`;
+            return height;
         };
 
-        const updateThumb = () => {
+        const getLayout = () => {
             const scrollHeight = container.scrollHeight;
             const clientHeight = container.clientHeight;
+            const trackH = track.clientHeight;
+            const ratio = scrollHeight > 0 ? clientHeight / scrollHeight : 1;
+            const thumbH = Math.max(24, Math.min(trackH, trackH * ratio));
+            const maxScroll = Math.max(0, scrollHeight - clientHeight);
+            const maxThumbTop = Math.max(0, trackH - thumbH);
+            return { scrollHeight, clientHeight, trackH, thumbH, maxScroll, maxThumbTop };
+        };
+
+        const paintThumb = () => {
             const scrollTop = container.scrollTop;
+            const scrollHeight = container.scrollHeight;
+            const clientHeight = container.clientHeight;
             const canScroll = scrollHeight > clientHeight + 1;
             section.classList.toggle('is-tabs-scrolled', canScroll && scrollTop > 0);
             section.classList.toggle(
                 'is-tabs-scrolled-bottom',
                 canScroll && scrollTop + clientHeight < scrollHeight - 1
             );
+            sidebarEl.classList.toggle('has-tabs-scrollbar', canScroll);
             if (!canScroll) {
-                thumb.hidden = true;
-                section.classList.remove(
-                    'is-tabs-scrolling',
-                    'is-tabs-scroll-fading',
-                    'is-tabs-scrolled',
-                    'is-tabs-scrolled-bottom'
-                );
+                track.classList.add('is-hidden');
                 return false;
             }
-            thumb.hidden = false;
-            const inset = 6;
-            const trackH = Math.max(0, clientHeight - inset * 2);
-            const ratio = clientHeight / scrollHeight;
-            const thumbH = Math.max(28, Math.min(trackH, trackH * ratio));
-            const maxScroll = scrollHeight - clientHeight;
-            const maxTop = Math.max(0, trackH - thumbH);
-            const thumbOffset = maxScroll > 0 ? (scrollTop / maxScroll) * maxTop : 0;
+            track.classList.remove('is-hidden');
+            syncTrackSlot();
+            const { thumbH, maxScroll, maxThumbTop } = getLayout();
+            const thumbTop = maxScroll > 0 ? (scrollTop / maxScroll) * maxThumbTop : 0;
             thumb.style.height = `${thumbH}px`;
-            thumb.style.top = `${container.offsetTop + inset + thumbOffset}px`;
+            thumb.style.transform = `translate3d(0, ${thumbTop}px, 0)`;
             return true;
         };
 
-        const showScrollbar = () => {
-            if (!updateThumb()) return;
-            clearTimers();
-            section.classList.remove('is-tabs-scroll-fading');
-            section.classList.add('is-tabs-scrolling');
-            hideTimer = setTimeout(() => {
-                hideTimer = null;
-                section.classList.add('is-tabs-scroll-fading');
-                fadeTimer = setTimeout(() => {
-                    fadeTimer = null;
-                    section.classList.remove('is-tabs-scrolling', 'is-tabs-scroll-fading');
-                }, FADE_MS);
-            }, IDLE_MS);
+        const SCROLL_IDLE_MS = 900;
+        let scrollIdleTimer = null;
+        const revealScrollbar = () => {
+            if (track.classList.contains('is-hidden')) return;
+            track.classList.add('is-scrolling');
+            if (scrollIdleTimer) clearTimeout(scrollIdleTimer);
+            scrollIdleTimer = setTimeout(() => {
+                scrollIdleTimer = null;
+                if (!track.classList.contains('is-hover') && !track.classList.contains('is-dragging')) {
+                    track.classList.remove('is-scrolling');
+                }
+            }, SCROLL_IDLE_MS);
         };
 
-        /* Coalesce bursty trackpad scroll/wheel into one paint so edges keep up with fast flicks. */
         let scrollRaf = 0;
-        const onScrollActivity = () => {
+        const onScroll = () => {
             if (scrollRaf) return;
             scrollRaf = requestAnimationFrame(() => {
                 scrollRaf = 0;
-                showScrollbar();
+                paintThumb();
+                revealScrollbar();
             });
         };
 
-        container.addEventListener('scroll', onScrollActivity, { passive: true });
-        container.addEventListener('wheel', onScrollActivity, { passive: true });
+        container.addEventListener('scroll', onScroll, { passive: true });
+        container.addEventListener('wheel', onScroll, { passive: true });
+
+        let isDragging = false;
+        let dragStartY = 0;
+        let dragStartScroll = 0;
+
+        const getThumbRange = () => {
+            const { thumbH, maxScroll, maxThumbTop } = getLayout();
+            const scrollTop = container.scrollTop;
+            const thumbTop = maxScroll > 0 ? (scrollTop / maxScroll) * maxThumbTop : 0;
+            return { thumbTop, thumbH, maxScroll, maxThumbTop };
+        };
+
+        const isPointerOnThumb = (clientY, slop = 10) => {
+            const trackRect = track.getBoundingClientRect();
+            const { thumbTop, thumbH } = getThumbRange();
+            const y = clientY - trackRect.top;
+            return y >= thumbTop - slop && y <= thumbTop + thumbH + slop;
+        };
+
+        track.addEventListener('mouseenter', () => track.classList.add('is-hover'));
+        track.addEventListener('mouseleave', () => {
+            if (isDragging) return;
+            track.classList.remove('is-hover');
+        });
+
+        const endThumbDrag = () => {
+            if (!isDragging) return;
+            isDragging = false;
+            thumb.classList.remove('is-dragging');
+            track.classList.remove('is-dragging');
+            document.body.classList.remove('tabs-sb-dragging');
+            document.removeEventListener('mousemove', onThumbDragMove);
+            document.removeEventListener('mouseup', endThumbDrag);
+            revealScrollbar();
+        };
+
+        const onThumbDragMove = (e) => {
+            if (!isDragging) return;
+            e.preventDefault();
+            const { maxScroll, maxThumbTop } = getLayout();
+            const deltaY = e.clientY - dragStartY;
+            const scrollDelta = maxThumbTop > 0 ? (deltaY / maxThumbTop) * maxScroll : 0;
+            container.scrollTop = Math.max(0, Math.min(maxScroll, dragStartScroll + scrollDelta));
+            paintThumb();
+        };
+
+        const startThumbDrag = (e) => {
+            const { maxScroll } = getLayout();
+            if (maxScroll <= 0) return;
+            isDragging = true;
+            dragStartY = e.clientY;
+            dragStartScroll = container.scrollTop;
+            thumb.classList.add('is-dragging');
+            track.classList.add('is-dragging', 'is-scrolling', 'is-hover');
+            document.body.classList.add('tabs-sb-dragging');
+            document.addEventListener('mousemove', onThumbDragMove, { passive: false });
+            document.addEventListener('mouseup', endThumbDrag, { passive: false });
+        };
+
+        track.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (!paintThumb()) return;
+            const { maxScroll, maxThumbTop, thumbH } = getLayout();
+            if (maxScroll <= 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (isPointerOnThumb(e.clientY)) {
+                startThumbDrag(e);
+                return;
+            }
+
+            const trackRect = track.getBoundingClientRect();
+            const clickY = e.clientY - trackRect.top - thumbH / 2;
+            const thumbTop = Math.max(0, Math.min(maxThumbTop, clickY));
+            container.scrollTop = maxThumbTop > 0 ? (thumbTop / maxThumbTop) * maxScroll : 0;
+            paintThumb();
+            revealScrollbar();
+        });
+
         if (typeof ResizeObserver !== 'undefined') {
-            const ro = new ResizeObserver(() => {
-                updateThumb();
-                if (section.classList.contains('is-tabs-scrolling')) showScrollbar();
-            });
+            const ro = new ResizeObserver(() => paintThumb());
+            ro.observe(scrollport);
             ro.observe(container);
+            ro.observe(sidebarEl);
         }
         if (typeof MutationObserver !== 'undefined') {
             const mo = new MutationObserver(() => this._refreshTabsScrollEdges?.());
             mo.observe(container, { childList: true, subtree: true });
         }
         this._refreshTabsScrollEdges = () => {
-            const run = () => updateThumb();
-            run();
-            requestAnimationFrame(run);
+            paintThumb();
+            requestAnimationFrame(paintThumb);
             clearTimeout(this._tabsScrollEdgesTimer);
-            this._tabsScrollEdgesTimer = setTimeout(run, 220);
+            this._tabsScrollEdgesTimer = setTimeout(paintThumb, 120);
         };
         this._refreshTabsScrollEdges();
     }
@@ -19691,86 +22704,49 @@ class AxisBrowser {
         const hoverArea = document.getElementById('sidebar-hover-area');
         const sidebar = document.getElementById('sidebar');
 
-        let slideBackTimeout = null;
-        let closeFallbackTimer = null;
+        let peekHideTimer = null;
 
-        if (!hoverArea) {
-            console.error('Hover area not found!');
-            return;
-        }
+        if (!hoverArea || !sidebar) return;
 
-        const clearCloseFallback = () => {
-            if (closeFallbackTimer) {
-                clearTimeout(closeFallbackTimer);
-                closeFallbackTimer = null;
+        const cancelPeekHide = () => {
+            if (peekHideTimer) {
+                clearTimeout(peekHideTimer);
+                peekHideTimer = null;
+            }
+        };
+        this._cancelSidebarPeekHide = cancelPeekHide;
+
+        const hideSidebarPeek = () => {
+            if (!this._sidebarHoverPeek) return;
+            this._sidebarHoverPeek = false;
+            cancelPeekHide();
+            if (!sidebar.classList.contains('hidden')) {
+                const ae = document.activeElement;
+                if (ae && typeof ae.blur === 'function' && sidebar.contains(ae)) {
+                    ae.blur();
+                }
+                this._clearSidebarSlideOutState(sidebar);
+                sidebar.classList.add('hidden');
+                if (window.electronAPI?.setWindowButtonVisibility) {
+                    window.electronAPI.setWindowButtonVisibility(false);
+                }
             }
         };
 
-        const clearSlideOutSurfaceStyles = () => {
-            sidebar.style.removeProperty('background');
-            sidebar.style.removeProperty('backdrop-filter');
-            sidebar.style.removeProperty('-webkit-backdrop-filter');
-            sidebar.style.removeProperty('box-shadow');
+        const schedulePeekHide = () => {
+            if (!this._sidebarHoverPeek) return;
+            cancelPeekHide();
+            peekHideTimer = setTimeout(hideSidebarPeek, 280);
         };
 
-        /** Opaque-enough overlay surface (never the airy docked --sidebar-background). */
-        const applySlideOutSurface = () => {
-            const computedStyle = getComputedStyle(document.documentElement);
-            let bg = computedStyle.getPropertyValue('--sidebar-slide-out-background').trim();
-            if (!bg || bg === 'transparent') {
-                bg = document.body.classList.contains('light-theme')
-                    ? 'rgba(252, 252, 252, 0.94)'
-                    : 'rgba(28, 28, 28, 0.94)';
-            }
-            sidebar.style.setProperty('background', bg, 'important');
-            sidebar.style.setProperty('backdrop-filter', 'blur(40px) saturate(160%)', 'important');
-            sidebar.style.setProperty('-webkit-backdrop-filter', 'blur(40px) saturate(160%)', 'important');
-        };
-
-        const finishSlideOutClose = () => {
-            clearCloseFallback();
-            /* Overlay already slid off; docked bar must snap with zero transition or
-               width/min-width/margin/visibility easing runs again and the webview reflows (twitch). */
-            sidebar.style.setProperty('transition', 'none', 'important');
-            sidebar.classList.remove('slide-out', 'slide-out-closing');
-            sidebar.style.removeProperty('animation');
-            sidebar.style.removeProperty('--sidebar-reveal-width');
-            clearSlideOutSurfaceStyles();
-            sidebar.style.removeProperty('transform');
-            void sidebar.offsetHeight;
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    sidebar.style.removeProperty('transition');
-                });
-            });
-            if (sidebar.classList.contains('hidden') && window.electronAPI?.setWindowButtonVisibility) {
-                window.electronAPI.setWindowButtonVisibility(false);
-            }
-        };
-
-        const revealFromEdge = () => {
+        const revealSidebarPeek = () => {
             if (!sidebar.classList.contains('hidden')) return;
 
-            clearTimeout(slideBackTimeout);
-            slideBackTimeout = null;
-            clearCloseFallback();
+            cancelPeekHide();
+            this._clearSidebarSlideOutState(sidebar);
 
-            /* Cancel close mid-flight: drop partial keyframes, then re-open cleanly */
-            if (sidebar.classList.contains('slide-out-closing')) {
-                sidebar.classList.remove('slide-out-closing');
-                sidebar.classList.remove('slide-out');
-                sidebar.style.animation = 'none';
-                void sidebar.offsetHeight;
-                sidebar.style.removeProperty('animation');
-            }
-
-            let w = parseInt(String(sidebar.style.width || '').trim(), 10);
-            if (!Number.isFinite(w) || w < 200) w = 300;
-            if (w > 500) w = 500;
-            sidebar.style.setProperty('--sidebar-reveal-width', `${w}px`);
-
-            applySlideOutSurface();
-            sidebar.classList.add('slide-out');
+            this._sidebarHoverPeek = true;
+            sidebar.classList.remove('hidden');
 
             if (window.electronAPI?.setWindowButtonVisibility) {
                 window.electronAPI.setWindowButtonVisibility(true);
@@ -19778,57 +22754,22 @@ class AxisBrowser {
             this.syncMacOSTrafficLayout();
         };
 
-        hoverArea.addEventListener('mouseenter', revealFromEdge);
+        hoverArea.addEventListener('mouseenter', revealSidebarPeek);
 
         sidebar.addEventListener('mouseenter', () => {
-            if (sidebar.classList.contains('slide-out')) {
-                clearTimeout(slideBackTimeout);
-                slideBackTimeout = null;
-            }
+            if (this._sidebarHoverPeek) cancelPeekHide();
         });
 
-        const closeSlideOut = () => {
-            if (!sidebar.classList.contains('slide-out') || sidebar.classList.contains('slide-out-closing')) return;
-
-            const onAnimationEnd = (e) => {
-                if (e.target !== sidebar) return;
-                const name = e.animationName || '';
-                if (!name.includes('sidebarSlideOut')) return;
-                sidebar.removeEventListener('animationend', onAnimationEnd);
-                clearCloseFallback();
-                finishSlideOutClose();
-            };
-
-            sidebar.addEventListener('animationend', onAnimationEnd);
-
-            clearCloseFallback();
-            closeFallbackTimer = setTimeout(() => {
-                sidebar.removeEventListener('animationend', onAnimationEnd);
-                if (sidebar.classList.contains('slide-out') || sidebar.classList.contains('slide-out-closing')) {
-                    finishSlideOutClose();
-                }
-            }, 520);
-
-            sidebar.classList.add('slide-out-closing');
-        };
-
-        hoverArea.addEventListener('mouseleave', () => {
-            if (sidebar.classList.contains('hidden') && sidebar.classList.contains('slide-out')) {
-                slideBackTimeout = setTimeout(closeSlideOut, 280);
-            }
-        });
-
-        sidebar.addEventListener('mouseleave', () => {
-            if (sidebar.classList.contains('hidden') && sidebar.classList.contains('slide-out')) {
-                slideBackTimeout = setTimeout(closeSlideOut, 280);
-            }
-        });
+        hoverArea.addEventListener('mouseleave', schedulePeekHide);
+        sidebar.addEventListener('mouseleave', schedulePeekHide);
 
         document.addEventListener('click', (e) => {
-            if (sidebar.classList.contains('slide-out') &&
+            if (
+                this._sidebarHoverPeek &&
                 !sidebar.contains(e.target) &&
-                !hoverArea.contains(e.target)) {
-                closeSlideOut();
+                !hoverArea.contains(e.target)
+            ) {
+                hideSidebarPeek();
             }
         });
 
@@ -19885,9 +22826,14 @@ class AxisBrowser {
             pollingInterval: null
         };
 
-        // Setup AI button click: quote selection and open main chat panel
+        // Setup AI button click: quote selection in chat or open main chat panel
         const button = aiButton.querySelector('.ai-button');
-        button?.addEventListener('click', () => this.openChatWithQuotedSelection());
+        button?.addEventListener('click', () => {
+            const source = this.aiSelectionState?.source;
+            if (source === 'sidebar-chat') this.quoteSelectionInSidebarChat();
+            else if (source === 'ntp-chat') this.quoteSelectionInNtpChat();
+            else this.openChatWithQuotedSelection();
+        });
 
         // Setup custom question submit - use event delegation to ensure it works
         const setupSubmitHandler = () => {
@@ -19964,6 +22910,14 @@ class AxisBrowser {
                 }
             }
         });
+
+        if (!this._chatSelectionChangeBound) {
+            this._chatSelectionChangeBound = true;
+            document.addEventListener('selectionchange', () => {
+                if (!this.isAiFeaturesEnabled()) return;
+                this.checkInAppChatSelection();
+            });
+        }
 
         // Start polling for text selection
         this.startAISelectionPolling();
@@ -20045,7 +22999,7 @@ class AxisBrowser {
 
         this.aiSelectionState.pollingInterval = setInterval(() => {
             this.checkTextSelection();
-        }, 300);
+        }, 140);
     }
 
     stopAISelectionPolling() {
@@ -20055,11 +23009,65 @@ class AxisBrowser {
         }
     }
 
+    checkInAppChatSelection() {
+        if (!this.isAiFeaturesEnabled()) return false;
+
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+            if (this.aiSelectionState?.source === 'sidebar-chat' || this.aiSelectionState?.source === 'ntp-chat') {
+                this.hideAIButton();
+            }
+            return false;
+        }
+
+        const text = sel.toString().trim();
+        if (!text) {
+            if (this.aiSelectionState?.source === 'sidebar-chat' || this.aiSelectionState?.source === 'ntp-chat') {
+                this.hideAIButton();
+            }
+            return false;
+        }
+
+        const range = sel.getRangeAt(0);
+        const node = range.commonAncestorContainer;
+        const sidebarMessages = document.getElementById('ai-chat-messages');
+        const ntpMessages = document.getElementById('new-tab-ask-messages');
+        const chatInput = document.getElementById('ai-chat-input');
+        const ntpInput = document.getElementById('new-tab-input');
+        if (chatInput?.contains(node) || ntpInput?.contains(node)) return false;
+
+        let source = null;
+        const chatPanel = document.getElementById('ai-chat-panel');
+        if (sidebarMessages && sidebarMessages.contains(node) && chatPanel && !chatPanel.classList.contains('hidden')) {
+            source = 'sidebar-chat';
+        } else if (ntpMessages && ntpMessages.contains(node) && this.isNewTabInChat()) {
+            source = 'ntp-chat';
+        } else {
+            return false;
+        }
+
+        const rect = range.getBoundingClientRect();
+        if (!rect.width && !rect.height) return false;
+
+        this.aiSelectionState.text = text;
+        this.aiSelectionState.source = source;
+        this.aiSelectionState.position = { x: rect.left - 2, y: rect.top - 34 };
+        this.aiSelectionState._misses = 0;
+        if (this._aiHideTimer) {
+            clearTimeout(this._aiHideTimer);
+            this._aiHideTimer = null;
+        }
+        this.showAIButton(rect.left - 2, rect.top - 34, { viewport: true });
+        return true;
+    }
+
     async checkTextSelection() {
         if (!this.isAiFeaturesEnabled()) {
             this.hideAIButton();
             return;
         }
+        if (this.checkInAppChatSelection()) return;
+
         const webview = this.getActiveWebview();
         if (!webview) {
             this.hideAIButton();
@@ -20093,7 +23101,7 @@ class AxisBrowser {
                         return {
                             text: text,
                             x: rect.left - 2, // Slightly to the left of selection edge
-                            y: rect.top - 35, // Closer to top of selection
+                            y: rect.top - 34,
                             width: rect.width,
                             height: rect.height
                         };
@@ -20105,10 +23113,37 @@ class AxisBrowser {
 
             if (result && result.text && result.text.length > 0) {
                 this.aiSelectionState.text = result.text;
+                this.aiSelectionState.source = 'webview';
                 this.aiSelectionState.position = { x: result.x, y: result.y };
-                this.showAIButton(result.x, result.y);
+                this.aiSelectionState._misses = 0;
+                if (this._aiHideTimer) {
+                    clearTimeout(this._aiHideTimer);
+                    this._aiHideTimer = null;
+                }
+                if (!this._aiShowTimer) {
+                    this._aiShowTimer = setTimeout(() => {
+                        this._aiShowTimer = null;
+                        const pos = this.aiSelectionState?.position;
+                        if (pos && this.aiSelectionState?.text) {
+                            this.showAIButton(pos.x, pos.y);
+                        }
+                    }, 28);
+                } else {
+                    // Keep timer; refresh position for when it fires
+                }
             } else {
-                this.hideAIButton();
+                if (this._aiShowTimer) {
+                    clearTimeout(this._aiShowTimer);
+                    this._aiShowTimer = null;
+                }
+                this.aiSelectionState._misses = (this.aiSelectionState._misses || 0) + 1;
+                if (this.aiSelectionState._misses < 2) return;
+                if (!this._aiHideTimer) {
+                    this._aiHideTimer = setTimeout(() => {
+                        this._aiHideTimer = null;
+                        this.hideAIButton();
+                    }, 50);
+                }
             }
         } catch (error) {
             // Selection check failed, hide button
@@ -20117,64 +23152,95 @@ class AxisBrowser {
         }
     }
 
-    showAIButton(x, y) {
+    showAIButton(x, y, { viewport = false } = {}) {
         if (!this.isAiFeaturesEnabled()) return;
         const aiButton = document.getElementById('ai-selection-button');
         if (!aiButton) {
             return;
         }
 
-        // Get webview position to adjust coordinates
-        const webview = this.getActiveWebview();
-        if (!webview) {
-            return;
+        let viewportX;
+        let viewportY;
+        if (viewport) {
+            viewportX = x;
+            viewportY = Math.max(8, y);
+        } else {
+            const webview = this.getActiveWebview();
+            if (!webview) {
+                return;
+            }
+            const webviewRect = webview.getBoundingClientRect();
+            viewportX = webviewRect.left + x;
+            viewportY = Math.max(8, webviewRect.top + y);
+        }
+        const wasHidden = aiButton.classList.contains('hidden');
+        const lastX = this.aiSelectionState?._lastX;
+        const lastY = this.aiSelectionState?._lastY;
+        const moved =
+            lastX == null ||
+            lastY == null ||
+            Math.abs(lastX - viewportX) > 1.5 ||
+            Math.abs(lastY - viewportY) > 1.5;
+
+        if (moved || wasHidden) {
+            aiButton.style.left = `${viewportX}px`;
+            aiButton.style.top = `${viewportY}px`;
+            if (this.aiSelectionState) {
+                this.aiSelectionState._lastX = viewportX;
+                this.aiSelectionState._lastY = viewportY;
+            }
         }
 
-        const webviewRect = webview.getBoundingClientRect();
-        
-        // Coordinates from webview are relative to webview's viewport
-        // Add webview's position to get absolute viewport coordinates
-        const viewportX = webviewRect.left + x;
-        const viewportY = webviewRect.top + y;
-
-        // Position button at top-left of selection, closer to the corner
-        aiButton.style.left = `${viewportX}px`;
-        aiButton.style.top = `${Math.max(10, viewportY)}px`;
-        // Remove inline transform to let CSS handle the animation
-        aiButton.style.transform = '';
-        aiButton.style.opacity = '';
-        aiButton.style.visibility = '';
-        aiButton.style.display = 'block';
         aiButton.style.zIndex = '10000';
-        aiButton.classList.remove('hidden');
-        
-        // Force a reflow to ensure styles are applied
-        void aiButton.offsetHeight;
+        if (wasHidden) {
+            // Ensure the enter transition starts from the hidden state.
+            void aiButton.offsetWidth;
+            aiButton.classList.remove('hidden');
+        }
     }
 
     hideAIButton() {
+        if (this._aiShowTimer) {
+            clearTimeout(this._aiShowTimer);
+            this._aiShowTimer = null;
+        }
+        if (this._aiHideTimer) {
+            clearTimeout(this._aiHideTimer);
+            this._aiHideTimer = null;
+        }
         const aiButton = document.getElementById('ai-selection-button');
         if (aiButton) {
             aiButton.classList.add('hidden');
-            aiButton.style.display = '';
-            aiButton.style.opacity = '';
-            aiButton.style.visibility = '';
         }
         if (this.aiSelectionState) {
             this.aiSelectionState.text = '';
+            this.aiSelectionState.source = null;
             this.aiSelectionState.position = null;
+            this.aiSelectionState._lastX = null;
+            this.aiSelectionState._lastY = null;
+            this.aiSelectionState._misses = 0;
         }
     }
 
-    /**
-     * Show quoted selection in the bar above the message box and open main chat panel.
-     */
-    openChatWithQuotedSelection() {
-        if (!this.isAiFeaturesEnabled()) return;
-        const selectedText = this.aiSelectionState?.text?.trim();
-        if (!selectedText) return;
+    _formatQuotedMarkdown(text) {
+        return String(text || '')
+            .split('\n')
+            .map((line) => '> ' + line)
+            .join('\n');
+    }
 
-        const quoted = selectedText.split('\n').map(line => '> ' + line).join('\n');
+    _plainQuoteText(quoteMarkdown) {
+        return String(quoteMarkdown || '').replace(/^> /gm, '').trim();
+    }
+
+    _buildChatQuoteBlockHtml(plainText) {
+        const display = this.escapeHtml(this._plainQuoteText(plainText));
+        if (!display) return '';
+        return `<div class="axis-chat-quote-inline">${display}</div>`;
+    }
+
+    _applySidebarChatQuote(selectedText) {
+        const quoted = this._formatQuotedMarkdown(selectedText);
         const chatPanel = document.getElementById('ai-chat-panel');
         const contentArea = document.getElementById('content-area');
         const quoteBar = document.getElementById('ai-chat-quote-bar');
@@ -20183,10 +23249,8 @@ class AxisBrowser {
 
         if (!chatPanel || !quoteBar || !quoteTextEl || !chatInput) return;
 
-        // Store full quoted text for when user sends (included in message)
         this.chatQuotedText = quoted;
 
-        // Ensure main chat panel is open
         if (chatPanel.classList.contains('hidden')) {
             this.applyChatPanelWidth?.(this.getChatPanelWidth?.());
             contentArea?.classList.remove('chat-sliding');
@@ -20200,13 +23264,53 @@ class AxisBrowser {
             this.aiChatPanelOpenByTabId.set(tid, true);
         }
 
-        // Show quote bar with preview (plain text for display, may be truncated by CSS)
         quoteTextEl.textContent = selectedText;
         quoteBar.classList.remove('hidden');
-
         chatInput.value = '';
         setTimeout(() => chatInput.focus(), 100);
+    }
 
+    /**
+     * Show quoted selection in the bar above the message box and open main chat panel.
+     */
+    openChatWithQuotedSelection() {
+        if (!this.isAiFeaturesEnabled()) return;
+        const selectedText = this.aiSelectionState?.text?.trim();
+        if (!selectedText) return;
+
+        this._applySidebarChatQuote(selectedText);
+        window.getSelection()?.removeAllRanges();
+        this.hideAIButton();
+        this.hideAIPopup();
+    }
+
+    quoteSelectionInSidebarChat() {
+        if (!this.isAiFeaturesEnabled()) return;
+        const selectedText = this.aiSelectionState?.text?.trim();
+        if (!selectedText) return;
+
+        this._applySidebarChatQuote(selectedText);
+        window.getSelection()?.removeAllRanges();
+        this.hideAIButton();
+        this.hideAIPopup();
+    }
+
+    quoteSelectionInNtpChat() {
+        if (!this.isAiFeaturesEnabled()) return;
+        const selectedText = this.aiSelectionState?.text?.trim();
+        if (!selectedText) return;
+
+        this.newTabQuotedText = this._formatQuotedMarkdown(selectedText);
+        const quoteBar = document.getElementById('new-tab-quote-bar');
+        const quoteTextEl = document.getElementById('new-tab-quote-text');
+        const input = document.getElementById('new-tab-input');
+        if (!quoteBar || !quoteTextEl || !input) return;
+
+        quoteTextEl.textContent = selectedText;
+        quoteBar.classList.remove('hidden');
+        input.value = '';
+        this._focusNewTabInput();
+        window.getSelection()?.removeAllRanges();
         this.hideAIButton();
         this.hideAIPopup();
     }
@@ -20215,6 +23319,14 @@ class AxisBrowser {
         this.chatQuotedText = null;
         const quoteBar = document.getElementById('ai-chat-quote-bar');
         const quoteTextEl = document.getElementById('ai-chat-quote-text');
+        if (quoteBar) quoteBar.classList.add('hidden');
+        if (quoteTextEl) quoteTextEl.textContent = '';
+    }
+
+    clearNewTabQuote() {
+        this.newTabQuotedText = null;
+        const quoteBar = document.getElementById('new-tab-quote-bar');
+        const quoteTextEl = document.getElementById('new-tab-quote-text');
         if (quoteBar) quoteBar.classList.add('hidden');
         if (quoteTextEl) quoteTextEl.textContent = '';
     }
@@ -20390,12 +23502,22 @@ class AxisBrowser {
         return AxisAiProviders.normalizeSettings(this.settings);
     }
 
+    _aiProviderKeyLooksSealed(key) {
+        const k = String(key || '').trim();
+        return k.startsWith('axisenc:v1:');
+    }
+
     getActiveAiProvider() {
         if (typeof AxisAiProviders === 'undefined') {
             const st = this.getAiProviderState();
             return st.aiProviders[0] || null;
         }
-        return AxisAiProviders.getActiveEntry(this.settings);
+        const entry = AxisAiProviders.getActiveEntry(this.settings);
+        if (entry?.apiKey && this._aiProviderKeyLooksSealed(entry.apiKey)) {
+            void this.loadSettings().then(() => this.syncAiProviderFromSettings?.());
+            return null;
+        }
+        return entry;
     }
 
     hasAiApiKey() {
@@ -20408,15 +23530,20 @@ class AxisBrowser {
         return AxisAiProviders.displayName(this.getActiveAiProvider());
     }
 
-    async _completeAiChat(messages, options = {}) {
-        const entry = this.getActiveAiProvider();
+    async _completeAiChat(messages, options = {}, onStream) {
+        const entry = this._resolveAiChatProviderEntry();
         if (!entry?.apiKey) {
             throw new Error(this.t('ai.needKey'));
         }
         if (typeof AxisAiProviders === 'undefined') {
             throw new Error('AI providers module is unavailable.');
         }
-        return AxisAiProviders.chatCompletion(entry, messages, options);
+        const completionOptions = this._getAiChatCompletionOptions(options);
+        if (options.signal) completionOptions.signal = options.signal;
+        if (typeof onStream === 'function') {
+            return AxisAiProviders.chatCompletionStream(entry, messages, completionOptions, onStream);
+        }
+        return AxisAiProviders.chatCompletion(entry, messages, completionOptions);
     }
 
     getGroqApiKey() {
@@ -20436,6 +23563,377 @@ class AxisBrowser {
         this.aiChatApiKey = entry?.apiKey ? String(entry.apiKey).trim() : '';
         this.updateAIChatSetupState();
         this._syncAiChatImageAttachUi();
+        void this.refreshAiModelSelectors(false);
+    }
+
+    _aiModelStorageKey() {
+        return 'axis-ai-model-selection';
+    }
+
+    getSelectedAiModelValue() {
+        const saved = localStorage.getItem(this._aiModelStorageKey());
+        return saved && String(saved).trim() ? String(saved).trim() : 'auto';
+    }
+
+    setSelectedAiModelValue(value) {
+        const next = String(value || 'auto').trim() || 'auto';
+        localStorage.setItem(this._aiModelStorageKey(), next);
+        this._updateAiModelPickerLabels();
+        this._renderAllAiModelMenus();
+    }
+
+    _resolveAiChatProviderEntry() {
+        if (typeof AxisAiProviders === 'undefined') return this.getActiveAiProvider();
+        const selection = AxisAiProviders.parseModelSelection(this.getSelectedAiModelValue());
+        if (selection.mode === 'fixed' && selection.entryId) {
+            const entry = AxisAiProviders.getEntryById(this.settings, selection.entryId);
+            if (entry) return entry;
+        }
+        return this.getActiveAiProvider();
+    }
+
+    _getAiChatCompletionOptions(extra = {}) {
+        const selection =
+            typeof AxisAiProviders !== 'undefined'
+                ? AxisAiProviders.parseModelSelection(this.getSelectedAiModelValue())
+                : { mode: 'auto', modelId: null };
+        const opts = { ...extra };
+        if (selection.mode === 'fixed' && selection.modelId) {
+            opts.model = selection.modelId;
+        }
+        return opts;
+    }
+
+    _getAiModelLabelForValue(value) {
+        const v = String(value || 'auto');
+        if (v === 'auto') return this.t('ai.auto');
+        const item = this._aiModelCatalog.find((row) => row.value === v);
+        if (item) return item.label;
+        const parts = v.split(':');
+        return parts.length > 1 ? parts.slice(1).join(':') : v;
+    }
+
+    _updateAiModelPickerLabels() {
+        const selected = this.getSelectedAiModelValue();
+        const label = this._getAiModelLabelForValue(selected);
+        const sidebarLabel = document.getElementById('ai-chat-model-label');
+        const ntpLabel = document.getElementById('new-tab-model-label');
+        if (sidebarLabel) sidebarLabel.textContent = label;
+        if (ntpLabel) ntpLabel.textContent = label;
+    }
+
+    _closeAllAiModelMenus() {
+        this._aiModelMenuOpen = false;
+        document.querySelectorAll('.ai-chat-model-menu').forEach((menu) => {
+            menu.classList.remove('is-open', 'is-ported');
+            menu.style.left = '';
+            menu.style.top = '';
+            menu.style.right = '';
+            menu.style.bottom = '';
+            menu.style.position = '';
+            menu.style.zIndex = '';
+            if (menu._aiModelPickerHome && menu.parentElement !== menu._aiModelPickerHome) {
+                menu._aiModelPickerHome.appendChild(menu);
+            }
+            menu.classList.add('hidden');
+        });
+        document.querySelectorAll('.ai-chat-model-trigger').forEach((btn) => {
+            btn.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    _positionAiModelMenu(menu, trigger) {
+        if (!menu || !trigger) return;
+        const rect = trigger.getBoundingClientRect();
+        const gap = 6;
+        const margin = 10;
+        const menuWidth = menu.offsetWidth || 208;
+        const menuHeight = menu.offsetHeight || 160;
+        let left = rect.left;
+        let top = rect.top - menuHeight - gap;
+        if (left + menuWidth > window.innerWidth - margin) {
+            left = window.innerWidth - menuWidth - margin;
+        }
+        left = Math.max(margin, left);
+        if (top < margin) {
+            top = rect.bottom + gap;
+        }
+        top = Math.max(margin, Math.min(top, window.innerHeight - menuHeight - margin));
+        menu.style.left = `${Math.round(left)}px`;
+        menu.style.top = `${Math.round(top)}px`;
+    }
+
+    _openAiModelMenu(menu, trigger) {
+        if (!menu || !trigger) return;
+        const picker = trigger.closest('[data-ai-model-picker]');
+        if (picker) {
+            menu._aiModelPickerHome = picker;
+            if (menu.parentElement !== document.body) {
+                document.body.appendChild(menu);
+            }
+        }
+        menu.classList.remove('hidden');
+        menu.classList.add('is-ported');
+        menu.style.position = 'fixed';
+        menu.style.zIndex = '25000';
+        const sc = this.getAiChatChromeStyleForContext(trigger);
+        menu.dataset.chatTheme = sc.theme || 'dark';
+        this._applyAiChatChromeVarsTo(menu, sc);
+        trigger.setAttribute('aria-expanded', 'true');
+        requestAnimationFrame(() => {
+            this._positionAiModelMenu(menu, trigger);
+            menu.classList.add('is-open');
+            requestAnimationFrame(() => this._positionAiModelMenu(menu, trigger));
+        });
+    }
+
+    _renderAiModelMenu(menuEl, items, selected) {
+        if (!menuEl) return;
+        menuEl.innerHTML = '';
+
+        const list = document.createElement('div');
+        list.className = 'ai-chat-model-menu-list';
+        menuEl.appendChild(list);
+
+        const refreshBtn = document.createElement('button');
+        refreshBtn.type = 'button';
+        refreshBtn.className = 'ai-chat-model-refresh-row';
+        refreshBtn.dataset.action = 'refresh-models';
+        refreshBtn.innerHTML = `<i class="fas fa-rotate-right" aria-hidden="true"></i><span>${this.escapeHtml(this.t('ai.refreshModels'))}</span>`;
+        list.appendChild(refreshBtn);
+
+        const addOption = (item, { hint = '' } = {}) => {
+            const isSelected = selected === item.value;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `ai-chat-model-option${isSelected ? ' is-selected' : ''}`;
+            btn.dataset.value = item.value;
+            btn.setAttribute('role', 'option');
+            btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+            const hintHtml = hint
+                ? `<span class="ai-chat-model-option-hint">${this.escapeHtml(hint)}</span>`
+                : '';
+            btn.innerHTML = `
+                <span class="ai-chat-model-option-main">
+                    <span class="ai-chat-model-option-name">${this.escapeHtml(item.label || item.value)}</span>
+                    ${hintHtml}
+                </span>
+                <i class="fas fa-check ai-chat-model-option-check" aria-hidden="true"></i>
+            `;
+            list.appendChild(btn);
+        };
+
+        const autoItem = items.find((item) => item.value === 'auto');
+        if (autoItem) {
+            addOption({ value: 'auto', label: this.t('ai.auto') }, { hint: this.t('ai.autoHint') });
+        }
+
+        for (const item of items) {
+            if (item.value === 'auto') continue;
+            addOption(item);
+        }
+    }
+
+    _renderAllAiModelMenus() {
+        const selected = this.getSelectedAiModelValue();
+        this._renderAiModelMenu(document.getElementById('ai-chat-model-menu'), this._aiModelCatalog, selected);
+        this._renderAiModelMenu(document.getElementById('new-tab-model-menu'), this._aiModelCatalog, selected);
+    }
+
+    async refreshAiModelSelectors(force = false) {
+        if (!this.hasAiApiKey() || typeof AxisAiProviders === 'undefined') {
+            this._aiModelCatalog = [{ value: 'auto', label: this.t('ai.auto'), hint: this.t('ai.autoHint') }];
+            this._renderAllAiModelMenus();
+            this._updateAiModelPickerLabels();
+            return;
+        }
+        if (this._aiModelCatalogLoading) return;
+        this._aiModelCatalogLoading = true;
+        document.querySelectorAll('.ai-chat-model-refresh-row').forEach((btn) => btn.classList.add('is-refreshing'));
+        try {
+            if (force) AxisAiProviders.invalidateModelsCache();
+            const items = await AxisAiProviders.buildChatModelCatalog(this.settings, { force });
+            this._aiModelCatalog = items.length ? items : [{ value: 'auto', label: this.t('ai.auto') }];
+            const selected = this.getSelectedAiModelValue();
+            if (selected !== 'auto' && !this._aiModelCatalog.some((item) => item.value === selected)) {
+                this.setSelectedAiModelValue('auto');
+            } else {
+                this._renderAllAiModelMenus();
+                this._updateAiModelPickerLabels();
+            }
+        } catch (_) {
+            if (!this._aiModelCatalog.length) {
+                this._aiModelCatalog = [{ value: 'auto', label: this.t('ai.auto') }];
+            }
+        } finally {
+            this._aiModelCatalogLoading = false;
+            document.querySelectorAll('.ai-chat-model-refresh-row').forEach((btn) => btn.classList.remove('is-refreshing'));
+        }
+    }
+
+    _bindAiModelPicker(pickerEl) {
+        if (!pickerEl || pickerEl.dataset.aiModelBound === '1') return;
+        pickerEl.dataset.aiModelBound = '1';
+        const trigger = pickerEl.querySelector('.ai-chat-model-trigger');
+        const menu = pickerEl.querySelector('.ai-chat-model-menu');
+        if (!trigger || !menu) return;
+
+        trigger.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+        });
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = !menu.classList.contains('hidden') && menu.classList.contains('is-open');
+            if (isOpen) {
+                this._closeAllAiModelMenus();
+                return;
+            }
+            this._closeAllAiModelMenus();
+            this._aiModelMenuOpen = true;
+            this._openAiModelMenu(menu, trigger);
+            void this.refreshAiModelSelectors(false);
+        });
+
+        menu.addEventListener('click', (e) => {
+            const refresh = e.target.closest('[data-action="refresh-models"]');
+            if (refresh) {
+                e.stopPropagation();
+                void this.refreshAiModelSelectors(true);
+                return;
+            }
+            const option = e.target.closest('.ai-chat-model-option');
+            if (!option?.dataset?.value) return;
+            this.setSelectedAiModelValue(option.dataset.value);
+            this._closeAllAiModelMenus();
+        });
+    }
+
+    setupAiModelSelectors() {
+        if (this._aiModelSelectorsBound) return;
+        this._aiModelSelectorsBound = true;
+        document.querySelectorAll('[data-ai-model-picker]').forEach((picker) => this._bindAiModelPicker(picker));
+        if (!this._aiModelMenuDismissBound) {
+            this._aiModelMenuDismissBound = true;
+            const dismissModelMenus = (e) => {
+                if (!this._aiModelMenuOpen) return;
+                if (e.target.closest('[data-ai-model-picker], .ai-chat-model-menu, .ai-chat-model-trigger')) return;
+                this._closeAllAiModelMenus();
+            };
+            document.addEventListener('mousedown', dismissModelMenus, true);
+            document.addEventListener('click', dismissModelMenus, true);
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') this._closeAllAiModelMenus();
+            });
+        }
+        void this.refreshAiModelSelectors(false);
+    }
+
+    _syncAiModelPickerVisibility() {
+        const hasKey = this.hasAiApiKey() && this.isAiFeaturesEnabled();
+        const sidebarShow = hasKey;
+        const ntpShow = hasKey && this.isNewTabInChat();
+        document.getElementById('ai-chat-model-picker')?.toggleAttribute('hidden', !sidebarShow);
+        document.getElementById('ai-chat-composer-toolbar')?.toggleAttribute('hidden', !sidebarShow);
+        document.getElementById('ai-chat-send')?.toggleAttribute('hidden', !sidebarShow);
+        document.getElementById('new-tab-model-picker')?.toggleAttribute('hidden', !ntpShow);
+        document.getElementById('new-tab-composer-toolbar')?.toggleAttribute('hidden', !ntpShow);
+        document.getElementById('new-tab-send-btn')?.toggleAttribute('hidden', !ntpShow);
+    }
+
+    _autoGrowComposerInput(el) {
+        if (!el || el.tagName !== 'TEXTAREA') return;
+        const max = 132;
+        const min = 18;
+        el.style.height = '0px';
+        const next = Math.min(max, Math.max(min, el.scrollHeight));
+        el.style.height = `${next}px`;
+        el.style.overflowY = next >= max ? 'auto' : 'hidden';
+    }
+
+    setupComposerAutoGrow() {
+        if (this._composerAutoGrowBound) return;
+        this._composerAutoGrowBound = true;
+        const bind = (el) => {
+            if (!el || el._axisAutoGrowBound) return;
+            el._axisAutoGrowBound = true;
+            const grow = () => this._autoGrowComposerInput(el);
+            el.addEventListener('input', grow);
+            grow();
+        };
+        document.querySelectorAll('.axis-composer-input').forEach(bind);
+        this._bindComposerAutoGrow = bind;
+    }
+
+    setupComposerShellFocus() {
+        if (this._composerShellFocusBound) return;
+        this._composerShellFocusBound = true;
+        document.querySelectorAll('[data-axis-composer]').forEach((shell) => {
+            shell.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                if (e.target.closest('.axis-composer-input, .axis-composer-input-row, .axis-composer-quote, .axis-composer-toolbar, .axis-composer-send-btn, button, [data-ai-model-picker], .ai-chat-model-menu')) return;
+                const input = shell.querySelector('.axis-composer-input');
+                if (!input || input.disabled || input.readOnly) return;
+                e.preventDefault();
+                input.focus();
+            });
+        });
+    }
+
+    _renderStreamingAssistantHtml(text, { done = false } = {}) {
+        const body = text.startsWith('Error:')
+            ? this.escapeHtml(text)
+            : done
+                ? this.formatAiChatMarkdown(text)
+                : `${this.escapeHtml(text)}<span class="ai-chat-stream-cursor" aria-hidden="true">▋</span>`;
+        return body;
+    }
+
+    _scrollSidebarChatToBottom() {
+        const chatMessages = document.getElementById('ai-chat-messages');
+        if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    _scrollNewTabAskMessagesToBottom() {
+        const container = document.getElementById('new-tab-ask-messages');
+        if (container) container.scrollTop = container.scrollHeight;
+    }
+
+    _createSidebarStreamUpdater(messageId) {
+        let lastPaint = 0;
+        return (fullText, { done = false } = {}) => {
+            const messageDiv = document.querySelector(`#ai-chat-messages [data-message-id="${messageId}"]`);
+            if (!messageDiv) return;
+            const now = performance.now();
+            if (!done && now - lastPaint < 32) return;
+            lastPaint = now;
+            const time = messageDiv.querySelector('.ai-chat-message-time')?.textContent
+                || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            messageDiv.innerHTML = `
+                <div class="ai-chat-message-content">${this._renderStreamingAssistantHtml(fullText, { done })}</div>
+                <div class="ai-chat-message-time">${time}</div>
+            `;
+            this._scrollSidebarChatToBottom();
+        };
+    }
+
+    _createNtpStreamUpdater(loadingId) {
+        let lastPaint = 0;
+        return (fullText, { done = false } = {}) => {
+            const updated = document.querySelector(
+                `.new-tab-ask-message.assistant[data-message-id="${loadingId}"]`
+            );
+            if (!updated) return;
+            const now = performance.now();
+            if (!done && now - lastPaint < 32) return;
+            lastPaint = now;
+            updated.innerHTML = `
+                <div class="new-tab-ask-avatar assistant" aria-hidden="true"><i class="fas fa-message"></i></div>
+                <div class="new-tab-ask-body">
+                    <div class="new-tab-ask-bubble${done ? '' : ' new-tab-ask-bubble-streaming'}">${this._renderStreamingAssistantHtml(fullText, { done })}</div>
+                </div>
+            `;
+            this._scrollNewTabAskMessagesToBottom();
+        };
     }
 
     activeProviderSupportsImages() {
@@ -20461,7 +23959,7 @@ class AxisBrowser {
 
     async _compressAiChatImageForApi(dataUrl, fileName, originalMime) {
         const maxDim = 1536;
-        const maxBytes = 4 * 1024 * 1024;
+        const maxBytes = 6 * 1024 * 1024;
         const mime = String(originalMime || '').toLowerCase();
         if (mime === 'image/gif') {
             const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
@@ -20475,7 +23973,7 @@ class AxisBrowser {
                     name: fileName
                 };
             }
-            throw new Error('GIF images must be 4 MB or smaller.');
+            throw new Error('GIF too large after compression.');
         }
 
         const img = await new Promise((resolve, reject) => {
@@ -20518,7 +24016,7 @@ class AxisBrowser {
             tryExport('image/jpeg', 0.58);
 
         if (!packed) {
-            throw new Error('Image is too large after compression. Try a smaller file.');
+            throw new Error('Image too large to send.');
         }
 
         return {
@@ -20529,13 +24027,41 @@ class AxisBrowser {
         };
     }
 
+    _isAiChatImageFile(file) {
+        const type = String(file?.type || '').toLowerCase();
+        if (type.startsWith('image/')) return true;
+        if (type === 'application/octet-stream' || !type) {
+            return /\.(jpe?g|png|gif|webp|bmp|svg|ico|tiff?|tif|avif|heic|heif|jfif|pjpeg|apng)$/i.test(
+                String(file?.name || '')
+            );
+        }
+        return /\.(jpe?g|png|gif|webp|bmp|svg|ico|tiff?|tif|avif|heic|heif|jfif|pjpeg|apng)$/i.test(
+            String(file?.name || '')
+        );
+    }
+
+    _aiChatFileIconClass(name = '') {
+        const ext = String(name || '').split('.').pop()?.toLowerCase() || '';
+        if (['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx'].includes(ext)) return 'fa-file-code';
+        if (['json', 'jsonl', 'yaml', 'yml', 'toml', 'xml', 'html', 'htm', 'css', 'scss', 'less'].includes(ext)) {
+            return 'fa-file-code';
+        }
+        if (['py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cpp', 'h', 'cs', 'php', 'lua', 'r', 'dart', 'zig'].includes(ext)) {
+            return 'fa-file-code';
+        }
+        if (['csv', 'tsv', 'sql'].includes(ext)) return 'fa-file-csv';
+        if (['md', 'markdown', 'txt', 'rst', 'log'].includes(ext)) return 'fa-file-lines';
+        if (['sh', 'zsh', 'bash'].includes(ext)) return 'fa-terminal';
+        return 'fa-file';
+    }
+
     async readAiChatImageFile(file) {
-        const maxBytes = 8 * 1024 * 1024;
-        if (!file || !String(file.type || '').startsWith('image/')) {
-            throw new Error('Only JPEG, PNG, GIF, or WebP images can be attached.');
+        const maxBytes = 15 * 1024 * 1024;
+        if (!file || !this._isAiChatImageFile(file)) {
+            throw new Error('Unsupported image type.');
         }
         if (file.size > maxBytes) {
-            throw new Error('Each image must be 8 MB or smaller.');
+            throw new Error('Image too large (max 15 MB).');
         }
         const rawDataUrl = await new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -20554,12 +24080,181 @@ class AxisBrowser {
         };
     }
 
+    _isAiChatTextFile(file) {
+        if (this._isAiChatImageFile(file)) return false;
+        const type = String(file?.type || '').toLowerCase();
+        const name = String(file?.name || '');
+        if (type.startsWith('text/')) return true;
+        if (
+            /(json|xml|javascript|typescript|yaml|toml|x-sh|sql|csv|markdown|graphql|protobuf|rtf)/.test(
+                type
+            )
+        ) {
+            return true;
+        }
+        if (type === 'application/octet-stream' || !type) {
+            return /\.(txt|md|markdown|csv|tsv|json|jsonl|xml|ya?ml|toml|ini|cfg|conf|config|log|env|html?|css|scss|less|js|mjs|cjs|jsx|ts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|sh|zsh|bash|sql|lua|r|dart|vue|svelte|graphql|gql|proto|tf|hcl|dockerfile|makefile|cmake|tex|bib|rst|properties|gradle|plist|zig|v|sv|asm|s|patch|diff|ipynb|lock|gitignore|editorconfig|prettierrc|eslintrc|npmrc|nvmrc|rtf|ini|cfg)$/i.test(
+                name
+            );
+        }
+        return /\.(txt|md|markdown|csv|tsv|json|jsonl|xml|ya?ml|toml|ini|cfg|conf|config|log|env|html?|css|scss|less|js|mjs|cjs|jsx|ts|tsx|py|rb|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp|cs|php|sh|zsh|bash|sql|lua|r|dart|vue|svelte|graphql|gql|proto|tf|hcl|dockerfile|makefile|cmake|tex|bib|rst|properties|gradle|plist|zig|v|sv|asm|s|patch|diff|ipynb|lock|gitignore|editorconfig|prettierrc|eslintrc|npmrc|nvmrc|rtf)$/i.test(
+            name
+        );
+    }
+
+    _aiChatAttachPreviewEl(target) {
+        return target === 'newtab'
+            ? document.getElementById('new-tab-attach-preview')
+            : document.getElementById('ai-chat-attach-preview');
+    }
+
+    _flashAiChatAttachNotice(target, message) {
+        const previewEl = this._aiChatAttachPreviewEl(target);
+        if (!previewEl || !message) return;
+        let notice = previewEl.querySelector('.ai-chat-attach-preview-notice');
+        if (!notice) {
+            const header = previewEl.querySelector('.ai-chat-attach-preview-header');
+            if (!header) return;
+            notice = document.createElement('span');
+            notice.className = 'ai-chat-attach-preview-notice';
+            notice.setAttribute('aria-live', 'polite');
+            header.appendChild(notice);
+        }
+        if (previewEl._attachNoticeTimer) clearTimeout(previewEl._attachNoticeTimer);
+        if (previewEl._attachNoticeFadeTimer) clearTimeout(previewEl._attachNoticeFadeTimer);
+        if (notice._attachNoticeFadeEnd) {
+            notice.removeEventListener('transitionend', notice._attachNoticeFadeEnd);
+            notice._attachNoticeFadeEnd = null;
+        }
+        notice.textContent = message;
+        notice.classList.remove('is-hiding');
+        notice.classList.remove('is-visible');
+        requestAnimationFrame(() => {
+            notice.classList.add('is-visible');
+        });
+        previewEl._attachNoticeTimer = setTimeout(() => {
+            previewEl._attachNoticeTimer = null;
+            notice.classList.remove('is-visible');
+            notice.classList.add('is-hiding');
+            const onFadeEnd = (e) => {
+                if (e.target !== notice || e.propertyName !== 'opacity') return;
+                notice.removeEventListener('transitionend', onFadeEnd);
+                notice._attachNoticeFadeEnd = null;
+                notice.classList.remove('is-hiding');
+                notice.textContent = '';
+            };
+            notice._attachNoticeFadeEnd = onFadeEnd;
+            notice.addEventListener('transitionend', onFadeEnd);
+            previewEl._attachNoticeFadeTimer = setTimeout(() => {
+                previewEl._attachNoticeFadeTimer = null;
+                if (notice._attachNoticeFadeEnd === onFadeEnd) {
+                    notice.removeEventListener('transitionend', onFadeEnd);
+                    notice._attachNoticeFadeEnd = null;
+                    notice.classList.remove('is-hiding');
+                    notice.textContent = '';
+                }
+            }, 280);
+        }, 2600);
+    }
+
+    async readAiChatTextFile(file) {
+        const name = String(file?.name || 'file').slice(0, 120);
+        if (file.size > 2 * 1024 * 1024) throw new Error('File too large (max 2 MB).');
+        const text = await file.text();
+        if (text.includes('\u0000')) throw new Error(`${name} is not a text file.`);
+        return {
+            id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            kind: 'file',
+            name,
+            text
+        };
+    }
+
+    /** Text-file attachments travel inside the prompt; providers only take images as binary parts. */
+    _withAiChatFileContext(text, attachments) {
+        const files = (attachments || []).filter((a) => a?.kind === 'file');
+        if (!files.length) return text;
+        const blocks = files
+            .map((f) => `Attached file: ${f.name}\n\`\`\`\`\n${f.text}\n\`\`\`\``)
+            .join('\n\n');
+        return text ? `${text}\n\n${blocks}` : blocks;
+    }
+
+    async _addAiChatDroppedFiles(fileList, target) {
+        if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled()) return;
+        const all = Array.from(fileList || []).filter(Boolean);
+        const isImage = (f) => this._isAiChatImageFile(f);
+        const images = all.filter(isImage);
+        const texts = all.filter((f) => !isImage(f) && this._isAiChatTextFile(f));
+        const unsupported = all.length - images.length - texts.length;
+
+        if (images.length) {
+            await (target === 'newtab'
+                ? this._addNewTabChatImages(images)
+                : this._addSidebarChatImages(images));
+        }
+        if (texts.length) {
+            const current = (
+                target === 'newtab' ? this._newTabChatImages || [] : this._aiChatImagesFor()
+            ).slice();
+            let hitLimit = false;
+            for (const file of texts) {
+                if (current.length >= this._aiChatMaxImages) {
+                    hitLimit = true;
+                    break;
+                }
+                try {
+                    current.push(await this.readAiChatTextFile(file));
+                } catch (e) {
+                    this._flashAiChatAttachNotice(
+                        target,
+                        e?.message || 'Could not attach file.'
+                    );
+                }
+            }
+            if (target === 'newtab') this._newTabChatImages = current;
+            else this._setAiChatImages(current);
+            this._syncAiChatImageAttachUi();
+            if (hitLimit) {
+                this._flashAiChatAttachNotice(
+                    target,
+                    `Maximum ${this._aiChatMaxImages} attachments per message.`
+                );
+            }
+        }
+        if (unsupported > 0) {
+            this._flashAiChatAttachNotice(target, 'Unsupported file type.');
+        }
+    }
+
+    _aiChatDroppedImageUrl(dataTransfer) {
+        const html = dataTransfer?.getData?.('text/html') || '';
+        const fromHtml = html.match(/<img[^>]+src\s*=\s*["']([^"']+)["']/i)?.[1] || '';
+        const uri = (dataTransfer?.getData?.('text/uri-list') || '')
+            .split(/\r?\n/)
+            .find((line) => line && !line.startsWith('#')) || '';
+        const candidate = (fromHtml || uri).replace(/&amp;/g, '&').trim();
+        return /^(https?:|data:image\/)/i.test(candidate) ? candidate : '';
+    }
+
+    async _aiChatFileFromImageUrl(url) {
+        if (url.startsWith('data:')) {
+            const blob = await (await fetch(url)).blob();
+            return new File([blob], 'image', { type: blob.type });
+        }
+        const res = await window.electronAPI?.fetchAiChatImageUrl?.(url);
+        if (!res?.ok) return null;
+        const bytes = Uint8Array.from(atob(res.base64), (c) => c.charCodeAt(0));
+        return new File([bytes], res.name || 'image', { type: res.mimeType });
+    }
+
     _buildUserMessageImagesHtml(images) {
         if (!Array.isArray(images) || !images.length) return '';
         const imgs = images
-            .map(
-                (img) =>
-                    `<img class="ai-chat-attached-image" src="${this.escapeHtml(img.dataUrl)}" alt="${this.escapeHtml(img.name || 'Attached image')}" loading="lazy">`
+            .map((img) =>
+                img.kind === 'file'
+                    ? `<span class="ai-chat-attached-file"><i class="fas ${this._aiChatFileIconClass(img.name)}" aria-hidden="true"></i>${this.escapeHtml(img.name || 'File')}</span>`
+                    : `<img class="ai-chat-attached-image" src="${this.escapeHtml(img.dataUrl)}" alt="${this.escapeHtml(img.name || 'Attached image')}" loading="lazy">`
             )
             .join('');
         return `<div class="ai-chat-attached-images">${imgs}</div>`;
@@ -20567,6 +24262,10 @@ class AxisBrowser {
 
     _renderAiChatAttachPreview(previewEl, images, onRemove) {
         if (!previewEl) return;
+        if (previewEl._attachNoticeTimer) {
+            clearTimeout(previewEl._attachNoticeTimer);
+            previewEl._attachNoticeTimer = null;
+        }
         previewEl.innerHTML = '';
         if (!Array.isArray(images) || !images.length) {
             previewEl.classList.add('hidden');
@@ -20576,7 +24275,7 @@ class AxisBrowser {
 
         const header = document.createElement('div');
         header.className = 'ai-chat-attach-preview-header';
-        header.innerHTML = `<span class="ai-chat-attach-preview-label">${images.length} of ${this._aiChatMaxImages} attached</span>`;
+        header.innerHTML = `<span class="ai-chat-attach-preview-label">${images.length} of ${this._aiChatMaxImages} attached</span><span class="ai-chat-attach-preview-notice" aria-live="polite"></span>`;
         previewEl.appendChild(header);
 
         const row = document.createElement('div');
@@ -20584,10 +24283,22 @@ class AxisBrowser {
         images.forEach((img) => {
             const chip = document.createElement('div');
             chip.className = 'ai-chat-attach-chip';
-            const thumb = document.createElement('img');
-            thumb.src = img.dataUrl;
-            thumb.alt = img.name || 'Attached image';
-            chip.appendChild(thumb);
+            if (img.kind === 'file') {
+                chip.classList.add('ai-chat-attach-chip--file');
+                chip.title = img.name || '';
+                const icon = document.createElement('i');
+                icon.className = `fas ${this._aiChatFileIconClass(img.name)}`;
+                icon.setAttribute('aria-hidden', 'true');
+                const label = document.createElement('span');
+                label.className = 'ai-chat-attach-chip-name';
+                label.textContent = img.name || 'File';
+                chip.append(icon, label);
+            } else {
+                const thumb = document.createElement('img');
+                thumb.src = img.dataUrl;
+                thumb.alt = img.name || 'Attached image';
+                chip.appendChild(thumb);
+            }
             const removeBtn = document.createElement('button');
             removeBtn.type = 'button';
             removeBtn.className = 'ai-chat-attach-chip-remove';
@@ -20604,8 +24315,9 @@ class AxisBrowser {
         const hasKey = this.hasAiApiKey() && this.isAiFeaturesEnabled();
         const supports = this._canUseAiChatImages();
         if (!supports) {
-            this._sidebarChatImages = [];
-            this._newTabChatImages = [];
+            const filesOnly = (list) => (hasKey ? (list || []).filter((a) => a?.kind === 'file') : []);
+            this._sidebarChatImages = filesOnly(this._sidebarChatImages);
+            this._newTabChatImages = filesOnly(this._newTabChatImages);
         }
 
         document.getElementById('ai-chat-attach-btn')?.classList.toggle('hidden', !hasKey);
@@ -20656,31 +24368,40 @@ class AxisBrowser {
             this.showNotification?.(this.t('ai.noVision'), 'error');
             return;
         }
-        const files = Array.from(fileList || []).filter(
-            (f) => f && String(f.type || '').startsWith('image/')
-        );
+        const files = Array.from(fileList || []).filter((f) => f && this._isAiChatImageFile(f));
         if (!files.length) return;
 
         const current = (this._newTabChatImages || []).slice();
         const room = this._aiChatMaxImages - current.length;
         if (room <= 0) {
-            this.showNotification?.(`You can attach up to ${this._aiChatMaxImages} images per message.`, 'error');
+            this._syncAiChatImageAttachUi();
+            this._flashAiChatAttachNotice(
+                'newtab',
+                `Maximum ${this._aiChatMaxImages} attachments per message.`
+            );
             return;
         }
 
         let added = 0;
+        let skipped = files.length - Math.min(files.length, room);
         for (const file of files.slice(0, room)) {
             try {
                 current.push(await this.readAiChatImageFile(file));
                 added++;
             } catch (e) {
-                this.showNotification?.(e?.message || 'Could not attach image.', 'error');
+                this._flashAiChatAttachNotice('newtab', e?.message || 'Could not attach image.');
             }
         }
         if (added > 0) {
             this._newTabChatImages = current;
         }
         this._syncAiChatImageAttachUi();
+        if (skipped > 0) {
+            this._flashAiChatAttachNotice(
+                'newtab',
+                `Maximum ${this._aiChatMaxImages} attachments per message.`
+            );
+        }
     }
 
     _removeSidebarChatImage(id) {
@@ -20694,31 +24415,106 @@ class AxisBrowser {
             this.showNotification?.(this.t('ai.noVision'), 'error');
             return;
         }
-        const files = Array.from(fileList || []).filter(
-            (f) => f && String(f.type || '').startsWith('image/')
-        );
+        const files = Array.from(fileList || []).filter((f) => f && this._isAiChatImageFile(f));
         if (!files.length) return;
 
         const current = this._aiChatImagesFor().slice();
         const room = this._aiChatMaxImages - current.length;
         if (room <= 0) {
-            this.showNotification?.(`You can attach up to ${this._aiChatMaxImages} images per message.`, 'error');
+            this._syncAiChatImageAttachUi();
+            this._flashAiChatAttachNotice(
+                'sidebar',
+                `Maximum ${this._aiChatMaxImages} attachments per message.`
+            );
             return;
         }
 
         let added = 0;
+        let skipped = files.length - Math.min(files.length, room);
         for (const file of files.slice(0, room)) {
             try {
                 current.push(await this.readAiChatImageFile(file));
                 added++;
             } catch (e) {
-                this.showNotification?.(e?.message || 'Could not attach image.', 'error');
+                this._flashAiChatAttachNotice('sidebar', e?.message || 'Could not attach image.');
             }
         }
         if (added > 0) {
             this._setAiChatImages(current);
         }
         this._syncAiChatImageAttachUi();
+        if (skipped > 0) {
+            this._flashAiChatAttachNotice(
+                'sidebar',
+                `Maximum ${this._aiChatMaxImages} attachments per message.`
+            );
+        }
+    }
+
+    _aiChatDragLooksLikeFiles(dataTransfer) {
+        if (!dataTransfer) return false;
+        if (dataTransfer.files?.length) return true;
+        const types = Array.from(dataTransfer.types || []);
+        if (types.includes('Files')) return true;
+        if (types.includes('text/uri-list')) return true;
+        if (types.includes('application/x-axis-file-path')) return true;
+        return false;
+    }
+
+    _filePathsFromDataTransfer(dataTransfer) {
+        const paths = [];
+        const files = Array.from(dataTransfer?.files || []);
+        for (const file of files) {
+            const fromApi = window.electronAPI?.getPathForFile?.(file);
+            if (fromApi) paths.push(fromApi);
+            else if (file.path) paths.push(file.path);
+        }
+        const axisPath = dataTransfer?.getData?.('application/x-axis-file-path');
+        if (axisPath) paths.push(axisPath);
+        if (paths.length) return paths;
+        const plain = dataTransfer?.getData?.('text/plain');
+        if (plain && /^(\/|~|[A-Za-z]:\\)/.test(plain.trim())) {
+            paths.push(plain.trim());
+        }
+        if (paths.length) return paths;
+        const uri = (dataTransfer?.getData?.('text/uri-list') || '')
+            .split(/\r?\n/)
+            .find((line) => line && !line.startsWith('#'));
+        if (uri && /^file:/i.test(uri)) {
+            try {
+                const u = new URL(uri);
+                let p = decodeURIComponent(u.pathname || '');
+                if (window.electronAPI?.platform === 'win32' && p.startsWith('/')) {
+                    p = p.slice(1);
+                }
+                if (p) paths.push(p);
+            } catch (_) {}
+        }
+        return paths;
+    }
+
+    async _filesFromDataTransfer(dataTransfer, target = 'sidebar') {
+        const fromList = Array.from(dataTransfer?.files || []).filter(Boolean);
+        if (fromList.length) return fromList;
+        const paths = this._filePathsFromDataTransfer(dataTransfer);
+        if (!paths.length && this._axisNativeFileDragPath) {
+            paths.push(this._axisNativeFileDragPath);
+        }
+        const out = [];
+        for (const filePath of paths) {
+            const payload = await window.electronAPI?.readAiChatAttachmentPath?.(filePath);
+            if (!payload?.ok) {
+                if (payload?.error) this._flashAiChatAttachNotice(target, payload.error);
+                continue;
+            }
+            if (payload.kind === 'blob') {
+                const bytes = Uint8Array.from(atob(payload.base64), (c) => c.charCodeAt(0));
+                out.push(new File([bytes], payload.name, { type: payload.mimeType || 'application/octet-stream' }));
+            } else if (payload.kind === 'text') {
+                out.push(new File([payload.text], payload.name, { type: 'text/plain' }));
+            }
+        }
+        return out;
     }
 
     _bindAiChatImageDrop(targetEl, options = {}) {
@@ -20728,41 +24524,73 @@ class AxisBrowser {
         const chrome =
             (options.chromeId && document.getElementById(options.chromeId)) ||
             document.getElementById('ai-chat-composer-chrome');
-        const addFiles =
-            typeof options.addFiles === 'function'
-                ? options.addFiles
-                : (files) => this._addSidebarChatImages(files);
+        const target = options.target === 'newtab' ? 'newtab' : 'sidebar';
+        const isActive = typeof options.isActive === 'function' ? options.isActive : () => true;
 
         const setDropActive = (on) => {
             chrome?.classList.toggle('ai-chat-drop-active', on);
         };
+        const acceptsDrag = (e) => {
+            if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled() || !isActive()) return false;
+            if (this._axisNativeFileDragPath) return true;
+            if (this._aiChatDragLooksLikeFiles(e.dataTransfer)) return true;
+            const types = Array.from(e.dataTransfer?.types || []);
+            return (
+                this._canUseAiChatImages() &&
+                types.includes('text/uri-list') &&
+                types.includes('text/html')
+            );
+        };
 
+        let depth = 0;
         targetEl.addEventListener('dragenter', (e) => {
-            if (!this._canUseAiChatImages()) return;
-            if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+            if (!acceptsDrag(e)) return;
             e.preventDefault();
+            depth++;
             setDropActive(true);
         });
         targetEl.addEventListener('dragover', (e) => {
-            if (!this._canUseAiChatImages()) return;
-            if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+            if (!acceptsDrag(e)) return;
             e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
             setDropActive(true);
         });
         targetEl.addEventListener('dragleave', (e) => {
-            if (e.currentTarget.contains(e.relatedTarget)) return;
-            setDropActive(false);
+            depth = Math.max(0, depth - 1);
+            if (depth === 0 || !targetEl.contains(e.relatedTarget)) {
+                depth = 0;
+                setDropActive(false);
+            }
         });
         targetEl.addEventListener('drop', (e) => {
+            depth = 0;
             setDropActive(false);
-            if (!this._canUseAiChatImages()) return;
-            const files = Array.from(e.dataTransfer?.files || []).filter((f) =>
-                String(f.type || '').startsWith('image/')
-            );
-            if (!files.length) return;
+            if (!acceptsDrag(e)) return;
             e.preventDefault();
             e.stopPropagation();
-            void addFiles(files);
+            void (async () => {
+                const files = await this._filesFromDataTransfer(e.dataTransfer, target);
+                if (files.length) {
+                    await this._addAiChatDroppedFiles(files, target);
+                    this._axisNativeFileDragConsumed = true;
+                    this._clearAxisNativeFileDrag();
+                    return;
+                }
+                const path = this._axisNativeFileDragPath;
+                if (path) {
+                    this._consumeNativeFileDragToAiChat(path, target);
+                    return;
+                }
+                const url = this._aiChatDroppedImageUrl(e.dataTransfer);
+                if (!url) return;
+                try {
+                    const file = await this._aiChatFileFromImageUrl(url);
+                    if (file) await this._addAiChatDroppedFiles([file], target);
+                    else this.showNotification?.('Could not attach that image.', 'error');
+                } catch (_) {
+                    this.showNotification?.('Could not attach that image.', 'error');
+                }
+            })();
         });
     }
 
@@ -20773,52 +24601,55 @@ class AxisBrowser {
         const newTabBtn = document.getElementById('new-tab-attach-btn');
         const newTabInput = document.getElementById('new-tab-image-input');
         const newTabComposerInput = document.getElementById('new-tab-input');
+        const accept = this._aiChatFileInputAccept;
+        if (sidebarInput && accept) sidebarInput.setAttribute('accept', accept);
+        if (newTabInput && accept) newTabInput.setAttribute('accept', accept);
 
         sidebarBtn?.addEventListener('click', () => sidebarInput?.click());
         newTabBtn?.addEventListener('click', () => newTabInput?.click());
 
         sidebarInput?.addEventListener('change', () => {
-            void this._addSidebarChatImages(sidebarInput.files).finally(() => {
+            void this._addAiChatDroppedFiles(sidebarInput.files, 'sidebar').finally(() => {
                 sidebarInput.value = '';
             });
         });
 
         newTabInput?.addEventListener('change', () => {
-            void this._addNewTabChatImages(newTabInput.files).finally(() => {
+            void this._addAiChatDroppedFiles(newTabInput.files, 'newtab').finally(() => {
                 newTabInput.value = '';
             });
         });
 
-        const onPasteSidebarImages = async (e) => {
-            if (!this._canUseAiChatImages()) return;
+        const onPasteSidebarAttachments = async (e) => {
+            if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled()) return;
             const items = Array.from(e.clipboardData?.items || []);
-            const imageFiles = items
-                .filter((item) => item.kind === 'file' && String(item.type || '').startsWith('image/'))
+            const pastedFiles = items
+                .filter((item) => item.kind === 'file')
                 .map((item) => item.getAsFile())
                 .filter(Boolean);
-            if (!imageFiles.length) return;
+            if (!pastedFiles.length) return;
             e.preventDefault();
             e.stopPropagation();
-            await this._addSidebarChatImages(imageFiles);
+            await this._addAiChatDroppedFiles(pastedFiles, 'sidebar');
         };
 
-        const onPasteNewTabImages = async (e) => {
-            if (!this._canUseAiChatImages() || !this.isNewTabInChat()) return;
+        const onPasteNewTabAttachments = async (e) => {
+            if (!this.hasAiApiKey() || !this.isAiFeaturesEnabled() || !this.isNewTabInChat()) return;
             const items = Array.from(e.clipboardData?.items || []);
-            const imageFiles = items
-                .filter((item) => item.kind === 'file' && String(item.type || '').startsWith('image/'))
+            const pastedFiles = items
+                .filter((item) => item.kind === 'file')
                 .map((item) => item.getAsFile())
                 .filter(Boolean);
-            if (!imageFiles.length) return;
+            if (!pastedFiles.length) return;
             e.preventDefault();
             e.stopPropagation();
-            await this._addNewTabChatImages(imageFiles);
+            await this._addAiChatDroppedFiles(pastedFiles, 'newtab');
         };
 
         chatInput?.addEventListener(
             'paste',
             (e) => {
-                void onPasteSidebarImages(e);
+                void onPasteSidebarAttachments(e);
             },
             true
         );
@@ -20826,25 +24657,51 @@ class AxisBrowser {
         newTabComposerInput?.addEventListener(
             'paste',
             (e) => {
-                void onPasteNewTabImages(e);
+                void onPasteNewTabAttachments(e);
             },
             true
         );
 
-        chatInput?.addEventListener('input', () => this.updateSidebarChatSendButtonState());
+        chatInput?.addEventListener('input', () => {
+            this._autoGrowComposerInput(chatInput);
+            this.updateSidebarChatSendButtonState();
+        });
+        this._autoGrowComposerInput(chatInput);
 
-        this._bindAiChatImageDrop(chatInput);
-        this._bindAiChatImageDrop(document.getElementById('ai-chat-composer-chrome'), {
+        this._bindAiChatImageDrop(document.getElementById('ai-chat-panel'), {
             chromeId: 'ai-chat-composer-chrome',
-            addFiles: (files) => this._addSidebarChatImages(files)
+            target: 'sidebar'
         });
-        this._bindAiChatImageDrop(newTabComposerInput, {
-            chromeId: 'new-tab-composer-chrome',
-            addFiles: (files) => this._addNewTabChatImages(files)
+        this._bindAiChatImageDrop(document.getElementById('ai-chat-messages'), {
+            chromeId: 'ai-chat-composer-chrome',
+            target: 'sidebar'
         });
-        this._bindAiChatImageDrop(document.getElementById('new-tab-composer-chrome'), {
+        this._bindAiChatImageDrop(document.getElementById('ai-chat-input-container'), {
+            chromeId: 'ai-chat-composer-chrome',
+            target: 'sidebar'
+        });
+        const newTabChrome = document.getElementById('new-tab-composer-chrome');
+        const newTabAiActive = () =>
+            this._isOnNewTabPage() && this.hasAiApiKey() && this.isAiFeaturesEnabled();
+        this._bindAiChatImageDrop(newTabChrome, {
             chromeId: 'new-tab-composer-chrome',
-            addFiles: (files) => this._addNewTabChatImages(files)
+            target: 'newtab',
+            isActive: newTabAiActive
+        });
+        this._bindAiChatImageDrop(document.getElementById('new-tab-ask-messages'), {
+            chromeId: 'new-tab-composer-chrome',
+            target: 'newtab',
+            isActive: newTabAiActive
+        });
+        this._bindAiChatImageDrop(document.getElementById('new-tab-ai-chat-view'), {
+            chromeId: 'new-tab-composer-chrome',
+            target: 'newtab',
+            isActive: () => this.isNewTabInChat() && newTabAiActive()
+        });
+        this._bindAiChatImageDrop(document.getElementById('new-tab-search-wrapper'), {
+            chromeId: 'new-tab-composer-chrome',
+            target: 'newtab',
+            isActive: newTabAiActive
         });
     }
 
@@ -20909,6 +24766,7 @@ class AxisBrowser {
         }
         this.updateSidebarChatSendButtonState();
         this._syncAiChatImageAttachUi();
+        this._syncAiModelPickerVisibility();
     }
 
     /** Store default: on unless explicitly false. Incognito defaults off until enabled in Settings. */
@@ -20988,9 +24846,43 @@ class AxisBrowser {
         quoteDismiss?.addEventListener('click', () => {
             this.clearChatQuote();
         });
+        document.getElementById('new-tab-quote-dismiss')?.addEventListener('click', () => {
+            this.clearNewTabQuote();
+        });
+
+        const onChatMessageUiClick = (e) => {
+            if (e.target.closest?.('.ai-chat-edit-cancel')) {
+                e.preventDefault();
+                this.cancelInlineChatEdit();
+                return;
+            }
+            const saveBtn = e.target.closest?.('.ai-chat-edit-save');
+            if (saveBtn) {
+                e.preventDefault();
+                const raw = saveBtn.getAttribute('data-edit-message-id');
+                const scope = saveBtn.getAttribute('data-edit-scope') || 'sidebar';
+                const messageId = raw != null ? Number(raw) : NaN;
+                if (Number.isFinite(messageId)) void this.commitInlineChatEdit(messageId, scope);
+                return;
+            }
+            const btn = e.target.closest?.('.ai-chat-message-edit');
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const raw = btn.getAttribute('data-edit-message-id');
+            const scope = btn.getAttribute('data-edit-scope') || 'sidebar';
+            const messageId = raw != null ? Number(raw) : NaN;
+            if (Number.isFinite(messageId)) this.beginEditChatMessage(messageId, scope);
+        };
+        chatMessages.addEventListener('click', onChatMessageUiClick);
+        document.getElementById('new-tab-ask-messages')?.addEventListener('click', onChatMessageUiClick);
 
         // Send message on button click
         chatSend.addEventListener('click', () => {
+            if (this._aiChatStreaming) {
+                this._stopAiChatStream();
+                return;
+            }
             if (!this.hasGroqApiKey()) return;
             this.sendChatMessage();
         });
@@ -21051,6 +24943,9 @@ class AxisBrowser {
         });
 
         this.updateAIChatSetupState();
+        this.setupAiModelSelectors();
+        this.setupComposerShellFocus();
+        this.setupComposerAutoGrow();
     }
 
     getChatPanelWidth() {
@@ -21187,6 +25082,7 @@ class AxisBrowser {
             this._applyAiChatPanelChrome();
             this.updateAIChatSetupState();
             this._syncAiChatImageAttachUi();
+            void this.refreshAiModelSelectors(false);
             const chatInput = document.getElementById('ai-chat-input');
             if (chatInput && this.hasGroqApiKey()) {
                 setTimeout(() => chatInput.focus(), reduceMotion ? 0 : slideMs);
@@ -21253,18 +25149,28 @@ class AxisBrowser {
 
     async sendChatMessage() {
         if (!this.isAiFeaturesEnabled()) return;
+        if (this._aiChatStreaming) {
+            this._stopAiChatStream();
+            return;
+        }
         const chatInput = document.getElementById('ai-chat-input');
         const chatMessages = document.getElementById('ai-chat-messages');
         
         if (!chatInput || !chatMessages) return;
 
         const mainText = chatInput.value.trim();
-        const images = (this._sidebarChatImages || []).map((img) => ({
-            mimeType: img.mimeType,
-            base64: img.base64,
-            dataUrl: img.dataUrl,
-            name: img.name
-        }));
+        const attachments = this._sidebarChatImages || [];
+        const images = attachments
+            .filter((img) => img.kind !== 'file')
+            .map((img) => ({
+                mimeType: img.mimeType,
+                base64: img.base64,
+                dataUrl: img.dataUrl,
+                name: img.name
+            }));
+        const fileChips = attachments
+            .filter((a) => a.kind === 'file')
+            .map((a) => ({ kind: 'file', name: a.name }));
         let fullMessage;
         let quoteForDisplay = null;
         if (this.chatQuotedText) {
@@ -21274,7 +25180,8 @@ class AxisBrowser {
         } else {
             fullMessage = mainText;
         }
-        if (!fullMessage && !images.length) return;
+        if (!fullMessage && !images.length && !fileChips.length) return;
+        const promptMessage = this._withAiChatFileContext(fullMessage, attachments);
 
         if (!this.hasAiApiKey()) {
             this.updateAIChatSetupState();
@@ -21285,24 +25192,46 @@ class AxisBrowser {
             return;
         }
 
-        // Clear input (fixed height - no resize)
         chatInput.value = '';
+        this._autoGrowComposerInput(chatInput);
         this._sidebarChatImages = [];
         this._syncAiChatImageAttachUi();
 
         // Add user message (with optional quote box for display)
-        this.addChatMessage('user', fullMessage, false, { quote: quoteForDisplay, mainText, images });
+        this.addChatMessage('user', promptMessage, false, {
+            quote: quoteForDisplay,
+            mainText,
+            images,
+            files: fileChips
+        });
 
         // Add loading message
         const loadingId = this.addChatMessage('assistant', '', true);
 
-        // Send to AI (full message including quote)
+        const streamUpdate = this._createSidebarStreamUpdater(loadingId);
+        this._aiChatStreamController = new AbortController();
+        this._setAiChatStreaming(true);
         try {
-            const response = await this.getChatAIResponse(fullMessage, { images });
-            this.updateChatMessage(loadingId, response);
+            const response = await this.getChatAIResponse(promptMessage, {
+                images,
+                signal: this._aiChatStreamController.signal,
+                onStream: (text) => streamUpdate(text, { done: false })
+            });
+            streamUpdate(response, { done: true });
+            this._finalizeChatMessage(loadingId, response);
         } catch (error) {
-            console.error('Chat AI Error:', error);
-            this.updateChatMessage(loadingId, `Error: ${error.message}\n\nPlease try again.`);
+            if (error?.name === 'AbortError') {
+                streamUpdate(this.t('ai.stopped') || 'Stopped.', { done: true });
+                this._finalizeChatMessage(loadingId, this.t('ai.stopped') || 'Stopped.');
+            } else {
+                console.error('Chat AI Error:', error);
+                const errText = `Error: ${error.message}\n\nPlease try again.`;
+                streamUpdate(errText, { done: true });
+                this._finalizeChatMessage(loadingId, errText);
+            }
+        } finally {
+            this._aiChatStreamController = null;
+            this._setAiChatStreaming(false);
         }
     }
 
@@ -21325,22 +25254,24 @@ class AxisBrowser {
             `;
         } else {
             const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const { quote, mainText, images } = options;
+            const { quote, mainText, images, files } = options;
+            const media = [...(images || []), ...(files || [])];
             let contentHtml;
             if (role === 'user' && quote != null && quote !== '') {
-                const quoteDisplay = this.escapeHtml(quote);
                 const bodyDisplay = this.escapeHtml((mainText != null ? mainText : '').trim());
-                const imagesHtml = this._buildUserMessageImagesHtml(images);
+                const imagesHtml = this._buildUserMessageImagesHtml(media);
                 contentHtml = `
                     <div class="ai-chat-message-content">
-                        <div class="ai-chat-message-quote">${quoteDisplay}</div>
+                        <div class="ai-chat-message-quote">${this._buildChatQuoteBlockHtml(quote)}</div>
                         ${imagesHtml}
                         ${bodyDisplay ? `<div class="ai-chat-message-body">${bodyDisplay}</div>` : ''}
                     </div>
                 `;
             } else if (role === 'user') {
-                const imagesHtml = this._buildUserMessageImagesHtml(images);
-                const bodyDisplay = this.escapeHtml(String(content || '').trim());
+                const imagesHtml = this._buildUserMessageImagesHtml(media);
+                const bodyDisplay = this.escapeHtml(
+                    String((files?.length && mainText != null ? mainText : content) || '').trim()
+                );
                 if (imagesHtml) {
                     contentHtml = `
                     <div class="ai-chat-message-content ai-chat-message-content--with-media">
@@ -21360,7 +25291,8 @@ class AxisBrowser {
                     <div class="ai-chat-message-content">${this.escapeHtml(content)}</div>
                 `;
             }
-            messageDiv.innerHTML = contentHtml + `<div class="ai-chat-message-time">${time}</div>`;
+            messageDiv.innerHTML =
+                `<div class="ai-chat-message-stack">${contentHtml}${this._chatMessageMetaHtml(messageId, time, role)}</div>`;
         }
 
         chatMessages.appendChild(messageDiv);
@@ -21374,6 +25306,7 @@ class AxisBrowser {
             content,
                 timestamp: new Date().toISOString(),
                 ...(options.images?.length ? { images: options.images } : {}),
+                ...(options.files?.length ? { files: options.files } : {}),
                 ...(options.quote != null ? { quote: options.quote } : {}),
                 ...(options.mainText != null ? { mainText: options.mainText } : {})
         });
@@ -21384,25 +25317,13 @@ class AxisBrowser {
     }
 
     updateChatMessage(messageId, content) {
-        const chatMessages = document.getElementById('ai-chat-messages');
-        if (!chatMessages) return;
+        const streamUpdate = this._createSidebarStreamUpdater(messageId);
+        streamUpdate(content, { done: true });
+        this._finalizeChatMessage(messageId, content);
+    }
 
-        const messageDiv = chatMessages.querySelector(`[data-message-id="${messageId}"]`);
-        if (!messageDiv) return;
-
-        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const bodyHtml = content.startsWith('Error:')
-            ? this.escapeHtml(content)
-            : this.formatAiChatMarkdown(content);
-        messageDiv.innerHTML = `
-            <div class="ai-chat-message-content">${bodyHtml}</div>
-            <div class="ai-chat-message-time">${time}</div>
-        `;
-        messageDiv.classList.remove('assistant');
-        messageDiv.classList.add('assistant');
-
-        // Update stored message (or append if this was a loading placeholder)
-        const messageIndex = this.aiChatMessages.findIndex(m => m.id === messageId);
+    _finalizeChatMessage(messageId, content) {
+        const messageIndex = this.aiChatMessages.findIndex((m) => m.id === messageId);
         if (messageIndex !== -1) {
             this.aiChatMessages[messageIndex].content = content;
         } else {
@@ -21414,8 +25335,7 @@ class AxisBrowser {
             });
         }
         this._persistSidebarChatForTab(this.currentTab);
-
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        this._scrollSidebarChatToBottom();
     }
 
     /**
@@ -21535,7 +25455,43 @@ class AxisBrowser {
             }
         ];
 
-        return this._completeAiChat(messages, { maxTokens: 2048 });
+        const onStream = typeof options.onStream === 'function' ? options.onStream : null;
+        const extra = { maxTokens: 2048 };
+        if (options.signal) extra.signal = options.signal;
+        return this._completeAiChat(messages, extra, onStream);
+    }
+
+    _aiChatTrimmedLine(line) {
+        return String(line ?? '').replace(/\t/g, '    ').trim();
+    }
+
+    _aiChatIsUlLine(line) {
+        const t = this._aiChatTrimmedLine(line);
+        return /^[-*+]\s+/.test(t);
+    }
+
+    _aiChatUlContent(line) {
+        return this._aiChatTrimmedLine(line).replace(/^[-*+]\s+/, '');
+    }
+
+    _aiChatIsOlLine(line) {
+        return /^\d+[.)]\s+/.test(this._aiChatTrimmedLine(line));
+    }
+
+    _aiChatOlContent(line) {
+        return this._aiChatTrimmedLine(line).replace(/^\d+[.)]\s+/, '');
+    }
+
+    _aiChatIsBlockSpecial(line) {
+        const t = this._aiChatTrimmedLine(line);
+        if (!t) return true;
+        if (t.startsWith('```')) return true;
+        if (this._aiChatIsUlLine(line)) return true;
+        if (this._aiChatIsOlLine(line)) return true;
+        if (/^#{1,6}\s+/.test(t)) return true;
+        if (/^(\*{3,}|-{3,}|_{3,})$/.test(t)) return true;
+        if (/^>\s?/.test(t)) return true;
+        return false;
     }
 
     /** Render assistant Markdown (headings, lists, code, links) as safe HTML for chat bubbles. */
@@ -21547,12 +25503,12 @@ class AxisBrowser {
 
         while (i < lines.length) {
             const line = lines[i];
-            const trimmed = line.trim();
+            const trimmed = this._aiChatTrimmedLine(line);
 
             if (trimmed.startsWith('```')) {
                 i++;
                 const codeLines = [];
-                while (i < lines.length && !lines[i].trim().startsWith('```')) {
+                while (i < lines.length && !this._aiChatTrimmedLine(lines[i]).startsWith('```')) {
                     codeLines.push(lines[i]);
                     i++;
                 }
@@ -21563,29 +25519,29 @@ class AxisBrowser {
                 continue;
             }
 
-            if (/^[-*]\s+/.test(line)) {
+            if (this._aiChatIsUlLine(line)) {
                 const items = [];
-                while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
-                    items.push(this._formatAiChatInline(lines[i].replace(/^[-*]\s+/, '')));
+                while (i < lines.length && this._aiChatIsUlLine(lines[i])) {
+                    items.push(this._formatAiChatInline(this._aiChatUlContent(lines[i])));
                     i++;
                 }
                 out.push(`<ul class="axis-ai-md-list">${items.map((li) => `<li>${li}</li>`).join('')}</ul>`);
                 continue;
             }
 
-            if (/^\d+\.\s+/.test(line)) {
+            if (this._aiChatIsOlLine(line)) {
                 const items = [];
-                while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
-                    items.push(this._formatAiChatInline(lines[i].replace(/^\d+\.\s+/, '')));
+                while (i < lines.length && this._aiChatIsOlLine(lines[i])) {
+                    items.push(this._formatAiChatInline(this._aiChatOlContent(lines[i])));
                     i++;
                 }
                 out.push(`<ol class="axis-ai-md-list">${items.map((li) => `<li>${li}</li>`).join('')}</ol>`);
                 continue;
             }
 
-            const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+            const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
             if (heading) {
-                const level = heading[1].length;
+                const level = Math.min(6, heading[1].length);
                 out.push(`<h${level} class="axis-ai-md-h">${this._formatAiChatInline(heading[2])}</h${level}>`);
                 i++;
                 continue;
@@ -21597,10 +25553,10 @@ class AxisBrowser {
                 continue;
             }
 
-            if (/^>\s?/.test(line)) {
+            if (/^>\s?/.test(trimmed)) {
                 const quoteLines = [];
-                while (i < lines.length && /^>\s?/.test(lines[i])) {
-                    quoteLines.push(lines[i].replace(/^>\s?/, ''));
+                while (i < lines.length && /^>\s?/.test(this._aiChatTrimmedLine(lines[i]))) {
+                    quoteLines.push(this._aiChatTrimmedLine(lines[i]).replace(/^>\s?/, ''));
                     i++;
                 }
                 out.push(`<blockquote class="axis-ai-md-quote">${this._formatAiChatInline(quoteLines.join('\n'))}</blockquote>`);
@@ -21613,16 +25569,7 @@ class AxisBrowser {
             }
 
             const paraLines = [];
-            while (
-                i < lines.length
-                && lines[i].trim()
-                && !lines[i].trim().startsWith('```')
-                && !/^[-*]\s+/.test(lines[i])
-                && !/^\d+\.\s+/.test(lines[i])
-                && !/^#{1,4}\s+/.test(lines[i].trim())
-                && !/^>\s?/.test(lines[i])
-                && !/^(\*{3,}|-{3,}|_{3,})$/.test(lines[i].trim())
-            ) {
+            while (i < lines.length && !this._aiChatIsBlockSpecial(lines[i])) {
                 paraLines.push(lines[i]);
                 i++;
             }
@@ -21637,6 +25584,7 @@ class AxisBrowser {
     _formatAiChatInline(text) {
         let s = this.escapeHtml(text);
         s = s.replace(/`([^`\n]+)`/g, '<code class="axis-ai-md-code">$1</code>');
+        s = s.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
         s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
         s = s.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
         s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
@@ -21646,6 +25594,13 @@ class AxisBrowser {
             (_, label, url) => {
                 const safeUrl = url.replace(/"/g, '&quot;');
                 return `<a class="axis-ai-md-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+            }
+        );
+        s = s.replace(
+            /(^|[\s(])((https?:\/\/)[^\s<]+[^\s<.,;:!?)\]'"])/g,
+            (match, prefix, url) => {
+                const safeUrl = url.replace(/"/g, '&quot;');
+                return `${prefix}<a class="axis-ai-md-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${url}</a>`;
             }
         );
         return s.replace(/\n/g, '<br>');
@@ -21732,26 +25687,15 @@ class AxisBrowser {
     
     _getIconPickerAnchorRect(type) {
         let targetElement = null;
-        if (type === 'tab' && this.contextMenuTabId) {
-            targetElement = document.querySelector(`[data-tab-id="${this.contextMenuTabId}"]`);
+        if (type === 'tab' && this.contextMenuTabId != null) {
+            targetElement = this._getTabElement(this.contextMenuTabId);
         } else if (type === 'favorite' && this.contextMenuFavoriteId) {
             const fid = String(this.contextMenuFavoriteId);
             const q = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(fid) : fid.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
             targetElement = document.querySelector(`#favorites-grid .favorite-item[data-favorite-id="${q}"]`);
         } else if (type === 'tab-group' && this.contextMenuTabGroupId != null) {
             const gid = this.findTabGroupKey(this.contextMenuTabGroupId);
-            const q =
-                gid != null && typeof CSS !== 'undefined' && CSS.escape
-                    ? CSS.escape(String(gid))
-                    : gid != null
-                      ? String(gid).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-                      : '';
-            if (q) targetElement = document.querySelector(`[data-tab-group-id="${q}"]`);
-        }
-        
-        if (!targetElement && type === 'tab' && this.currentTab) {
-                targetElement = document.querySelector(`[data-tab-id="${this.currentTab}"]`);
-            if (targetElement) this.contextMenuTabId = this.currentTab;
+            if (gid != null) targetElement = this._findTabGroupElementInProfileScope(gid);
         }
 
         if (targetElement) return targetElement.getBoundingClientRect();
@@ -21790,24 +25734,25 @@ class AxisBrowser {
 
         const storedType = iconType === 'fa' ? 'fa' : 'emoji';
         
-        if (this._iconPickerType === 'tab' && this.contextMenuTabId) {
-            const tab = this.tabs.get(this.contextMenuTabId);
+        if (this._iconPickerType === 'tab' && this.contextMenuTabId != null) {
+            const tabId = this._normalizeTabMapKey(this.contextMenuTabId);
+            const tab = tabId != null ? this.tabs.get(tabId) : null;
             if (tab) {
                 if (!this._suppressUndo) {
                     this._pushUndo({
                         type: 'change_icon_tab',
-                        tabId: this.contextMenuTabId,
+                        tabId,
                         previousIcon: tab.customIcon || null,
                         previousIconType: tab.customIconType || null
                     });
                 }
                 tab.customIcon = iconValue;
                 tab.customIconType = storedType;
-                this.tabs.set(this.contextMenuTabId, tab);
-                const tabElement = document.querySelector(`[data-tab-id="${this.contextMenuTabId}"]`);
-                if (tabElement) {
-                    this.updateTabIcon(tabElement, this.contextMenuTabId);
-                }
+                this.tabs.set(tabId, tab);
+                const tabElement = this._getTabElement(tabId);
+                if (tabElement) this.updateTabIcon(tabElement, tabId);
+                if (tab.pinned) this._scheduleSavePinnedTabs();
+                this._syncLinkedFavoriteIconFromTab(tab);
             }
         } else if (this._iconPickerType === 'tab-group' && this.contextMenuTabGroupId != null) {
             const gid = this.findTabGroupKey(this.contextMenuTabGroupId);
@@ -21829,7 +25774,9 @@ class AxisBrowser {
                 tabGroup.iconType = storedType;
                 this.tabGroups.set(gid, tabGroup);
                 this.saveTabGroups();
-                this.renderTabGroups();
+                const groupEl = this._findTabGroupElementInProfileScope(gid);
+                if (groupEl) this.syncTabGroupElementHeader(groupEl, tabGroup);
+                else this.renderTabGroups();
             }
         } else if (this._iconPickerType === 'favorite' && this.contextMenuFavoriteId) {
             const fav = this.favorites.find((f) => f.id === this.contextMenuFavoriteId);
@@ -21842,8 +25789,11 @@ class AxisBrowser {
                         previousIconType: fav.customIconType || null
                     });
                 }
+                const prevCacheKey = `custom:${fav.customIconType || 'fa'}:${fav.customIcon || ''}`;
                 fav.customIcon = iconValue;
                 fav.customIconType = storedType;
+                this._favoriteAccentCache.delete(prevCacheKey);
+                this._favoriteAccentCache.delete(`custom:${storedType}:${iconValue}`);
                 const rt = this._normalizeTabMapKey(fav.runtimeTabId);
                 if (rt != null && this.tabs.has(rt)) {
                     const tab = this.tabs.get(rt);
@@ -21854,7 +25804,16 @@ class AxisBrowser {
                     if (tabElement) this.updateTabIcon(tabElement, rt);
                 }
                 this.saveFavorites();
-                this.renderFavorites();
+                const grid = this.elements?.favoritesGrid;
+                const chip = grid?.querySelector(`[data-favorite-id="${fav.id}"]`);
+                if (chip) {
+                    const wrap = chip.querySelector('.favorite-icon-wrap');
+                    if (wrap) wrap.innerHTML = this.getFavoriteIconHtml(fav);
+                    this._applyFavoriteItemAccentColor(chip, fav);
+                    this._syncFavoriteActiveHighlight();
+                } else {
+                    this.renderFavorites();
+                }
             }
             this.contextMenuFavoriteId = null;
         }
@@ -22309,6 +26268,12 @@ class AxisBrowser {
         this.tabs.set(tabId, tab);
 
         this.syncSidebarFromTabGroups();
+        const tabEl = this._getTabElement?.(tabId) || this.getOrCreateTabElement(tabId);
+        if (tabEl) {
+            tabEl.classList.add('pinned');
+            this.setupPinnedTabCloseButton(tabEl, tabId);
+            this.updatePinnedTabClosedState?.(tabId);
+        }
 
         if (this._pendingEmptyGroupCollapseId != null) {
             const gid = this._pendingEmptyGroupCollapseId;
@@ -22528,13 +26493,46 @@ class AxisBrowser {
             this.settings.tabGroups = tabGroups;
             this.settings.pinnedTabs = pinnedTabs;
             this.settings.unpinnedTabs = unpinnedTabs;
+
+            const parkedProfiles = [];
+            if (context === 'app-quit' && this._profileRuntime?.size) {
+                const activePid = String(this.profileId || '');
+                for (const [rawPid, state] of this._profileRuntime.entries()) {
+                    const pid = String(rawPid || '');
+                    if (!pid || pid === activePid) continue;
+                    try {
+                        const captured =
+                            typeof this._persistPayloadFromRuntimeState === 'function'
+                                ? this._persistPayloadFromRuntimeState(state)
+                                : null;
+                        if (
+                            captured &&
+                            (Array.isArray(captured.pinnedTabs) ||
+                                Array.isArray(captured.tabGroups) ||
+                                Array.isArray(captured.unpinnedTabs))
+                        ) {
+                            parkedProfiles.push({
+                                profileId: pid,
+                                tabGroups: captured.tabGroups || [],
+                                pinnedTabs: captured.pinnedTabs || [],
+                                unpinnedTabs: captured.unpinnedTabs || [],
+                                pinnedSidebarOrder: captured.pinnedSidebarOrder || [],
+                                favoritesPayload: captured.favoritesPayload || []
+                            });
+                        }
+                    } catch (_) {}
+                }
+            }
+
             return {
                 incognito: false,
+                profileId: this.profileId || null,
                 tabGroups,
                 pinnedTabs,
                 unpinnedTabs,
                 pinnedSidebarOrder: pinnedSidebarOrder || this.settings.pinnedSidebarOrder || [],
-                clearUnpinnedRecovery: context === 'app-quit'
+                clearUnpinnedRecovery: context === 'app-quit',
+                parkedProfiles
             };
         } catch (e) {
             console.error('flushSessionStatePayload failed:', e);
@@ -22694,6 +26692,12 @@ class AxisBrowser {
         const existing = this._findTabElementInProfileScope(tabId);
         if (existing) {
             existing.dataset.axisProfile = this._activeProfileDomKey();
+            const tab = this.tabs.get(tabId);
+            if (tab?.pinned) {
+                existing.classList.add('pinned');
+                this.setupPinnedTabCloseButton(existing, tabId);
+                this.updatePinnedTabClosedState?.(tabId);
+            }
             return existing;
         }
         const tab = this.tabs.get(tabId);
@@ -22709,7 +26713,7 @@ class AxisBrowser {
         tabElement.innerHTML = `
             <div class="tab-content">
                 <div class="tab-left">${iconHtml}
-                    <span class="tab-audio-indicator" style="display:none;"><i class="fas fa-volume-up"></i></span>
+                    ${this._tabAudioWrapHtml(tabId)}
                     <span class="tab-title">${this.escapeHtml(tab.title || 'New Tab')}</span>
                 </div>
                 <div class="tab-right"><button class="tab-close">${this._tabCloseGlyphHtml('x')}</button></div>
@@ -22719,6 +26723,9 @@ class AxisBrowser {
         this.setupTabEventListeners(tabElement, tabId);
         this.updateTabFavicon(tabId, tabElement);
         if (tab.pinned) this.updatePinnedTabClosedState(tabId);
+        if (tab.isPlayingAudio) {
+            this.updateTabAudioIndicator(tabId, tab.isPlayingAudio);
+        }
         return tabElement;
     }
 
@@ -23159,6 +27166,8 @@ class AxisBrowser {
                 if (!tabEl) tabEl = this.getOrCreateTabElement(tabId);
                 if (!tabEl) return;
                 tabEl.classList.add('pinned');
+                this.setupPinnedTabCloseButton(tabEl, tabId);
+                this.updatePinnedTabClosedState?.(tabId);
                 /* Always re-append so group.tabIds order wins over leftover DOM order. */
                 container.appendChild(tabEl);
                 if (this.makeTabDraggable) this.makeTabDraggable(tabEl);
@@ -23589,53 +27598,45 @@ class AxisBrowser {
         }, 160);
     }
 
+    _resolveTabAncestryAnchorEl(tabId) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (id == null) return null;
+        const tabEl = document.querySelector(`[data-tab-id="${id}"]`);
+        if (tabEl && !tabEl.classList.contains('tab-favorite-host')) {
+            try {
+                const r = tabEl.getBoundingClientRect();
+                if (r.width >= 4 && r.height >= 4) return tabEl;
+            } catch (_) {}
+        }
+        const tab = this.tabs.get(id);
+        if (tab?.favoriteId != null) {
+            const favEl = document.querySelector(
+                `.favorite-item[data-favorite-id="${CSS.escape(String(tab.favoriteId))}"]`
+            );
+            if (favEl) return favEl;
+        }
+        if (tabEl) return tabEl;
+        return null;
+    }
+
     positionTabAncestryPanel(tabId) {
         const panel = document.getElementById('tab-ancestry-panel');
         const arrow = panel?.querySelector('.tab-ancestry-arrow');
         if (!panel) return;
-        const inset = 8;
-        const viewportH = window.innerHeight || document.documentElement.clientHeight;
-        const sidebar = document.getElementById('sidebar');
-        const tabEl = document.querySelector(`[data-tab-id="${tabId}"]`);
+        const tabEl = this._resolveTabAncestryAnchorEl(tabId);
         const pt = this._lastContextMenuPoint;
-        const sideRect = sidebar?.getBoundingClientRect?.();
-        const sideLeft = sideRect ? sideRect.left + inset : inset;
-        const sideRight = sideRect ? sideRect.right - inset : (window.innerWidth || 320) - inset;
-        const maxW = Math.max(180, sideRight - sideLeft);
-        const panelW = Math.min(248, maxW);
-
-        let anchorX;
-        let top;
-        if (tabEl) {
-            const rect = tabEl.getBoundingClientRect();
-            anchorX = rect.left + rect.width / 2;
-            top = rect.bottom + 2;
-        } else if (pt && Number.isFinite(pt.x)) {
-            anchorX = pt.x;
-            top = pt.y + 6;
-        } else if (sideRect) {
-            anchorX = sideRect.left + sideRect.width / 2;
-            top = Math.max(inset, sideRect.top + 80);
-        } else {
-            anchorX = panelW / 2 + inset;
-            top = 80;
-        }
-
-        let left = anchorX - panelW / 2;
-        left = Math.max(sideLeft, Math.min(left, sideRight - panelW));
-        const maxTop = Math.max(inset, viewportH - 140);
-        top = Math.max(inset, Math.min(top, maxTop));
-
-        panel.style.width = `${panelW}px`;
-        panel.style.left = `${left}px`;
-        panel.style.top = `${top}px`;
-        panel.style.setProperty('--tab-ancestry-origin-x', `${Math.round(anchorX - left)}px`);
-        if (arrow) {
-            const arrowX = Math.max(14, Math.min(anchorX - left, panelW - 14));
-            arrow.style.left = `${arrowX}px`;
-            arrow.style.marginLeft = '-7px';
-            panel.style.transformOrigin = `${arrowX}px 0`;
-            panel.style.setProperty('--ta-arrow-x', `${arrowX}px`);
+        const pos = window.AxisAnchoredPopover?.position;
+        if (pos) {
+            pos(panel, arrow, {
+                anchorEl: tabEl,
+                anchorPoint:
+                    tabEl || !(pt && Number.isFinite(pt.x))
+                        ? null
+                        : { x: pt.x, y: pt.y },
+                panelWidth: 248,
+                minHeight: 140
+            });
+            return;
         }
     }
 
@@ -23666,6 +27667,7 @@ class AxisBrowser {
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 panel.classList.add('is-open');
+                this.positionTabAncestryPanel(id);
                 this._scrollTabAncestryToBottom();
             });
         });
@@ -23750,8 +27752,9 @@ class AxisBrowser {
         this.hideWebpageContextMenu();
         this.hideSidebarContextMenu();
         this.hideTabGroupContextMenu();
-        
-        const tab = this.tabs.get(tabId);
+
+        const normalizedTabId = this._normalizeTabMapKey(tabId);
+        const tab = normalizedTabId != null ? this.tabs.get(normalizedTabId) : null;
         const tabGroupsList = Array.from(this.tabGroups.values())
             .sort((a, b) => (a.order || 0) - (b.order || 0))
             .map(g => ({ id: g.id, name: g.name || `Tab Group ${g.id}` }));
@@ -23766,7 +27769,7 @@ class AxisBrowser {
             canUpdateSavedLink: !!savedLinkInfo,
             savedLinkKind: savedLinkInfo?.kind || ''
         };
-        this.contextMenuTabId = this._normalizeTabMapKey(tabId);
+        this.contextMenuTabId = normalizedTabId;
         this._lastContextMenuPoint = { x: e.clientX, y: e.clientY };
         await window.electronAPI.showTabContextMenu(e.clientX, e.clientY, tabInfo);
     }
@@ -23893,13 +27896,570 @@ class AxisBrowser {
     }
 
     toggleTabMute(tabId) {
-        const tab = this.tabs.get(tabId);
+        const id = this._normalizeTabMapKey(tabId);
+        const tab = id != null ? this.tabs.get(id) : null;
         if (!tab) return;
 
         tab.isMuted = !tab.isMuted;
-        this.tabs.set(tabId, tab);
-        this._applyTabMuteState(tabId);
-            this.applyAmbientFromSettings();
+        if (tab.isMuted) {
+            const audio = this._ensureTabAudioState(tab);
+            audio.volume = 0;
+        } else {
+            const audio = this._ensureTabAudioState(tab);
+            if ((Number(audio.volume) || 0) <= 0) audio.volume = 1;
+        }
+        this.tabs.set(id, tab);
+        this._applyTabMuteState(id);
+        void this.syncTabAudioToWebview(id);
+        this.applyAmbientFromSettings();
+        this._syncTabAudioSliders(id);
+        this._syncSidebarVolBtnForTab(id);
+    }
+
+    _ensureTabAudioState(tab) {
+        if (window.AxisTabAudio?.ensureTabState) return window.AxisTabAudio.ensureTabState(tab);
+        if (!tab.audio) tab.audio = { volume: 1, mono: false, eq: 'off' };
+        return tab.audio;
+    }
+
+    async _injectTabAudioGuest(webview) {
+        if (!webview || !window.AxisTabAudio) return;
+        if (webview.__axisTabAudioInjected) return;
+        const ok = await window.AxisTabAudio.injectGuest(webview);
+        if (ok) webview.__axisTabAudioInjected = true;
+    }
+
+    async syncTabAudioToWebview(tabId, targetIndex = null) {
+        const tab = this.tabs.get(tabId);
+        const webview = tab?.webview;
+        if (!tab || !webview || !window.AxisTabAudio) return;
+        const audio = this._ensureTabAudioState(tab);
+        await this._injectTabAudioGuest(webview);
+        const needsGraph = !!audio.mono || (audio.eq && audio.eq !== 'off');
+        if (needsGraph) {
+            await window.AxisTabAudio.applyToWebview(webview, audio, targetIndex);
+        } else {
+            await window.AxisTabAudio.applyVolume(webview, audio.volume, targetIndex);
+        }
+    }
+
+    _setTabVolumeFromSlider(tabId, rawValue, videoIndex = null) {
+        const id = this._normalizeTabMapKey(tabId);
+        const tab = id != null ? this.tabs.get(id) : null;
+        if (!tab) return;
+        const audio = this._ensureTabAudioState(tab);
+        const pct = Math.max(0, Math.min(100, parseInt(rawValue, 10) || 0));
+        audio.volume = pct / 100;
+        const shouldMute = pct === 0;
+        if (tab.isMuted !== shouldMute) {
+            tab.isMuted = shouldMute;
+            this.tabs.set(id, tab);
+            this._applyTabMuteState(id);
+        }
+        void this.syncTabAudioToWebview(id, videoIndex);
+        this._syncTabAudioSliders(id);
+        this._syncSidebarVolBtnForTab(id);
+    }
+
+    _adjustTabVolume(tabId, delta) {
+        const id = this._normalizeTabMapKey(tabId);
+        const tab = id != null ? this.tabs.get(id) : null;
+        if (!tab) return;
+        const audio = this._ensureTabAudioState(tab);
+        const next = Math.max(0, Math.min(1, (Number(audio.volume) || 1) + delta));
+        this._setTabVolumeFromSlider(id, Math.round(next * 100));
+    }
+
+    _toggleTabVolumeExtremes(tabId, videoIndex = null) {
+        const id = this._normalizeTabMapKey(tabId);
+        const tab = id != null ? this.tabs.get(id) : null;
+        if (!tab) return;
+        const audio = this._ensureTabAudioState(tab);
+        const atZero = tab.isMuted || (Number(audio.volume) || 0) <= 0;
+        if (atZero) {
+            audio.volume = 1;
+            tab.isMuted = false;
+        } else {
+            audio.volume = 0;
+            tab.isMuted = true;
+        }
+        this.tabs.set(id, tab);
+        this._applyTabMuteState(id);
+        void this.syncTabAudioToWebview(id, videoIndex);
+        this._syncTabAudioSliders(id);
+        this._syncSidebarVolBtnForTab(id);
+    }
+
+    _syncSidebarVolBtnForTab(tabId) {
+        const id = this._normalizeTabMapKey(tabId);
+        const dock = this._sidebarMediaDock;
+        if (!dock || this._normalizeTabMapKey(dock.tabId) !== id) return;
+        const tab = this.tabs.get(id);
+        const volI = this.elements?.sidebarMediaVolBtn?.querySelector('i');
+        if (!volI || !tab) return;
+        const audio = this._ensureTabAudioState(tab);
+        const pct = tab.isMuted ? 0 : Math.round((Number(audio.volume) || 1) * 100);
+        if (pct === 0) {
+            volI.className = 'fas fa-volume-xmark';
+        } else if (pct < 50) {
+            volI.className = 'fas fa-volume-low';
+        } else {
+            volI.className = 'fas fa-volume-high';
+        }
+    }
+
+    _syncTabAudioSliders(tabId) {
+        if (this._audioMixerTabId === this._normalizeTabMapKey(tabId)) {
+            this._syncAudioMixerPanel(tabId);
+        }
+    }
+
+    _isAudioMixerOpen() {
+        return !!document.querySelector('.tab-audio-wrap.is-mixer-open, .sidebar-media-vol-wrap.is-mixer-open');
+    }
+
+    _getTabAudioWraps(tabId) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (id == null) return [];
+        const poolId = this._axisProfileDomPoolId(this.profileId);
+        const roots = [
+            this.elements?.tabsContainer,
+            document.getElementById('tab-element-pool'),
+            document.getElementById(poolId)
+        ].filter(Boolean);
+        const wraps = [];
+        for (const root of roots) {
+            root.querySelectorAll(`[data-tab-id="${id}"] .tab-audio-wrap`).forEach((wrap) => wraps.push(wrap));
+        }
+        return wraps;
+    }
+
+    _applyAudioMixerControls(slider, toggleBtn, tab) {
+        if (!tab) return;
+        const audio = this._ensureTabAudioState(tab);
+        const pct = tab.isMuted ? 0 : Math.round((Number(audio.volume) || 1) * 100);
+        const isMuted = tab.isMuted || pct === 0;
+        const toggleIcon = toggleBtn?.querySelector('i');
+        if (slider) {
+            slider.value = String(pct);
+            slider.style.setProperty('--axis-audio-pct', `${pct}%`);
+        }
+        if (toggleIcon) {
+            toggleIcon.className = isMuted ? 'fas fa-volume-xmark' : 'fas fa-volume-high';
+        }
+        if (toggleBtn) {
+            toggleBtn.classList.toggle('is-muted', isMuted);
+            toggleBtn.title = isMuted ? this.t('chrome.unmute') || 'Unmute' : this.t('chrome.muteUnmute') || 'Mute';
+        }
+    }
+
+    _syncAudioMixerPanel(tabId) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (id == null) return;
+        const tab = this.tabs.get(id);
+        if (!tab) return;
+        for (const wrap of this._getTabAudioWraps(id)) {
+            this._ensureTabAudioMixerMarkup(wrap);
+            this._applyAudioMixerControls(
+                wrap.querySelector('.axis-audio-slider'),
+                wrap.querySelector('.axis-audio-toggle'),
+                tab
+            );
+        }
+        const dock = this._sidebarMediaDock;
+        if (dock && this._normalizeTabMapKey(dock.tabId) === id) {
+            const volWrap = this.elements?.sidebarMediaVolWrap;
+            this._applyAudioMixerControls(
+                volWrap?.querySelector('.axis-audio-slider'),
+                volWrap?.querySelector('.axis-audio-toggle'),
+                tab
+            );
+        }
+    }
+
+    _clearInlineMixerOpenState() {
+        document.querySelectorAll('.tab-audio-wrap.is-mixer-open').forEach((wrap) => {
+            wrap.classList.remove('is-mixer-open');
+        });
+        document.querySelectorAll('.tab-audio-indicator.is-mixer-open').forEach((btn) => {
+            btn.classList.remove('is-mixer-open');
+        });
+        this.elements?.sidebarMediaVolWrap?.classList.remove('is-mixer-open');
+        this.elements?.sidebarMediaVolBtn?.classList.remove('is-mixer-open');
+    }
+
+    _showAudioMixer(anchorEl, tabId, videoIndex = null) {
+        const id = this._normalizeTabMapKey(tabId);
+        const tab = id != null ? this.tabs.get(id) : null;
+        if (!tab || !anchorEl) return;
+        this._hideAudioMixer();
+        this._audioMixerTabId = id;
+        this._audioMixerVideoIndex = videoIndex;
+        this._audioMixerAnchor = anchorEl;
+        if (anchorEl.id === 'sidebar-media-vol-btn') {
+            anchorEl.classList.add('is-mixer-open');
+            this.elements?.sidebarMediaVolWrap?.classList.add('is-mixer-open');
+            this.elements?.sidebarMediaDock?.classList.add('sidebar-media-dock--mixer-open');
+        } else {
+            const wrap = anchorEl.closest('.tab-audio-wrap');
+            if (!wrap) return;
+            wrap.classList.add('is-active', 'is-mixer-open');
+            anchorEl.classList.add('is-mixer-open');
+        }
+        this._syncAudioMixerPanel(id);
+        void this.syncTabAudioToWebview(id, videoIndex);
+    }
+
+    _hideAudioMixer() {
+        if (!this._isAudioMixerOpen()) return;
+        this._clearInlineMixerOpenState();
+        this.elements?.sidebarMediaDock?.classList.remove('sidebar-media-dock--mixer-open');
+        this._audioMixerTabId = null;
+        this._audioMixerVideoIndex = null;
+        this._audioMixerAnchor = null;
+    }
+
+    _hideAudioMixerIfOpen() {
+        if (this._isAudioMixerOpen()) this._hideAudioMixer();
+    }
+
+    _toggleAudioMixer(anchorEl, tabId, videoIndex = null) {
+        const id = this._normalizeTabMapKey(tabId);
+        if (id == null) return;
+        if (this._audioMixerTabId === id && this._isAudioMixerOpen() && this._audioMixerAnchor === anchorEl) {
+            this._hideAudioMixer();
+            return;
+        }
+        this._showAudioMixer(anchorEl, tabId, videoIndex);
+    }
+
+    _bindAudioMixerWebviewDismiss(webview) {
+        if (!webview || webview.__axisAudioMixerFocusBound) return;
+        const onFocus = () => this._hideAudioMixerIfOpen();
+        webview.__axisAudioMixerFocusBound = true;
+        webview.__axisAudioMixerFocusHandler = onFocus;
+        webview.addEventListener('focus', onFocus);
+    }
+
+    _bindUrlBarChromeDismissOnWebviewFocus(webview) {
+        if (!webview || webview.__axisUrlBarDismissFocusBound) return;
+        const onFocus = () => this._dismissUrlBarChromePanels();
+        webview.__axisUrlBarDismissFocusBound = true;
+        webview.__axisUrlBarDismissFocusHandler = onFocus;
+        webview.addEventListener('focus', onFocus);
+    }
+
+    _normalizeScreenTimeDomain(domain) {
+        return String(domain || '')
+            .trim()
+            .toLowerCase()
+            .replace(/^www\./, '');
+    }
+
+    _normalizeScreenTimeLimitsMap(limits) {
+        const out = {};
+        if (!limits || typeof limits !== 'object') return out;
+        for (const [domain, seconds] of Object.entries(limits)) {
+            const dom = this._normalizeScreenTimeDomain(domain);
+            const sec = Math.floor(Number(seconds) || 0);
+            if (dom && sec > 0) out[dom] = Math.min(24 * 3600, sec);
+        }
+        return out;
+    }
+
+    _screenTimeDomainFromTab(tab) {
+        const url = tab?.url;
+        if (!url || String(url).toLowerCase().startsWith('axis:')) return null;
+        try {
+            return this._normalizeScreenTimeDomain(new URL(url).hostname);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    _getScreenTimeUsedSeconds(domain) {
+        const dom = this._normalizeScreenTimeDomain(domain);
+        if (!dom) return 0;
+        let used = Number(this._screenTimeDomainUsageToday?.[dom]) || 0;
+        if (!this._screenTimeActiveSince || document.hidden) {
+            const baseline = Number(this._screenTimeLimitBaselines?.[dom]) || 0;
+            return Math.max(0, used - baseline);
+        }
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        const activeDom = this._screenTimeDomainFromTab(tab);
+        if (activeDom === dom) {
+            used += Math.max(0, Math.floor((Date.now() - this._screenTimeActiveSince) / 1000));
+        }
+        const baseline = Number(this._screenTimeLimitBaselines?.[dom]) || 0;
+        return Math.max(0, used - baseline);
+    }
+
+    _flushScreenTime(opts = {}) {
+        if (
+            !opts.ignoreEnabled &&
+            (!this.settings?.screenTimeEnabled || this.profileId === 'incognito')
+        ) {
+            return;
+        }
+        if (this.profileId === 'incognito') return;
+        if (!this._screenTimeActiveSince) return;
+        const elapsed = Math.floor((Date.now() - this._screenTimeActiveSince) / 1000);
+        this._screenTimeActiveSince = Date.now();
+        if (elapsed < 1) return;
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        const domain = this._screenTimeDomainFromTab(tab);
+        if (!domain || !window.electronAPI?.recordScreenTimeTick) return;
+        void window.electronAPI
+            .recordScreenTimeTick({ domain, seconds: elapsed })
+            .then(() => {
+                if (!this._screenTimeDomainUsageToday) this._screenTimeDomainUsageToday = {};
+                this._screenTimeDomainUsageToday[domain] =
+                    (Number(this._screenTimeDomainUsageToday[domain]) || 0) + elapsed;
+                this._checkScreenTimeLimit(domain);
+            })
+            .catch(() => {});
+    }
+
+    _formatScreenTimeLimitDuration(seconds) {
+        const sec = Math.max(0, Math.floor(Number(seconds) || 0));
+        if (sec < 60) return `${sec}s`;
+        const m = Math.floor(sec / 60);
+        if (m < 60) return `${m}m`;
+        const h = Math.floor(m / 60);
+        const rm = m % 60;
+        return rm ? `${h}h ${rm}m` : `${h}h`;
+    }
+
+    async _refreshScreenTimeUsageCache() {
+        if (!window.electronAPI?.getScreenTimeStats) return;
+        try {
+            const stats = await window.electronAPI.getScreenTimeStats();
+            this._screenTimeDomainUsageToday = stats?.domainUsage || {};
+            this._screenTimeLimitBaselines =
+                stats?.limitBaselines && typeof stats.limitBaselines === 'object'
+                    ? { ...stats.limitBaselines }
+                    : {};
+            if (stats?.limits && typeof stats.limits === 'object') {
+                this.settings.screenTimeLimits = this._normalizeScreenTimeLimitsMap(stats.limits);
+            }
+        } catch (_) {}
+    }
+
+    _finishScreenTimeLimitHide() {
+        const overlay = this.elements?.screenTimeLimitOverlay;
+        if (!overlay) return;
+        if (this._screenTimeLimitHideTimer) {
+            clearTimeout(this._screenTimeLimitHideTimer);
+            this._screenTimeLimitHideTimer = null;
+        }
+        overlay.classList.remove('is-open', 'is-leaving');
+        overlay.classList.add('hidden');
+        this._screenTimeLimitShownFor = null;
+    }
+
+    _hideScreenTimeLimitBanner(opts = {}) {
+        const overlay = this.elements?.screenTimeLimitOverlay;
+        if (!overlay || overlay.classList.contains('hidden')) return;
+        if (opts.instant) {
+            this._finishScreenTimeLimitHide();
+            return;
+        }
+        if (overlay.classList.contains('is-leaving')) return;
+        if (!overlay.classList.contains('is-open')) {
+            this._finishScreenTimeLimitHide();
+            return;
+        }
+        if (this._screenTimeLimitHideTimer) clearTimeout(this._screenTimeLimitHideTimer);
+        overlay.classList.add('is-leaving');
+        overlay.classList.remove('is-open');
+        this._screenTimeLimitHideTimer = setTimeout(() => this._finishScreenTimeLimitHide(), 320);
+    }
+
+    _showScreenTimeLimitBanner(domain, limitSeconds, opts = {}) {
+        const overlay = this.elements?.screenTimeLimitOverlay;
+        const title = this.elements?.screenTimeLimitTitle;
+        const message = this.elements?.screenTimeLimitMessage;
+        const progress = document.getElementById('screen-time-limit-progress');
+        const sheet = overlay?.querySelector('.screen-time-limit-sheet');
+        if (!overlay || !title || !message || !domain) return;
+        const dom = this._normalizeScreenTimeDomain(domain);
+        const alreadyVisible =
+            !overlay.classList.contains('hidden') &&
+            overlay.classList.contains('is-open') &&
+            !overlay.classList.contains('is-leaving') &&
+            this._screenTimeLimitShownFor === dom;
+        if (alreadyVisible) return;
+
+        if (this._screenTimeLimitHideTimer) {
+            clearTimeout(this._screenTimeLimitHideTimer);
+            this._screenTimeLimitHideTimer = null;
+        }
+        this._screenTimeLimitShownFor = dom;
+        this._screenTimeLimitResumeFor = null;
+        const limitLabel = this._formatScreenTimeLimitDuration(limitSeconds);
+        title.textContent = dom;
+        const reached =
+            this.t('screenTime.limitDone', { limit: limitLabel }) ||
+            `${limitLabel} daily limit reached`;
+        message.textContent = reached.includes('{') ? `${limitLabel} daily limit reached` : reached;
+        if (progress) progress.style.width = '100%';
+
+        const instant = !!opts.instant;
+        overlay.classList.remove('hidden', 'is-leaving', 'is-open', 'screen-time-limit-instant');
+        if (instant) {
+            overlay.classList.add('is-open', 'screen-time-limit-instant');
+            requestAnimationFrame(() => overlay.classList.remove('screen-time-limit-instant'));
+            return;
+        }
+        if (sheet) {
+            sheet.style.transition = 'none';
+            void sheet.offsetHeight;
+            sheet.style.transition = '';
+        }
+        void overlay.offsetHeight;
+        requestAnimationFrame(() => overlay.classList.add('is-open'));
+    }
+
+    _checkScreenTimeLimit(domain) {
+        if (!this.settings?.screenTimeEnabled || this.profileId === 'incognito') {
+            this._screenTimeLimitResumeFor = null;
+            this._hideScreenTimeLimitBanner();
+            return;
+        }
+        const dom = this._normalizeScreenTimeDomain(domain);
+        const limits = this.settings?.screenTimeLimits;
+        if (!dom || !limits || typeof limits !== 'object' || !limits[dom]) {
+            this._screenTimeLimitResumeFor = null;
+            this._hideScreenTimeLimitBanner();
+            return;
+        }
+        if (this._screenTimeLimitDismissed.has(dom)) {
+            this._screenTimeLimitResumeFor = null;
+            this._hideScreenTimeLimitBanner();
+            return;
+        }
+        const capSec = Math.max(1, Math.floor(Number(limits[dom]) || 0));
+        const used = this._getScreenTimeUsedSeconds(dom);
+        if (used >= capSec) {
+            const resume = this._screenTimeLimitResumeFor === dom;
+            this._showScreenTimeLimitBanner(dom, limits[dom], { instant: resume });
+        } else {
+            this._screenTimeLimitResumeFor = null;
+            this._hideScreenTimeLimitBanner();
+        }
+    }
+
+    _checkScreenTimeLimitForCurrentTab() {
+        const overlay = this.elements?.screenTimeLimitOverlay;
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        const domain = this._screenTimeDomainFromTab(tab);
+        if (!domain) {
+            const wasOpen =
+                this._screenTimeLimitShownFor &&
+                overlay &&
+                !overlay.classList.contains('hidden') &&
+                overlay.classList.contains('is-open');
+            if (wasOpen) this._screenTimeLimitResumeFor = this._screenTimeLimitShownFor;
+            this._hideScreenTimeLimitBanner({ instant: true });
+            return;
+        }
+        this._checkScreenTimeLimit(domain);
+    }
+
+    _initScreenTimeTracking() {
+        this._screenTimeActiveSince = Date.now();
+        void this._refreshScreenTimeUsageCache().then(() => this._checkScreenTimeLimitForCurrentTab());
+        if (this._screenTimeInterval) clearInterval(this._screenTimeInterval);
+        this._screenTimeInterval = setInterval(() => {
+            if (!this.settings?.screenTimeEnabled || document.hidden) return;
+            this._flushScreenTime();
+            this._checkScreenTimeLimitForCurrentTab();
+        }, 30000);
+        if (this._screenTimeLimitCheckInterval) clearInterval(this._screenTimeLimitCheckInterval);
+        this._screenTimeLimitCheckInterval = setInterval(() => {
+            if (!this.settings?.screenTimeEnabled || document.hidden) return;
+            this._checkScreenTimeLimitForCurrentTab();
+        }, 10000);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) this._flushScreenTime();
+            else this._screenTimeActiveSince = Date.now();
+        });
+        window.addEventListener('blur', () => this._flushScreenTime());
+        window.addEventListener('focus', () => {
+            this._screenTimeActiveSince = Date.now();
+            this._ensureActiveWebviewInteractable();
+        });
+        this.elements?.screenTimeLimitContinue?.addEventListener('click', () => {
+            const domain = this._screenTimeLimitShownFor;
+            if (domain) this._screenTimeLimitDismissed.add(domain);
+            this._screenTimeLimitResumeFor = null;
+            this._hideScreenTimeLimitBanner();
+        });
+    }
+
+    _clearSidebarSlideOutState(sidebar) {
+        if (!sidebar) return;
+        sidebar.classList.remove('slide-out', 'slide-out-closing');
+        sidebar.style.removeProperty('animation');
+        sidebar.style.removeProperty('--sidebar-reveal-width');
+        sidebar.style.removeProperty('background');
+        sidebar.style.removeProperty('backdrop-filter');
+        sidebar.style.removeProperty('-webkit-backdrop-filter');
+        sidebar.style.removeProperty('box-shadow');
+        sidebar.style.removeProperty('transform');
+    }
+
+    _bindTabAudioMixerUi() {
+        if (this._tabAudioMixerBound) return;
+        this._tabAudioMixerBound = true;
+
+        document.addEventListener('input', (e) => {
+            if (!e.target.classList?.contains('axis-audio-slider')) return;
+            const tabId = this._audioMixerTabId;
+            if (tabId == null) return;
+            const pct = parseInt(e.target.value, 10) || 0;
+            e.target.style.setProperty('--axis-audio-pct', `${pct}%`);
+            this._setTabVolumeFromSlider(tabId, e.target.value, this._audioMixerVideoIndex);
+        });
+
+        document.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            const inMixer = e.target.closest('.tab-audio-wrap.is-mixer-open, .sidebar-media-vol-wrap.is-mixer-open');
+            const toggleBtn = e.target.closest?.('.axis-audio-toggle');
+            if (toggleBtn && inMixer) {
+                e.preventDefault();
+                e.stopPropagation();
+                const tabId = this._audioMixerTabId;
+                if (tabId != null) this._toggleTabVolumeExtremes(tabId, this._audioMixerVideoIndex);
+                return;
+            }
+            const volBtn = e.target.closest('#sidebar-media-vol-btn');
+            const tabIndicator = e.target.closest?.('.tab-audio-indicator');
+            if (volBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const dock = this._sidebarMediaDock;
+                if (dock) this._toggleAudioMixer(volBtn, dock.tabId, dock.videoIndex);
+                return;
+            }
+            if (tabIndicator && !e.target.closest('.axis-audio-slider, .axis-audio-toggle')) {
+                e.preventDefault();
+                e.stopPropagation();
+                const tabEl = tabIndicator.closest('[data-tab-id]');
+                const tabId = this._normalizeTabMapKey(tabEl?.dataset?.tabId);
+                if (tabId != null) this._toggleAudioMixer(tabIndicator, tabId, null);
+                return;
+            }
+            if (this._isAudioMixerOpen() && !inMixer) {
+                this._hideAudioMixer();
+            }
+        }, true);
+
+        this.elements?.contentArea?.addEventListener('mousedown', () => this._hideAudioMixerIfOpen());
+        document.getElementById('url-bar')?.addEventListener('mousedown', () => this._hideAudioMixerIfOpen());
+        for (const tab of this.tabs.values()) {
+            if (tab?.webview) this._bindAudioMixerWebviewDismiss(tab.webview);
+        }
     }
 
     async showSidebarContextMenu(e) {
@@ -24758,6 +29318,185 @@ class AxisBrowser {
         }
     }
 
+    _progressFromActiveDownloadRows(rows) {
+        let received = 0;
+        let total = 0;
+        for (const row of rows || []) {
+            received += Number(row?.receivedBytes) || 0;
+            const t = Number(row?.totalBytes) || 0;
+            if (t > 0) total += t;
+        }
+        if (total <= 0) return null;
+        return Math.min(1, Math.max(0, received / total));
+    }
+
+    _clearDownloadCompleteAutoDismiss() {
+        if (this._downloadCompleteAutoTimer) {
+            clearTimeout(this._downloadCompleteAutoTimer);
+            this._downloadCompleteAutoTimer = null;
+        }
+    }
+
+    _scheduleDownloadCompleteAutoDismiss(ms = 3000) {
+        this._clearDownloadCompleteAutoDismiss();
+        this._downloadCompleteAutoTimer = setTimeout(() => {
+            this._downloadCompleteAutoTimer = null;
+            const dlBtn = document.getElementById('downloads-btn-footer');
+            if (dlBtn?.classList.contains('is-download-complete')) {
+                void this._resetDownloadsButtonFromComplete();
+            }
+        }, ms);
+    }
+
+    _setDownloadUiState(state, progress = null) {
+        const dlBtn = document.getElementById('downloads-btn-footer');
+        const fill = document.getElementById('url-bar-dl-bar-fill');
+        if (!dlBtn) return;
+
+        if (state === 'downloading') {
+            this._clearDownloadCompleteAutoDismiss();
+            dlBtn.classList.remove('is-download-complete', 'is-download-resetting', 'is-downloading');
+            void dlBtn.offsetWidth;
+            dlBtn.classList.add('is-downloading');
+            document.body.classList.add('axis-download-activity');
+            dlBtn.setAttribute('aria-busy', 'true');
+            dlBtn.setAttribute('title', 'Downloading…');
+            this._downloadSessionActive = true;
+            if (fill) {
+                const hasPct = typeof progress === 'number' && Number.isFinite(progress) && progress > 0;
+                if (hasPct) {
+                    dlBtn.classList.remove('is-downloading-indeterminate');
+                    fill.style.removeProperty('width');
+                    fill.style.removeProperty('transform');
+                    fill.style.removeProperty('animation');
+                    fill.style.setProperty(
+                        '--dl-fill-pct',
+                        `${Math.max(12, Math.round(Math.max(0, Math.min(1, progress)) * 100))}%`
+                    );
+                } else {
+                    dlBtn.classList.add('is-downloading-indeterminate');
+                    fill.style.removeProperty('--dl-fill-pct');
+                }
+            }
+            this.scheduleDownloadsPopupRefresh();
+            return;
+        }
+
+        if (state === 'complete') {
+            if (dlBtn.classList.contains('is-download-complete')) return;
+            dlBtn.classList.remove('is-downloading', 'is-downloading-indeterminate', 'is-download-resetting');
+            dlBtn.classList.add('is-download-complete');
+            document.body.classList.remove('axis-download-activity');
+            dlBtn.setAttribute('aria-busy', 'false');
+            dlBtn.setAttribute('title', 'Download complete — click to dismiss');
+            this._downloadSessionActive = false;
+            if (fill) {
+                fill.style.removeProperty('--dl-fill-pct');
+                fill.style.removeProperty('width');
+                fill.style.removeProperty('transform');
+                fill.style.removeProperty('animation');
+            }
+            this._scheduleDownloadCompleteAutoDismiss(3000);
+            this.scheduleDownloadsPopupRefresh();
+            return;
+        }
+
+        if (state === 'idle') {
+            this._clearDownloadCompleteAutoDismiss();
+            dlBtn.classList.remove(
+                'is-downloading',
+                'is-downloading-indeterminate',
+                'is-download-complete',
+                'is-download-resetting'
+            );
+            document.body.classList.remove('axis-download-activity');
+            dlBtn.setAttribute('aria-busy', 'false');
+            dlBtn.setAttribute('title', 'Downloads');
+            this._downloadSessionActive = false;
+            if (fill) {
+                fill.style.removeProperty('--dl-fill-pct');
+                fill.style.removeProperty('width');
+                fill.style.removeProperty('transform');
+                fill.style.removeProperty('animation');
+            }
+        }
+    }
+
+    _resetDownloadsButtonFromComplete() {
+        const dlBtn = document.getElementById('downloads-btn-footer');
+        if (!dlBtn?.classList.contains('is-download-complete')) {
+            return Promise.resolve();
+        }
+        this._clearDownloadCompleteAutoDismiss();
+        if (this._downloadCompleteResetTimer) {
+            clearTimeout(this._downloadCompleteResetTimer);
+            this._downloadCompleteResetTimer = null;
+        }
+        return new Promise((resolve) => {
+            dlBtn.classList.add('is-download-resetting');
+            dlBtn.classList.remove('is-download-complete');
+            this._downloadCompleteResetTimer = setTimeout(() => {
+                this._downloadCompleteResetTimer = null;
+                dlBtn.classList.remove('is-download-resetting');
+                this._setDownloadUiState('idle');
+                resolve();
+            }, 320);
+        });
+    }
+
+    async handleDownloadsButtonClick() {
+        const dlBtn = document.getElementById('downloads-btn-footer');
+        if (dlBtn?.classList.contains('is-download-complete')) {
+            await this._resetDownloadsButtonFromComplete();
+            return;
+        }
+        await this.showDownloadsPopup();
+    }
+
+    _setupUrlBarButtonPressFeedback() {
+        const bar = document.getElementById('webview-url-bar');
+        if (!bar || bar.dataset.axisPressBound === '1') return;
+        bar.dataset.axisPressBound = '1';
+        const selector = '.url-bar-btn, .url-bar-action-btn, .url-bar-chat-btn';
+        const pressClass = 'url-bar-pressed';
+        const clearPressed = () => {
+            bar.querySelectorAll(`.${pressClass}`).forEach((node) => node.classList.remove(pressClass));
+        };
+        bar.addEventListener(
+            'pointerdown',
+            (e) => {
+                const btn = e.target.closest(selector);
+                if (!btn || btn.disabled || btn.classList.contains('hidden')) return;
+                clearPressed();
+                btn.classList.add(pressClass);
+            },
+            true
+        );
+        bar.addEventListener('pointerup', clearPressed, true);
+        bar.addEventListener('pointercancel', clearPressed, true);
+        document.addEventListener('pointerup', clearPressed, true);
+        window.addEventListener('blur', clearPressed);
+    }
+
+    _startDownloadActivityWatcher() {
+        if (this._downloadActivityPoll) return;
+        this._downloadActivityPoll = setInterval(async () => {
+            try {
+                const rows = (await window.electronAPI?.getActiveDownloads?.()) || [];
+                const dlBtn = document.getElementById('downloads-btn-footer');
+                if (rows.length > 0) {
+                    this._setDownloadUiState('downloading', this._progressFromActiveDownloadRows(rows));
+                    return;
+                }
+                if (dlBtn?.classList.contains('is-downloading')) {
+                    this._setDownloadUiState('complete');
+                }
+            } catch (_) {
+                /* ignore */
+            }
+        }, 120);
+    }
+
     async refreshDownloadsPopupListIfOpen() {
         const popup = document.getElementById('downloads-popup');
         const list = document.getElementById('downloads-popup-list');
@@ -24914,7 +29653,21 @@ class AxisBrowser {
             activeDownloads = [];
         }
 
-        // Clear current items
+        const prevScrollTop = list.scrollTop;
+        this._downloadsPopupThumbObserver?.disconnect();
+        const thumbObserver = (this._downloadsPopupThumbObserver = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    thumbObserver.unobserve(entry.target);
+                    const load = entry.target._axisLoadThumb;
+                    entry.target._axisLoadThumb = null;
+                    load?.();
+                }
+            },
+            { root: list, rootMargin: '160px 0px' }
+        ));
+
         list.innerHTML = '';
 
         if (!downloads.length) {
@@ -24927,10 +29680,6 @@ class AxisBrowser {
             `;
             list.appendChild(empty);
         } else {
-            const pathsForIcons = downloads.map((d) => d.path).filter(Boolean);
-            if (pathsForIcons.length && window.electronAPI?.cacheDragIcons) {
-                window.electronAPI.cacheDragIcons(pathsForIcons).catch(() => {});
-            }
             const activeByPath = new Map();
             const activeByName = new Map();
             activeDownloads
@@ -24979,10 +29728,16 @@ class AxisBrowser {
                 row.dataset.downloadNameNorm = nameKey || '';
                 row.dataset.downloadPath = item.path || '';
                 row.dataset.downloadBaseMeta = `${this.formatFileSize(item.size || 0)} • ${this.formatTimeAgo(item.mtime)}`;
+                const canAttachAi =
+                    !isDownloading &&
+                    item.path &&
+                    this.hasAiApiKey() &&
+                    this.isAiFeaturesEnabled();
+                const attachChatTitle = this.escapeHtml(this.t('ai.attachToChat') || 'Add to AI chat');
                 const sideBtnHtml =
                     isDownloading && tracked && Number(tracked.axisId) > 0
                         ? `<button type="button" class="downloads-popup-row-action downloads-popup-cancel-download" title="${this.escapeHtml(this.t('downloads.cancel'))}" data-axis-download-id="${tracked.axisId}"><i class="fas fa-times" aria-hidden="true"></i></button>`
-                        : `<button type="button" class="downloads-popup-row-action downloads-popup-show-folder" title="${this.escapeHtml(this.t('menu.revealFinder'))}"><i class="fas fa-folder-open" aria-hidden="true"></i></button>`;
+                        : `<div class="downloads-popup-row-actions">${canAttachAi ? `<button type="button" class="downloads-popup-row-action downloads-popup-attach-chat" title="${attachChatTitle}"><i class="fas fa-paperclip" aria-hidden="true"></i></button>` : ''}<button type="button" class="downloads-popup-row-action downloads-popup-show-folder" title="${this.escapeHtml(this.t('menu.revealFinder'))}"><i class="fas fa-folder-open" aria-hidden="true"></i></button></div>`;
                 row.innerHTML = `
                     <div class="downloads-popup-thumbnail ${this.escapeHtml(fileType)}">
                         ${this.getDownloadPopupThumbnailLoadingMarkup()}
@@ -24999,16 +29754,39 @@ class AxisBrowser {
                     ${sideBtnHtml}
                 `;
 
-                row.draggable = true;
+                row.draggable = !isDownloading;
                 row.addEventListener('dragstart', (e) => {
-                    if (isDownloading) {
+                    if (isDownloading || !item.path) return;
+                    e.stopPropagation();
+                    const path = item.path;
+                    const backdrop = document.getElementById('downloads-popup-backdrop');
+                    document.body.classList.remove('downloads-popup-open');
+                    document.getElementById('downloads-btn-footer')?.setAttribute('aria-expanded', 'false');
+                    if (backdrop) {
+                        backdrop.style.pointerEvents = 'none';
+                        backdrop.classList.add('hidden');
+                        backdrop.setAttribute('aria-hidden', 'true');
+                    }
+                    this._beginAxisNativeFileDrag(path);
+                    this._ensureActiveWebviewInteractable();
+                    try {
+                        e.dataTransfer.setData('application/x-axis-file-path', path);
+                        e.dataTransfer.setData('text/plain', path);
+                        const fileUrl = this.pathToFileUrl(path);
+                        if (fileUrl) e.dataTransfer.setData('text/uri-list', fileUrl);
+                        e.dataTransfer.effectAllowed = 'copy';
+                    } catch (_) {}
+                    if (window.electronAPI?.startFileDrag) {
                         e.preventDefault();
-                        return;
+                        window.electronAPI.startFileDrag(path);
                     }
-                    e.preventDefault();
-                    if (item.path && window.electronAPI?.startFileDrag) {
-                        window.electronAPI.startFileDrag(item.path);
-                    }
+                    requestAnimationFrame(() => {
+                        this.hideDownloadsPopup();
+                        backdrop?.style.removeProperty('pointer-events');
+                    });
+                });
+                row.addEventListener('dragend', () => {
+                    this._finishNativeFileDragToAiChat();
                 });
 
                 // Open file on row click (suppressed after a drag by the browser)
@@ -25019,24 +29797,40 @@ class AxisBrowser {
                     }
                 });
 
-                const sideBtn = row.querySelector('.downloads-popup-row-action');
-                sideBtn?.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    if (sideBtn.classList.contains('downloads-popup-cancel-download')) {
-                        const aid = Number(sideBtn.dataset.axisDownloadId);
-                        const itemRow = sideBtn.closest('.downloads-popup-item');
-                        this.onDownloadsPopupCancelRequested(aid, itemRow);
-                        return;
-                    }
-                    if (item.path) {
-                        window.electronAPI.showItemInFolder(item.path);
-                    }
+                row.querySelectorAll('.downloads-popup-row-action').forEach((sideBtn) => {
+                    sideBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        if (sideBtn.classList.contains('downloads-popup-cancel-download')) {
+                            const aid = Number(sideBtn.dataset.axisDownloadId);
+                            const itemRow = sideBtn.closest('.downloads-popup-item');
+                            this.onDownloadsPopupCancelRequested(aid, itemRow);
+                            return;
+                        }
+                        if (sideBtn.classList.contains('downloads-popup-attach-chat')) {
+                            const target =
+                                document.getElementById('ai-chat-panel')?.offsetParent != null &&
+                                document.getElementById('content-area')?.classList.contains('chat-open')
+                                    ? 'sidebar'
+                                    : this._isOnNewTabPage()
+                                      ? 'newtab'
+                                      : 'sidebar';
+                            void this._ingestAiChatPaths([item.path], target);
+                            this.hideDownloadsPopup();
+                            return;
+                        }
+                        if (item.path) {
+                            window.electronAPI.showItemInFolder(item.path);
+                        }
+                    });
                 });
 
                 list.appendChild(row);
-                this.loadDownloadPopupThumbnail(item.path, fileType, fileName, row);
+                row._axisLoadThumb = () =>
+                    this.loadDownloadPopupThumbnail(item.path, fileType, fileName, row);
+                thumbObserver.observe(row);
             });
         }
+        list.scrollTop = prevScrollTop;
     }
 
     // In-app downloads popup showing most recent files from Downloads folder
@@ -25054,6 +29848,7 @@ class AxisBrowser {
 
         this.closeExtensionsMenu();
         this.closeAdblockPanel();
+        clearTimeout(this._downloadsPopupClearTimer);
         await this.populateDownloadsPopupList(list);
 
         this.positionUrlBarAnchoredPopup(popup, button);
@@ -25080,6 +29875,34 @@ class AxisBrowser {
         }, { once: true });
     }
 
+    /** Safety net after native file drag (main unblocks when drop finishes). */
+    _ensureDownloadsShellAfterFileDrag() {
+        document.body.classList.remove('downloads-popup-open');
+        document.getElementById('downloads-btn-footer')?.setAttribute('aria-expanded', 'false');
+        const backdrop = document.getElementById('downloads-popup-backdrop');
+        if (backdrop) {
+            backdrop.classList.add('hidden');
+            backdrop.setAttribute('aria-hidden', 'true');
+            backdrop.style.removeProperty('pointer-events');
+        }
+        const popup = document.getElementById('downloads-popup');
+        if (popup && !popup.classList.contains('hidden')) {
+            this.hideDownloadsPopup();
+        }
+        this.stopDownloadsPopupLiveRefresh();
+        requestAnimationFrame(() => {
+            this._dismissUrlBarChromePanels?.();
+            this._ensureActiveWebviewInteractable();
+            try {
+                this.getActiveWebview()?.focus?.();
+            } catch (_) {}
+        });
+    }
+
+    _releaseUiAfterDownloadsFileDrag() {
+        this._ensureDownloadsShellAfterFileDrag();
+    }
+
     hideDownloadsPopup() {
         const popup = document.getElementById('downloads-popup');
         const backdrop = document.getElementById('downloads-popup-backdrop');
@@ -25092,6 +29915,15 @@ class AxisBrowser {
         document.getElementById('downloads-btn-footer')?.setAttribute('aria-expanded', 'false');
         if (!popup) return;
         popup.classList.add('hidden');
+        requestAnimationFrame(() => this._ensureActiveWebviewInteractable());
+        // The hidden popup stays laid out for its fade; hundreds of rows would tax every layout.
+        clearTimeout(this._downloadsPopupClearTimer);
+        this._downloadsPopupClearTimer = setTimeout(() => {
+            if (!popup.classList.contains('hidden')) return;
+            this._downloadsPopupThumbObserver?.disconnect();
+            const list = document.getElementById('downloads-popup-list');
+            if (list) list.innerHTML = '';
+        }, 250);
     }
     
     // Helper: format bytes into human-readable size
@@ -25857,51 +30689,27 @@ class AxisBrowser {
     zoomIn() {
         const webview = this.getActiveWebview();
         if (!webview) return;
-        const currentZoom = webview.getZoomFactor();
-        const newZoom = Math.min(currentZoom + 0.1, 3.0);
-        webview.setZoomFactor(newZoom);
-        this.showZoomIndicator('zoom-in', Math.round(newZoom * 100));
+        const newZoom = Math.min(this._getWebviewZoomFactor(webview) + 0.1, 3.0);
+        this._setActiveWebviewZoomFactor(newZoom);
     }
 
     zoomOut() {
         const webview = this.getActiveWebview();
         if (!webview) return;
-        const currentZoom = webview.getZoomFactor();
-        const newZoom = Math.max(currentZoom - 0.1, 0.25);
-        webview.setZoomFactor(newZoom);
-        this.showZoomIndicator('zoom-out', Math.round(newZoom * 100));
+        const newZoom = Math.max(this._getWebviewZoomFactor(webview) - 0.1, 0.25);
+        this._setActiveWebviewZoomFactor(newZoom);
     }
 
     resetZoom() {
-        const webview = this.getActiveWebview();
-        if (!webview) return;
-        webview.setZoomFactor(1.0);
-        this.showZoomIndicator('zoom-in', 100);
+        this._setActiveWebviewZoomFactor(1);
     }
 
     showZoomIndicator(type, percentage) {
-        const indicator = document.getElementById('zoom-indicator');
-        const percentageSpan = indicator.querySelector('.zoom-percentage');
-        const icon = indicator.querySelector('i');
-        
-        // Update content
-        percentageSpan.textContent = `${percentage}%`;
-        
-        // Update icon based on zoom type
-        if (type === 'zoom-in') {
-            icon.className = 'fas fa-search-plus';
-        } else if (type === 'zoom-out') {
-            icon.className = 'fas fa-search-minus';
-        }
-        
-        // Show indicator
-        indicator.classList.remove('hidden');
-        indicator.classList.add('show', type);
-        
-        setTimeout(() => {
-            indicator.classList.remove('show', type);
-            indicator.classList.add('hidden');
-        }, 4000);
+        const legacy = document.getElementById('zoom-indicator');
+        if (legacy) legacy.classList.add('hidden');
+        const delta =
+            type === 'zoom-out' ? -0.1 : type === 'zoom-in' && percentage === 100 ? -0.01 : 0.1;
+        this._flashUrlBarZoomChange(percentage, delta);
     }
 
     setupLoadingScreen() {
@@ -26031,15 +30839,21 @@ class AxisBrowser {
                 return;
             }
             resizeHandle.style.display = '';
-            const top = contentArea.offsetTop;
-            const height = contentArea.offsetHeight;
+            const contentRect = contentArea.getBoundingClientRect();
+            const sidebarRect = sidebar.getBoundingClientRect();
             const isRightSide = mainArea.classList.contains('sidebar-right');
+            const handleW = 8;
             const seamX = isRightSide
-                ? mainArea.clientWidth - sidebar.offsetWidth
-                : sidebar.offsetWidth;
-            resizeHandle.style.top = `${top}px`;
-            resizeHandle.style.height = `${height}px`;
-            resizeHandle.style.left = `${Math.round(seamX - 6)}px`;
+                ? sidebarRect.left - contentRect.left
+                : sidebarRect.right - contentRect.left;
+            const panelRadius = Number.parseFloat(
+                getComputedStyle(document.documentElement).getPropertyValue('--axis-content-panel-radius')
+            ) || 6;
+            const seamInset = 8 + panelRadius + 6;
+            resizeHandle.style.top = `${seamInset}px`;
+            resizeHandle.style.bottom = `${seamInset}px`;
+            resizeHandle.style.width = `${handleW}px`;
+            resizeHandle.style.left = `${Math.round(seamX - handleW / 2)}px`;
             resizeHandle.style.right = 'auto';
         };
 
@@ -26061,66 +30875,40 @@ class AxisBrowser {
         let isResizing = false;
         let startX = 0;
         let startWidth = 0;
+        let latestX = 0;
         let animationFrame = null;
 
         const startResize = (e) => {
             if (isResizing) return;
-            
+
             isResizing = true;
             startX = e.clientX;
-            startWidth = sidebar.offsetWidth;
-            
-            // Add visual feedback
+            latestX = e.clientX;
+            startWidth = sidebar.getBoundingClientRect().width || sidebar.offsetWidth;
+
+            sidebar.style.setProperty('transition', 'none', 'important');
             document.body.classList.add('resizing');
+            resizeHandle.classList.add('is-dragging');
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
-            
-            // Prevent text selection and default behaviors
+
             e.preventDefault();
             e.stopPropagation();
         };
 
-        let lastUpdateTime = 0;
-        const throttleMs = 8; // ~120fps for smoother resizing
-        
         const doResize = (e) => {
             if (!isResizing) return;
-            
-            const now = performance.now();
-            
-            // Throttle updates for smoother performance
-            if (now - lastUpdateTime < throttleMs) {
-                return;
-            }
-            lastUpdateTime = now;
-            
-            // Cancel previous animation frame
-            if (animationFrame) {
-                cancelAnimationFrame(animationFrame);
-            }
-            
-            // Use requestAnimationFrame for smooth resizing
+            latestX = e.clientX;
+            if (animationFrame) return;
             animationFrame = requestAnimationFrame(() => {
-                const deltaX = e.clientX - startX;
-                
-                // Check if sidebar is on the right side
-                const mainArea = document.getElementById('main-area');
-                const isRightSide = mainArea && mainArea.classList.contains('sidebar-right');
-                
-                // When sidebar is on the right, dragging left (negative deltaX) should increase width
-                // So we need to invert the deltaX
+                animationFrame = null;
+                const deltaX = latestX - startX;
+                const isRightSide = mainArea.classList.contains('sidebar-right');
                 const adjustedDeltaX = isRightSide ? -deltaX : deltaX;
-                
-                const newWidth = startWidth + adjustedDeltaX;
-                const minWidth = 200;
-                const maxWidth = 500;
-                
-                // Clamp width within bounds
-                const clampedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
-                
-                // Apply the new width with CSS transition disabled during resize for immediate feedback
-                sidebar.style.transition = 'none';
-                sidebar.style.width = clampedWidth + 'px';
+                const clampedWidth = Math.max(200, Math.min(500, startWidth + adjustedDeltaX));
+                sidebar.style.setProperty('width', `${clampedWidth}px`, 'important');
+                sidebar.style.setProperty('min-width', `${clampedWidth}px`, 'important');
+                sidebar.style.setProperty('max-width', `${clampedWidth}px`, 'important');
                 syncSidebarResizeHandleLayout();
                 this._scheduleWebviewHostBoundsLiveSync();
             });
@@ -26128,32 +30916,35 @@ class AxisBrowser {
 
         const stopResize = (e) => {
             if (!isResizing) return;
-            
+
             isResizing = false;
-            lastUpdateTime = 0;
-            
-            // Cancel any pending animation frame
+
             if (animationFrame) {
                 cancelAnimationFrame(animationFrame);
                 animationFrame = null;
             }
-            
-            // Re-enable CSS transitions for smooth final state
-            sidebar.style.transition = '';
-            
-            // Remove visual feedback
+
+            // Keep the final width; clear temporary min/max locks so CSS bounds apply again.
+            const finalW = Math.max(200, Math.min(500, sidebar.getBoundingClientRect().width || startWidth));
+            sidebar.style.removeProperty('min-width');
+            sidebar.style.removeProperty('max-width');
+            sidebar.style.setProperty('width', `${finalW}px`);
+            sidebar.style.removeProperty('transition');
             document.body.classList.remove('resizing');
+            resizeHandle.classList.remove('is-dragging');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
 
             this._finishWebviewHostBoundsTracking();
-            
-            // Prevent event bubbling
+
             if (e) {
                 e.preventDefault();
                 e.stopPropagation();
             }
         };
+
+        resizeHandle.addEventListener('mouseenter', () => resizeHandle.classList.add('is-hover'));
+        resizeHandle.addEventListener('mouseleave', () => resizeHandle.classList.remove('is-hover'));
 
         // Mouse events
         resizeHandle.addEventListener('mousedown', startResize, { passive: false });
@@ -28122,9 +32913,17 @@ class AxisBrowser {
         void this.refreshSecurityPanel();
     }
 
+    _getSiteStyle() {
+        if (!this._siteStyle && typeof window.AxisSiteStyle === 'function') {
+            this._siteStyle = new window.AxisSiteStyle(this);
+        }
+        return this._siteStyle || null;
+    }
+
     closeAllPopups() {
         // Close all popups smoothly with consistent animations
         this.closeExtensionsMenu();
+        this._siteStyle?.close();
 
         // Close panels (downloads, security, notes)
         const downloadsPanel = document.getElementById('downloads-panel');
@@ -28169,6 +32968,8 @@ class AxisBrowser {
         if (colorPicker && !colorPicker.classList.contains('hidden')) {
             this.hideTabGroupColorPicker();
         }
+
+        this.closeSpotlightSearch();
     }
 
     closePanelWithAnimation(panel) {
@@ -28206,12 +33007,179 @@ class AxisBrowser {
         }, 150);
     }
 
+    _usesSpotlightNewTab() {
+        return this.settings?.newTabMode === 'spotlight';
+    }
+
+    _isSpotlightOpen() {
+        const el = document.getElementById('spotlight-search');
+        return !!(el && !el.classList.contains('hidden'));
+    }
+
+    setupSpotlightSearch() {
+        const overlay = document.getElementById('spotlight-search');
+        const input = document.getElementById('spotlight-input');
+        const suggestions = document.getElementById('spotlight-suggestions');
+        const backdrop = overlay?.querySelector('.spotlight-backdrop');
+        if (!overlay || !input || !suggestions) return;
+
+        backdrop?.addEventListener('click', () => this.closeSpotlightSearch());
+
+        const scheduleSpotlightSuggestUpdate = (value) => {
+            if (this._spotlightSuggestInputRaf) {
+                cancelAnimationFrame(this._spotlightSuggestInputRaf);
+                this._spotlightSuggestInputRaf = 0;
+            }
+            this._spotlightSuggestInputRaf = requestAnimationFrame(() => {
+                this._spotlightSuggestInputRaf = 0;
+                void this.updateNewTabSuggestions(value, 'spotlight');
+                this.spotlightSelectedIndex = -1;
+                if (value.trim()) this.hideSpotlightAskSetup();
+            });
+        };
+
+        input.addEventListener('input', (e) => {
+            scheduleSpotlightSuggestUpdate(e.target.value.trim());
+        });
+
+        document.getElementById('spotlight-ask-setup-settings')?.addEventListener('click', () => {
+            void window.electronAPI?.openSettingsWindow?.('ai');
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void this.triggerSpotlightAskFromSearch();
+                return;
+            }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const items = suggestions.querySelectorAll('.spotlight-suggestion-item');
+                if (this.spotlightSelectedIndex >= 0 && items[this.spotlightSelectedIndex]) {
+                    items[this.spotlightSelectedIndex].click();
+                } else {
+                    this.performSpotlightSearch();
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                this.closeSpotlightSearch();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.navigateNewTabSuggestions(1, suggestions);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.navigateNewTabSuggestions(-1, suggestions);
+            }
+        });
+    }
+
+    _playNewTabButtonFeedback() {
+        this._playSidebarItemPress(this.elements.sidebarNewTabBtn);
+    }
+
+    _syncSpotlightNewTabButtonHighlight(active) {
+        const btn = this.elements.sidebarNewTabBtn;
+        if (!btn) return;
+        btn.classList.toggle('sidebar-new-tab-btn--spotlight-active', !!active);
+    }
+
+    _ensureSpotlightSuggestionsInner(container = document.getElementById('spotlight-suggestions')) {
+        if (!container) return null;
+        let inner = container.querySelector('.spotlight-suggestions-inner');
+        if (!inner) {
+            inner = document.createElement('div');
+            inner.className = 'spotlight-suggestions-inner';
+            container.appendChild(inner);
+        }
+        return inner;
+    }
+
+    _openSpotlightOverlay(opts = {}) {
+        const overlay = document.getElementById('spotlight-search');
+        const input = document.getElementById('spotlight-input');
+        if (!overlay || !input) return;
+
+        if (this._spotlightCloseTimer) {
+            clearTimeout(this._spotlightCloseTimer);
+            this._spotlightCloseTimer = null;
+        }
+        if (this._spotlightSuggestionsCloseTimer) {
+            clearTimeout(this._spotlightSuggestionsCloseTimer);
+            this._spotlightSuggestionsCloseTimer = null;
+        }
+
+        this._spotlightFromNewTab = !!opts.fromNewTabShortcut;
+        this._syncSpotlightNewTabButtonHighlight(this._spotlightFromNewTab);
+
+        overlay.classList.remove('hidden');
+        this._spotlightOpen = true;
+        input.value = '';
+        this.spotlightSelectedIndex = -1;
+        this.hideSpotlightAskSetup();
+        this._clearSpotlightSuggestions({ instant: true });
+        requestAnimationFrame(() => input.focus());
+    }
+
     showSpotlightSearch() {
-        this.createNewTab();
+        this._openSpotlightOverlay();
     }
 
     closeSpotlightSearch() {
-        // No-op: spotlight replaced by new tab page
+        const overlay = document.getElementById('spotlight-search');
+        if (!overlay || overlay.classList.contains('hidden')) return;
+
+        this._spotlightOpen = false;
+        this._spotlightFromNewTab = false;
+        this._syncSpotlightNewTabButtonHighlight(false);
+        this._clearSpotlightSuggestions({ instant: true });
+        this.hideSpotlightAskSetup();
+
+        const input = document.getElementById('spotlight-input');
+        if (input) input.value = '';
+        this.spotlightSelectedIndex = -1;
+
+        if (this._spotlightSuggestionsCloseTimer) {
+            clearTimeout(this._spotlightSuggestionsCloseTimer);
+            this._spotlightSuggestionsCloseTimer = null;
+        }
+        overlay.classList.add('hidden');
+    }
+
+    _clearSpotlightSuggestions(opts = {}) {
+        const container = document.getElementById('spotlight-suggestions');
+        if (!container) return;
+        const clearGen = (this._spotlightSuggestionsClearGen =
+            (this._spotlightSuggestionsClearGen || 0) + 1);
+        const inner = container.querySelector('.spotlight-suggestions-inner');
+        const finish = () => {
+            if (clearGen !== this._spotlightSuggestionsClearGen) return;
+            if (inner) inner.replaceChildren();
+            else container.replaceChildren();
+        };
+        if (this._spotlightSuggestionsCloseTimer) {
+            clearTimeout(this._spotlightSuggestionsCloseTimer);
+            this._spotlightSuggestionsCloseTimer = null;
+        }
+        if (opts.instant || !container.classList.contains('show')) {
+            container.classList.remove('show', 'hiding');
+            container.setAttribute('aria-hidden', 'true');
+            finish();
+            return;
+        }
+        container.classList.remove('show');
+        container.classList.add('hiding');
+        container.setAttribute('aria-hidden', 'true');
+        this._spotlightSuggestionsCloseTimer = setTimeout(() => {
+            this._spotlightSuggestionsCloseTimer = null;
+            container.classList.remove('hiding');
+            finish();
+        }, 140);
     }
 
     navigateSuggestions(direction) {
@@ -28249,7 +33217,10 @@ class AxisBrowser {
     }
 
     performSpotlightSearch() {
-        const input = document.getElementById('new-tab-input') || document.getElementById('spotlight-input');
+        const spotlightOpen = this._isSpotlightOpen();
+        const input = spotlightOpen
+            ? document.getElementById('spotlight-input')
+            : document.getElementById('new-tab-input') || document.getElementById('spotlight-input');
         const query = input?.value?.trim();
 
         if (query) {
@@ -28261,24 +33232,30 @@ class AxisBrowser {
                 this.saveSetting('recentSearches', this.settings.recentSearches);
             }
 
-            // Check for special axis:// URLs first
             if (query.toLowerCase() === 'axis://settings') {
+                if (spotlightOpen) this.closeSpotlightSearch();
                 this.toggleSettings();
                 return;
             }
 
             const searchUrl = this.sanitizeUrl(query) || this.getSearchUrl(query, selectedEngine);
-
             const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
             const onNewTabPage = tab && tab.url === this.NEWTAB_URL;
             const searchMeta = window.AxisTabAncestry?.extractSearchQuery(searchUrl);
-            if (onNewTabPage) {
-                this.navigate(searchUrl);
+            const searchOpts = searchMeta ? { ancestryKind: 'search', searchQuery: searchMeta.query } : {};
+
+            if (spotlightOpen && this._spotlightFromNewTab) {
+                this.closeSpotlightSearch();
+                this.createNewTab(searchUrl, { ...searchOpts, skipSpotlightOverlay: true });
+            } else if (spotlightOpen || onNewTabPage) {
+                if (this.tabs.size === 0 || this.currentTab === null) {
+                    this.createNewTab(searchUrl, searchOpts);
+                } else {
+                    this.navigate(searchUrl);
+                }
+                if (spotlightOpen) this.closeSpotlightSearch();
             } else {
-                this.createNewTab(
-                    searchUrl,
-                    searchMeta ? { ancestryKind: 'search', searchQuery: searchMeta.query } : {}
-                );
+                this.createNewTab(searchUrl, searchOpts);
             }
         }
     }
@@ -29777,6 +34754,9 @@ class AxisBrowser {
     }
 
     showQuitConfirmation() {
+        if (window.electronAPI?.platform === 'win32' || window.electronAPI?.platform === 'darwin') {
+            return;
+        }
         let backdrop = document.getElementById('quit-modal-backdrop');
         if (!backdrop) {
             backdrop = document.createElement('div');
@@ -29916,45 +34896,158 @@ class AxisBrowser {
         this.showNotification(this.t('note.shortcutsReset'), 'success');
     }
 
+    _tabUsesGuestLinkPreview(tab) {
+        if (!tab || tab.isSettings) return false;
+        const u = String(tab.url || '');
+        if (!u || u === 'about:blank' || u === this.NEWTAB_URL) return false;
+        if (/^axis:/i.test(u)) return false;
+        return true;
+    }
+
     _isLinkPreviewEnabled() {
         return this.settings?.linkPreview !== false;
     }
 
     _applyLinkPreviewSetting() {
         if (!this._isLinkPreviewEnabled()) {
+            this._setLinkPreviewVisible(false);
             this._hideLinkStatusNow();
         }
+        this._syncLinkPreviewConfigToAllWebviews();
+    }
+
+    _setLinkPreviewVisible(visible) {
+        /* Guest pages paint link preview in preload; host layer is for internal pages only. */
+        document.body.classList.remove('axis-link-preview-visible');
+    }
+
+    _syncLinkPreviewLayout() {
+        if (!this._isLinkPreviewEnabled()) {
+            this._setLinkPreviewVisible(false);
+        }
+        this._syncLinkPreviewConfigToAllWebviews();
+    }
+
+    _getLinkPreviewConfig() {
+        return {
+            enabled: this._isLinkPreviewEnabled(),
+            pageLight: this.isLightUiTheme()
+        };
+    }
+
+    _syncLinkPreviewConfigToWebview(webview) {
+        if (!webview || typeof webview.send !== 'function') return;
+        try {
+            webview.send('axis-link-preview-config', this._getLinkPreviewConfig());
+        } catch (_) {}
+    }
+
+    _syncLinkPreviewConfigToAllWebviews() {
+        document.querySelectorAll('#webviews-container webview').forEach((wv) => {
+            this._syncLinkPreviewConfigToWebview(wv);
+        });
+    }
+
+    _getNavGestureConfig() {
+        const sensitivity = Math.max(
+            50,
+            Math.min(150, Number(this.settings?.navGestureSensitivity) || 100)
+        );
+        return {
+            enabled: this.settings?.navGestureEnabled !== false,
+            sensitivity,
+            pinchZoomEnabled: this.settings?.navPinchZoomEnabled !== false
+        };
+    }
+
+    _focusActiveWebviewGuest() {
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+        const tab = this.currentTab != null ? this.tabs.get(this.currentTab) : null;
+        if (!tab || tab.url === this.NEWTAB_URL || tab.isSettings || tab.url === 'axis://settings') return;
+        try {
+            webview.focus();
+        } catch (_) {}
+    }
+
+    _tabIdForWebview(webview) {
+        if (!webview) return null;
+        try {
+            const raw = webview.dataset?.tabId || webview.getAttribute?.('data-tab-id');
+            return raw != null ? this._normalizeTabMapKey(raw) : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    _syncNavGestureConfigToWebview(webview) {
+        if (!webview || typeof webview.send !== 'function') return;
+        try {
+            webview.send('axis-nav-gesture-config', this._getNavGestureConfig());
+        } catch (_) {
+            /* guest may not be ready */
+        }
+    }
+
+    _syncNavGestureConfigToAllWebviews() {
+        document.querySelectorAll('#webviews-container webview').forEach((wv) => {
+            this._syncNavGestureConfigToWebview(wv);
+        });
     }
 
     setupLinkStatusBar() {
         const layer = this.elements?.linkStatusLayer;
+        const status = this.elements?.linkStatus;
         const hitLeft = this.elements?.linkStatusHitLeft;
         const hitRight = this.elements?.linkStatusHitRight;
         if (!layer || layer.dataset.bound === '1') return;
         layer.dataset.bound = '1';
 
-        const onDockEnter = () => {
-            if (this._linkStatusDockLeaveTimer) {
-                clearTimeout(this._linkStatusDockLeaveTimer);
-                this._linkStatusDockLeaveTimer = null;
-            }
-            this._onLinkStatusDockEnter();
-        };
-        const onDockLeave = () => {
-            if (this._linkStatusDockLeaveTimer) clearTimeout(this._linkStatusDockLeaveTimer);
-            this._linkStatusDockLeaveTimer = setTimeout(() => {
-                this._linkStatusDockLeaveTimer = null;
-                const overLeft = hitLeft?.matches(':hover');
-                const overRight = hitRight?.matches(':hover');
-                if (!overLeft && !overRight) this._onLinkStatusDockLeave();
-            }, 48);
+        const onStripEnter = () => {
+            if (!this._linkStatusTargetUrl || !this._isLinkPreviewEnabled()) return;
+            if (layer.classList.contains('hidden')) return;
+            this._cancelLinkStatusDockReset();
+            this._cancelLinkStatusFade();
+            this._cancelLinkStatusHide();
+            layer.classList.remove('is-leaving');
+            this._linkStatusChipHovered = true;
+            this._dockLinkStatusRight();
         };
 
-        for (const hit of [hitLeft, hitRight]) {
-            if (!hit) continue;
-            hit.addEventListener('mouseenter', onDockEnter);
-            hit.addEventListener('mouseleave', onDockLeave);
-        }
+        const onStripLeave = () => {
+            if (!this._linkStatusTargetUrl || !this._isLinkPreviewEnabled()) return;
+            this._linkStatusChipHovered = false;
+            this._undockLinkStatusLeft();
+            this._cancelLinkStatusHide();
+            this._linkStatusHideTimer = setTimeout(() => {
+                this._linkStatusHideTimer = null;
+                if (this._linkStatusChipHovered) return;
+                const layer = this.elements?.linkStatusLayer;
+                if (layer && layer.matches(':hover')) return;
+                this._linkStatusTargetUrl = '';
+                this._fadeOutLinkStatus();
+            }, 320);
+        };
+
+        const onHostPointerMove = (e) => {
+            if (!this._linkStatusTargetUrl || !this._isLinkPreviewEnabled()) return;
+            if (layer.classList.contains('hidden')) return;
+            this._syncLinkStatusDockFromHostPointer({ x: e.clientX, y: e.clientY });
+        };
+
+        status?.addEventListener('mouseenter', onStripEnter);
+        status?.addEventListener('pointerenter', onStripEnter);
+        hitLeft?.addEventListener('mouseenter', onStripEnter);
+        hitLeft?.addEventListener('pointerenter', onStripEnter);
+        hitRight?.addEventListener('mouseenter', onStripEnter);
+        hitRight?.addEventListener('pointerenter', onStripEnter);
+
+        layer.addEventListener('mouseleave', (e) => {
+            if (layer.contains(e.relatedTarget)) return;
+            onStripLeave();
+        });
+        layer.addEventListener('mousemove', onHostPointerMove);
+        layer.addEventListener('pointermove', onHostPointerMove);
 
         document.querySelectorAll('#webviews-container webview').forEach((wv) => {
             const tid = wv.dataset?.tabId;
@@ -29962,18 +35055,159 @@ class AxisBrowser {
         });
     }
 
-    _onLinkStatusDockEnter() {
-        this._linkStatusInDockZone = true;
-        this._cancelLinkStatusHide();
-        this._cancelLinkStatusFade();
-        this.elements?.linkStatusLayer?.classList.remove('is-leaving');
-        this._dockLinkStatusRight();
+    _cancelLinkStatusDockReset() {
+        if (this._linkStatusDockResetTimer) {
+            clearTimeout(this._linkStatusDockResetTimer);
+            this._linkStatusDockResetTimer = null;
+        }
     }
 
-    _onLinkStatusDockLeave() {
-        this._linkStatusInDockZone = false;
-        this._undockLinkStatusLeft();
-        if (!this._linkStatusTargetUrl) this._scheduleLinkStatusHide();
+    _scheduleLinkStatusDockReset(delayMs = 120) {
+        this._cancelLinkStatusDockReset();
+        this._linkStatusDockResetTimer = setTimeout(() => {
+            this._linkStatusDockResetTimer = null;
+            if (this._linkStatusChipHovered) return;
+            const status = this.elements?.linkStatus;
+            if (status?.matches(':hover')) return;
+            this._undockLinkStatusLeft();
+        }, delayMs);
+    }
+
+    _linkStatusHostPointFromGuest(webview, payload) {
+        if (!webview || !payload) return null;
+        const x = Number(payload.x);
+        const y = Number(payload.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        const rect = webview.getBoundingClientRect();
+        if (!rect.width || !rect.height) return null;
+        const gw = Number(payload.w) || rect.width;
+        const gh = Number(payload.h) || rect.height;
+        return {
+            x: rect.left + (x / gw) * rect.width,
+            y: rect.top + (y / gh) * rect.height
+        };
+    }
+
+    _handleLinkPreviewMainInput(payload) {
+        if (!payload || !this._linkStatusTargetUrl || !this._isLinkPreviewEnabled()) return;
+        const webview = this.getActiveWebview();
+        if (!webview) return;
+        let guestId = 0;
+        try {
+            guestId = webview.getWebContentsId();
+        } catch (_) {}
+        if (Number(payload.guestContentsId) !== Number(guestId)) return;
+        const point = this._linkStatusHostPointFromGuest(webview, payload);
+        if (!point) return;
+        this._linkStatusLastGuestPoint = point;
+        this._syncLinkStatusDockFromHostPointer(point);
+    }
+
+    _syncLinkStatusDockFromHostPointer(point) {
+        if (!this._linkStatusTargetUrl || !this._isLinkPreviewEnabled() || !point) return;
+        const layer = this.elements?.linkStatusLayer;
+        if (!layer || layer.classList.contains('hidden')) return;
+        layer.classList.remove('is-leaving');
+
+        const leftRect = this._linkStatusChipHostRect(14, false);
+        const rightRect = this._linkStatusChipHostRect(14, true);
+
+        if (leftRect && this._pointInRect(point, leftRect)) {
+            this._cancelLinkStatusDockReset();
+            this._linkStatusChipHovered = true;
+            this._dockLinkStatusRight();
+            return;
+        }
+
+        if (this._linkStatusDockRight) {
+            if (rightRect && this._pointInRect(point, rightRect)) {
+                this._cancelLinkStatusDockReset();
+                this._linkStatusChipHovered = true;
+                return;
+            }
+            this._linkStatusChipHovered = false;
+            this._scheduleLinkStatusDockReset(80);
+        }
+    }
+
+    _linkStatusChipHostRect(pad = 12, dockRight = null) {
+        const layer = this.elements?.linkStatusLayer;
+        if (!layer || layer.classList.contains('hidden')) return null;
+        const lr = layer.getBoundingClientRect();
+        const useRight = dockRight != null ? dockRight : !!this._linkStatusDockRight;
+        const chipW = Math.min(lr.width * 0.58, 360);
+        const chipH = 28;
+        const marginX = 12;
+        const marginBottom = 5;
+        const bottom = lr.bottom - marginBottom;
+        const top = bottom - chipH;
+        let left;
+        let right;
+        if (useRight) {
+            right = lr.right - marginX;
+            left = right - chipW;
+        } else {
+            left = lr.left + marginX;
+            right = left + chipW;
+        }
+        return {
+            left: left - pad,
+            right: right + pad,
+            top: top - pad,
+            bottom: bottom + pad
+        };
+    }
+
+    _pointInRect(point, rect) {
+        if (!point || !rect) return false;
+        return (
+            point.x >= rect.left &&
+            point.x <= rect.right &&
+            point.y >= rect.top &&
+            point.y <= rect.bottom
+        );
+    }
+
+    _syncLinkStatusDockFromGuestPointer(point) {
+        this._syncLinkStatusDockFromHostPointer(point);
+    }
+
+    _handleLinkPreviewGuestPointer(tabId, webview, payload) {
+        if (this._normalizeTabMapKey(this.currentTab) !== this._normalizeTabMapKey(tabId)) return;
+        if (!this._linkStatusTargetUrl || !this._isLinkPreviewEnabled()) return;
+        const point = this._linkStatusHostPointFromGuest(webview, payload);
+        if (!point) return;
+        this._linkStatusLastGuestPoint = point;
+        this._syncLinkStatusDockFromGuestPointer(point);
+    }
+
+    _handleLinkPreviewZone(tabId, zone) {
+        if (this._normalizeTabMapKey(this.currentTab) !== this._normalizeTabMapKey(tabId)) return;
+        if (!this._linkStatusTargetUrl || !this._isLinkPreviewEnabled()) return;
+        const layer = this.elements?.linkStatusLayer;
+        if (!layer || layer.classList.contains('hidden')) return;
+        zone = String(zone || 'none');
+        this._linkStatusLastPreviewZone = zone;
+
+        if (zone === 'left') {
+            this._cancelLinkStatusDockReset();
+            this._cancelLinkStatusFade();
+            layer.classList.remove('is-leaving');
+            this._linkStatusChipHovered = true;
+            this._dockLinkStatusRight();
+            return;
+        }
+
+        if (zone === 'right' && this._linkStatusDockRight) {
+            this._cancelLinkStatusDockReset();
+            this._linkStatusChipHovered = true;
+            return;
+        }
+
+        if (zone === 'none') {
+            this._linkStatusChipHovered = false;
+            this._scheduleLinkStatusDockReset(90);
+        }
     }
 
     _dockLinkStatusRight() {
@@ -30013,8 +35247,21 @@ class AxisBrowser {
         const url = this._sanitizeLinkStatusUrl(rawUrl);
         this._linkStatusTargetUrl = url;
 
+        const tab =
+            this.currentTab != null && this.tabs.has(this.currentTab)
+                ? this.tabs.get(this.currentTab)
+                : null;
+        const webview = tab?.webview || this.getActiveWebview();
+        if (tab && webview && this._tabUsesGuestLinkPreview(tab)) {
+            try {
+                webview.send('axis-link-preview-url', url);
+            } catch (_) {}
+            return;
+        }
+
         if (!url) {
             this._cancelLinkStatusShow();
+            this._undockLinkStatusLeft();
             this._scheduleLinkStatusHide();
             return;
         }
@@ -30097,16 +35344,27 @@ class AxisBrowser {
     }
 
     _scheduleLinkStatusHide() {
-        if (this._linkStatusInDockZone) return;
         this._cancelLinkStatusHide();
         this._linkStatusHideTimer = setTimeout(() => {
             this._linkStatusHideTimer = null;
-            if (this._linkStatusTargetUrl || this._linkStatusInDockZone) return;
+            if (this._linkStatusTargetUrl) return;
             this._fadeOutLinkStatus();
-        }, 1000);
+        }, 800);
     }
 
     _presentLinkStatus(url) {
+        const tab =
+            this.currentTab != null && this.tabs.has(this.currentTab)
+                ? this.tabs.get(this.currentTab)
+                : null;
+        if (tab && this._tabUsesGuestLinkPreview(tab)) {
+            const webview = tab.webview || this.getActiveWebview();
+            try {
+                webview?.send?.('axis-link-preview-url', url);
+            } catch (_) {}
+            return;
+        }
+
         const layer = this.elements?.linkStatusLayer;
         const el = this.elements?.linkStatus;
         const text = this.elements?.linkStatusText;
@@ -30121,11 +35379,21 @@ class AxisBrowser {
         }
         layer.classList.remove('hidden', 'is-leaving');
         el.classList.remove('hidden', 'is-leaving');
+        this._setLinkPreviewVisible(true);
         if (wasHidden) {
             this._linkStatusDockRight = false;
+            this._linkStatusChipHovered = false;
             el.classList.remove('is-right');
-        } else if (!this._linkStatusDockRight) {
+        } else if (this._linkStatusChipHovered) {
+            this._dockLinkStatusRight();
+        } else if (!this._linkStatusChipHovered) {
             el.classList.remove('is-right');
+        }
+        if (this._linkStatusLastPreviewZone === 'left') {
+            this._dockLinkStatusRight();
+        }
+        if (this._linkStatusLastGuestPoint) {
+            this._syncLinkStatusDockFromGuestPointer(this._linkStatusLastGuestPoint);
         }
     }
 
@@ -30149,6 +35417,7 @@ class AxisBrowser {
             if (!this._linkStatusTargetUrl) {
                 this._linkStatusTargetUrl = '';
             }
+            this._setLinkPreviewVisible(false);
         };
 
         const onEnd = (e) => {
@@ -30167,6 +35436,7 @@ class AxisBrowser {
     }
 
     _hideLinkStatusNow() {
+        this._cancelLinkStatusDockReset();
         this._cancelLinkStatusShow();
         this._cancelLinkStatusHide();
         this._cancelLinkStatusFade();
@@ -30175,6 +35445,7 @@ class AxisBrowser {
             this._linkStatusDockLeaveTimer = null;
         }
         this._linkStatusDockRight = false;
+        this._linkStatusChipHovered = false;
         this._linkStatusInDockZone = false;
         const layer = this.elements?.linkStatusLayer;
         const el = this.elements?.linkStatus;
@@ -30185,6 +35456,7 @@ class AxisBrowser {
         el.classList.remove('is-right', 'is-leaving');
         this._linkStatusVisibleUrl = '';
         this._linkStatusTargetUrl = '';
+        this._setLinkPreviewVisible(false);
     }
     
     // URL Bar Setup - themed bar that matches website colors
@@ -30268,6 +35540,8 @@ class AxisBrowser {
         window.addEventListener('resize', () => {
             const p = document.getElementById('adblock-panel');
             if (p && !p.classList.contains('hidden')) this.positionAdblockPanel();
+            const zp = document.getElementById('url-bar-zoom-panel');
+            if (zp && !zp.classList.contains('hidden')) this.positionUrlBarZoomPanel();
             const sp = document.getElementById('security-panel');
             if (sp && !sp.classList.contains('hidden')) this.positionSecurityPanel();
         });
@@ -30336,6 +35610,74 @@ class AxisBrowser {
                 await this.copyCurrentUrl();
             });
         }
+
+        const urlBarCenter = document.querySelector('.url-bar-center');
+        if (urlBarCenter && !this._urlBarZoomHoverBound) {
+            this._urlBarZoomHoverBound = true;
+            urlBarCenter.addEventListener('mouseenter', () => {
+                this._urlBarCenterHovered = true;
+                this._syncUrlBarZoomBadge(this.currentTab);
+            });
+            urlBarCenter.addEventListener('mouseleave', () => {
+                this._urlBarCenterHovered = false;
+                this._syncUrlBarZoomBadge(this.currentTab);
+            });
+        }
+        const zoomBadge = document.getElementById('url-bar-zoom-badge');
+        if (zoomBadge) {
+            zoomBadge.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggleUrlBarZoomPanel();
+            });
+        }
+        document.getElementById('url-bar-zoom-panel-backdrop')?.addEventListener('click', () => {
+            this.closeUrlBarZoomPanel();
+        });
+        document.getElementById('downloads-popup-backdrop')?.addEventListener('mousedown', () => {
+            this._dismissUrlBarChromePanels();
+        });
+        document.getElementById('extensions-menu-backdrop')?.addEventListener('mousedown', () => {
+            this._dismissUrlBarChromePanels();
+        });
+        document.getElementById('security-panel-backdrop')?.addEventListener('mousedown', () => {
+            this._dismissUrlBarChromePanels();
+        });
+        document.getElementById('adblock-panel-backdrop')?.addEventListener('mousedown', () => {
+            this._dismissUrlBarChromePanels();
+        });
+        document.getElementById('url-bar-zoom-in')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wv = this.getActiveWebview();
+            if (!wv) return;
+            const next = Math.min(3, this._getWebviewZoomFactor(wv) + 0.1);
+            this._setActiveWebviewZoomFactor(next);
+        });
+        document.getElementById('url-bar-zoom-in-fine')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wv = this.getActiveWebview();
+            if (!wv) return;
+            const next = Math.min(3, this._getWebviewZoomFactor(wv) + 0.01);
+            this._setActiveWebviewZoomFactor(next);
+        });
+        document.getElementById('url-bar-zoom-out')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wv = this.getActiveWebview();
+            if (!wv) return;
+            const next = Math.max(0.25, this._getWebviewZoomFactor(wv) - 0.1);
+            this._setActiveWebviewZoomFactor(next);
+        });
+        document.getElementById('url-bar-zoom-out-fine')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wv = this.getActiveWebview();
+            if (!wv) return;
+            const next = Math.max(0.25, this._getWebviewZoomFactor(wv) - 0.01);
+            this._setActiveWebviewZoomFactor(next);
+        });
+        document.getElementById('url-bar-zoom-reset')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._setActiveWebviewZoomFactor(1);
+        });
         
         // Make URL bar clickable and editable
         if (el.urlBarDisplay && el.urlBarInput) {
@@ -30871,6 +36213,7 @@ class AxisBrowser {
         } else if (!opts.keepInstantTheme) {
             this._releaseUrlBarInstantThemeAfterTabSwitchIfNeeded();
         }
+        this._syncUrlBarZoomBadge(this.currentTab);
     }
     
     // Apply app theme to URL bar (for regular website tabs - not NTP / Settings)
@@ -30926,7 +36269,7 @@ class AxisBrowser {
         }
         this.applyChatPanelTheme(urlBar);
         this._syncWebPanelVisualState();
-        this._syncWebviewCanvasColor(this.settings?.themeColor || '#1a1a1a');
+        this._clearWebviewCanvasColor();
     }
 
     /** Transparent sites: see-through URL bar with frosted blur - theme shows through like New Tab. */
@@ -30985,21 +36328,14 @@ class AxisBrowser {
         this._clearWebviewCanvasColor();
         urlBar.style.setProperty('background', 'transparent', 'important');
         urlBar.style.setProperty('--url-bar-bg', 'transparent');
-            urlBar.style.removeProperty('backdrop-filter');
-            urlBar.style.removeProperty('-webkit-backdrop-filter');
-        const lightUi = this.isLightUiTheme();
-        urlBar.classList.toggle('dark-mode', !lightUi);
+        urlBar.style.removeProperty('backdrop-filter');
+        urlBar.style.removeProperty('-webkit-backdrop-filter');
+        urlBar.classList.add('dark-mode');
         urlBar.style.setProperty('--url-bar-border', 'transparent');
-            if (lightUi) {
-            urlBar.style.setProperty('--url-bar-text', 'rgba(0, 0, 0, 0.88)');
-            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(0, 0, 0, 0.5)');
-            urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(0, 0, 0, 0.06)');
-            } else {
-                urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
-            urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
-                urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
-            }
-        }
+        urlBar.style.setProperty('--url-bar-text', 'rgba(255, 255, 255, 0.96)');
+        urlBar.style.setProperty('--url-bar-text-muted', 'rgba(255, 255, 255, 0.58)');
+        urlBar.style.setProperty('--url-bar-btn-hover', 'rgba(255, 255, 255, 0.12)');
+    }
 
     /** New tab URL bar follows light/dark appearance; Settings stays dark frosted. */
     applyInternalShellUrlBarStyle() {
@@ -31062,31 +36398,38 @@ class AxisBrowser {
             return true;
         }
 
-        let rr = Math.max(0, Math.min(255, Math.round(r)));
-        let gg = Math.max(0, Math.min(255, Math.round(g)));
-        let bb = Math.max(0, Math.min(255, Math.round(b)));
+        const rawR = Math.max(0, Math.min(255, Math.round(r)));
+        const rawG = Math.max(0, Math.min(255, Math.round(g)));
+        const rawB = Math.max(0, Math.min(255, Math.round(b)));
+        let rr = rawR;
+        let gg = rawG;
+        let bb = rawB;
         // Pure white/black page canvases make the browser frame look stuck rather
         // than adapted. Preserve the site's light/dark intent while moving only
         // near-neutral extremes into a readable native-chrome range.
         const maxChannel = Math.max(rr, gg, bb);
         const minChannel = Math.min(rr, gg, bb);
         const saturation = maxChannel ? (maxChannel - minChannel) / maxChannel : 0;
-        if (saturation < 0.08 && minChannel >= 246) {
-            rr = 242;
-            gg = 242;
-            bb = 244;
-        } else if (saturation < 0.08 && maxChannel <= 9) {
-            rr = 24;
-            gg = 24;
-            bb = 26;
+        const nearWhitePage = saturation < 0.08 && minChannel >= 246;
+        const nearBlackPage = saturation < 0.08 && maxChannel <= 9;
+        if (nearBlackPage) {
+            rr = 30;
+            gg = 30;
+            bb = 34;
         }
         const pageHex = `#${[rr, gg, bb].map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+        const canvasHex = nearWhitePage
+            ? `#${[rawR, rawG, rawB].map((c) => c.toString(16).padStart(2, '0')).join('')}`
+            : pageHex;
         this._syncWebPanelVisualState();
-        this._syncWebviewCanvasColor(pageHex);
+        this._syncWebviewCanvasColor(canvasHex);
 
         urlBar.style.removeProperty('backdrop-filter');
         urlBar.style.removeProperty('-webkit-backdrop-filter');
-        const bgColor = `rgba(${rr}, ${gg}, ${bb}, 1)`;
+        const barR = nearWhitePage ? rawR : rr;
+        const barG = nearWhitePage ? rawG : gg;
+        const barB = nearWhitePage ? rawB : bb;
+        const bgColor = `rgba(${barR}, ${barG}, ${barB}, 1)`;
         const pageBgDark = this.isDarkColor(pageHex);
 
         if (pageBgDark) {
@@ -31187,7 +36530,8 @@ class AxisBrowser {
                             while (cur && cur.nodeType === 1) {
                                 if (cur.tagName === 'IFRAME') return null;
                                 var bg = parseColor(window.getComputedStyle(cur).backgroundColor);
-                                if (bg && (bg.r + bg.g + bg.b) > 28) return bg;
+                                // Accept near-black headers (old threshold of 28 skipped real dark chrome).
+                                if (bg) return bg;
                                 cur = cur.parentElement;
                             }
                             return null;
@@ -31214,28 +36558,39 @@ class AxisBrowser {
                             return preferred || fallback;
                         }
                         var themeMeta = pickThemeColorMeta();
-                        if (themeMeta && themeMeta.content) {
-                            var metaColor = parseColor(themeMeta.content);
-                            if (metaColor) {
-                                return { r: metaColor.r, g: metaColor.g, b: metaColor.b, brightness: getBrightness(metaColor), source: 'meta' };
+                        var metaColor = themeMeta && themeMeta.content ? parseColor(themeMeta.content) : null;
+                        var vw = window.innerWidth || document.documentElement.clientWidth || 800;
+                        var els;
+                        try { els = document.elementsFromPoint(Math.floor(vw * 0.5), 8); } catch (e) { els = null; }
+                        var topBg = null;
+                        if (els && els.length) {
+                            for (var i = 0; i < Math.min(els.length, 10); i++) {
+                                var bg = getEffectiveBg(els[i]);
+                                if (bg) {
+                                    topBg = bg;
+                                    break;
+                                }
                             }
+                        }
+                        // Prefer page-top chrome when it exists; only use meta when it agrees
+                        // or when no top sample is available (avoids accent theme-colors that don't match the header).
+                        if (topBg) {
+                            if (metaColor) {
+                                var d = Math.abs(metaColor.r - topBg.r) + Math.abs(metaColor.g - topBg.g) + Math.abs(metaColor.b - topBg.b);
+                                if (d <= 90) {
+                                    return { r: metaColor.r, g: metaColor.g, b: metaColor.b, brightness: getBrightness(metaColor), source: 'meta' };
+                                }
+                            }
+                            return { r: topBg.r, g: topBg.g, b: topBg.b, brightness: getBrightness(topBg), source: 'topvote' };
+                        }
+                        if (metaColor) {
+                            return { r: metaColor.r, g: metaColor.g, b: metaColor.b, brightness: getBrightness(metaColor), source: 'meta' };
                         }
                         var bodyBg = parseColor(window.getComputedStyle(document.body).backgroundColor);
                         var htmlBg = parseColor(window.getComputedStyle(document.documentElement).backgroundColor);
                         var surface = bodyBg || htmlBg;
                         if (surface) {
                             return { r: surface.r, g: surface.g, b: surface.b, brightness: getBrightness(surface), source: 'surface' };
-                        }
-                        var vw = window.innerWidth || document.documentElement.clientWidth || 800;
-                        var els;
-                        try { els = document.elementsFromPoint(Math.floor(vw * 0.5), 8); } catch (e) { els = null; }
-                        if (els && els.length) {
-                            for (var i = 0; i < Math.min(els.length, 8); i++) {
-                                var bg = getEffectiveBg(els[i]);
-                                if (bg) {
-                                    return { r: bg.r, g: bg.g, b: bg.b, brightness: getBrightness(bg), source: 'topvote' };
-                                }
-                            }
                         }
                         var fallbackDark = false;
                         try { fallbackDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
@@ -31323,7 +36678,8 @@ class AxisBrowser {
                             while (cur && cur.nodeType === 1) {
                                 if (cur.tagName === 'IFRAME') return null;
                                 var bg = parseColor(window.getComputedStyle(cur).backgroundColor);
-                                if (bg && (bg.r + bg.g + bg.b) > 28) return bg;
+                                // Accept near-black headers (old threshold of 28 skipped real dark chrome).
+                                if (bg) return bg;
                                 cur = cur.parentElement;
                             }
                             return null;
@@ -31465,21 +36821,33 @@ class AxisBrowser {
                         var hdr = collectHeaderCandidate();
                         var meta = collectMetaCandidate();
                         var surface = collectSurfaceCandidate();
-                        // Author theme-color wins when present - sticky nav samples were painting the wrong bar color.
+                        // Prefer page-top / header chrome over a mismatched theme-color meta.
+                        // Meta only auto-wins when it agrees with what sits under the URL bar.
                         if (meta) {
-                            return { r: meta.rgb.r, g: meta.rgb.g, b: meta.rgb.b, brightness: getBrightness(meta.rgb), source: 'meta' };
+                            var metaAgrees = false;
+                            if (top && isSimilar(meta.rgb, top.rgb, 72)) metaAgrees = true;
+                            if (hdr && isSimilar(meta.rgb, hdr.rgb, 72)) metaAgrees = true;
+                            if (metaAgrees) {
+                                return { r: meta.rgb.r, g: meta.rgb.g, b: meta.rgb.b, brightness: getBrightness(meta.rgb), source: 'meta' };
+                            }
+                            // Softly include meta; chrome samples can still beat it.
+                            meta.score = 70;
+                            candidates.push(meta);
                         }
                         if (top) candidates.push(top);
                         if (hdr) candidates.push(hdr);
                         if (surface) candidates.push(surface);
 
                         if (top && hdr && isSimilar(top.rgb, hdr.rgb, 45)) {
-                            top.score += 40;
-                            hdr.score += 20;
+                            top.score += 55;
+                            hdr.score += 35;
                         }
                         if (top && surface && isSimilar(top.rgb, surface.rgb, 40)) {
                             top.score += 35;
                             surface.score += 20;
+                        }
+                        if (hdr && surface && isSimilar(hdr.rgb, surface.rgb, 40)) {
+                            hdr.score += 25;
                         }
 
                         var winner = pickBestCandidate(candidates);
@@ -31582,39 +36950,198 @@ class AxisBrowser {
 
     /** AI chat panel - frosted glass; follows Appearance light/dark for ink and surfaces. */
     applyChatPanelTheme(urlBar) {
-        const sc = this.getNewTabSurfaceChromeStyle();
-        const container = urlBar && urlBar.closest ? urlBar.closest('.webview-container') : null;
-        if (container) {
-            this._applyAiChatChromeVarsTo(container, sc);
-        }
         this._applyAiChatPanelChrome();
     }
 
-    /** Match guest + panel fill to page tint so rounded corners do not flash white. */
+    /**
+     * Letterboxing behind the guest uses the page canvas color from extraction (URL bar theme),
+     * never the app theme or transparent shell bleed.
+     */
     _syncWebviewCanvasColor(color) {
         const container = document.querySelector('.webview-container');
+        const webviewsContainer = document.getElementById('webviews-container');
         if (!container) return;
-        if (
-            !color ||
-            this.settings?.transparentSites ||
-            document.body.classList.contains('transparent-sites-mode') ||
-            !document.body.classList.contains('panel-site')
-        ) {
+        const onSitePanel =
+            document.body.classList.contains('panel-site') &&
+            !document.body.classList.contains('transparent-sites-mode');
+
+        container.style.removeProperty('background');
+        webviewsContainer?.style.removeProperty('background');
+
+        if (this.settings?.transparentSites) {
+            document.body.style.removeProperty('--axis-webview-canvas');
             container.style.removeProperty('--axis-webview-canvas');
+            document.querySelectorAll('#webviews-container webview').forEach((wv) => {
+                wv.style.removeProperty('background');
+            });
             return;
         }
-        container.style.setProperty('--axis-webview-canvas', color);
+
+        const hex = typeof color === 'string' && color.trim() ? color.trim() : null;
+        const letterbox = hex || (onSitePanel ? '#ffffff' : null);
+
+        if (hex) {
+            document.body.style.setProperty('--axis-webview-canvas', hex);
+            container.style.setProperty('--axis-webview-canvas', hex);
+        } else {
+            document.body.style.removeProperty('--axis-webview-canvas');
+            container.style.removeProperty('--axis-webview-canvas');
+        }
+
+        document.querySelectorAll('#webviews-container webview').forEach((wv) => {
+            if (onSitePanel && !wv.classList.contains('inactive') && letterbox) {
+                wv.style.setProperty('background', letterbox, 'important');
+            } else {
+                wv.style.removeProperty('background');
+            }
+        });
+    }
+
+    setupHostNavGestures() {
+        const root = document.querySelector('.webview-container');
+        if (!root || root.dataset.hostNavBound === '1') return;
+        root.dataset.hostNavBound = '1';
+
+        const focusGuestFromPointer = (ev) => {
+            const t = ev?.target;
+            if (!t || !(t instanceof Element)) return;
+            if (t.closest('#webview-url-bar')) return;
+            if (t.closest('#ai-chat-panel')) return;
+            if (t.closest('#new-tab-page')) return;
+            if (t.closest('#axis-store-install-host-bar')) return;
+            if (t.closest('#screen-time-limit-overlay')) return;
+            if (t.closest('#downloads-popup') || t.closest('.downloads-popup-backdrop')) return;
+            if (!t.closest('#webviews-container') && !t.closest('webview')) return;
+            if (this._hostChromeHasTextFocus?.()) return;
+            this._focusActiveWebviewGuest();
+        };
+        const webviewsRoot = document.getElementById('webviews-container');
+        webviewsRoot?.addEventListener(
+            'pointerdown',
+            (ev) => {
+                this._dismissUrlBarChromePanels();
+                focusGuestFromPointer(ev);
+            },
+            { capture: true }
+        );
+        document.getElementById('new-tab-page')?.addEventListener(
+            'pointerdown',
+            () => this._dismissUrlBarChromePanels(),
+            { capture: true }
+        );
+
+        let accBack = 0;
+        let accForward = 0;
+        let accUp = 0;
+        let accDown = 0;
+        let lastEventMs = 0;
+        let cooldownUntil = 0;
+
+        root.addEventListener(
+            'wheel',
+            (ev) => {
+                try {
+                    if (ev.ctrlKey || ev.metaKey) return;
+                    const sidebar = document.getElementById('sidebar');
+                    if (sidebar && ev.target instanceof Node && sidebar.contains(ev.target)) return;
+
+                    let dx = Number(ev.deltaX) || 0;
+                    let dy = Number(ev.deltaY) || 0;
+                    if (ev.deltaMode === 1) {
+                        dx *= 16;
+                        dy *= 16;
+                    } else if (ev.deltaMode === 2) {
+                        dx *= 96;
+                        dy *= 96;
+                    }
+                    if (!dx && !dy) return;
+
+                    const sens = Math.max(
+                        50,
+                        Math.min(150, Number(this.settings?.navGestureSensitivity) || 100)
+                    );
+                    const thresh = Math.round(28 * (100 / sens));
+                    const now = Date.now();
+                    if (now < cooldownUntil) return;
+                    if (now - lastEventMs > 180) {
+                        accBack = 0;
+                        accForward = 0;
+                        accUp = 0;
+                        accDown = 0;
+                    }
+                    lastEventMs = now;
+
+                    const horizontal = Math.abs(dx) >= Math.abs(dy) * 0.85;
+                    const vertical = Math.abs(dy) >= Math.abs(dx) * 0.85;
+
+                    const navGesturesOn = this.settings?.navGestureEnabled !== false;
+                    const customVert =
+                        this._customGestureByType?.has('swipe-up') ||
+                        this._customGestureByType?.has('swipe-down');
+                    if (vertical && (customVert || navGesturesOn)) {
+                        if (dy < 0) accUp += -dy;
+                        else if (dy > 0) accDown += dy;
+                        if (accUp >= thresh) {
+                            accUp = 0;
+                            accDown = 0;
+                            cooldownUntil = now + 240;
+                            ev.preventDefault();
+                            this._handleGuestTrackpadGesture('swipe-up');
+                            return;
+                        }
+                        if (accDown >= thresh) {
+                            accUp = 0;
+                            accDown = 0;
+                            cooldownUntil = now + 240;
+                            ev.preventDefault();
+                            this._handleGuestTrackpadGesture('swipe-down');
+                            return;
+                        }
+                    }
+
+                    if (!navGesturesOn) return;
+                    if (!horizontal) return;
+                    if (Math.abs(dx) < Math.abs(dy) * 0.55 && Math.abs(dx) < 10) return;
+
+                    // Fingers move right → deltaX < 0 → back (Chromium overscroll convention).
+                    if (dx < 0) accBack += -dx;
+                    else if (dx > 0) accForward += dx;
+
+                    if (accBack >= thresh) {
+                        accBack = 0;
+                        accForward = 0;
+                        cooldownUntil = now + 240;
+                        ev.preventDefault();
+                        if (navGesturesOn) {
+                            this.tryNavigateWithAxisGesture('back');
+                        } else if (!this._tryCustomTrackpadGesture('swipe-left')) {
+                            this.tryNavigateWithAxisGesture('back');
+                        }
+                    } else if (accForward >= thresh) {
+                        accBack = 0;
+                        accForward = 0;
+                        cooldownUntil = now + 240;
+                        ev.preventDefault();
+                        if (navGesturesOn) {
+                            this.tryNavigateWithAxisGesture('forward');
+                        } else if (!this._tryCustomTrackpadGesture('swipe-right')) {
+                            this.tryNavigateWithAxisGesture('forward');
+                        }
+                    }
+                } catch (_) {
+                    /* ignore */
+                }
+            },
+            { passive: false, capture: true }
+        );
     }
 
     _clearWebviewCanvasColor() {
         this._syncWebviewCanvasColor(null);
     }
     
-    // Native Picture-in-Picture functionality using browser API
-    // This uses the native browser PIP which is hardware-accelerated and smooth
+    // Picture-in-Picture: native `video.requestPictureInPicture()` in the guest page.
     setupPIP() {
-        // Native PIP doesn't need custom window setup - browser handles everything
-        // We just need to track state
         this.pipTabId = null;
         this.pipVideoIndex = 0;
         this.pipWebview = null;
@@ -31639,7 +37166,10 @@ class AxisBrowser {
         if (!this.pipTabId || !this.pipWebview || this._pipLeaveBusy) return;
         let stillInPIP = true;
         try {
-            stillInPIP = await this.pipWebview.executeJavaScript('!!document.pictureInPictureElement');
+            stillInPIP = await this.pipWebview.executeJavaScript(
+                AxisBrowser._guestNativePipIsActiveSrc(),
+                true
+            );
         } catch (e) {
             return;
         }
@@ -31692,6 +37222,79 @@ class AxisBrowser {
      * Injected into guests for tab-switch auto-PiP only. Filters tiny/decorative `<video>` loops
      * (hero animations, sprites) so only layout-large, reasonably sized media can trigger PiP.
      */
+    static _guestNativePipEnterAutoSrc(leaveTab = false) {
+        const leave = leaveTab ? 'true' : 'false';
+        return `
+                (async function() {
+                    ${AxisBrowser._guestVideoEligibleForAutoPipSrc()}
+                    const videos = document.querySelectorAll('video');
+                    for (let i = 0; i < videos.length; i++) {
+                        const v = videos[i];
+                        if (v.ended || v.readyState < 2) continue;
+                        const playing = !v.paused;
+                        const handoff = ${leave} && v.currentTime > 0.2 && (playing || v.readyState >= 3);
+                        if (!playing && !handoff) continue;
+                        if (!${leave} && !axisGuestVideoEligibleForAutoPip(v)) continue;
+                        if (!document.pictureInPictureEnabled || v.disablePictureInPicture) continue;
+                        try {
+                            if (document.pictureInPictureElement) {
+                                await document.exitPictureInPicture();
+                            }
+                            await v.requestPictureInPicture();
+                            if (v.paused) {
+                                try { await v.play(); } catch (_) {}
+                            }
+                            return { success: true, videoIndex: i };
+                        } catch (e) {}
+                    }
+                    return { success: false };
+                })();
+            `;
+    }
+
+    static _guestNativePipEnterIndexSrc(videoIndex, requireEligible) {
+        const idx = Number(videoIndex) || 0;
+        const req = requireEligible ? 'true' : 'false';
+        return `
+                (async function() {
+                    ${AxisBrowser._guestVideoEligibleForAutoPipSrc()}
+                    const videos = document.querySelectorAll('video');
+                    const v = videos[${idx}];
+                    if (!v) return { success: false };
+                    if (${req} && !axisGuestVideoEligibleForAutoPip(v)) return { success: false };
+                    if (!document.pictureInPictureEnabled || v.disablePictureInPicture) {
+                        return { success: false };
+                    }
+                    try {
+                        if (document.pictureInPictureElement) {
+                            await document.exitPictureInPicture();
+                        }
+                        await v.requestPictureInPicture();
+                        if (v.paused) {
+                            try { await v.play(); } catch (_) {}
+                        }
+                        return { success: true, videoIndex: ${idx} };
+                    } catch (e) {
+                        return { success: false };
+                    }
+                })();
+            `;
+    }
+
+    static _guestNativePipIsActiveSrc() {
+        return `(function() { return !!document.pictureInPictureElement; })();`;
+    }
+
+    static _guestNativePipExitSrc() {
+        return `
+                (async function() {
+                    if (document.pictureInPictureElement) {
+                        await document.exitPictureInPicture();
+                    }
+                })();
+            `;
+    }
+
     static _guestVideoEligibleForAutoPipSrc() {
         return `
                     function axisGuestVideoEligibleForAutoPip(v) {
@@ -31720,38 +37323,14 @@ class AxisBrowser {
                     }`;
     }
     
-    async checkAndShowPIP(tabId, webview) {
+    async checkAndShowPIP(tabId, webview, options = {}) {
         if (!webview) return false;
-        
+
         try {
-            // Check if there's a playing video and request native PIP
-            const result = await webview.executeJavaScript(`
-                (async function() {
-                    ${AxisBrowser._guestVideoEligibleForAutoPipSrc()}
-                    const videos = document.querySelectorAll('video');
-                    for (let i = 0; i < videos.length; i++) {
-                        const v = videos[i];
-                        if (!v.paused && v.readyState >= 2 && axisGuestVideoEligibleForAutoPip(v)) {
-                            try {
-                                if (document.pictureInPictureEnabled && !v.disablePictureInPicture) {
-                                    if (document.pictureInPictureElement) {
-                                        await document.exitPictureInPicture();
-                                    }
-                                    await v.requestPictureInPicture();
-                                    if (v.paused) {
-                                        try { await v.play(); } catch (_) {}
-                                    }
-                                    return { success: true, videoIndex: i };
-                                }
-                            } catch (e) {
-                                console.log('PIP request failed:', e.message);
-                            }
-                        }
-                    }
-                    return { success: false };
-                })();
-            `);
-            
+            const result = await webview.executeJavaScript(
+                AxisBrowser._guestNativePipEnterAutoSrc(!!options.leaveTab),
+                true
+            );
             if (result && result.success) {
                 this.pipTabId = tabId;
                 this.pipVideoIndex = result.videoIndex;
@@ -31765,54 +37344,29 @@ class AxisBrowser {
         }
         return false;
     }
-    
+
     async showPIP(tabId, webview, videoIndex = 0) {
         if (!webview) return;
-        
+
         this.pipTabId = tabId;
         this.pipVideoIndex = videoIndex;
         this.pipWebview = webview;
         this.startPIPLeaveCheck();
-        
+
         try {
-            // Request native browser PIP
-            await webview.executeJavaScript(`
-                (async function() {
-                    ${AxisBrowser._guestVideoEligibleForAutoPipSrc()}
-                    const videos = document.querySelectorAll('video');
-                    const videoIndex = ${videoIndex};
-                    if (videos.length > videoIndex) {
-                        const v = videos[videoIndex];
-                        if (v && axisGuestVideoEligibleForAutoPip(v) && document.pictureInPictureEnabled && !v.disablePictureInPicture) {
-                            try {
-                                if (document.pictureInPictureElement) {
-                                    await document.exitPictureInPicture();
-                                }
-                                await v.requestPictureInPicture();
-                                return true;
-                            } catch (e) {
-                                console.log('PIP failed:', e.message);
-                            }
-                        }
-                    }
-                    return false;
-                })();
-            `);
+            await webview.executeJavaScript(
+                AxisBrowser._guestNativePipEnterIndexSrc(videoIndex, true),
+                true
+            );
         } catch (e) {
             // Ignore
         }
     }
-    
+
     async exitNativePIP() {
         if (this.pipWebview) {
             try {
-                await this.pipWebview.executeJavaScript(`
-                    (async function() {
-                        if (document.pictureInPictureElement) {
-                            await document.exitPictureInPicture();
-                        }
-                    })();
-                `);
+                await this.pipWebview.executeJavaScript(AxisBrowser._guestNativePipExitSrc(), true);
             } catch (e) {
                 // Ignore
             }
@@ -31833,7 +37387,6 @@ class AxisBrowser {
                                 v.pause();
                             }
                         }
-                        // Exit PIP
                         if (document.pictureInPictureElement) {
                             await document.exitPictureInPicture();
                         }
@@ -31852,11 +37405,13 @@ class AxisBrowser {
         this._fullscreenChromeBound = true;
         const apply = (fullscreen) => {
             document.body.classList.toggle('axis-window-fullscreen', !!fullscreen);
+            this.updatePinnedSeparatorVisibility();
         };
         window.electronAPI?.onWindowFullscreen?.((payload) => {
             apply(payload && typeof payload === 'object' ? payload.fullscreen : payload);
         });
         void window.electronAPI?.getWindowFullscreen?.().then((fs) => apply(fs));
+        document.addEventListener('fullscreenchange', () => this.updatePinnedSeparatorVisibility());
     }
 
     setupSiteHtmlFullscreenSync() {
@@ -31873,11 +37428,13 @@ class AxisBrowser {
         if (active) {
             document.body.classList.remove('axis-site-html-fs-restore');
             document.body.classList.add('axis-site-html-fullscreen');
+            this.updatePinnedSeparatorVisibility();
             return;
         }
         if (!document.body.classList.contains('axis-site-html-fullscreen')) return;
         document.body.classList.add('axis-site-html-fs-restore');
         document.body.classList.remove('axis-site-html-fullscreen');
+        this.updatePinnedSeparatorVisibility();
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 document.body.classList.remove('axis-site-html-fs-restore');
@@ -32060,7 +37617,6 @@ class AxisBrowser {
         el.sidebarMediaPrevBtn?.addEventListener('click', () => void this.sidebarMediaDockSeek(-10));
         el.sidebarMediaPlayBtn?.addEventListener('click', () => void this.sidebarMediaDockTogglePlay());
         el.sidebarMediaNextBtn?.addEventListener('click', () => void this.sidebarMediaDockSeek(10));
-        el.sidebarMediaVolBtn?.addEventListener('click', () => void this.sidebarMediaDockToggleMute());
     }
 
     _getSidebarMediaWebview() {
@@ -32168,6 +37724,8 @@ class AxisBrowser {
         this._refreshSidebarMediaDockChrome();
         this._sidebarMediaTitleEnsureResizeObserver();
         this._startSidebarMediaDockPoll();
+        this._syncTabAudioSliders(tid);
+        void this.syncTabAudioToWebview(tid, videoIndex);
     }
 
     _sidebarMediaTitleEnsureResizeObserver() {
@@ -32459,9 +38017,15 @@ class AxisBrowser {
         if (playI) {
             playI.className = paused ? 'fas fa-play' : 'fas fa-pause';
         }
-        const volI = this.elements?.sidebarMediaVolBtn?.querySelector('i');
-        if (volI) {
-            volI.className = muted ? 'fas fa-volume-xmark' : 'fas fa-volume-high';
+        const dock = this._sidebarMediaDock;
+        const tab = dock ? this.tabs.get(this._normalizeTabMapKey(dock.tabId)) : null;
+        if (tab) {
+            this._syncSidebarVolBtnForTab(tab.id ?? dock.tabId);
+        } else {
+            const volI = this.elements?.sidebarMediaVolBtn?.querySelector('i');
+            if (volI) {
+                volI.className = muted ? 'fas fa-volume-xmark' : 'fas fa-volume-high';
+            }
         }
         const card =
             this.elements?.sidebarMediaDockCard ||
@@ -32551,32 +38115,8 @@ class AxisBrowser {
         const tabId = dock.tabId;
         const idx = dock.videoIndex;
         try {
-            /* Explicit PiP from the dock must not use auto-PiP layout rules: the guest `<video>` is
-             * often hidden or zero-sized while the tab is in the background, so
-             * `axisGuestVideoEligibleForAutoPip` would block a valid re-entry. */
             const result = await wv.executeJavaScript(
-                `
-                (async function() {
-                    var videos = document.querySelectorAll('video');
-                    var v = videos[${idx}];
-                    if (!v || v.tagName !== 'VIDEO') return { success: false };
-                    if (!document.pictureInPictureEnabled || v.disablePictureInPicture) {
-                        return { success: false };
-                    }
-                    try {
-                        if (document.pictureInPictureElement === v) {
-                            return { success: true };
-                        }
-                        if (document.pictureInPictureElement) {
-                            await document.exitPictureInPicture();
-                        }
-                        await v.requestPictureInPicture();
-                        return { success: true };
-                    } catch (e) {
-                        return { success: false };
-                    }
-                })();
-            `,
+                AxisBrowser._guestNativePipEnterIndexSrc(idx, false),
                 true
             );
             if (result && result.success) {
@@ -32592,9 +38132,8 @@ class AxisBrowser {
     
     hidePIP() {
         this.stopPIPLeaveCheck();
-        // Exit native PIP if active (async; never leave an unhandled rejection).
         this._voidGuestTask(this.exitNativePIP());
-        
+
         this.pipTabId = null;
         this.pipVideoIndex = 0;
         this.pipWebview = null;
@@ -33758,10 +39297,20 @@ class AxisBrowser {
         return `${avatar}${copy}`;
     }
 
+    _vaultAutofillPageOrigin(webview) {
+        try {
+            const live = webview?.getURL?.() || '';
+            if (/^https?:/i.test(live)) return new URL(live).origin;
+        } catch (_) {}
+        return '';
+    }
+
     async applyVaultAutofillLogin(webview, id) {
         if (!webview || !id) return;
         try {
-            const login = await window.electronAPI.vaultGetLoginForFill(id);
+            const login = await window.electronAPI.vaultGetLoginForFill(id, {
+                pageOrigin: this._vaultAutofillPageOrigin(webview)
+            });
             if (!login || (!login.username && !login.password)) return;
             // Fill in the page world so it works even when guest preload IPC is unavailable.
             try {
@@ -33785,7 +39334,9 @@ class AxisBrowser {
     async applyVaultAutofillCard(webview, id) {
         if (!webview || !id) return;
         try {
-            const card = await window.electronAPI.vaultGetCardForFill(id);
+            const card = await window.electronAPI.vaultGetCardForFill(id, {
+                pageOrigin: this._vaultAutofillPageOrigin(webview)
+            });
             if (!card || !card.number) return;
             // Never send CVV into the guest page (user types it on the form).
             const cardForGuest = { ...card, cvv: '' };
@@ -33811,7 +39362,9 @@ class AxisBrowser {
     async applyVaultAutofillAddress(webview, id) {
         if (!webview || !id) return;
         try {
-            const address = await window.electronAPI.vaultGetAddressForFill(id);
+            const address = await window.electronAPI.vaultGetAddressForFill(id, {
+                pageOrigin: this._vaultAutofillPageOrigin(webview)
+            });
             if (!address) return;
             const payload = { ...address, __axisFillKind: 'address' };
             try {
@@ -34042,7 +39595,9 @@ class AxisBrowser {
         this._hideVaultModals?.();
         if (!wv || !id) return;
         try {
-            const login = await window.electronAPI.vaultGetLoginForFill(id);
+            const login = await window.electronAPI.vaultGetLoginForFill(id, {
+                pageOrigin: this._vaultAutofillPageOrigin(wv)
+            });
             wv.send('axis-vault-apply-login', login);
         } catch (e) {
             this.showNotification(e?.message || 'Could not fill login', 'error');
@@ -34056,7 +39611,9 @@ class AxisBrowser {
         this._hideVaultModals?.();
         if (!wv || !id) return;
         try {
-            const card = await window.electronAPI.vaultGetCardForFill(id);
+            const card = await window.electronAPI.vaultGetCardForFill(id, {
+                pageOrigin: this._vaultAutofillPageOrigin(wv)
+            });
             wv.send('axis-vault-apply-card', { ...card, cvv: '' });
         } catch (e) {
             this.showNotification(e?.message || 'Could not fill card', 'error');
