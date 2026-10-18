@@ -1707,8 +1707,21 @@ webview.axis-profile-webview-suspended {
     overflow: visible;
 }
 
-.sidebar-update-banner.hidden {
-    display: none !important;
+.sidebar-update-banner.sidebar-update-banner--mounted:not(.sidebar-update-banner--shown) {
+    opacity: 0;
+    transform: translateY(4px);
+    pointer-events: none;
+}
+
+.sidebar-update-banner.sidebar-update-banner--mounted.sidebar-update-banner--shown {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.sidebar-update-banner.sidebar-update-banner--mounted:not(.sidebar-update-banner--shown) {
+    transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
 .sidebar-update-banner-card {
@@ -1918,6 +1931,10 @@ webview.axis-profile-webview-suspended {
     .sidebar-update-banner-card,
     .sidebar-update-banner-expand {
         transition: none !important;
+    }
+
+    .sidebar-update-banner.sidebar-update-banner--mounted:not(.sidebar-update-banner--shown) {
+        transform: none !important;
     }
 
     .sidebar-update-banner-notes,
