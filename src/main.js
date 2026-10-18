@@ -7280,9 +7280,7 @@ app.whenReady().then(async () => {
           return null;
         },
         quitForUpdate: async () => {
-          isQuitConfirmed = true;
-          isUserQuitting = true;
-          await finishConfirmedQuit();
+          await finishConfirmedQuitForUpdate();
         },
         getDismissedUpdateVersion: () => store.get('updateDismissedVersion', ''),
         setDismissedUpdateVersion: (version) => {
@@ -7415,6 +7413,26 @@ async function finishConfirmedQuit() {
   } catch (_) {}
   await persistSessionBeforeQuit();
   app.quit();
+}
+
+/** Quit for in-app update: bounded session save, then force exit so the apply helper can replace the app. */
+async function finishConfirmedQuitForUpdate() {
+  isQuitConfirmed = true;
+  isUserQuitting = true;
+  try {
+    for (const vault of axisVaultByProfile.values()) {
+      vault.flushUnlocked();
+    }
+  } catch (_) {}
+  try {
+    await Promise.race([persistSessionBeforeQuit(), new Promise((resolve) => setTimeout(resolve, 8000))]);
+  } catch (_) {}
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      if (win && !win.isDestroyed()) win.destroy();
+    } catch (_) {}
+  }
+  app.exit(0);
 }
 
 // Handle Cmd+Q on macOS (before-quit fires before window close)
