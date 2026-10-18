@@ -1,7 +1,7 @@
 /**
  * GitHub release updates for Axis (main process only).
- * Finds a newer release, shows a sidebar banner, then Restart downloads,
- * verifies, replaces the app after quit, and relaunches. User data is untouched.
+ * Finds a newer release, shows a sidebar banner, prefetches the installer,
+ * then Restart verifies, replaces the app after quit, and relaunches. User data is untouched.
  */
 const { app, dialog, shell, net, BrowserWindow } = require('electron');
 const { spawn } = require('child_process');
@@ -25,9 +25,11 @@ function t(key, vars) {
 const DEFAULT_GITHUB_REPO = 'AbdelrahmanBerchan/Axis-Browser';
 const GITHUB_API = 'https://api.github.com';
 const DOWNLOAD_ATTEMPTS = 3;
+const DOWNLOAD_TIMEOUT_MS = 12 * 60 * 1000;
 
 let checkInProgress = false;
 let applyInProgress = false;
+let prefetch = { version: '', url: '', path: '', job: null };
 let dismissedVersion = '';
 let lastRelease = null;
 let lastStatus = {
@@ -79,29 +81,44 @@ function parseVersionParts(raw) {
     const s = String(raw || '')
         .trim()
         .replace(/^[vV]/, '');
-    const core = s.split(/[-+]/, 1)[0];
-    if (!core || !/^\d+(?:\.\d+)*$/.test(core)) return null;
-    return core.split('.').map((n) => parseInt(n, 10) || 0);
+    const core = s.split(/[-+]/, 1)[0].trim();
+    const m = core.match(/^(\d+(?:\.\d+)*)([a-z]\d*)?$/i);
+    if (!m) return null;
+    return {
+        nums: m[1].split('.').map((n) => parseInt(n, 10) || 0),
+        suffix: (m[2] || '').toLowerCase()
+    };
 }
 
 function compareVersions(a, b) {
     const pa = parseVersionParts(a);
     const pb = parseVersionParts(b);
     if (!pa || !pb) return null;
-    const len = Math.max(pa.length, pb.length);
+    const len = Math.max(pa.nums.length, pb.nums.length);
     for (let i = 0; i < len; i += 1) {
-        const da = pa[i] || 0;
-        const db = pb[i] || 0;
+        const da = pa.nums[i] || 0;
+        const db = pb.nums[i] || 0;
         if (da > db) return 1;
         if (da < db) return -1;
     }
+    const sa = pa.suffix;
+    const sb = pb.suffix;
+    if (sa === sb) return 0;
+    if (!sa && sb) return -1;
+    if (sa && !sb) return 1;
+    if (sa < sb) return -1;
+    if (sa > sb) return 1;
     return 0;
 }
 
 function formatVersionLabel(raw) {
-    const parts = parseVersionParts(raw);
-    if (!parts) return String(raw || '').trim() || 'unknown';
-    return parts.join('.');
+    const s = String(raw || '')
+        .trim()
+        .replace(/^[vV]/, '');
+    const core = s.split(/[-+]/, 1)[0].trim();
+    const m = core.match(/^(\d+(?:\.\d+)*)([a-z]\d*)?$/i);
+    if (m) return m[1] + (m[2] || '');
+    return String(raw || '').trim() || 'unknown';
 }
 
 function parentForDialog(explicit) {
@@ -127,6 +144,7 @@ function publicStatus(extra = {}) {
         message: lastStatus.message || '',
         releaseUrl: lastStatus.releaseUrl || '',
         packaged: isPackagedApp(),
+        progress: typeof lastStatus.progress === 'number' ? lastStatus.progress : null,
         ...extra
     };
 }
@@ -275,11 +293,25 @@ function pickReleaseAssets(assets) {
         const mac = list.filter(
             (asset) => (asset.lower.endsWith('.dmg') || asset.lower.endsWith('.zip')) && isMacAssetForArch(asset, arm)
         );
-        push(mac.find((a) => a.lower.endsWith('.dmg') && (a.lower.includes('arm64') || a.lower.includes('aarch64') || !arm)));
+        // Prefer ZIP (faster apply — no DMG mount) when both exist on the release.
+        push(
+            mac.find(
+                (a) =>
+                    a.lower.endsWith('.zip') &&
+                    (a.lower.includes('arm64') || a.lower.includes('aarch64') || !arm)
+            )
+        );
+        push(
+            mac.find(
+                (a) =>
+                    a.lower.endsWith('.dmg') &&
+                    (a.lower.includes('arm64') || a.lower.includes('aarch64') || !arm)
+            )
+        );
         push(mac.find((a) => a.lower.endsWith('.zip')));
         push(mac.find((a) => a.lower.endsWith('.dmg')));
         for (const asset of mac) push(asset);
-        return out.slice(0, 2);
+        return out;
     }
 
     if (platform === 'win32') {
@@ -317,51 +349,78 @@ function unlinkQuiet(filePath) {
     } catch (_) {}
 }
 
-function downloadFile(url, destPath) {
+function reportDownloadProgress(bytes, total) {
+    if (!total || total <= 0) return;
+    const pct = Math.min(100, Math.max(0, Math.round((bytes / total) * 100)));
+    if (lastStatus.status === 'downloading' || lastStatus.status === 'available') {
+        setStatus({ progress: pct });
+    }
+}
+
+function downloadFile(url, destPath, options = {}) {
     return new Promise((resolve, reject) => {
         unlinkQuiet(destPath);
+        let settled = false;
+        const finish = (err, result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (err) reject(err);
+            else resolve(result);
+        };
+        const timer = setTimeout(() => {
+            try {
+                request.abort();
+            } catch (_) {}
+            unlinkQuiet(destPath);
+            finish(new Error('Download timed out.'));
+        }, DOWNLOAD_TIMEOUT_MS);
+
         const request = net.request({ method: 'GET', url, redirect: 'follow' });
         request.setHeader('User-Agent', 'Axis-Browser-Update-Check');
         request.on('response', (response) => {
             const code = response.statusCode || 0;
             if (code < 200 || code >= 300) {
-                reject(new Error(`Download failed (${code}).`));
+                finish(new Error(`Download failed (${code}).`));
                 return;
             }
+            const total = parseInt(String(response.headers['content-length'] || '0'), 10) || 0;
             const file = fs.createWriteStream(destPath);
             let bytes = 0;
             response.on('data', (chunk) => {
                 bytes += chunk.length;
+                if (options.onProgress) options.onProgress(bytes, total);
+                else reportDownloadProgress(bytes, total);
             });
             response.pipe(file);
             file.on('finish', () => {
                 file.close((err) => {
                     if (err) {
                         unlinkQuiet(destPath);
-                        reject(err);
+                        finish(err);
                         return;
                     }
-                    resolve({ destPath, bytes });
+                    finish(null, { destPath, bytes });
                 });
             });
             file.on('error', (err) => {
                 unlinkQuiet(destPath);
-                reject(err);
+                finish(err);
             });
         });
         request.on('error', (err) => {
             unlinkQuiet(destPath);
-            reject(err);
+            finish(err);
         });
         request.end();
     });
 }
 
-async function downloadFileWithRetry(url, destPath) {
+async function downloadFileWithRetry(url, destPath, options = {}) {
     let lastErr = null;
     for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
         try {
-            return await downloadFile(url, destPath);
+            return await downloadFile(url, destPath, options);
         } catch (err) {
             lastErr = err;
             unlinkQuiet(destPath);
@@ -427,56 +486,93 @@ app="\${AXIS_UPDATE_APP:-}"
 relaunch="\${AXIS_UPDATE_RELAUNCH:-}"
 pkg1="\${AXIS_UPDATE_PKG1:-}"
 pkg2="\${AXIS_UPDATE_PKG2:-}"
+logfile="\${AXIS_UPDATE_LOG:-}"
 workdir="$(mktemp -d -t axis-update)"
 cleanup() { rm -rf "$workdir" || true; }
 trap cleanup EXIT
 
+log() {
+  [ -n "$logfile" ] || return 0
+  printf '%s %s\\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$logfile" 2>/dev/null || true
+}
+
 wait_quit() {
-  if [ -z "$pid" ]; then sleep 2; return; fi
-  for _ in $(seq 1 120); do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      sleep 1
-      return
+  if [ -z "$pid" ]; then sleep 2; return 0; fi
+  log "waiting for Axis (pid $pid) to exit"
+  local n=0
+  while kill -0 "$pid" 2>/dev/null; do
+    n=$((n + 1))
+    if [ "$n" -gt 2400 ]; then
+      log "timeout waiting for pid $pid"
+      return 1
     fi
-    sleep 0.4
+    sleep 0.25
   done
+  sleep 2
+  log "Axis process exited"
+  return 0
 }
 
 find_app() {
   local root="$1"
   local hit
-  hit="$(find "$root" -maxdepth 3 -name '*.app' -type d 2>/dev/null | head -n 1 || true)"
-  if [ -n "$hit" ]; then echo "$hit"; return 0; fi
+  hit="$(find "$root" -maxdepth 4 -name '*.app' -type d 2>/dev/null | head -n 1 || true)"
+  if [ -n "$hit" ]; then printf '%s' "$hit"; return 0; fi
+  return 1
+}
+
+dmg_mount() {
+  local pkg="$1"
+  local mount="" plist_out
+  plist_out="$(mktemp -t axis-hdiutil-plist)"
+  if hdiutil attach -nobrowse -readonly -plist -mountroot "$workdir" "$pkg" > "$plist_out" 2>/dev/null; then
+    mount="$(plutil -extract system-entities.0.mount-point raw "$plist_out" 2>/dev/null || true)"
+  fi
+  rm -f "$plist_out"
+  if [ -n "$mount" ] && [ -d "$mount" ]; then
+    printf '%s' "$mount"
+    return 0
+  fi
+  mount="$(hdiutil attach -nobrowse -readonly -mountroot "$workdir" "$pkg" 2>/dev/null | awk '/Apple_HFS/ { print $NF; exit }')"
+  if [ -n "$mount" ] && [ -d "$mount" ]; then
+    printf '%s' "$mount"
+    return 0
+  fi
   return 1
 }
 
 install_pkg() {
   local pkg="$1"
   [ -n "$pkg" ] && [ -f "$pkg" ] || return 1
-  local lower
+  local lower mount src
   lower="$(printf '%s' "$pkg" | tr '[:upper:]' '[:lower:]')"
-  local src=""
+  log "install_pkg $pkg -> $app"
   if [[ "$lower" == *.zip ]]; then
     ditto -xk "$pkg" "$workdir/unzip"
     src="$(find_app "$workdir/unzip")" || return 1
-  elif [[ "$lower" == *.dmg ]]; then
-    local mount
-    mount="$(hdiutil attach -nobrowse -readonly -mountroot "$workdir" "$pkg" | awk '/\\/ { print $NF; exit }')"
-    [ -n "$mount" ] || return 1
-    src="$(find_app "$mount")" || { hdiutil detach "$mount" -quiet || true; return 1; }
+    ditto "$src" "$app"
+    return 0
+  fi
+  if [[ "$lower" == *.dmg ]]; then
+    mount="$(dmg_mount "$pkg")" || { log "dmg mount failed"; return 1; }
+    src="$(find_app "$mount")" || { hdiutil detach "$mount" -quiet || true; log "no .app in dmg"; return 1; }
     ditto "$src" "$app"
     hdiutil detach "$mount" -quiet || true
     return 0
-  else
-    return 1
   fi
-  ditto "$src" "$app"
+  return 1
 }
 
-wait_quit
-if ! install_pkg "$pkg1"; then
-  install_pkg "$pkg2"
+log "axis apply helper started"
+if ! wait_quit; then
+  log "aborting install — Axis still running"
+  exit 1
 fi
+if ! install_pkg "$pkg1"; then
+  log "pkg1 failed, trying pkg2"
+  install_pkg "$pkg2" || { log "install failed"; exit 1; }
+fi
+log "install ok, relaunch"
 if [ -n "$relaunch" ]; then
   open -a "$relaunch" || open "$relaunch" || true
 fi
@@ -550,7 +646,17 @@ fi
 `;
 }
 
+function applyLogPath() {
+    return path.join(updatesDir(), 'axis-apply-update.log');
+}
+
 function spawnApplyHelper(downloadedPaths) {
+    const logPath = applyLogPath();
+    try {
+        fs.writeFileSync(logPath, `--- apply ${new Date().toISOString()} pid=${process.pid} ---\n`, {
+            encoding: 'utf8'
+        });
+    } catch (_) {}
     const env = {
         ...process.env,
         AXIS_UPDATE_PID: String(process.pid),
@@ -558,7 +664,8 @@ function spawnApplyHelper(downloadedPaths) {
         AXIS_UPDATE_RELAUNCH: relaunchPath(),
         AXIS_UPDATE_PKG1: downloadedPaths[0] || '',
         AXIS_UPDATE_PKG2: downloadedPaths[1] || '',
-        AXIS_UPDATE_APPIMAGE: process.env.APPIMAGE || ''
+        AXIS_UPDATE_APPIMAGE: process.env.APPIMAGE || '',
+        AXIS_UPDATE_LOG: logPath
     };
 
     let scriptPath;
@@ -590,25 +697,73 @@ function spawnApplyHelper(downloadedPaths) {
     child.unref();
 }
 
-async function downloadAndVerifyAssets(assets) {
-    const downloaded = [];
-    let lastErr = null;
-    for (const asset of assets) {
-        const dest = destPathForAsset(asset);
+function prefetchedPackagePath(version, asset) {
+    if (!asset || !version) return '';
+    if (prefetch.version !== version || prefetch.url !== asset.url) return '';
+    if (!prefetch.path || !fs.existsSync(prefetch.path)) return '';
+    return prefetch.path;
+}
+
+async function downloadAndVerifyAsset(asset, options = {}) {
+    const dest = destPathForAsset(asset);
+    await downloadFileWithRetry(asset.url, dest, options);
+    await verifyDownloadedFile(dest, asset);
+    return dest;
+}
+
+async function prefetchReleasePackage(release) {
+    if (!release || !isPackagedApp() || applyInProgress) return;
+    const version = release.version;
+    const assets = pickReleaseAssets(release.assets);
+    const primary = assets[0];
+    if (!primary) return;
+    if (prefetchedPackagePath(version, primary)) return;
+    if (prefetch.job && prefetch.version === version) return prefetch.job;
+
+    prefetch.version = version;
+    prefetch.url = primary.url;
+    prefetch.path = '';
+
+    prefetch.job = (async () => {
         try {
-            await downloadFileWithRetry(asset.url, dest);
-            await verifyDownloadedFile(dest, asset);
-            downloaded.push(dest);
-            if (downloaded.length >= 2) break;
+            const wasAvailable = lastStatus.available && lastStatus.status === 'available';
+            if (wasAvailable) setStatus({ status: 'downloading', progress: 0 });
+            const dest = await downloadAndVerifyAsset(primary);
+            prefetch.path = dest;
+            if (wasAvailable && lastStatus.version === version) {
+                setStatus({ status: 'available', progress: null, message: '' });
+            }
         } catch (err) {
-            lastErr = err;
-            unlinkQuiet(dest);
+            prefetch.path = '';
+            if (lastStatus.available && lastStatus.version === version && lastStatus.status === 'downloading') {
+                setStatus({ status: 'available', progress: null });
+            }
+        } finally {
+            prefetch.job = null;
         }
+    })();
+    return prefetch.job;
+}
+
+async function resolvePrimaryPackage(release, assets) {
+    const primary = assets[0];
+    if (!primary) throw new Error('No installer asset');
+    const version = release.version;
+    const cached = prefetchedPackagePath(version, primary);
+    if (cached) return cached;
+    if (prefetch.job && prefetch.version === version) {
+        try {
+            await prefetch.job;
+        } catch (_) {}
+        const after = prefetchedPackagePath(version, primary);
+        if (after) return after;
     }
-    if (!downloaded.length) {
-        throw lastErr || new Error('Could not download a usable update package.');
-    }
-    return downloaded;
+    setStatus({ status: 'downloading', progress: 0 });
+    const dest = await downloadAndVerifyAsset(primary);
+    prefetch.version = version;
+    prefetch.url = primary.url;
+    prefetch.path = dest;
+    return dest;
 }
 
 function rememberAvailableRelease(release) {
@@ -626,15 +781,18 @@ function rememberAvailableRelease(release) {
             releaseUrl
         });
     }
-    return setStatus({
+    const status = setStatus({
         available: true,
         preview: false,
         version,
         channel: channelLabel(release),
         status: 'available',
         message: '',
-        releaseUrl
+        releaseUrl,
+        progress: null
     });
+    void prefetchReleasePackage(release);
+    return status;
 }
 
 async function showUpToDateDialog(parent, currentVersion, remoteVersion, isAhead, isPrerelease = false) {
@@ -772,19 +930,24 @@ async function applyAvailableUpdate() {
     }
 
     applyInProgress = true;
-    setStatus({ status: 'downloading', message: '' });
     try {
-        const downloaded = await downloadAndVerifyAssets(assets);
-        setStatus({ status: 'installing', message: '' });
-        spawnApplyHelper(downloaded);
+        const pkgPath = await resolvePrimaryPackage(lastRelease, assets);
+        const fallback = assets[1];
+        let pkg2Path = '';
+        if (fallback) {
+            const dest2 = destPathForAsset(fallback);
+            if (fs.existsSync(dest2)) pkg2Path = dest2;
+        }
+        setStatus({ status: 'installing', message: '', progress: null });
+        spawnApplyHelper([pkgPath, pkg2Path]);
         setTimeout(() => {
             void quitForUpdate();
-        }, 120);
+        }, 250);
         return { ok: true };
     } catch (err) {
         applyInProgress = false;
         const message = err && err.message ? err.message : t('update.downloadFail');
-        setStatus({ status: 'error', message });
+        setStatus({ status: 'error', message, progress: null });
         return { ok: false, message };
     }
 }
