@@ -107,7 +107,13 @@
   }
 
   function createProviderId() {
-    return `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return `ai-${crypto.randomUUID()}`;
+    }
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `ai-${hex}`;
   }
 
   function unwrapApiKey(rawKey) {
