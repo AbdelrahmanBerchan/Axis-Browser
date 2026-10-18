@@ -2848,10 +2848,25 @@ class AxisBrowser {
                 (stack || row).appendChild(el);
                 return el;
             })();
-        meta.innerHTML = `<div class="ai-chat-message-edit-actions">
-            <button type="button" class="ai-chat-edit-cancel" title="${cancelLabel}" aria-label="${cancelLabel}"><i class="fas fa-times" aria-hidden="true"></i></button>
-            <button type="button" class="ai-chat-edit-save" data-edit-message-id="${id}" data-edit-scope="${scope}" title="${saveLabel}" aria-label="${saveLabel}"><i class="fas fa-check" aria-hidden="true"></i></button>
-        </div>`;
+        meta.replaceChildren();
+        const actions = document.createElement('div');
+        actions.className = 'ai-chat-message-edit-actions';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'ai-chat-edit-cancel';
+        cancelBtn.title = cancelLabel;
+        cancelBtn.setAttribute('aria-label', cancelLabel);
+        cancelBtn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'ai-chat-edit-save';
+        saveBtn.setAttribute('data-edit-message-id', String(id ?? ''));
+        saveBtn.setAttribute('data-edit-scope', String(scope ?? ''));
+        saveBtn.title = saveLabel;
+        saveBtn.setAttribute('aria-label', saveLabel);
+        saveBtn.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i>';
+        actions.append(cancelBtn, saveBtn);
+        meta.appendChild(actions);
         meta.style.opacity = '1';
         meta.style.pointerEvents = 'auto';
         meta.style.visibility = 'visible';
@@ -23906,8 +23921,10 @@ class AxisBrowser {
             const now = performance.now();
             if (!done && now - lastPaint < 32) return;
             lastPaint = now;
-            const time = messageDiv.querySelector('.ai-chat-message-time')?.textContent
-                || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const time = this.escapeHtml(
+                messageDiv.querySelector('.ai-chat-message-time')?.textContent
+                    || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            );
             messageDiv.innerHTML = `
                 <div class="ai-chat-message-content">${this._renderStreamingAssistantHtml(fullText, { done })}</div>
                 <div class="ai-chat-message-time">${time}</div>
@@ -24237,12 +24254,31 @@ class AxisBrowser {
         return /^(https?:|data:image\/)/i.test(candidate) ? candidate : '';
     }
 
-    async _aiChatFileFromImageUrl(url) {
-        if (url.startsWith('data:')) {
-            const blob = await (await fetch(url)).blob();
-            return new File([blob], 'image', { type: blob.type });
+    _parseDataImageUrlForChat(dataUrl) {
+        const raw = String(dataUrl || '').trim();
+        const match = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i.exec(raw);
+        if (!match) return null;
+        const mimeType = match[1].toLowerCase();
+        const b64 = match[2].replace(/\s/g, '');
+        if (!b64 || b64.length > 14 * 1024 * 1024) return null;
+        try {
+            const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+            if (!bytes.length) return null;
+            return { bytes, mimeType };
+        } catch (_) {
+            return null;
         }
-        const res = await window.electronAPI?.fetchAiChatImageUrl?.(url);
+    }
+
+    async _aiChatFileFromImageUrl(url) {
+        const href = String(url || '').trim();
+        if (/^data:image\//i.test(href)) {
+            const parsed = this._parseDataImageUrlForChat(href);
+            if (!parsed) return null;
+            return new File([parsed.bytes], 'image', { type: parsed.mimeType });
+        }
+        if (!/^https?:\/\//i.test(href)) return null;
+        const res = await window.electronAPI?.fetchAiChatImageUrl?.(href);
         if (!res?.ok) return null;
         const bytes = Uint8Array.from(atob(res.base64), (c) => c.charCodeAt(0));
         return new File([bytes], res.name || 'image', { type: res.mimeType });
@@ -34668,10 +34704,21 @@ class AxisBrowser {
     /** Set guest webview src; allow one file: navigation past the http(s)→file: link block. */
     _assignWebviewSrc(webview, url) {
         if (!webview || !url) return;
+        let safe = null;
         if (/^file:/i.test(url)) {
-            webview.__axisAllowNextFileNav = true;
+            try {
+                const fileUrl = new URL(url);
+                if (fileUrl.protocol !== 'file:') return;
+                webview.__axisAllowNextFileNav = true;
+                safe = fileUrl.href;
+            } catch (_) {
+                return;
+            }
+        } else {
+            safe = this.sanitizeUrl(url);
         }
-        webview.src = url;
+        if (!safe) return;
+        webview.src = safe;
     }
 
     isValidDomain(domain) {
@@ -35230,11 +35277,12 @@ class AxisBrowser {
         if (!value) return '';
         try {
             const parsed = new URL(value);
-            if (parsed.protocol === 'javascript:' || parsed.protocol === 'about:') return '';
-            return value;
+            const proto = parsed.protocol.toLowerCase();
+            if (proto !== 'http:' && proto !== 'https:') return '';
+            if (parsed.username || parsed.password) return '';
+            return parsed.href;
         } catch (_) {
-            if (/^javascript:/i.test(value)) return '';
-            return value;
+            return '';
         }
     }
 
@@ -37497,9 +37545,7 @@ class AxisBrowser {
         this._lastUpdateBannerStatus = { ...(this._lastUpdateBannerStatus || {}), ...info };
         if (info.preview === true) return;
         const show = info.available === true && info.status !== 'idle';
-        banner.classList.toggle('hidden', !show);
-        if (show) banner.removeAttribute('hidden');
-        else banner.setAttribute('hidden', '');
+        this._syncSidebarUpdateBannerVisibility(banner, show);
 
         const version = String(info.version || '').trim();
         const channel = String(info.channel || '').trim();
@@ -37517,6 +37563,12 @@ class AxisBrowser {
         if (metaEl) {
             if (info.status === 'error' && info.message) {
                 metaEl.textContent = String(info.message);
+            } else if (
+                info.status === 'downloading' &&
+                typeof info.progress === 'number' &&
+                Number.isFinite(info.progress)
+            ) {
+                metaEl.textContent = [version, `${info.progress}%`].filter(Boolean).join(' · ');
             } else {
                 metaEl.textContent = [version, channel].filter(Boolean).join(' · ');
             }
@@ -37546,6 +37598,55 @@ class AxisBrowser {
             this.showNotification?.(errMsg, 'error');
         }
         if (!errMsg) this._lastUpdateBannerError = '';
+    }
+
+    _syncSidebarUpdateBannerVisibility(banner, show) {
+        if (!banner) return;
+        const wantsShow = !!show;
+        const isVisible = this._updateBannerShown === true;
+
+        if (this._updateBannerHideTimer) {
+            clearTimeout(this._updateBannerHideTimer);
+            this._updateBannerHideTimer = null;
+        }
+
+        if (wantsShow && !isVisible) {
+            this._updateBannerShown = true;
+            banner.classList.remove('hidden');
+            banner.removeAttribute('hidden');
+            banner.classList.add('sidebar-update-banner--mounted');
+            banner.classList.remove('sidebar-update-banner--shown');
+            const reveal = () => banner.classList.add('sidebar-update-banner--shown');
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => requestAnimationFrame(reveal));
+            } else {
+                reveal();
+            }
+            return;
+        }
+
+        if (!wantsShow && isVisible) {
+            this._updateBannerShown = false;
+            banner.classList.remove('sidebar-update-banner--shown');
+            const finishHide = () => {
+                this._updateBannerHideTimer = null;
+                banner.classList.add('hidden');
+                banner.setAttribute('hidden', '');
+                banner.classList.remove('sidebar-update-banner--mounted');
+            };
+            if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+                finishHide();
+            } else {
+                this._updateBannerHideTimer = window.setTimeout(finishHide, 280);
+            }
+            return;
+        }
+
+        if (wantsShow && isVisible) {
+            banner.classList.remove('hidden');
+            banner.removeAttribute('hidden');
+            banner.classList.add('sidebar-update-banner--mounted', 'sidebar-update-banner--shown');
+        }
     }
 
     async openUpdateReleaseNotes() {
@@ -38430,8 +38531,28 @@ class AxisBrowser {
         }, 450);
     }
 
+    _isAllowedGuestInjectScript(js) {
+        if (typeof js !== 'string' || !js.length) return false;
+        if (js.length > 524288) return false;
+        const trustedStatics = [
+            this._vaultAutofillBootstrapJs,
+            this._vaultAutofillHideJs,
+            this._vaultAutofillProbeJs
+        ].filter(Boolean);
+        if (trustedStatics.includes(js)) return true;
+        const t = js.trim();
+        if (!/^\(function\s*\(\)\s*\{/.test(t)) return false;
+        if (!/\}\)\(\);?\s*$/.test(t)) return false;
+        if (/[<>\u2028\u2029]/.test(t)) return false;
+        return (
+            t.includes('__axisVault') ||
+            t.includes('data-axis-vault-theme') ||
+            t.includes('__axisVaultUiTheme')
+        );
+    }
+
     async executeInGuestFrames(webview, js, userGesture = false) {
-        if (!webview || !js) return;
+        if (!webview || !this._isAllowedGuestInjectScript(js)) return;
         let ran = false;
         const runFrame = async (frame) => {
             if (!frame) return;
