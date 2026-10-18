@@ -1205,6 +1205,7 @@
                     typeSeen.set(type, seen);
                     const title =
                         (typeCounts.get(type) || 0) > 1 ? `${baseTitle} ${seen}` : baseTitle;
+                    const wid = esc(String(w.id ?? ''));
 
                     if (type === 'clock') {
                         const hour12 = w.config?.hour12 !== false && w.config?.format !== '24';
@@ -1213,7 +1214,7 @@
                                 title,
                                 field(
                                 t('ntp.widget.timeFormat'),
-                                `<select data-ntp-field="hour12" data-widget-id="${w.id}">
+                                `<select data-ntp-field="hour12" data-widget-id="${wid}">
       <option value="true"${hour12 ? ' selected' : ''}>${esc(t('ntp.widget.hour12'))}</option>
       <option value="false"${!hour12 ? ' selected' : ''}>${esc(t('ntp.widget.hour24'))}</option>
     </select>`
@@ -1264,13 +1265,13 @@
                                 title,
                                 field(
                                     t('ntp.widget.calendarType'),
-                                    `<select data-ntp-field="calendarSystem" data-widget-id="${w.id}">
+                                    `<select data-ntp-field="calendarSystem" data-widget-id="${wid}">
       ${systemOpts}
     </select>`
                                 ) +
                                     field(
                                         t('ntp.widget.layout'),
-                                        `<select data-ntp-field="viewMode" data-widget-id="${w.id}">
+                                        `<select data-ntp-field="viewMode" data-widget-id="${wid}">
       <option value="auto"${viewMode === 'auto' ? ' selected' : ''}>${esc(t('ntp.widget.auto'))}</option>
       <option value="day"${viewMode === 'day' ? ' selected' : ''}>${esc(t('ntp.widget.day'))}</option>
       <option value="week"${viewMode === 'week' ? ' selected' : ''}>${esc(t('ntp.widget.week'))}</option>
@@ -1279,7 +1280,7 @@
                                     ) +
                                     field(
                                         t('ntp.widget.weekStarts'),
-                                        `<select data-ntp-field="weekStartsOn" data-widget-id="${w.id}">
+                                        `<select data-ntp-field="weekStartsOn" data-widget-id="${wid}">
       <option value="0"${weekStartsOn === 0 ? ' selected' : ''}>${esc(t('ntp.widget.sunday'))}</option>
       <option value="1"${weekStartsOn === 1 ? ' selected' : ''}>${esc(t('ntp.widget.monday'))}</option>
     </select>`
@@ -1306,13 +1307,13 @@
                                       const label = esc(displaySym(sym));
                                       const upDisabled = idx === 0 ? ' disabled' : '';
                                       const downDisabled = idx === norm.length - 1 ? ' disabled' : '';
-                                      return `<li class="ntp-ticker-row" data-ntp-ticker-row data-widget-id="${w.id}" data-symbol="${esc(sym)}" data-index="${idx}">
+                                      return `<li class="ntp-ticker-row" data-ntp-ticker-row data-widget-id="${wid}" data-symbol="${esc(sym)}" data-index="${idx}">
   <div class="ntp-ticker-row-sym">${label}</div>
   <div class="ntp-ticker-row-actions">
-    <button type="button" class="ntp-ticker-move" data-ntp-ticker-move="up" data-widget-id="${w.id}" data-symbol="${esc(sym)}"${upDisabled} aria-label="Move ${label} up">↑</button>
-    <button type="button" class="ntp-ticker-move" data-ntp-ticker-move="down" data-widget-id="${w.id}" data-symbol="${esc(sym)}"${downDisabled} aria-label="Move ${label} down">↓</button>
+    <button type="button" class="ntp-ticker-move" data-ntp-ticker-move="up" data-widget-id="${wid}" data-symbol="${esc(sym)}"${upDisabled} aria-label="Move ${label} up">↑</button>
+    <button type="button" class="ntp-ticker-move" data-ntp-ticker-move="down" data-widget-id="${wid}" data-symbol="${esc(sym)}"${downDisabled} aria-label="Move ${label} down">↓</button>
   </div>
-  <button type="button" class="ntp-ticker-remove" data-ntp-ticker-remove data-widget-id="${w.id}" data-symbol="${esc(sym)}" aria-label="Remove ${label}">×</button>
+  <button type="button" class="ntp-ticker-remove" data-ntp-ticker-remove data-widget-id="${wid}" data-symbol="${esc(sym)}" aria-label="Remove ${label}">×</button>
 </li>`;
                                   })
                                   .join('')
@@ -1323,12 +1324,12 @@
                         cards.push(
                             card(
                                 title,
-                                `<div class="ntp-widget-settings-field ntp-ticker-picker" data-widget-id="${w.id}">
+                                `<div class="ntp-widget-settings-field ntp-ticker-picker" data-widget-id="${wid}">
   <div class="ntp-widget-settings-field-label">${esc(t('ntp.widget.tickers'))}</div>
   ${empty}
-  <ul class="ntp-ticker-list" data-ntp-ticker-list data-widget-id="${w.id}">${rows}</ul>
+  <ul class="ntp-ticker-list" data-ntp-ticker-list data-widget-id="${wid}">${rows}</ul>
   <div class="ntp-ticker-search-wrap">
-    <input type="text" class="ntp-weather-city-search" data-ntp-ticker-search data-widget-id="${w.id}" placeholder="${escapeHtml(t('ntp.widget.searchTickers'))}" spellcheck="false" maxlength="40" autocomplete="off">
+    <input type="text" class="ntp-weather-city-search" data-ntp-ticker-search data-widget-id="${wid}" placeholder="${escapeHtml(t('ntp.widget.searchTickers'))}" spellcheck="false" maxlength="40" autocomplete="off">
     <div class="ntp-ticker-results hidden" data-ntp-ticker-results role="listbox"></div>
   </div>
   <div class="ntp-widget-settings-field-hint">${esc(t('ntp.widget.tickersHint'))}</div>
@@ -1348,15 +1349,15 @@
                         const fieldsHtml =
                             field(
                                 t('ntp.widget.timeFormat'),
-                                `<select data-ntp-field="hour12" data-widget-id="${w.id}">
+                                `<select data-ntp-field="hour12" data-widget-id="${wid}">
       <option value="true"${hour12 ? ' selected' : ''}>${esc(t('ntp.widget.hour12'))}</option>
       <option value="false"${!hour12 ? ' selected' : ''}>${esc(t('ntp.widget.hour24'))}</option>
     </select>`
                             ) +
-                            `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${w.id}">
+                            `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${wid}">
   <div class="ntp-widget-settings-field-label">${esc(t('ntp.widget.city'))}</div>
   <div class="ntp-weather-city-selected" data-ntp-city-selected>${selectedLabel}</div>
-  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="${escapeHtml(t('ntp.widget.searchCities'))}" spellcheck="false" maxlength="80" autocomplete="off">
+  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${wid}" placeholder="${escapeHtml(t('ntp.widget.searchCities'))}" spellcheck="false" maxlength="80" autocomplete="off">
   <div class="ntp-weather-city-results hidden" data-ntp-city-results role="listbox"></div>
   <div class="ntp-widget-settings-field-hint">Type at least 2 letters, then choose a city. Time zone is set automatically.</div>
 </div>`;
@@ -1374,15 +1375,15 @@
                         const fieldsHtml =
                             field(
                                 'AQI scale',
-                                `<select data-ntp-field="scale" data-widget-id="${w.id}">
+                                `<select data-ntp-field="scale" data-widget-id="${wid}">
       <option value="us"${scale === 'us' ? ' selected' : ''}>US AQI</option>
       <option value="eu"${scale === 'eu' ? ' selected' : ''}>European AQI</option>
     </select>`
                             ) +
-                            `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${w.id}">
+                            `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${wid}">
   <div class="ntp-widget-settings-field-label">${esc(t('ntp.widget.city'))}</div>
   <div class="ntp-weather-city-selected" data-ntp-city-selected>${selectedLabel}</div>
-  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="${escapeHtml(t('ntp.widget.searchCities'))}" spellcheck="false" maxlength="80" autocomplete="off">
+  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${wid}" placeholder="${escapeHtml(t('ntp.widget.searchCities'))}" spellcheck="false" maxlength="80" autocomplete="off">
   <div class="ntp-weather-city-results hidden" data-ntp-city-results role="listbox"></div>
   <div class="ntp-widget-settings-field-hint">Type at least 2 letters, then choose a city. Air quality updates automatically.</div>
 </div>`;
@@ -1397,24 +1398,33 @@
                     const fieldsHtml =
                         field(
                             t('ntp.widget.tempUnit'),
-                            `<select data-ntp-field="unit" data-widget-id="${w.id}">
+                            `<select data-ntp-field="unit" data-widget-id="${wid}">
       <option value="C"${unit === 'C' ? ' selected' : ''}>°C</option>
       <option value="F"${unit === 'F' ? ' selected' : ''}>°F</option>
     </select>`
                         ) +
-                        `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${w.id}">
+                        `<div class="ntp-widget-settings-field ntp-city-picker" data-widget-id="${wid}">
   <div class="ntp-widget-settings-field-label">${esc(t('ntp.widget.city'))}</div>
   <div class="ntp-weather-city-selected" data-ntp-city-selected>${selectedLabel}</div>
-  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${w.id}" placeholder="${escapeHtml(t('ntp.widget.searchCities'))}" spellcheck="false" maxlength="80" autocomplete="off">
+  <input type="text" class="ntp-weather-city-search" data-ntp-city-search data-widget-id="${wid}" placeholder="${escapeHtml(t('ntp.widget.searchCities'))}" spellcheck="false" maxlength="80" autocomplete="off">
   <div class="ntp-weather-city-results hidden" data-ntp-city-results role="listbox"></div>
   <div class="ntp-widget-settings-field-hint">Type at least 2 letters, then choose a city from the list. Weather updates automatically.</div>
 </div>`;
                     cards.push(card(title, fieldsHtml));
                 }
 
-                list.innerHTML =
-                    cards.join('') ||
-                    '<div class="ntp-widgets-settings-empty">' + escapeHtml(t('ntp.widget.settingsEmpty')) + '</div>';
+                list.replaceChildren();
+                const combined = cards.join('');
+                if (!combined) {
+                    const empty = document.createElement('div');
+                    empty.className = 'ntp-widgets-settings-empty';
+                    empty.textContent = t('ntp.widget.settingsEmpty');
+                    list.appendChild(empty);
+                } else {
+                    const tpl = document.createElement('template');
+                    tpl.innerHTML = combined;
+                    list.appendChild(tpl.content);
+                }
             }
 
             function syncNtpWidgetSettingsFields() {
@@ -4079,7 +4089,7 @@
             }
             function beginCustomGestureDraft() {
                 customGestureDraft = {
-                    id: `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+                    id: `g${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)}`,
                     name: 'New gesture',
                     kind: 'macro',
                     gesture: '',
@@ -4390,7 +4400,7 @@
                     if (addBtn) {
                         e.preventDefault();
                         customShortcutDraft = {
-                            id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+                            id: `c${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)}`,
                             name: t('settings.shortcuts.newCustom') || 'New shortcut',
                             kind: 'macro',
                             builderSteps: [defaultBuilderStep()],
